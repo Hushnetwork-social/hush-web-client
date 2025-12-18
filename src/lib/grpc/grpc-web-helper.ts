@@ -4,6 +4,13 @@
 // GRPC_SERVER_URL is used for container-to-container communication within Docker network
 const GRPC_URL = process.env.GRPC_SERVER_URL || process.env.NEXT_PUBLIC_GRPC_URL || 'http://localhost:4666';
 
+// Log the configured URL on startup (server-side only)
+if (typeof window === 'undefined') {
+  console.log(`[gRPC] Server URL configured: ${GRPC_URL}`);
+  console.log(`[gRPC] GRPC_SERVER_URL env: ${process.env.GRPC_SERVER_URL || '(not set)'}`);
+  console.log(`[gRPC] NEXT_PUBLIC_GRPC_URL env: ${process.env.NEXT_PUBLIC_GRPC_URL || '(not set)'}`);
+}
+
 // Encode a varint (variable-length integer)
 function encodeVarint(value: number): number[] {
   const bytes: number[] = [];
@@ -78,22 +85,31 @@ export async function grpcCall(
   const url = `${GRPC_URL}/${service}/${method}`;
   const frame = createGrpcFrame(requestBytes);
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/grpc-web+proto',
-      'Accept': 'application/grpc-web+proto, application/grpc-web',
-      'X-Grpc-Web': '1',
-    },
-    body: Buffer.from(frame),
-  });
+  console.log(`[gRPC] Calling ${service}/${method} at ${url}`);
 
-  if (!response.ok) {
-    throw new Error(`gRPC call failed: ${response.status}`);
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/grpc-web+proto',
+        'Accept': 'application/grpc-web+proto, application/grpc-web',
+        'X-Grpc-Web': '1',
+      },
+      body: Buffer.from(frame),
+    });
+
+    if (!response.ok) {
+      console.error(`[gRPC] Call failed: HTTP ${response.status} ${response.statusText}`);
+      throw new Error(`gRPC call failed: ${response.status}`);
+    }
+
+    console.log(`[gRPC] Call succeeded: ${service}/${method}`);
+    const buffer = await response.arrayBuffer();
+    return new Uint8Array(buffer);
+  } catch (error) {
+    console.error(`[gRPC] Call error for ${url}:`, error);
+    throw error;
   }
-
-  const buffer = await response.arrayBuffer();
-  return new Uint8Array(buffer);
 }
 
 // Parse gRPC response to extract message bytes
