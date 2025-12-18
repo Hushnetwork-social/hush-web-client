@@ -3,7 +3,8 @@
 
 import { NextResponse } from 'next/server';
 
-const GRPC_URL = process.env.NEXT_PUBLIC_GRPC_URL || 'http://localhost:4666';
+// Use GRPC_SERVER_URL for server-side API routes (set at runtime via Docker)
+const GRPC_URL = process.env.GRPC_SERVER_URL || process.env.NEXT_PUBLIC_GRPC_URL || 'http://localhost:4666';
 
 // Parse a varint from bytes starting at offset
 function parseVarint(bytes: Uint8Array, offset: number): { value: number; bytesRead: number } {
