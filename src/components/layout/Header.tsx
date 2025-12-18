@@ -1,6 +1,7 @@
 "use client";
 
 import { Lock } from "lucide-react";
+import { getVersionDisplay } from "@/lib/version";
 
 interface HeaderProps {
   title?: string;
@@ -43,13 +44,15 @@ interface FooterProps {
 }
 
 export function Footer({ blockHeight = 0 }: FooterProps) {
+  const version = getVersionDisplay();
+
   return (
     <footer className="py-2">
       <div className="flex flex-col items-center space-y-0.5">
         <div className="flex items-center space-x-1">
           <Lock className="w-3 h-3 text-hush-purple" />
           <span className="text-[10px] text-hush-text-accent">
-            Secured by HushNetwork
+            Secured by HushNetwork - {version}
           </span>
         </div>
         <div className="flex items-center space-x-1">

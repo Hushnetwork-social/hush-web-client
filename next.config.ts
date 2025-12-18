@@ -1,7 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Note: Removed 'output: export' to enable API routes for gRPC proxy
+  // Standalone output for Docker deployment (enabled via STANDALONE_BUILD=true)
+  // This creates a minimal production build with all dependencies bundled
+  ...(process.env.STANDALONE_BUILD === 'true' && { output: 'standalone' }),
   images: {
     unoptimized: true,
   },
