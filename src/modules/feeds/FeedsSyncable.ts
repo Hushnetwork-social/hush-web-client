@@ -29,6 +29,9 @@ import type { Feed, FeedMessage } from '@/types';
 // Minimum blocks to wait before resetting pending personal feed creation
 const MIN_BLOCKS_BEFORE_RESET = 5;
 
+// Session storage key to detect page reload/refresh
+const SESSION_SYNCED_KEY = 'hush-feeds-session-synced';
+
 export class FeedsSyncable implements ISyncable {
   name = 'FeedsSyncable';
   requiresAuth = true; // Only runs when authenticated
@@ -36,6 +39,8 @@ export class FeedsSyncable implements ISyncable {
   private isSyncing = false;
 
   private isFirstSync = true;
+
+  private hasValidatedThisSession = false;
 
   async syncTask(): Promise<void> {
     // Prevent concurrent syncs
@@ -86,12 +91,50 @@ export class FeedsSyncable implements ISyncable {
   }
 
   /**
+   * Check if this is a new browser session (page reload/refresh/new tab)
+   * sessionStorage is cleared when tab closes, so absence of key means new session
+   */
+  private isNewSession(): boolean {
+    if (typeof window === 'undefined') return false;
+
+    try {
+      return !sessionStorage.getItem(SESSION_SYNCED_KEY);
+    } catch {
+      // sessionStorage may be unavailable (private browsing, etc.)
+      return false;
+    }
+  }
+
+  /**
+   * Mark that we've validated data this session
+   */
+  private markSessionValidated(): void {
+    if (typeof window === 'undefined') return;
+
+    try {
+      sessionStorage.setItem(SESSION_SYNCED_KEY, 'true');
+    } catch {
+      // Ignore errors
+    }
+    this.hasValidatedThisSession = true;
+  }
+
+  /**
    * Sync feeds from blockchain
    */
   private async syncFeeds(address: string): Promise<void> {
     const { syncMetadata } = useFeedsStore.getState();
     const currentBlockHeight = useBlockchainStore.getState().blockHeight;
     let blockIndex = syncMetadata.lastFeedBlockIndex;
+    let forceFullSync = false;
+
+    // On page reload/refresh (new session), always sync from block 0 to validate
+    // cached data against current blockchain state
+    if (!this.hasValidatedThisSession && this.isNewSession()) {
+      console.log('[FeedsSyncable] New session detected (page reload/refresh)');
+      console.log('[FeedsSyncable] Forcing full sync from block 0 to validate cached data...');
+      forceFullSync = true;
+    }
 
     // Detect blockchain reset: if server block height is lower than our last sync block,
     // the database was reset and we need to clear all local cached data
@@ -102,8 +145,13 @@ export class FeedsSyncable implements ISyncable {
       console.log('[FeedsSyncable] Clearing local feeds cache and resyncing from scratch...');
       useFeedsStore.getState().reset();
       blockIndex = 0;
-      // Re-fetch state after reset
       this.isFirstSync = true;
+      forceFullSync = true;
+    }
+
+    // If forcing full sync, start from block 0
+    if (forceFullSync) {
+      blockIndex = 0;
     }
 
     // Check if any feed is missing its AES key - if so, force a full refresh from block 0
@@ -127,18 +175,41 @@ export class FeedsSyncable implements ISyncable {
       console.log(`  - Last sync block: ${blockIndex}`);
     }
 
-    const { feeds: newFeeds, maxBlockIndex } = await fetchFeeds(address, blockIndex);
+    const { feeds: serverFeeds, maxBlockIndex } = await fetchFeeds(address, blockIndex);
 
-    if (newFeeds.length > 0) {
-      console.log(`[FeedsSyncable] Found ${newFeeds.length} new feed(s)`);
-      newFeeds.forEach(f => console.log(`  - Feed: ${f.name} (${f.type}, id: ${f.id})`));
-      useFeedsStore.getState().addFeeds(newFeeds);
+    // When doing a full sync from block 0, validate cached data against server
+    if (forceFullSync && currentFeeds.length > 0) {
+      const serverFeedIds = new Set(serverFeeds.map(f => f.id));
+      const staleFeedIds = currentFeeds.filter(f => !serverFeedIds.has(f.id));
+
+      if (staleFeedIds.length > 0) {
+        console.log(`[FeedsSyncable] Found ${staleFeedIds.length} stale cached feed(s) not on server`);
+        staleFeedIds.forEach(f => console.log(`  - Stale: ${f.name} (${f.type}, id: ${f.id})`));
+        console.log('[FeedsSyncable] Clearing stale feeds from cache...');
+        // Reset the store to clear stale data, then add server feeds
+        useFeedsStore.getState().reset();
+      } else if (serverFeeds.length === 0 && currentFeeds.length > 0) {
+        // Server has no feeds but we have cached feeds - they're all stale
+        console.log('[FeedsSyncable] Server has no feeds but client has cached data - clearing stale cache');
+        useFeedsStore.getState().reset();
+      }
+    }
+
+    if (serverFeeds.length > 0) {
+      console.log(`[FeedsSyncable] Found ${serverFeeds.length} feed(s) from server`);
+      serverFeeds.forEach(f => console.log(`  - Feed: ${f.name} (${f.type}, id: ${f.id})`));
+      useFeedsStore.getState().addFeeds(serverFeeds);
       useFeedsStore.getState().setSyncMetadata({ lastFeedBlockIndex: maxBlockIndex });
 
       // Decrypt feed keys for new feeds
-      await this.decryptFeedKeys(newFeeds);
-    } else if (currentFeeds.length === 0) {
+      await this.decryptFeedKeys(serverFeeds);
+    } else if (useFeedsStore.getState().feeds.length === 0) {
       console.log('[FeedsSyncable] No feeds found for this user');
+    }
+
+    // Mark session as validated after successful full sync
+    if (forceFullSync) {
+      this.markSessionValidated();
     }
 
     // Also check if any existing feeds are missing decrypted keys

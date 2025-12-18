@@ -282,6 +282,8 @@ describe('FeedsSyncable', () => {
     useFeedsStore.getState().reset();
     useAppStore.getState().setCredentials(null);
     mockFetch.mockReset();
+    // Simulate existing session to prevent full resync on every test
+    sessionStorage.setItem('hush-feeds-session-synced', 'true');
   });
 
   it('should have correct properties', () => {
