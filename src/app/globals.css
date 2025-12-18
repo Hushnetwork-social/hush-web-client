@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --hush-bg-dark: #111827;
+  --hush-bg-element: #23304b;
+  --hush-bg-hover: #2A2A3E;
+  --hush-purple: #A78BFA;
+  --hush-purple-hover: #8B5CF6;
+  --hush-text-primary: #efe8f6;
+  --hush-text-accent: #C4B5FD;
+}
+
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+  background-color: var(--hush-bg-dark);
+  color: var(--hush-text-primary);
+}
+
+/* Custom scrollbar for webkit browsers */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--hush-bg-dark);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--hush-bg-hover);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--hush-purple);
+}
+
+/* Focus styles */
+input:focus,
+textarea:focus,
+button:focus {
+  outline: none;
+}
+
+/* Message bubble border radius utilities */
+@layer utilities {
+  .rounded-bubble-sent {
+    border-radius: 18px 18px 4px 18px;
+  }
+
+  .rounded-bubble-received {
+    border-radius: 18px 18px 18px 4px;
+  }
+}
