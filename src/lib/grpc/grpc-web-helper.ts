@@ -1,6 +1,8 @@
 // gRPC-Web Helper for making binary gRPC calls from Next.js API routes
 
-const GRPC_URL = process.env.NEXT_PUBLIC_GRPC_URL || 'http://localhost:4666';
+// Server-side URL for API routes running in Docker - connects directly to HushNetworkNode
+// GRPC_SERVER_URL is used for container-to-container communication within Docker network
+const GRPC_URL = process.env.GRPC_SERVER_URL || process.env.NEXT_PUBLIC_GRPC_URL || 'http://localhost:4666';
 
 // Encode a varint (variable-length integer)
 function encodeVarint(value: number): number[] {
