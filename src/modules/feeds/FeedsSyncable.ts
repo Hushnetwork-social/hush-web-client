@@ -89,12 +89,27 @@ export class FeedsSyncable implements ISyncable {
    * Sync feeds from blockchain
    */
   private async syncFeeds(address: string): Promise<void> {
-    const { syncMetadata, feeds } = useFeedsStore.getState();
+    const { syncMetadata } = useFeedsStore.getState();
+    const currentBlockHeight = useBlockchainStore.getState().blockHeight;
     let blockIndex = syncMetadata.lastFeedBlockIndex;
 
+    // Detect blockchain reset: if server block height is lower than our last sync block,
+    // the database was reset and we need to clear all local cached data
+    if (currentBlockHeight > 0 && blockIndex > 0 && currentBlockHeight < blockIndex) {
+      console.log('[FeedsSyncable] Blockchain reset detected!');
+      console.log(`  - Server block height: ${currentBlockHeight}`);
+      console.log(`  - Client last sync block: ${blockIndex}`);
+      console.log('[FeedsSyncable] Clearing local feeds cache and resyncing from scratch...');
+      useFeedsStore.getState().reset();
+      blockIndex = 0;
+      // Re-fetch state after reset
+      this.isFirstSync = true;
+    }
+
     // Check if any feed is missing its AES key - if so, force a full refresh from block 0
-    const feedsMissingKey = feeds.filter((f) => f.encryptedFeedKey && !f.aesKey);
-    const feedsNoEncryptedKey = feeds.filter((f) => !f.encryptedFeedKey && !f.aesKey);
+    const currentFeeds = useFeedsStore.getState().feeds;
+    const feedsMissingKey = currentFeeds.filter((f) => f.encryptedFeedKey && !f.aesKey);
+    const feedsNoEncryptedKey = currentFeeds.filter((f) => !f.encryptedFeedKey && !f.aesKey);
 
     if (feedsMissingKey.length > 0 || feedsNoEncryptedKey.length > 0) {
       console.log(`[FeedsSyncable] Feeds missing AES key: ${feedsMissingKey.length}, missing encryptedFeedKey: ${feedsNoEncryptedKey.length}`);
@@ -106,9 +121,9 @@ export class FeedsSyncable implements ISyncable {
     }
 
     // Log on first sync or when feeds are empty
-    if (feeds.length === 0 || this.isFirstSync) {
+    if (currentFeeds.length === 0 || this.isFirstSync) {
       console.log(`[FeedsSyncable] Syncing feeds for address: ${address.substring(0, 20)}...`);
-      console.log(`  - Current feed count: ${feeds.length}`);
+      console.log(`  - Current feed count: ${currentFeeds.length}`);
       console.log(`  - Last sync block: ${blockIndex}`);
     }
 
@@ -122,7 +137,7 @@ export class FeedsSyncable implements ISyncable {
 
       // Decrypt feed keys for new feeds
       await this.decryptFeedKeys(newFeeds);
-    } else if (feeds.length === 0) {
+    } else if (currentFeeds.length === 0) {
       console.log('[FeedsSyncable] No feeds found for this user');
     }
 
