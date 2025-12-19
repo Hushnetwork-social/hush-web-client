@@ -6,8 +6,10 @@ import { NextResponse } from 'next/server';
 // Mark as dynamic to exclude from static export
 export const dynamic = 'force-dynamic';
 
-// Use GRPC_SERVER_URL for server-side API routes (set at runtime via Docker)
-const GRPC_URL = process.env.GRPC_SERVER_URL || process.env.NEXT_PUBLIC_GRPC_URL || 'http://localhost:4666';
+// Helper to get GRPC URL at runtime (not at build time)
+function getGrpcUrl(): string {
+  return process.env.GRPC_SERVER_URL || process.env.NEXT_PUBLIC_GRPC_URL || 'http://localhost:4666';
+}
 
 // Parse a varint from bytes starting at offset
 function parseVarint(bytes: Uint8Array, offset: number): { value: number; bytesRead: number } {
@@ -27,7 +29,8 @@ function parseVarint(bytes: Uint8Array, offset: number): { value: number; bytesR
 }
 
 export async function GET() {
-  const url = `${GRPC_URL}/rpcHush.HushBlockchain/GetBlockchainHeight`;
+  const grpcUrl = getGrpcUrl();
+  const url = `${grpcUrl}/rpcHush.HushBlockchain/GetBlockchainHeight`;
   console.log('[API] Fetching block height from:', url);
 
   try {
@@ -124,7 +127,7 @@ export async function GET() {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error('[API] Failed to fetch block height:', errorMessage);
     return NextResponse.json(
-      { error: `Failed to connect to gRPC server at ${GRPC_URL}: ${errorMessage}` },
+      { error: `Failed to connect to gRPC server at ${grpcUrl}: ${errorMessage}` },
       { status: 502 }
     );
   }
