@@ -15,8 +15,9 @@ RUN npm ci
 FROM node:20-alpine AS builder
 WORKDIR /app
 
-# Build argument for version (injected at build time)
+# Build arguments (injected at build time)
 ARG APP_VERSION=Production
+ARG NEXT_PUBLIC_GRPC_URL=https://api.hushnetwork.social
 
 # Copy dependencies from deps stage
 COPY --from=deps /app/node_modules ./node_modules
@@ -25,7 +26,9 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY hush-web-client/ ./
 
 # Set environment variables for build
+# NEXT_PUBLIC_* variables are baked into client-side JS at build time
 ENV NEXT_PUBLIC_APP_VERSION=${APP_VERSION}
+ENV NEXT_PUBLIC_GRPC_URL=${NEXT_PUBLIC_GRPC_URL}
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV STANDALONE_BUILD=true
 
