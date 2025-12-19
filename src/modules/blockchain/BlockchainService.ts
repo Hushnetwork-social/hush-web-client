@@ -6,13 +6,15 @@
  * See MemoryBank/HushWebClient/SYNC_ARCHITECTURE.md for full documentation.
  */
 
+import { buildApiUrl } from '@/lib/api-config';
+
 /**
  * Fetches the current blockchain height from the API.
  * @returns The current block index
  * @throws Error if the API call fails
  */
 export async function fetchBlockHeight(): Promise<number> {
-  const response = await fetch('/api/blockchain/height');
+  const response = await fetch(buildApiUrl('/api/blockchain/height'));
 
   if (!response.ok) {
     throw new Error(`Failed to fetch block height: HTTP ${response.status}`);
@@ -36,7 +38,7 @@ export async function submitTransaction(signedTransaction: string): Promise<{
   successful: boolean;
   message: string;
 }> {
-  const response = await fetch('/api/blockchain/submit', {
+  const response = await fetch(buildApiUrl('/api/blockchain/submit'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ signedTransaction }),

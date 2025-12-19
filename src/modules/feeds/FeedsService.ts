@@ -10,6 +10,7 @@ import type { Feed, FeedMessage, ProfileSearchResult } from '@/types';
 import { createFeedMessageTransaction, createChatFeedTransaction, hexToBytes } from '@/lib/crypto';
 import { FEED_TYPE_MAP, useFeedsStore } from './useFeedsStore';
 import { useAppStore } from '@/stores';
+import { buildApiUrl } from '@/lib/api-config';
 
 // Server feed response type
 interface ServerFeed {
@@ -40,7 +41,7 @@ export async function fetchFeeds(
   address: string,
   blockIndex: number
 ): Promise<{ feeds: Feed[]; maxBlockIndex: number }> {
-  const url = `/api/feeds/list?address=${encodeURIComponent(address)}&blockIndex=${blockIndex}`;
+  const url = buildApiUrl(`/api/feeds/list?address=${encodeURIComponent(address)}&blockIndex=${blockIndex}`);
 
   const response = await fetch(url);
 
@@ -98,7 +99,7 @@ export async function fetchMessages(
   blockIndex: number
 ): Promise<{ messages: FeedMessage[]; maxBlockIndex: number }> {
   const response = await fetch(
-    `/api/feeds/messages?address=${encodeURIComponent(address)}&blockIndex=${blockIndex}`
+    buildApiUrl(`/api/feeds/messages?address=${encodeURIComponent(address)}&blockIndex=${blockIndex}`)
   );
 
   if (!response.ok) {
@@ -135,7 +136,7 @@ export async function fetchMessages(
  */
 export async function checkHasPersonalFeed(address: string): Promise<boolean> {
   const response = await fetch(
-    `/api/feeds/has-personal?address=${encodeURIComponent(address)}`
+    buildApiUrl(`/api/feeds/has-personal?address=${encodeURIComponent(address)}`)
   );
 
   if (!response.ok) {
@@ -153,7 +154,7 @@ export async function submitTransaction(signedTransaction: string): Promise<{
   successful: boolean;
   message: string;
 }> {
-  const response = await fetch('/api/blockchain/submit', {
+  const response = await fetch(buildApiUrl('/api/blockchain/submit'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ signedTransaction }),

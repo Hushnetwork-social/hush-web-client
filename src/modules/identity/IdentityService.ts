@@ -5,6 +5,7 @@
  */
 
 import type { ProfileSearchResult } from '@/types';
+import { buildApiUrl } from '@/lib/api-config';
 
 export interface IdentityInfo {
   exists: boolean;
@@ -18,7 +19,7 @@ export interface IdentityInfo {
  * Checks if an identity exists in the blockchain.
  */
 export async function checkIdentityExists(address: string): Promise<IdentityInfo> {
-  const url = `/api/identity/check?address=${encodeURIComponent(address)}`;
+  const url = buildApiUrl(`/api/identity/check?address=${encodeURIComponent(address)}`);
 
   const response = await fetch(url);
 
@@ -44,7 +45,7 @@ export async function submitTransaction(signedTransaction: string): Promise<{
   successful: boolean;
   message: string;
 }> {
-  const response = await fetch('/api/blockchain/submit', {
+  const response = await fetch(buildApiUrl('/api/blockchain/submit'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ signedTransaction }),
@@ -70,7 +71,7 @@ export async function searchByDisplayName(partialName: string): Promise<ProfileS
     return [];
   }
 
-  const url = `/api/identity/search?name=${encodeURIComponent(partialName.trim())}`;
+  const url = buildApiUrl(`/api/identity/search?name=${encodeURIComponent(partialName.trim())}`);
 
   const response = await fetch(url);
 

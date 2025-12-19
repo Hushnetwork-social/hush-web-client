@@ -5,16 +5,21 @@
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build",
+    "build:static": "cross-env STATIC_EXPORT=true next build",
     "start": "next start",
     "prod": "next build && next start",
     "lint": "next lint",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "dependencies": {
     "@noble/hashes": "^2.0.1",
     "@noble/secp256k1": "^3.0.0",
+    "@tauri-apps/api": "^2.9.1",
     "bip39": "^3.1.0",
     "grpc-web": "^1.5.0",
     "lucide-react": "^0.468.0",
@@ -24,6 +29,7 @@
     "zustand": "^5.0.2"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.9.6",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.1",
     "@types/node": "^22.10.2",
@@ -31,6 +37,7 @@
     "@types/react-dom": "^19.0.2",
     "@vitejs/plugin-react": "^5.1.2",
     "autoprefixer": "^10.4.20",
+    "cross-env": "^10.1.0",
     "eslint": "^9.17.0",
     "eslint-config-next": "^15.1.0",
     "jsdom": "^27.3.0",
