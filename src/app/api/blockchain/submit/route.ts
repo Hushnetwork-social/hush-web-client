@@ -2,6 +2,9 @@
 // Submits a signed transaction to the blockchain
 
 import { NextRequest, NextResponse } from 'next/server';
+
+// Mark as dynamic to exclude from static export
+export const dynamic = 'force-dynamic';
 import {
   grpcCall,
   parseGrpcResponse,

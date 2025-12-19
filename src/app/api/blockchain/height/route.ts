@@ -3,6 +3,9 @@
 
 import { NextResponse } from 'next/server';
 
+// Mark as dynamic to exclude from static export
+export const dynamic = 'force-dynamic';
+
 // Use GRPC_SERVER_URL for server-side API routes (set at runtime via Docker)
 const GRPC_URL = process.env.GRPC_SERVER_URL || process.env.NEXT_PUBLIC_GRPC_URL || 'http://localhost:4666';
 
