@@ -12,6 +12,8 @@ import { useAppStore } from '@/stores';
 import { useFeedsStore } from '@/modules/feeds';
 import { notificationService } from '@/lib/grpc/services';
 import { aesDecrypt } from '@/lib/crypto/encryption';
+import { detectPlatform } from '@/lib/platform';
+import { showNotification as showPlatformNotification } from '@/lib/notifications';
 import type { FeedEventResponse } from '@/lib/grpc/grpc-web-helper';
 
 // Event types matching proto enum
@@ -120,19 +122,32 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
               incrementUnreadCount(event.feedId);
             }
 
-            // Decrypt message preview for toast
+            // Decrypt message preview for notification
             const decryptedPreview = event.messagePreview
               ? await decryptMessagePreview(event.feedId, event.messagePreview)
               : 'New message';
 
-            const toast: NotificationToast = {
-              id: `${event.feedId}-${event.timestampUnixMs}`,
-              feedId: event.feedId,
-              senderName: event.senderName || 'Unknown',
-              messagePreview: decryptedPreview,
-              timestamp: event.timestampUnixMs,
-            };
-            addToast(toast);
+            const platform = detectPlatform();
+
+            if (platform === 'tauri') {
+              // Tauri: Use native OS notification
+              await showPlatformNotification({
+                feedId: event.feedId,
+                senderName: event.senderName || 'Unknown',
+                messagePreview: decryptedPreview,
+                timestamp: event.timestampUnixMs,
+              });
+            } else {
+              // Browser: Use in-app toast
+              const toast: NotificationToast = {
+                id: `${event.feedId}-${event.timestampUnixMs}`,
+                feedId: event.feedId,
+                senderName: event.senderName || 'Unknown',
+                messagePreview: decryptedPreview,
+                timestamp: event.timestampUnixMs,
+              };
+              addToast(toast);
+            }
             onNewMessage?.(event);
           } else {
             // User is viewing this feed - tell server to mark as read

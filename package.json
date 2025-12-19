@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
+    "dev:tauri": "next dev --turbopack --port 3100",
     "build": "next build",
     "build:static": "cross-env STATIC_EXPORT=true next build",
     "start": "next start",
@@ -20,6 +21,7 @@
     "@noble/hashes": "^2.0.1",
     "@noble/secp256k1": "^3.0.0",
     "@tauri-apps/api": "^2.9.1",
+    "@tauri-apps/plugin-notification": "^2.3.3",
     "bip39": "^3.1.0",
     "grpc-web": "^1.5.0",
     "lucide-react": "^0.468.0",
