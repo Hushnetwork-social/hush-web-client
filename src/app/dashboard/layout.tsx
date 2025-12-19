@@ -4,10 +4,12 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { Header, Footer, Sidebar, BottomNav } from "@/components/layout";
+import { InAppToastContainer } from "@/components/notifications";
 import { useAppStore } from "@/stores";
 import { useBlockchainStore } from "@/modules/blockchain";
 import { useFeedsStore } from "@/modules/feeds";
 import { resetIdentitySyncState } from "@/modules/identity";
+import { useNotifications } from "@/hooks";
 import { downloadCredentialsFile, type PortableCredentials } from "@/lib/crypto";
 import { Loader2 } from "lucide-react";
 
@@ -35,11 +37,14 @@ interface DashboardLayoutProps {
 
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const router = useRouter();
-  const { isAuthenticated, balance, currentUser, credentials, logout, selectedFeedId, selectedNav, setSelectedNav } = useAppStore();
+  const { isAuthenticated, balance, currentUser, credentials, logout, selectedFeedId, selectedNav, setSelectedNav, selectFeed } = useAppStore();
   const blockHeight = useBlockchainStore((state) => state.blockHeight);
   const [isMobile, setIsMobile] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
+
+  // Initialize notification system
+  const { toasts, dismissToast, markAsRead } = useNotifications();
 
   // Redirect to auth page if not authenticated
   useEffect(() => {
@@ -80,6 +85,13 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
   const handleNavSelect = (id: string) => {
     setSelectedNav(id);
+  };
+
+  // Handle clicking on a toast notification - navigate to the feed
+  const handleToastNavigate = (feedId: string) => {
+    selectFeed(feedId);
+    // Mark as read when navigating from toast
+    markAsRead(feedId);
   };
 
   const handleDownloadKeys = () => {
@@ -196,6 +208,13 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         requireConfirmation={true}
         onConfirm={handlePasswordConfirm}
         onCancel={() => setShowPasswordDialog(false)}
+      />
+
+      {/* In-App Toast Notifications */}
+      <InAppToastContainer
+        toasts={toasts}
+        onDismiss={dismissToast}
+        onNavigate={handleToastNavigate}
       />
     </div>
   );

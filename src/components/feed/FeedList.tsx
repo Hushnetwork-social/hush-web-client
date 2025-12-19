@@ -2,6 +2,7 @@
 
 import { useAppStore } from "@/stores";
 import { useFeedsStore } from "@/modules/feeds";
+import { notificationService } from "@/lib/grpc/services";
 import { ChatListItem } from "./ChatListItem";
 import { MessageSquare, Loader2 } from "lucide-react";
 
@@ -14,13 +15,27 @@ export function FeedList({ onFeedSelect }: FeedListProps) {
   const feeds = useFeedsStore((state) => state.feeds);
   const messages = useFeedsStore((state) => state.messages);
   const isSyncing = useFeedsStore((state) => state.isSyncing);
+  const markFeedAsRead = useFeedsStore((state) => state.markFeedAsRead);
 
   // UI state from app store
-  const { selectedFeedId, selectFeed, isLoading } = useAppStore();
+  const { selectedFeedId, selectFeed, isLoading, credentials } = useAppStore();
 
-  const handleFeedClick = (feedId: string) => {
+  const handleFeedClick = async (feedId: string) => {
     selectFeed(feedId);
     onFeedSelect?.(feedId);
+
+    // Mark feed as read when clicking on it
+    const feed = feeds.find((f) => f.id === feedId);
+    if (feed && feed.unreadCount > 0 && credentials?.signingPublicKey) {
+      // Optimistic update
+      markFeedAsRead(feedId);
+      // Notify server
+      try {
+        await notificationService.markFeedAsRead(credentials.signingPublicKey, feedId);
+      } catch (error) {
+        console.error('[FeedList] Failed to mark feed as read:', error);
+      }
+    }
   };
 
   // Format timestamp for display

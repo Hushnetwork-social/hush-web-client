@@ -199,3 +199,45 @@ export enum ParticipantType {
   Participant = 1,
   Admin = 2,
 }
+
+// ============= Notification Service Types =============
+
+export enum EventType {
+  Unspecified = 0,
+  NewMessage = 1,
+  MessagesRead = 2,
+  UnreadCountSync = 3,
+}
+
+export interface SubscribeToEventsRequest {
+  UserId: string;
+  DeviceId?: string;
+  Platform?: string;
+}
+
+export interface FeedEvent {
+  Type: EventType;
+  FeedId: string;
+  SenderName?: string;
+  MessagePreview?: string;
+  UnreadCount: number;
+  AllCounts?: Record<string, number>;
+  TimestampUnixMs: number;
+}
+
+export interface MarkFeedAsReadRequest {
+  UserId: string;
+  FeedId: string;
+}
+
+export interface MarkFeedAsReadReply {
+  Success: boolean;
+}
+
+export interface GetUnreadCountsRequest {
+  UserId: string;
+}
+
+export interface GetUnreadCountsReply {
+  Counts: Record<string, number>;
+}

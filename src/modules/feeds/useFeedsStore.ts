@@ -92,6 +92,23 @@ interface FeedsActions {
 
   /** Reset store to initial state (on logout) */
   reset: () => void;
+
+  // ============= Unread Count Actions =============
+
+  /** Set unread count for a specific feed */
+  setUnreadCount: (feedId: string, count: number) => void;
+
+  /** Increment unread count for a feed */
+  incrementUnreadCount: (feedId: string) => void;
+
+  /** Mark a feed as read (set unread count to 0) */
+  markFeedAsRead: (feedId: string) => void;
+
+  /** Sync all unread counts from server (bulk update) */
+  syncUnreadCounts: (counts: Record<string, number>) => void;
+
+  /** Get total unread count across all feeds */
+  getTotalUnreadCount: () => number;
 }
 
 type FeedsStore = FeedsState & FeedsActions;
@@ -263,6 +280,52 @@ export const useFeedsStore = create<FeedsStore>()(
       setError: (error) => set({ lastError: error }),
 
       reset: () => set(initialState),
+
+      // ============= Unread Count Implementations =============
+
+      setUnreadCount: (feedId, count) => {
+        const feeds = get().feeds;
+        const feedExists = feeds.some((f) => f.id === feedId);
+        console.log(`[FeedsStore] setUnreadCount: feedId=${feedId}, count=${count}, feedExists=${feedExists}, totalFeeds=${feeds.length}`);
+        if (!feedExists) {
+          console.log(`[FeedsStore] Available feed IDs:`, feeds.map((f) => f.id));
+        }
+        set((state) => ({
+          feeds: state.feeds.map((f) =>
+            f.id === feedId ? { ...f, unreadCount: count } : f
+          ),
+        }));
+      },
+
+      incrementUnreadCount: (feedId) => {
+        set((state) => ({
+          feeds: state.feeds.map((f) =>
+            f.id === feedId ? { ...f, unreadCount: (f.unreadCount || 0) + 1 } : f
+          ),
+        }));
+      },
+
+      markFeedAsRead: (feedId) => {
+        set((state) => ({
+          feeds: state.feeds.map((f) =>
+            f.id === feedId ? { ...f, unreadCount: 0 } : f
+          ),
+        }));
+      },
+
+      syncUnreadCounts: (counts) => {
+        set((state) => ({
+          feeds: state.feeds.map((f) => ({
+            ...f,
+            unreadCount: counts[f.id] ?? f.unreadCount ?? 0,
+          })),
+        }));
+      },
+
+      getTotalUnreadCount: () => {
+        const { feeds } = get();
+        return feeds.reduce((total, feed) => total + (feed.unreadCount || 0), 0);
+      },
     }),
     {
       name: 'hush-feeds-storage',

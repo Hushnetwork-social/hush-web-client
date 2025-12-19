@@ -631,3 +631,204 @@ function parseSingleSearchIdentity(bytes: Uint8Array): SearchIdentityResult {
 
   return result;
 }
+
+// ============= Notification Service Builders & Parsers =============
+
+export function buildSubscribeToEventsRequest(userId: string, deviceId?: string, platform?: string): Uint8Array {
+  const bytes: number[] = [
+    ...encodeString(1, userId),
+  ];
+  if (deviceId) bytes.push(...encodeString(2, deviceId));
+  if (platform) bytes.push(...encodeString(3, platform));
+  return new Uint8Array(bytes);
+}
+
+export function buildMarkFeedAsReadRequest(userId: string, feedId: string): Uint8Array {
+  const bytes = [
+    ...encodeString(1, userId),
+    ...encodeString(2, feedId),
+  ];
+  return new Uint8Array(bytes);
+}
+
+export function buildGetUnreadCountsRequest(userId: string): Uint8Array {
+  const bytes = encodeString(1, userId);
+  return new Uint8Array(bytes);
+}
+
+export interface FeedEventResponse {
+  type: number;
+  feedId: string;
+  senderName: string;
+  messagePreview: string;
+  unreadCount: number;
+  allCounts: Record<string, number>;
+  timestampUnixMs: number;
+}
+
+export function parseFeedEventResponse(messageBytes: Uint8Array): FeedEventResponse {
+  const result: FeedEventResponse = {
+    type: 0,
+    feedId: '',
+    senderName: '',
+    messagePreview: '',
+    unreadCount: 0,
+    allCounts: {},
+    timestampUnixMs: 0,
+  };
+
+  let offset = 0;
+  while (offset < messageBytes.length) {
+    const tagResult = parseVarint(messageBytes, offset);
+    const tag = tagResult.value;
+    offset += tagResult.bytesRead;
+
+    const fieldNumber = tag >> 3;
+    const wireType = tag & 0x07;
+
+    if (wireType === 0) {
+      // Varint
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+
+      if (fieldNumber === 1) result.type = valueResult.value;
+      if (fieldNumber === 5) result.unreadCount = valueResult.value;
+      if (fieldNumber === 7) result.timestampUnixMs = valueResult.value;
+    } else if (wireType === 2) {
+      // Length-delimited (string or embedded message)
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead;
+
+      if (fieldNumber === 6) {
+        // Map field - AllCounts (map<string, int32>)
+        const mapBytes = messageBytes.slice(offset, offset + lenResult.value);
+        const mapEntry = parseMapEntry(mapBytes);
+        if (mapEntry) {
+          result.allCounts[mapEntry.key] = mapEntry.value;
+        }
+      } else {
+        const strValue = parseString(messageBytes, offset, lenResult.value);
+        if (fieldNumber === 2) result.feedId = strValue;
+        if (fieldNumber === 3) result.senderName = strValue;
+        if (fieldNumber === 4) result.messagePreview = strValue;
+      }
+      offset += lenResult.value;
+    } else {
+      break;
+    }
+  }
+
+  return result;
+}
+
+function parseMapEntry(bytes: Uint8Array): { key: string; value: number } | null {
+  let key = '';
+  let value = 0;
+  let offset = 0;
+
+  while (offset < bytes.length) {
+    const tagResult = parseVarint(bytes, offset);
+    const tag = tagResult.value;
+    offset += tagResult.bytesRead;
+
+    const fieldNumber = tag >> 3;
+    const wireType = tag & 0x07;
+
+    if (wireType === 2 && fieldNumber === 1) {
+      // Key (string)
+      const lenResult = parseVarint(bytes, offset);
+      offset += lenResult.bytesRead;
+      key = parseString(bytes, offset, lenResult.value);
+      offset += lenResult.value;
+    } else if (wireType === 0 && fieldNumber === 2) {
+      // Value (int32)
+      const valueResult = parseVarint(bytes, offset);
+      offset += valueResult.bytesRead;
+      value = valueResult.value;
+    } else if (wireType === 0) {
+      const valueResult = parseVarint(bytes, offset);
+      offset += valueResult.bytesRead;
+    } else if (wireType === 2) {
+      const lenResult = parseVarint(bytes, offset);
+      offset += lenResult.bytesRead + lenResult.value;
+    } else {
+      break;
+    }
+  }
+
+  return key ? { key, value } : null;
+}
+
+export interface MarkFeedAsReadResponse {
+  success: boolean;
+}
+
+export function parseMarkFeedAsReadResponse(messageBytes: Uint8Array): MarkFeedAsReadResponse {
+  const result: MarkFeedAsReadResponse = { success: false };
+
+  let offset = 0;
+  while (offset < messageBytes.length) {
+    const tagResult = parseVarint(messageBytes, offset);
+    const tag = tagResult.value;
+    offset += tagResult.bytesRead;
+
+    const fieldNumber = tag >> 3;
+    const wireType = tag & 0x07;
+
+    if (wireType === 0 && fieldNumber === 1) {
+      const valueResult = parseVarint(messageBytes, offset);
+      result.success = valueResult.value === 1;
+      break;
+    } else if (wireType === 0) {
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+    } else if (wireType === 2) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead + lenResult.value;
+    } else {
+      break;
+    }
+  }
+
+  return result;
+}
+
+export interface GetUnreadCountsResponse {
+  counts: Record<string, number>;
+}
+
+export function parseGetUnreadCountsResponse(messageBytes: Uint8Array): GetUnreadCountsResponse {
+  const result: GetUnreadCountsResponse = { counts: {} };
+
+  let offset = 0;
+  while (offset < messageBytes.length) {
+    const tagResult = parseVarint(messageBytes, offset);
+    const tag = tagResult.value;
+    offset += tagResult.bytesRead;
+
+    const fieldNumber = tag >> 3;
+    const wireType = tag & 0x07;
+
+    if (wireType === 2 && fieldNumber === 1) {
+      // Map entry
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead;
+      const mapBytes = messageBytes.slice(offset, offset + lenResult.value);
+      const mapEntry = parseMapEntry(mapBytes);
+      if (mapEntry) {
+        result.counts[mapEntry.key] = mapEntry.value;
+      }
+      offset += lenResult.value;
+    } else if (wireType === 0) {
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+    } else if (wireType === 2) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead + lenResult.value;
+    } else {
+      break;
+    }
+  }
+
+  return result;
+}

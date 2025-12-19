@@ -23,6 +23,20 @@ export default {
         'bubble-sent': '18px 18px 4px 18px',
         'bubble-received': '18px 18px 18px 4px',
       },
+      animation: {
+        'slide-in': 'slideIn 0.3s ease-out',
+        'fade-out': 'fadeOut 0.3s ease-in forwards',
+      },
+      keyframes: {
+        slideIn: {
+          '0%': { transform: 'translateX(100%)', opacity: '0' },
+          '100%': { transform: 'translateX(0)', opacity: '1' },
+        },
+        fadeOut: {
+          '0%': { opacity: '1' },
+          '100%': { opacity: '0' },
+        },
+      },
     },
   },
   plugins: [],
