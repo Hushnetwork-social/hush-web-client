@@ -33,6 +33,7 @@ import {
   DEFAULT_SYNC_CONFIG,
 } from './types';
 import { registerAllModules } from './registerModules';
+import { debugLog, debugError } from '@/lib/debug-logger';
 
 // =============================================================================
 // Context
@@ -97,7 +98,7 @@ export function SyncProvider({ children, config }: SyncProviderProps) {
     // Avoid duplicate registrations
     const exists = syncablesRef.current.some((s) => s.name === syncable.name);
     if (!exists) {
-      console.log(`[SyncProvider] Registered syncable: ${syncable.name} (requiresAuth: ${syncable.requiresAuth})`);
+      debugLog(`[SyncProvider] Registered syncable: ${syncable.name} (requiresAuth: ${syncable.requiresAuth})`);
       syncablesRef.current.push(syncable);
     }
   }, []);
@@ -148,12 +149,12 @@ export function SyncProvider({ children, config }: SyncProviderProps) {
           }
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-          console.error(`[SyncProvider] ${loopName} - ${syncable.name} failed:`, errorMessage);
+          debugError(`[SyncProvider] ${loopName} - ${syncable.name} failed:`, errorMessage);
 
           setConsecutiveFailures((prev) => {
             const newCount = prev + 1;
             if (newCount >= maxConsecutiveFailures) {
-              console.error(`[SyncProvider] Too many consecutive failures (${newCount}). Sync paused.`);
+              debugError(`[SyncProvider] Too many consecutive failures (${newCount}). Sync paused.`);
               setIsPaused(true);
             }
             return newCount;
@@ -179,11 +180,11 @@ export function SyncProvider({ children, config }: SyncProviderProps) {
     const alwaysRunningSyncables = syncablesRef.current.filter((s) => !s.requiresAuth);
 
     if (alwaysRunningSyncables.length === 0) {
-      console.log('[SyncProvider] No always-running syncables registered yet');
+      debugLog('[SyncProvider] No always-running syncables registered yet');
       return;
     }
 
-    console.log(`[SyncProvider] Starting always-running loop with ${alwaysRunningSyncables.length} syncable(s)`);
+    debugLog(`[SyncProvider] Starting always-running loop with ${alwaysRunningSyncables.length} syncable(s)`);
 
     // Initial sync after small delay
     const initialTimeout = setTimeout(() => {
@@ -218,7 +219,7 @@ export function SyncProvider({ children, config }: SyncProviderProps) {
     if (!isAuthenticated) {
       // Stop auth-dependent sync when logged out
       if (authDependentIntervalRef.current) {
-        console.log('[SyncProvider] Stopping auth-dependent loop (logged out)');
+        debugLog('[SyncProvider] Stopping auth-dependent loop (logged out)');
         clearInterval(authDependentIntervalRef.current);
         authDependentIntervalRef.current = null;
       }
@@ -228,11 +229,11 @@ export function SyncProvider({ children, config }: SyncProviderProps) {
     const authDependentSyncables = syncablesRef.current.filter((s) => s.requiresAuth);
 
     if (authDependentSyncables.length === 0) {
-      console.log('[SyncProvider] No auth-dependent syncables registered yet');
+      debugLog('[SyncProvider] No auth-dependent syncables registered yet');
       return;
     }
 
-    console.log(`[SyncProvider] Starting auth-dependent loop with ${authDependentSyncables.length} syncable(s)`);
+    debugLog(`[SyncProvider] Starting auth-dependent loop with ${authDependentSyncables.length} syncable(s)`);
 
     // Initial sync after small delay
     const initialTimeout = setTimeout(() => {

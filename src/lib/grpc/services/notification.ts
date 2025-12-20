@@ -18,6 +18,7 @@ import {
   parseGrpcResponse,
   type FeedEventResponse,
 } from '../grpc-web-helper';
+import { debugLog, debugError } from '@/lib/debug-logger';
 
 // Client-side gRPC URL (port 4666 for gRPC-Web HTTP/1.1)
 const GRPC_WEB_URL = process.env.NEXT_PUBLIC_GRPC_URL || 'http://localhost:4666';
@@ -42,7 +43,7 @@ async function browserGrpcCall(
   frame[4] = requestBytes.length & 0xff;
   frame.set(requestBytes, 5);
 
-  console.log(`[NotificationService] Calling ${service}/${method} at ${url}`);
+  debugLog(`[NotificationService] Calling ${service}/${method} at ${url}`);
 
   const response = await fetch(url, {
     method: 'POST',
@@ -96,7 +97,7 @@ export function subscribeToEvents(
   frame[4] = requestBytes.length & 0xff;
   frame.set(requestBytes, 5);
 
-  console.log(`[NotificationService] Subscribing to events for user: ${userId.substring(0, 20)}...`);
+  debugLog(`[NotificationService] Subscribing to events for user: ${userId.substring(0, 20)}...`);
 
   // Use fetch with streaming response
   fetch(url, {
@@ -118,7 +119,7 @@ export function subscribeToEvents(
         throw new Error('Response body is null - streaming not supported');
       }
 
-      console.log(`[NotificationService] Stream connected, reading events...`);
+      debugLog(`[NotificationService] Stream connected, reading events...`);
 
       const reader = response.body.getReader();
       let buffer = new Uint8Array(0);
@@ -128,7 +129,7 @@ export function subscribeToEvents(
           const { done, value } = await reader.read();
 
           if (done) {
-            console.log(`[NotificationService] Stream ended`);
+            debugLog(`[NotificationService] Stream ended`);
             break;
           }
 
@@ -162,21 +163,21 @@ export function subscribeToEvents(
             if (flag === 0 && messageLength > 0) {
               try {
                 const event = parseFeedEventResponse(messageBytes);
-                console.log(`[NotificationService] Received event: type=${event.type}, feedId=${event.feedId}, unreadCount=${event.unreadCount}, senderName=${event.senderName}`);
+                debugLog(`[NotificationService] Received event: type=${event.type}, feedId=${event.feedId}, unreadCount=${event.unreadCount}, senderName=${event.senderName}`);
                 onEvent(event);
               } catch (parseError) {
-                console.error(`[NotificationService] Failed to parse event:`, parseError);
+                debugError(`[NotificationService] Failed to parse event:`, parseError);
               }
             }
             // Trailer frame (flag = 128) - contains status
             else if (flag === 128) {
-              console.log(`[NotificationService] Received trailer frame`);
+              debugLog(`[NotificationService] Received trailer frame`);
             }
           }
         }
       } catch (readError) {
         if (abortController.signal.aborted) {
-          console.log(`[NotificationService] Stream aborted by user`);
+          debugLog(`[NotificationService] Stream aborted by user`);
         } else {
           throw readError;
         }
@@ -184,7 +185,7 @@ export function subscribeToEvents(
     })
     .catch((error) => {
       if (!abortController.signal.aborted) {
-        console.error(`[NotificationService] Stream error:`, error);
+        debugError(`[NotificationService] Stream error:`, error);
         onError?.(error);
       }
     });
@@ -213,10 +214,10 @@ export async function markFeedAsRead(
     }
 
     const response = parseMarkFeedAsReadResponse(messageBytes);
-    console.log(`[NotificationService] MarkFeedAsRead response:`, response);
+    debugLog(`[NotificationService] MarkFeedAsRead response:`, response);
     return response;
   } catch (error) {
-    console.error(`[NotificationService] MarkFeedAsRead error:`, error);
+    debugError(`[NotificationService] MarkFeedAsRead error:`, error);
     return { success: false };
   }
 }
@@ -240,10 +241,10 @@ export async function getUnreadCounts(
     }
 
     const response = parseGetUnreadCountsResponse(messageBytes);
-    console.log(`[NotificationService] GetUnreadCounts response:`, response);
+    debugLog(`[NotificationService] GetUnreadCounts response:`, response);
     return response.counts;
   } catch (error) {
-    console.error(`[NotificationService] GetUnreadCounts error:`, error);
+    debugError(`[NotificationService] GetUnreadCounts error:`, error);
     return {};
   }
 }

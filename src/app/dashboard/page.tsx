@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { MessageSquare, Loader2 } from "lucide-react";
 import { useAppStore } from "@/stores";
 import { useFeedsStore } from "@/modules/feeds";
+import { debugLog } from "@/lib/debug-logger";
 
 // Dynamic imports to prevent dev mode race condition
 const FeedList = dynamic(
@@ -53,7 +54,7 @@ export default function DashboardPage() {
 
   const handleSendMessage = (message: string) => {
     // TODO: Implement message sending to blockchain
-    console.log("[DashboardPage] Sending message:", message);
+    debugLog("[DashboardPage] Sending message:", message);
   };
 
   const handleBack = () => {

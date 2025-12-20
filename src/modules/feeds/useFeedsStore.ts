@@ -10,6 +10,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Feed, FeedMessage } from '@/types';
+import { debugLog } from '@/lib/debug-logger';
 
 // Feed type mapping from server (FeedType enum)
 export const FEED_TYPE_MAP: Record<number, Feed['type']> = {
@@ -286,9 +287,9 @@ export const useFeedsStore = create<FeedsStore>()(
       setUnreadCount: (feedId, count) => {
         const feeds = get().feeds;
         const feedExists = feeds.some((f) => f.id === feedId);
-        console.log(`[FeedsStore] setUnreadCount: feedId=${feedId}, count=${count}, feedExists=${feedExists}, totalFeeds=${feeds.length}`);
+        debugLog(`[FeedsStore] setUnreadCount: feedId=${feedId}, count=${count}, feedExists=${feedExists}, totalFeeds=${feeds.length}`);
         if (!feedExists) {
-          console.log(`[FeedsStore] Available feed IDs:`, feeds.map((f) => f.id));
+          debugLog(`[FeedsStore] Available feed IDs:`, feeds.map((f) => f.id));
         }
         set((state) => ({
           feeds: state.feeds.map((f) =>

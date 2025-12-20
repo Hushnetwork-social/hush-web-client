@@ -11,6 +11,7 @@ import { createFeedMessageTransaction, createChatFeedTransaction, hexToBytes } f
 import { FEED_TYPE_MAP, useFeedsStore } from './useFeedsStore';
 import { useAppStore } from '@/stores';
 import { buildApiUrl } from '@/lib/api-config';
+import { debugLog, debugError } from '@/lib/debug-logger';
 
 // Server feed response type
 interface ServerFeed {
@@ -227,23 +228,23 @@ export async function sendMessage(
     // Add to store immediately (optimistic UI)
     useFeedsStore.getState().addPendingMessage(feedId, optimisticMessage);
 
-    console.log(`[FeedsService] Sending message ${messageId} to feed ${feedId}`);
+    debugLog(`[FeedsService] Sending message ${messageId} to feed ${feedId}`);
 
     // Submit to blockchain
     const result = await submitTransaction(signedTransaction);
 
     if (!result.successful) {
-      console.error(`[FeedsService] Message submission failed: ${result.message}`);
+      debugError(`[FeedsService] Message submission failed: ${result.message}`);
       // Note: We could remove the optimistic message here, but keeping it
       // allows the user to see what failed and potentially retry
       return { success: false, messageId, error: result.message };
     }
 
-    console.log(`[FeedsService] Message ${messageId} submitted successfully`);
+    debugLog(`[FeedsService] Message ${messageId} submitted successfully`);
     return { success: true, messageId };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error(`[FeedsService] Send message failed:`, error);
+    debugError(`[FeedsService] Send message failed:`, error);
     return { success: false, error: errorMessage };
   }
 }
@@ -305,7 +306,7 @@ export async function createChatFeed(
   // Check if we already have a feed with this user
   const existingFeed = findExistingChatFeed(profile.publicSigningAddress);
   if (existingFeed) {
-    console.log(`[FeedsService] Found existing feed ${existingFeed.id} with ${profile.displayName}`);
+    debugLog(`[FeedsService] Found existing feed ${existingFeed.id} with ${profile.displayName}`);
     return { success: true, feedId: existingFeed.id, isExisting: true };
   }
 
@@ -322,13 +323,13 @@ export async function createChatFeed(
       privateKeyBytes
     );
 
-    console.log(`[FeedsService] Creating new chat feed ${feedId} with ${profile.displayName}`);
+    debugLog(`[FeedsService] Creating new chat feed ${feedId} with ${profile.displayName}`);
 
     // Submit to blockchain
     const result = await submitTransaction(signedTransaction);
 
     if (!result.successful) {
-      console.error(`[FeedsService] Feed creation failed: ${result.message}`);
+      debugError(`[FeedsService] Feed creation failed: ${result.message}`);
       return { success: false, error: result.message };
     }
 
@@ -347,11 +348,11 @@ export async function createChatFeed(
 
     useFeedsStore.getState().addFeeds([optimisticFeed]);
 
-    console.log(`[FeedsService] Feed ${feedId} created successfully`);
+    debugLog(`[FeedsService] Feed ${feedId} created successfully`);
     return { success: true, feedId, isExisting: false };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error(`[FeedsService] Create chat feed failed:`, error);
+    debugError(`[FeedsService] Create chat feed failed:`, error);
     return { success: false, error: errorMessage };
   }
 }

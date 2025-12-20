@@ -8,6 +8,7 @@
  */
 
 import type { SyncProviderAPI } from './types';
+import { debugLog } from '@/lib/debug-logger';
 
 // Module imports
 import { registerBlockchainModule } from '@/modules/blockchain';
@@ -26,7 +27,7 @@ import { registerFeedsModule } from '@/modules/feeds';
  * @param api - The SyncProviderAPI for registering syncables
  */
 export function registerAllModules(api: SyncProviderAPI): void {
-  console.log('[registerAllModules] Starting module registration...');
+  debugLog('[registerAllModules] Starting module registration...');
 
   // Register modules (order matters: identity before feeds)
   registerBlockchainModule(api);
@@ -34,5 +35,5 @@ export function registerAllModules(api: SyncProviderAPI): void {
   registerFeedsModule(api);
   // registerBankModule(api);  // TODO: Implement in Step 4
 
-  console.log('[registerAllModules] Module registration complete');
+  debugLog('[registerAllModules] Module registration complete');
 }

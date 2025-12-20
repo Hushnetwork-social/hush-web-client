@@ -6,6 +6,7 @@ import { searchByDisplayName } from "@/modules/identity";
 import { findExistingChatFeed, createChatFeed, useFeedsStore } from "@/modules/feeds";
 import { useAppStore } from "@/stores";
 import type { ProfileSearchResult } from "@/types";
+import { debugLog, debugError } from "@/lib/debug-logger";
 
 interface SearchResultWithFeed extends ProfileSearchResult {
   hasExistingFeed: boolean;
@@ -90,7 +91,7 @@ export function NewChatView({ onFeedCreated, onFeedSelected, onBack, showBackBut
 
       setSearchResults(enrichedResults);
     } catch (err) {
-      console.error("[NewChatView] Search failed:", err);
+      debugError("[NewChatView] Search failed:", err);
       setError("Failed to search. Please try again.");
       setSearchResults([]);
     } finally {
@@ -103,14 +104,14 @@ export function NewChatView({ onFeedCreated, onFeedSelected, onBack, showBackBut
     async (profile: SearchResultWithFeed) => {
       // If this is the user's personal feed, navigate to it
       if (profile.isPersonalFeed && profile.personalFeedId) {
-        console.log("[NewChatView] Opening personal feed:", profile.personalFeedId);
+        debugLog("[NewChatView] Opening personal feed:", profile.personalFeedId);
         onFeedSelected?.(profile.personalFeedId);
         return;
       }
 
       // If chat feed already exists, just navigate to it
       if (profile.hasExistingFeed && profile.existingFeedId) {
-        console.log("[NewChatView] Opening existing feed:", profile.existingFeedId);
+        debugLog("[NewChatView] Opening existing feed:", profile.existingFeedId);
         onFeedSelected?.(profile.existingFeedId);
         return;
       }
@@ -133,15 +134,15 @@ export function NewChatView({ onFeedCreated, onFeedSelected, onBack, showBackBut
 
         if (result.feedId) {
           if (result.isExisting) {
-            console.log("[NewChatView] Feed already existed:", result.feedId);
+            debugLog("[NewChatView] Feed already existed:", result.feedId);
             onFeedSelected?.(result.feedId);
           } else {
-            console.log("[NewChatView] New feed created:", result.feedId);
+            debugLog("[NewChatView] New feed created:", result.feedId);
             onFeedCreated?.(result.feedId);
           }
         }
       } catch (err) {
-        console.error("[NewChatView] Create feed failed:", err);
+        debugError("[NewChatView] Create feed failed:", err);
         setError("Failed to create feed. Please try again.");
       } finally {
         setIsCreating(false);

@@ -12,6 +12,7 @@ import { resetIdentitySyncState } from "@/modules/identity";
 import { useNotifications } from "@/hooks";
 import { downloadCredentialsFile, type PortableCredentials } from "@/lib/crypto";
 import { Loader2 } from "lucide-react";
+import { debugLog, debugError } from "@/lib/debug-logger";
 
 // Dynamic imports to prevent dev mode race condition
 const FeedList = dynamic(
@@ -52,7 +53,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     const timer = setTimeout(() => {
       setIsCheckingAuth(false);
       if (!isAuthenticated) {
-        console.log('[Dashboard] Not authenticated, redirecting to /auth');
+        debugLog('[Dashboard] Not authenticated, redirecting to /auth');
         router.replace("/auth");
       }
     }, 100);
@@ -123,7 +124,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
       setShowPasswordDialog(false);
     } catch (error) {
-      console.error("Failed to download keys:", error);
+      debugError("Failed to download keys:", error);
       // Dialog stays open on error so user can try again
     }
   };

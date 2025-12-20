@@ -14,6 +14,7 @@ import type { ISyncable } from '@/lib/sync';
 import { useAppStore } from '@/stores';
 import { createIdentityTransaction, deriveKeysFromMnemonic } from '@/lib/crypto';
 import { checkIdentityExists, submitTransaction } from './IdentityService';
+import { debugLog, debugWarn, debugError } from '@/lib/debug-logger';
 
 // Track state to avoid repeated operations
 let identityConfirmed = false;
@@ -35,7 +36,7 @@ export class IdentitySyncable implements ISyncable {
     const { credentials, currentUser, isAuthenticated } = useAppStore.getState();
 
     if (!credentials?.signingPublicKey) {
-      console.log('[IdentitySyncable] Skipping - no credentials');
+      debugLog('[IdentitySyncable] Skipping - no credentials');
       return;
     }
 
@@ -55,36 +56,36 @@ export class IdentitySyncable implements ISyncable {
 
     try {
       // Log what we're checking
-      console.log('[IdentitySyncable] Checking identity in blockchain...');
-      console.log(`  - User: ${currentUser?.displayName || 'Unknown'}`);
-      console.log(`  - SigningKey: ${credentials.signingPublicKey.substring(0, 20)}...`);
+      debugLog('[IdentitySyncable] Checking identity in blockchain...');
+      debugLog(`  - User: ${currentUser?.displayName || 'Unknown'}`);
+      debugLog(`  - SigningKey: ${credentials.signingPublicKey.substring(0, 20)}...`);
 
       // Check if identity exists
       const identityInfo = await checkIdentityExists(credentials.signingPublicKey);
 
       if (identityInfo.exists) {
-        console.log('[IdentitySyncable] Identity found in blockchain:');
-        console.log(`  - ProfileName: ${identityInfo.profileName}`);
-        console.log(`  - PublicSigningAddress: ${identityInfo.publicSigningAddress?.substring(0, 20)}...`);
-        console.log(`  - PublicEncryptAddress: ${identityInfo.publicEncryptAddress?.substring(0, 20)}...`);
-        console.log(`  - IsPublic: ${identityInfo.isPublic}`);
+        debugLog('[IdentitySyncable] Identity found in blockchain:');
+        debugLog(`  - ProfileName: ${identityInfo.profileName}`);
+        debugLog(`  - PublicSigningAddress: ${identityInfo.publicSigningAddress?.substring(0, 20)}...`);
+        debugLog(`  - PublicEncryptAddress: ${identityInfo.publicEncryptAddress?.substring(0, 20)}...`);
+        debugLog(`  - IsPublic: ${identityInfo.isPublic}`);
         identityConfirmed = true;
         identityCreationPending = false;
         return;
       }
 
       // Identity not found
-      console.log('[IdentitySyncable] Identity NOT found in blockchain');
+      debugLog('[IdentitySyncable] Identity NOT found in blockchain');
 
       // If already creating, wait for it
       if (identityCreationPending) {
-        console.log('[IdentitySyncable] Identity creation already pending, waiting...');
+        debugLog('[IdentitySyncable] Identity creation already pending, waiting...');
         return;
       }
 
       // Check if we have mnemonic to create identity
       if (!credentials.mnemonic) {
-        console.warn('[IdentitySyncable] Cannot create identity - no mnemonic in credentials');
+        debugWarn('[IdentitySyncable] Cannot create identity - no mnemonic in credentials');
         return;
       }
 
@@ -92,7 +93,7 @@ export class IdentitySyncable implements ISyncable {
       await this.createIdentity(credentials, currentUser?.displayName || 'Anonymous');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
-      console.error(`[IdentitySyncable] Error: ${message}`, error);
+      debugError(`[IdentitySyncable] Error: ${message}`, error);
       throw error;
     } finally {
       this.isSyncing = false;
@@ -106,8 +107,8 @@ export class IdentitySyncable implements ISyncable {
     credentials: { mnemonic?: string[]; signingPublicKey?: string },
     displayName: string
   ): Promise<void> {
-    console.log('[IdentitySyncable] Creating identity transaction...');
-    console.log(`  - DisplayName: ${displayName}`);
+    debugLog('[IdentitySyncable] Creating identity transaction...');
+    debugLog(`  - DisplayName: ${displayName}`);
 
     identityCreationPending = true;
 
@@ -120,18 +121,18 @@ export class IdentitySyncable implements ISyncable {
       const signedTransaction = await createIdentityTransaction(displayName, keys, false);
 
       // Submit to blockchain
-      console.log('[IdentitySyncable] Submitting identity transaction...');
+      debugLog('[IdentitySyncable] Submitting identity transaction...');
       const result = await submitTransaction(signedTransaction);
 
       if (!result.successful) {
         throw new Error(result.message || 'Failed to create identity');
       }
 
-      console.log('[IdentitySyncable] Identity transaction submitted successfully');
-      console.log('[IdentitySyncable] Waiting for blockchain confirmation...');
+      debugLog('[IdentitySyncable] Identity transaction submitted successfully');
+      debugLog('[IdentitySyncable] Waiting for blockchain confirmation...');
       // identityConfirmed will be set to true on next sync when identity is found
     } catch (error) {
-      console.error('[IdentitySyncable] Failed to create identity:', error);
+      debugError('[IdentitySyncable] Failed to create identity:', error);
       identityCreationPending = false;
       throw error;
     }

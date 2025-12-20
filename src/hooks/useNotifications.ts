@@ -15,6 +15,7 @@ import { aesDecrypt } from '@/lib/crypto/encryption';
 import { detectPlatform } from '@/lib/platform';
 import { showNotification as showPlatformNotification } from '@/lib/notifications';
 import type { FeedEventResponse } from '@/lib/grpc/grpc-web-helper';
+import { debugLog, debugError } from '@/lib/debug-logger';
 
 // Event types matching proto enum
 const EventType = {
@@ -90,14 +91,14 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
       try {
         const feed = getFeed(feedId);
         if (!feed?.aesKey) {
-          console.log('[useNotifications] No AES key for feed, showing fallback');
+          debugLog('[useNotifications] No AES key for feed, showing fallback');
           return 'New message';
         }
         const decrypted = await aesDecrypt(encryptedPreview, feed.aesKey);
         // Truncate if too long
         return decrypted.length > 100 ? decrypted.slice(0, 100) + '...' : decrypted;
       } catch (error) {
-        console.error('[useNotifications] Failed to decrypt message preview:', error);
+        debugError('[useNotifications] Failed to decrypt message preview:', error);
         return 'New message';
       }
     },
@@ -109,7 +110,7 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
     async (event: FeedEventResponse) => {
       // Use ref to get current selectedFeedId (not stale from callback closure)
       const currentSelectedFeedId = selectedFeedIdRef.current;
-      console.log(`[useNotifications] Processing event: type=${event.type} (expected NewMessage=${EventType.NewMessage}), feedId=${event.feedId}, selectedFeedId=${currentSelectedFeedId}`);
+      debugLog(`[useNotifications] Processing event: type=${event.type} (expected NewMessage=${EventType.NewMessage}), feedId=${event.feedId}, selectedFeedId=${currentSelectedFeedId}`);
 
       switch (event.type) {
         case EventType.NewMessage:
@@ -152,11 +153,11 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
           } else {
             // User is viewing this feed - tell server to mark as read
             // so unread count stays at 0 even if they disconnect
-            console.log(`[useNotifications] User viewing feed, marking as read: ${event.feedId}`);
+            debugLog(`[useNotifications] User viewing feed, marking as read: ${event.feedId}`);
             const currentUserId = userIdRef.current;
             if (currentUserId) {
               notificationService.markFeedAsRead(currentUserId, event.feedId).catch((err) => {
-                console.error('[useNotifications] Failed to mark viewed feed as read:', err);
+                debugError('[useNotifications] Failed to mark viewed feed as read:', err);
               });
             }
           }
@@ -190,11 +191,11 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
   // Handle connection errors
   const handleError = useCallback(
     (error: Error) => {
-      console.error('[useNotifications] Stream error:', error);
+      debugError('[useNotifications] Stream error:', error);
       setIsConnected(false);
 
       if (autoReconnect) {
-        console.log(`[useNotifications] Reconnecting in ${reconnectDelay}ms...`);
+        debugLog(`[useNotifications] Reconnecting in ${reconnectDelay}ms...`);
         reconnectTimeoutRef.current = setTimeout(() => {
           connect();
         }, reconnectDelay);
@@ -206,7 +207,7 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
   // Connect to notification stream
   const connect = useCallback(() => {
     if (!userId) {
-      console.log('[useNotifications] No userId, skipping connection');
+      debugLog('[useNotifications] No userId, skipping connection');
       return;
     }
 
@@ -215,7 +216,7 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
       abortControllerRef.current.abort();
     }
 
-    console.log('[useNotifications] Connecting to notification stream...');
+    debugLog('[useNotifications] Connecting to notification stream...');
 
     abortControllerRef.current = notificationService.subscribeToEvents(
       userId,
@@ -256,7 +257,7 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
         syncUnreadCounts(counts);
       }
     } catch (error) {
-      console.error('[useNotifications] Failed to fetch unread counts:', error);
+      debugError('[useNotifications] Failed to fetch unread counts:', error);
     }
   }, [userId, syncUnreadCounts]);
 
@@ -271,7 +272,7 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
       try {
         await notificationService.markFeedAsRead(userId, feedId);
       } catch (error) {
-        console.error('[useNotifications] Failed to mark feed as read:', error);
+        debugError('[useNotifications] Failed to mark feed as read:', error);
         // Could revert optimistic update here if needed
       }
     },

@@ -11,6 +11,7 @@
 
 import type { SyncProviderAPI } from '@/lib/sync';
 import { FeedsSyncable } from './FeedsSyncable';
+import { debugLog } from '@/lib/debug-logger';
 
 // Re-export public API
 export { useFeedsStore, FEED_TYPE_MAP } from './useFeedsStore';
@@ -30,11 +31,11 @@ export {
  * Called by registerAllModules during app initialization.
  */
 export function registerFeedsModule(api: SyncProviderAPI): void {
-  console.log('[FeedsModule] Registering...');
+  debugLog('[FeedsModule] Registering...');
 
   // Create and register syncables
   const feedsSyncable = new FeedsSyncable();
   api.registerSyncable(feedsSyncable);
 
-  console.log('[FeedsModule] Registration complete');
+  debugLog('[FeedsModule] Registration complete');
 }

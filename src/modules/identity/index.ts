@@ -11,6 +11,7 @@
 
 import type { SyncProviderAPI } from '@/lib/sync';
 import { IdentitySyncable, resetIdentitySyncState } from './IdentitySyncable';
+import { debugLog } from '@/lib/debug-logger';
 
 // Re-export public API
 export { checkIdentityExists, submitTransaction, searchByDisplayName } from './IdentityService';
@@ -22,11 +23,11 @@ export { resetIdentitySyncState } from './IdentitySyncable';
  * Called by registerAllModules during app initialization.
  */
 export function registerIdentityModule(api: SyncProviderAPI): void {
-  console.log('[IdentityModule] Registering...');
+  debugLog('[IdentityModule] Registering...');
 
   // Create and register syncables
   const identitySyncable = new IdentitySyncable();
   api.registerSyncable(identitySyncable);
 
-  console.log('[IdentityModule] Registration complete');
+  debugLog('[IdentityModule] Registration complete');
 }

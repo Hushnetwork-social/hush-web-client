@@ -25,6 +25,7 @@ import { fetchFeeds, fetchMessages, submitTransaction } from './FeedsService';
 import { useFeedsStore } from './useFeedsStore';
 import { useBlockchainStore } from '../blockchain/useBlockchainStore';
 import type { Feed, FeedMessage } from '@/types';
+import { debugLog, debugWarn, debugError } from '@/lib/debug-logger';
 
 // Minimum blocks to wait before resetting pending personal feed creation
 const MIN_BLOCKS_BEFORE_RESET = 5;
@@ -45,21 +46,21 @@ export class FeedsSyncable implements ISyncable {
   async syncTask(): Promise<void> {
     // Prevent concurrent syncs
     if (this.isSyncing) {
-      console.log('[FeedsSyncable] Skipping - already syncing');
+      debugLog('[FeedsSyncable] Skipping - already syncing');
       return;
     }
 
     const credentials = useAppStore.getState().credentials;
 
     if (!credentials?.signingPublicKey) {
-      console.log('[FeedsSyncable] Skipping - no credentials');
+      debugLog('[FeedsSyncable] Skipping - no credentials');
       return;
     }
 
     // Log on first sync
     if (this.isFirstSync) {
-      console.log('[FeedsSyncable] Starting feeds sync...');
-      console.log(`  - Address: ${credentials.signingPublicKey.substring(0, 20)}...`);
+      debugLog('[FeedsSyncable] Starting feeds sync...');
+      debugLog(`  - Address: ${credentials.signingPublicKey.substring(0, 20)}...`);
     }
 
     this.isSyncing = true;
@@ -81,7 +82,7 @@ export class FeedsSyncable implements ISyncable {
       this.isFirstSync = false;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
-      console.error(`[FeedsSyncable] Sync failed: ${message}`, error);
+      debugError(`[FeedsSyncable] Sync failed: ${message}`, error);
       useFeedsStore.getState().setError(message);
       throw error; // Re-throw so SyncProvider can track failures
     } finally {
@@ -131,18 +132,18 @@ export class FeedsSyncable implements ISyncable {
     // On page reload/refresh (new session), always sync from block 0 to validate
     // cached data against current blockchain state
     if (!this.hasValidatedThisSession && this.isNewSession()) {
-      console.log('[FeedsSyncable] New session detected (page reload/refresh)');
-      console.log('[FeedsSyncable] Forcing full sync from block 0 to validate cached data...');
+      debugLog('[FeedsSyncable] New session detected (page reload/refresh)');
+      debugLog('[FeedsSyncable] Forcing full sync from block 0 to validate cached data...');
       forceFullSync = true;
     }
 
     // Detect blockchain reset: if server block height is lower than our last sync block,
     // the database was reset and we need to clear all local cached data
     if (currentBlockHeight > 0 && blockIndex > 0 && currentBlockHeight < blockIndex) {
-      console.log('[FeedsSyncable] Blockchain reset detected!');
-      console.log(`  - Server block height: ${currentBlockHeight}`);
-      console.log(`  - Client last sync block: ${blockIndex}`);
-      console.log('[FeedsSyncable] Clearing local feeds cache and resyncing from scratch...');
+      debugLog('[FeedsSyncable] Blockchain reset detected!');
+      debugLog(`  - Server block height: ${currentBlockHeight}`);
+      debugLog(`  - Client last sync block: ${blockIndex}`);
+      debugLog('[FeedsSyncable] Clearing local feeds cache and resyncing from scratch...');
       useFeedsStore.getState().reset();
       blockIndex = 0;
       this.isFirstSync = true;
@@ -160,19 +161,19 @@ export class FeedsSyncable implements ISyncable {
     const feedsNoEncryptedKey = currentFeeds.filter((f) => !f.encryptedFeedKey && !f.aesKey);
 
     if (feedsMissingKey.length > 0 || feedsNoEncryptedKey.length > 0) {
-      console.log(`[FeedsSyncable] Feeds missing AES key: ${feedsMissingKey.length}, missing encryptedFeedKey: ${feedsNoEncryptedKey.length}`);
+      debugLog(`[FeedsSyncable] Feeds missing AES key: ${feedsMissingKey.length}, missing encryptedFeedKey: ${feedsNoEncryptedKey.length}`);
       if (feedsNoEncryptedKey.length > 0) {
         // Force refresh from block 0 to get encryptedFeedKey from server
-        console.log('[FeedsSyncable] Forcing full refresh to get encryptedFeedKey');
+        debugLog('[FeedsSyncable] Forcing full refresh to get encryptedFeedKey');
         blockIndex = 0;
       }
     }
 
     // Log on first sync or when feeds are empty
     if (currentFeeds.length === 0 || this.isFirstSync) {
-      console.log(`[FeedsSyncable] Syncing feeds for address: ${address.substring(0, 20)}...`);
-      console.log(`  - Current feed count: ${currentFeeds.length}`);
-      console.log(`  - Last sync block: ${blockIndex}`);
+      debugLog(`[FeedsSyncable] Syncing feeds for address: ${address.substring(0, 20)}...`);
+      debugLog(`  - Current feed count: ${currentFeeds.length}`);
+      debugLog(`  - Last sync block: ${blockIndex}`);
     }
 
     const { feeds: serverFeeds, maxBlockIndex } = await fetchFeeds(address, blockIndex);
@@ -183,28 +184,28 @@ export class FeedsSyncable implements ISyncable {
       const staleFeedIds = currentFeeds.filter(f => !serverFeedIds.has(f.id));
 
       if (staleFeedIds.length > 0) {
-        console.log(`[FeedsSyncable] Found ${staleFeedIds.length} stale cached feed(s) not on server`);
-        staleFeedIds.forEach(f => console.log(`  - Stale: ${f.name} (${f.type}, id: ${f.id})`));
-        console.log('[FeedsSyncable] Clearing stale feeds from cache...');
+        debugLog(`[FeedsSyncable] Found ${staleFeedIds.length} stale cached feed(s) not on server`);
+        staleFeedIds.forEach(f => debugLog(`  - Stale: ${f.name} (${f.type}, id: ${f.id})`));
+        debugLog('[FeedsSyncable] Clearing stale feeds from cache...');
         // Reset the store to clear stale data, then add server feeds
         useFeedsStore.getState().reset();
       } else if (serverFeeds.length === 0 && currentFeeds.length > 0) {
         // Server has no feeds but we have cached feeds - they're all stale
-        console.log('[FeedsSyncable] Server has no feeds but client has cached data - clearing stale cache');
+        debugLog('[FeedsSyncable] Server has no feeds but client has cached data - clearing stale cache');
         useFeedsStore.getState().reset();
       }
     }
 
     if (serverFeeds.length > 0) {
-      console.log(`[FeedsSyncable] Found ${serverFeeds.length} feed(s) from server`);
-      serverFeeds.forEach(f => console.log(`  - Feed: ${f.name} (${f.type}, id: ${f.id})`));
+      debugLog(`[FeedsSyncable] Found ${serverFeeds.length} feed(s) from server`);
+      serverFeeds.forEach(f => debugLog(`  - Feed: ${f.name} (${f.type}, id: ${f.id})`));
       useFeedsStore.getState().addFeeds(serverFeeds);
       useFeedsStore.getState().setSyncMetadata({ lastFeedBlockIndex: maxBlockIndex });
 
       // Decrypt feed keys for new feeds
       await this.decryptFeedKeys(serverFeeds);
     } else if (useFeedsStore.getState().feeds.length === 0) {
-      console.log('[FeedsSyncable] No feeds found for this user');
+      debugLog('[FeedsSyncable] No feeds found for this user');
     }
 
     // Mark session as validated after successful full sync
@@ -222,7 +223,7 @@ export class FeedsSyncable implements ISyncable {
   private async decryptFeedKeys(feeds: Feed[]): Promise<void> {
     const credentials = useAppStore.getState().credentials;
     if (!credentials?.encryptionPrivateKey) {
-      console.log('[FeedsSyncable] Cannot decrypt feed keys - no encryption private key');
+      debugLog('[FeedsSyncable] Cannot decrypt feed keys - no encryption private key');
       return;
     }
 
@@ -232,9 +233,9 @@ export class FeedsSyncable implements ISyncable {
           // Pass hex string directly - eciesDecrypt expects a hex string
           const decryptedKey = await eciesDecrypt(feed.encryptedFeedKey, credentials.encryptionPrivateKey);
           useFeedsStore.getState().updateFeedAesKey(feed.id, decryptedKey);
-          console.log(`[FeedsSyncable] Decrypted AES key for feed: ${feed.name}`);
+          debugLog(`[FeedsSyncable] Decrypted AES key for feed: ${feed.name}`);
         } catch (error) {
-          console.error(`[FeedsSyncable] Failed to decrypt feed key for ${feed.name}:`, error);
+          debugError(`[FeedsSyncable] Failed to decrypt feed key for ${feed.name}:`, error);
         }
       }
     }
@@ -248,7 +249,7 @@ export class FeedsSyncable implements ISyncable {
     const feedsNeedingDecryption = feeds.filter((f) => f.encryptedFeedKey && !f.aesKey);
 
     if (feedsNeedingDecryption.length > 0) {
-      console.log(`[FeedsSyncable] ${feedsNeedingDecryption.length} feed(s) need key decryption`);
+      debugLog(`[FeedsSyncable] ${feedsNeedingDecryption.length} feed(s) need key decryption`);
       await this.decryptFeedKeys(feedsNeedingDecryption);
     }
 
@@ -256,7 +257,7 @@ export class FeedsSyncable implements ISyncable {
     const allFeeds = useFeedsStore.getState().feeds;
     allFeeds.forEach((f) => {
       if (!f.aesKey) {
-        console.log(`[FeedsSyncable] Feed "${f.name}" missing aesKey (hasEncryptedKey: ${!!f.encryptedFeedKey})`);
+        debugLog(`[FeedsSyncable] Feed "${f.name}" missing aesKey (hasEncryptedKey: ${!!f.encryptedFeedKey})`);
       }
     });
   }
@@ -271,7 +272,7 @@ export class FeedsSyncable implements ISyncable {
     const { messages: newMessages, maxBlockIndex } = await fetchMessages(address, blockIndex);
 
     if (newMessages.length > 0) {
-      console.log(`[FeedsSyncable] Found ${newMessages.length} new message(s)`);
+      debugLog(`[FeedsSyncable] Found ${newMessages.length} new message(s)`);
 
       // Group messages by feed ID
       const messagesByFeed = new Map<string, FeedMessage[]>();
@@ -299,14 +300,14 @@ export class FeedsSyncable implements ISyncable {
                   contentEncrypted: msg.content, // Keep encrypted version
                 };
               } catch (error) {
-                console.error(`[FeedsSyncable] Failed to decrypt message ${msg.id}:`, error);
+                debugError(`[FeedsSyncable] Failed to decrypt message ${msg.id}:`, error);
                 return msg; // Keep original if decryption fails
               }
             })
           );
           useFeedsStore.getState().addMessages(feedId, decryptedMessages);
         } else {
-          console.warn(`[FeedsSyncable] No AES key for feed ${feedId}, storing encrypted messages`);
+          debugWarn(`[FeedsSyncable] No AES key for feed ${feedId}, storing encrypted messages`);
           useFeedsStore.getState().addMessages(feedId, messages);
         }
       }
@@ -327,20 +328,20 @@ export class FeedsSyncable implements ISyncable {
 
     // Log status on first sync
     if (this.isFirstSync) {
-      console.log('[FeedsSyncable] Checking personal feed status...');
-      console.log(`  - hasPersonalFeed: ${store.hasPersonalFeed()}`);
-      console.log(`  - isCreatingPersonalFeed: ${store.isCreatingPersonalFeed}`);
-      console.log(`  - isPersonalFeedCreationPending: ${store.syncMetadata.isPersonalFeedCreationPending}`);
-      console.log(`  - personalFeedCreationBlockIndex: ${store.syncMetadata.personalFeedCreationBlockIndex}`);
-      console.log(`  - currentBlockHeight: ${currentBlockHeight}`);
-      console.log(`  - hasMnemonic: ${!!credentials.mnemonic}`);
+      debugLog('[FeedsSyncable] Checking personal feed status...');
+      debugLog(`  - hasPersonalFeed: ${store.hasPersonalFeed()}`);
+      debugLog(`  - isCreatingPersonalFeed: ${store.isCreatingPersonalFeed}`);
+      debugLog(`  - isPersonalFeedCreationPending: ${store.syncMetadata.isPersonalFeedCreationPending}`);
+      debugLog(`  - personalFeedCreationBlockIndex: ${store.syncMetadata.personalFeedCreationBlockIndex}`);
+      debugLog(`  - currentBlockHeight: ${currentBlockHeight}`);
+      debugLog(`  - hasMnemonic: ${!!credentials.mnemonic}`);
     }
 
     // Check if personal feed already exists
     if (store.hasPersonalFeed()) {
       // If we were waiting for it to be created, clear the pending flag
       if (store.syncMetadata.isPersonalFeedCreationPending) {
-        console.log('[FeedsSyncable] Personal feed confirmed on blockchain');
+        debugLog('[FeedsSyncable] Personal feed confirmed on blockchain');
         store.setSyncMetadata({
           isPersonalFeedCreationPending: false,
           personalFeedCreationBlockIndex: 0
@@ -351,7 +352,7 @@ export class FeedsSyncable implements ISyncable {
 
     // Don't create if already creating
     if (store.isCreatingPersonalFeed) {
-      console.log('[FeedsSyncable] Skipping - already creating personal feed');
+      debugLog('[FeedsSyncable] Skipping - already creating personal feed');
       return;
     }
 
@@ -361,12 +362,12 @@ export class FeedsSyncable implements ISyncable {
 
       if (blocksSinceCreation < MIN_BLOCKS_BEFORE_RESET) {
         // Still waiting for blockchain confirmation
-        console.log(`[FeedsSyncable] Personal feed creation pending, waiting for confirmation (${blocksSinceCreation}/${MIN_BLOCKS_BEFORE_RESET} blocks)`);
+        debugLog(`[FeedsSyncable] Personal feed creation pending, waiting for confirmation (${blocksSinceCreation}/${MIN_BLOCKS_BEFORE_RESET} blocks)`);
         return;
       }
 
       // Enough blocks have passed, reset and try again
-      console.log(`[FeedsSyncable] Personal feed creation timed out after ${blocksSinceCreation} blocks - resetting`);
+      debugLog(`[FeedsSyncable] Personal feed creation timed out after ${blocksSinceCreation} blocks - resetting`);
       store.setSyncMetadata({
         isPersonalFeedCreationPending: false,
         personalFeedCreationBlockIndex: 0
@@ -375,11 +376,11 @@ export class FeedsSyncable implements ISyncable {
 
     // Don't create if no mnemonic
     if (!credentials.mnemonic) {
-      console.log('[FeedsSyncable] Cannot create personal feed - no mnemonic in credentials');
+      debugLog('[FeedsSyncable] Cannot create personal feed - no mnemonic in credentials');
       return;
     }
 
-    console.log('[FeedsSyncable] No personal feed detected, creating one...');
+    debugLog('[FeedsSyncable] No personal feed detected, creating one...');
     store.setCreatingPersonalFeed(true);
 
     // Store current block height to track timeout
@@ -397,17 +398,17 @@ export class FeedsSyncable implements ISyncable {
       const { signedTransaction } = await createPersonalFeedTransaction(keys);
 
       // Submit to blockchain
-      console.log('[FeedsSyncable] Submitting personal feed transaction...');
+      debugLog('[FeedsSyncable] Submitting personal feed transaction...');
       const result = await submitTransaction(signedTransaction);
 
       if (!result.successful) {
         throw new Error(result.message || 'Failed to create personal feed');
       }
 
-      console.log('[FeedsSyncable] Personal feed creation transaction submitted successfully');
+      debugLog('[FeedsSyncable] Personal feed creation transaction submitted successfully');
       // Keep isPersonalFeedCreationPending true - it will be cleared when feed appears in sync
     } catch (error) {
-      console.error('[FeedsSyncable] Failed to create personal feed:', error);
+      debugError('[FeedsSyncable] Failed to create personal feed:', error);
       store.setSyncMetadata({
         isPersonalFeedCreationPending: false,
         personalFeedCreationBlockIndex: 0

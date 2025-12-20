@@ -11,6 +11,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { User, Credentials, Balance } from '@/types';
+import { debugLog, debugError } from '@/lib/debug-logger';
 
 interface AppStore {
   // Auth state
@@ -84,7 +85,7 @@ export const useAppStore = create<AppStore>()(
       // Handle corrupt localStorage gracefully
       onRehydrateStorage: () => (state, error) => {
         if (error) {
-          console.error('[AppStore] Failed to rehydrate storage:', error);
+          debugError('[AppStore] Failed to rehydrate storage:', error);
           // Clear corrupt data
           if (typeof window !== 'undefined') {
             localStorage.removeItem('hush-app-storage');
@@ -95,13 +96,13 @@ export const useAppStore = create<AppStore>()(
         // Log rehydration details
         if (state) {
           if (state.isAuthenticated && state.credentials) {
-            console.log('[AppStore] Credentials loaded from localStorage:');
-            console.log(`  - User: ${state.currentUser?.displayName || 'Unknown'}`);
-            console.log(`  - SigningKey: ${state.credentials.signingPublicKey?.substring(0, 20)}...`);
-            console.log(`  - EncryptKey: ${state.credentials.encryptionPublicKey?.substring(0, 20)}...`);
-            console.log(`  - Has mnemonic: ${!!state.credentials.mnemonic}`);
+            debugLog('[AppStore] Credentials loaded from localStorage:');
+            debugLog(`  - User: ${state.currentUser?.displayName || 'Unknown'}`);
+            debugLog(`  - SigningKey: ${state.credentials.signingPublicKey?.substring(0, 20)}...`);
+            debugLog(`  - EncryptKey: ${state.credentials.encryptionPublicKey?.substring(0, 20)}...`);
+            debugLog(`  - Has mnemonic: ${!!state.credentials.mnemonic}`);
           } else {
-            console.log('[AppStore] No credentials found in localStorage');
+            debugLog('[AppStore] No credentials found in localStorage');
           }
         }
       },
