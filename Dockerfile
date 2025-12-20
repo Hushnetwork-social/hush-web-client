@@ -18,6 +18,7 @@ WORKDIR /app
 # Build arguments (injected at build time)
 ARG APP_VERSION=Production
 ARG NEXT_PUBLIC_GRPC_URL=https://api.hushnetwork.social
+ARG NEXT_PUBLIC_DEBUG_LOGGING=false
 
 # Copy dependencies from deps stage
 COPY --from=deps /app/node_modules ./node_modules
@@ -29,6 +30,7 @@ COPY hush-web-client/ ./
 # NEXT_PUBLIC_* variables are baked into client-side JS at build time
 ENV NEXT_PUBLIC_APP_VERSION=${APP_VERSION}
 ENV NEXT_PUBLIC_GRPC_URL=${NEXT_PUBLIC_GRPC_URL}
+ENV NEXT_PUBLIC_DEBUG_LOGGING=${NEXT_PUBLIC_DEBUG_LOGGING}
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV STANDALONE_BUILD=true
 
