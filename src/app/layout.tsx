@@ -17,6 +17,18 @@ export const metadata: Metadata = {
     statusBarStyle: "black-translucent",
     title: "Hush Feeds",
   },
+  icons: {
+    icon: [
+      { url: "/icons/icon-72.png", sizes: "72x72", type: "image/png" },
+      { url: "/icons/icon-96.png", sizes: "96x96", type: "image/png" },
+      { url: "/icons/icon-128.png", sizes: "128x128", type: "image/png" },
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [
+      { url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+    ],
+  },
 };
 
 export const viewport: Viewport = {

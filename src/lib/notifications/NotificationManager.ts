@@ -9,6 +9,7 @@
  */
 
 import { detectPlatform, type Platform } from '../platform';
+import { debugLog, debugError } from '../debug-logger';
 
 export interface NotificationEvent {
   feedId: string;
@@ -31,11 +32,11 @@ class BrowserNotificationHandler implements NotificationHandler {
   async showNotification(event: NotificationEvent): Promise<void> {
     // Browser uses in-app toasts which are handled directly
     // in useNotifications via the addToast callback
-    console.log('[BrowserNotificationHandler] showNotification called (handled by toast system)');
+    debugLog('[BrowserNotificationHandler] showNotification called (handled by toast system)');
   }
 
   async clearNotification(feedId: string): Promise<void> {
-    console.log(`[BrowserNotificationHandler] clearNotification called for feed: ${feedId}`);
+    debugLog(`[BrowserNotificationHandler] clearNotification called for feed: ${feedId}`);
   }
 
   isSupported(): boolean {
@@ -71,10 +72,10 @@ class TauriNotificationHandler implements NotificationHandler {
       this.permissionGranted = permission;
       this.initialized = true;
 
-      console.log(`[TauriNotificationHandler] Initialized, permission: ${permission}`);
+      debugLog(`[TauriNotificationHandler] Initialized, permission: ${permission}`);
       return permission;
     } catch (error) {
-      console.error('[TauriNotificationHandler] Failed to initialize:', error);
+      debugError('[TauriNotificationHandler] Failed to initialize:', error);
       this.initialized = true;
       return false;
     }
@@ -84,7 +85,7 @@ class TauriNotificationHandler implements NotificationHandler {
     const hasPermission = await this.ensureInitialized();
 
     if (!hasPermission) {
-      console.log('[TauriNotificationHandler] No permission for notifications');
+      debugLog('[TauriNotificationHandler] No permission for notifications');
       return;
     }
 
@@ -98,16 +99,16 @@ class TauriNotificationHandler implements NotificationHandler {
         // are configured differently than v1
       });
 
-      console.log(`[TauriNotificationHandler] Sent notification from ${event.senderName}`);
+      debugLog(`[TauriNotificationHandler] Sent notification from ${event.senderName}`);
     } catch (error) {
-      console.error('[TauriNotificationHandler] Failed to show notification:', error);
+      debugError('[TauriNotificationHandler] Failed to show notification:', error);
     }
   }
 
   async clearNotification(feedId: string): Promise<void> {
     // Native notifications are automatically cleared by the OS
     // when user interacts with them
-    console.log(`[TauriNotificationHandler] clearNotification for feed: ${feedId} (handled by OS)`);
+    debugLog(`[TauriNotificationHandler] clearNotification for feed: ${feedId} (handled by OS)`);
   }
 
   isSupported(): boolean {
@@ -123,37 +124,34 @@ class MobilePWANotificationHandler implements NotificationHandler {
   async showNotification(event: NotificationEvent): Promise<void> {
     // Check if notification API is available
     if (!('Notification' in window)) {
-      console.log('[MobilePWANotificationHandler] Notifications not supported');
+      debugLog('[MobilePWANotificationHandler] Notifications not supported');
       return;
     }
 
     if (Notification.permission !== 'granted') {
-      console.log('[MobilePWANotificationHandler] No notification permission');
+      debugLog('[MobilePWANotificationHandler] No notification permission');
       return;
     }
 
     try {
-      const registration = await navigator.serviceWorker.ready;
-      await registration.showNotification(event.senderName || 'Hush Feeds', {
+      // Use the Notification API directly (works without service worker when app is open)
+      const notification = new Notification(event.senderName || 'Hush Feeds', {
         body: event.messagePreview || 'New message',
         icon: '/icons/icon-192.png',
         badge: '/icons/badge-72.png',
         tag: `feed-${event.feedId}`,
         data: { feedId: event.feedId },
       });
+
+      debugLog(`[MobilePWANotificationHandler] Sent notification from ${event.senderName}`);
     } catch (error) {
-      console.error('[MobilePWANotificationHandler] Failed to show notification:', error);
+      debugError('[MobilePWANotificationHandler] Failed to show notification:', error);
     }
   }
 
   async clearNotification(feedId: string): Promise<void> {
-    try {
-      const registration = await navigator.serviceWorker.ready;
-      const notifications = await registration.getNotifications({ tag: `feed-${feedId}` });
-      notifications.forEach(n => n.close());
-    } catch (error) {
-      console.error('[MobilePWANotificationHandler] Failed to clear notification:', error);
-    }
+    // Native notifications are automatically cleared when tapped
+    debugLog(`[MobilePWANotificationHandler] clearNotification for feed: ${feedId}`);
   }
 
   isSupported(): boolean {
@@ -173,7 +171,7 @@ export function getNotificationHandler(): NotificationHandler {
   }
 
   const platform = detectPlatform();
-  console.log(`[NotificationManager] Creating handler for platform: ${platform}`);
+  debugLog(`[NotificationManager] Creating handler for platform: ${platform}`);
 
   switch (platform) {
     case 'tauri':
