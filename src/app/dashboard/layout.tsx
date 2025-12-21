@@ -9,7 +9,7 @@ import { useAppStore } from "@/stores";
 import { useBlockchainStore } from "@/modules/blockchain";
 import { useFeedsStore } from "@/modules/feeds";
 import { resetIdentitySyncState } from "@/modules/identity";
-import { useNotifications } from "@/hooks";
+import { useNotifications, useBackButton } from "@/hooks";
 import { downloadCredentialsFile, type PortableCredentials } from "@/lib/crypto";
 import { Loader2 } from "lucide-react";
 import { debugLog, debugError } from "@/lib/debug-logger";
@@ -46,6 +46,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
   // Initialize notification system
   const { toasts, dismissToast, markAsRead } = useNotifications();
+
+  // Handle device back button for PWA navigation
+  useBackButton();
 
   // Redirect to auth page if not authenticated
   useEffect(() => {
