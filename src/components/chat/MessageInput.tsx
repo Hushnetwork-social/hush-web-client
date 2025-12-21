@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { Paperclip, Send } from "lucide-react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { Paperclip, Send, Smile } from "lucide-react";
+import { EmojiPicker } from "./EmojiPicker";
 
 interface MessageInputProps {
   onSend: (message: string) => void;
@@ -13,6 +14,7 @@ interface MessageInputProps {
 
 export function MessageInput({ onSend, onAttach, onEscapeEmpty, disabled = false, autoFocus = true }: MessageInputProps) {
   const [message, setMessage] = useState("");
+  const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Auto-focus input when component mounts
@@ -31,7 +33,8 @@ export function MessageInput({ onSend, onAttach, onEscapeEmpty, disabled = false
     if (message.trim() && !disabled) {
       onSend(message.trim());
       setMessage("");
-      // Ensure input keeps focus after sending
+      // Close emoji picker and focus input after sending
+      setIsEmojiPickerOpen(false);
       inputRef.current?.focus();
     }
   };
@@ -46,12 +49,39 @@ export function MessageInput({ onSend, onAttach, onEscapeEmpty, disabled = false
     }
   };
 
+  // Handle emoji selection
+  const handleEmojiSelect = useCallback((emoji: string) => {
+    setMessage((prev) => prev + emoji);
+    // Focus input after emoji selection
+    inputRef.current?.focus();
+  }, []);
+
+  // Close emoji picker when user starts typing
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setMessage(e.target.value);
+    if (isEmojiPickerOpen) {
+      setIsEmojiPickerOpen(false);
+    }
+  };
+
+  // Toggle emoji picker
+  const toggleEmojiPicker = () => {
+    setIsEmojiPickerOpen((prev) => !prev);
+  };
+
   return (
     <div className="flex-shrink-0 p-3">
       <form
         onSubmit={handleSubmit}
-        className="flex items-center bg-hush-bg-dark rounded-xl p-2"
+        className="relative flex items-center bg-hush-bg-dark rounded-xl p-2"
       >
+        {/* Emoji Picker Flyout */}
+        <EmojiPicker
+          isOpen={isEmojiPickerOpen}
+          onEmojiSelect={handleEmojiSelect}
+          onClose={() => setIsEmojiPickerOpen(false)}
+        />
+
         {/* Attachment Button */}
         <button
           type="button"
@@ -62,12 +92,26 @@ export function MessageInput({ onSend, onAttach, onEscapeEmpty, disabled = false
           <Paperclip className="w-5 h-5" />
         </button>
 
+        {/* Emoji Button */}
+        <button
+          type="button"
+          onClick={toggleEmojiPicker}
+          disabled={disabled}
+          className={`p-2 transition-colors disabled:opacity-50 ${
+            isEmojiPickerOpen
+              ? "text-hush-purple-hover"
+              : "text-hush-purple hover:text-hush-purple-hover"
+          }`}
+        >
+          <Smile className="w-5 h-5" />
+        </button>
+
         {/* Text Input */}
         <input
           ref={inputRef}
           type="text"
           value={message}
-          onChange={(e) => setMessage(e.target.value)}
+          onChange={handleInputChange}
           onKeyDown={handleKeyDown}
           placeholder="Type a message..."
           disabled={disabled}
