@@ -35,6 +35,14 @@ vi.mock('@/lib/crypto', () => ({
     signedTransaction: 'mock-signed-tx',
     feedId: 'mock-feed-id',
   }),
+  eciesDecrypt: vi.fn().mockResolvedValue('decrypted-key'),
+  aesDecrypt: vi.fn().mockReturnValue('decrypted-message'),
+}));
+
+// Mock crypto reactions module
+vi.mock('@/lib/crypto/reactions', () => ({
+  decryptReactionTally: vi.fn().mockReturnValue([0, 0, 0, 0, 0, 0]),
+  initializeBsgs: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Sample test data
@@ -308,13 +316,22 @@ describe('FeedsSyncable', () => {
       mnemonic: ['word1', 'word2'],
     });
 
-    // Add a personal feed to prevent creation attempt
-    useFeedsStore.getState().setFeeds([sampleFeed]);
+    // Create personal feed in SERVER format (not client Feed type)
+    // FeedsService.fetchFeeds expects server format with feedType: number
+    const serverPersonalFeed = {
+      feedId: 'feed-1',
+      feedTitle: 'My Personal Feed',
+      feedOwner: 'user-public-key',
+      feedType: 0, // 0 = personal in FEED_TYPE_MAP
+      blockIndex: 100,
+      participants: [{ participantPublicAddress: 'user-public-key' }],
+    };
 
-    // Mock feed list response
+    // Mock feed list response - return the personal feed from server
+    // This prevents cache clearing and personal feed creation
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      json: () => Promise.resolve({ feeds: [] }),
+      json: () => Promise.resolve({ feeds: [serverPersonalFeed] }),
     });
 
     // Mock messages response
@@ -327,6 +344,8 @@ describe('FeedsSyncable', () => {
 
     expect(mockFetch).toHaveBeenCalledTimes(2);
     expect(useFeedsStore.getState().isSyncing).toBe(false);
+    // Feed should be in the store
+    expect(useFeedsStore.getState().hasPersonalFeed()).toBe(true);
   });
 
   it('should detect missing personal feed and create one', async () => {

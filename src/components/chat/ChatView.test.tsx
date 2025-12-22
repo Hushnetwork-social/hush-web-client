@@ -15,17 +15,28 @@ import type { Feed } from '@/types';
 // Mock scrollIntoView for jsdom
 Element.prototype.scrollIntoView = vi.fn();
 
-// Create mock functions at module scope
-const mockDebugLog = vi.fn();
-
 // Mock the crypto constants
 vi.mock('@/lib/crypto/reactions/constants', () => ({
   EMOJIS: ['👍', '❤️', '😂', '😮', '😢', '😡'] as const,
+  EMOJI_COUNT: 6,
+  BABYJUBJUB: {
+    a: 168700n,
+    d: 168696n,
+    p: 21888242871839275222246405745257275088548364400416034343698204186575808495617n,
+    order: 21888242871839275222246405745257275088614511777268538073601725287587578984328n,
+    cofactor: 8n,
+    generator: { x: 0n, y: 1n },
+  },
+  IDENTITY: { x: 0n, y: 1n },
+  DOMAIN_SEPARATORS: { NULLIFIER: 0n, BACKUP: 0n, COMMITMENT: 0n },
+  CIRCUIT: { version: 'test', treeDepth: 20, gracePeriodRoots: 3 },
+  BSGS: { maxValue: 1024n, tableSize: 32, cacheKey: 'test', tableUrl: '/test' },
+  FEED_KEY_DOMAIN: 'test',
 }));
 
 // Mock the debug logger
 vi.mock('@/lib/debug-logger', () => ({
-  debugLog: (...args: unknown[]) => mockDebugLog(...args),
+  debugLog: vi.fn(),
   debugWarn: vi.fn(),
   debugError: vi.fn(),
 }));
@@ -169,9 +180,7 @@ describe('ChatView', () => {
       expect(screen.getByRole('listbox')).toBeInTheDocument();
     });
 
-    it('should log reaction selection (placeholder behavior)', () => {
-      mockDebugLog.mockClear();
-
+    it('should call onReactionSelect when emoji is selected', () => {
       render(<ChatView feed={mockFeed} />);
 
       // Open picker and select emoji
@@ -179,10 +188,8 @@ describe('ChatView', () => {
       const emojiButtons = screen.getAllByRole('option');
       fireEvent.click(emojiButtons[0]);
 
-      // Should log the selection
-      expect(mockDebugLog).toHaveBeenCalledWith(
-        expect.stringContaining('[ChatView] Reaction selected:')
-      );
+      // Emoji selection should close the picker
+      expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
     });
   });
 

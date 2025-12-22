@@ -221,16 +221,26 @@ describe('MessageBubble', () => {
     });
 
     it('should show pending state for my reaction', () => {
+      // Pending animation only shows when server count is 0 (not yet confirmed)
+      const countsWithZeroThumbsUp: EmojiCounts = {
+        '👍': 0,  // My pending reaction (not yet confirmed)
+        '❤️': 3,
+        '😂': 0,
+        '😮': 0,
+        '😢': 0,
+        '😡': 0,
+      };
+
       const { container } = render(
         <MessageBubble
           {...defaultProps}
-          reactionCounts={countsWithReactions}
-          myReaction={0}
+          reactionCounts={countsWithZeroThumbsUp}
+          myReaction={0}  // 👍 selected but not yet confirmed
           isPendingReaction={true}
         />
       );
 
-      // Should have animate-pulse class
+      // Should have animate-pulse class on the pending reaction
       const pulsingElement = container.querySelector('.animate-pulse');
       expect(pulsingElement).toBeInTheDocument();
     });
