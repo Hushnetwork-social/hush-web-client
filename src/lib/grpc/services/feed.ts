@@ -64,15 +64,18 @@ export const feedService = {
 
   /**
    * Get all feed messages for an address starting from a block index
+   * Also fetches reaction tallies since lastReactionTallyVersion (Protocol Omega)
    */
   async getFeedMessagesForAddress(
     profilePublicKey: string,
-    blockIndex: number = 0
+    blockIndex: number = 0,
+    lastReactionTallyVersion: number = 0
   ): Promise<GetFeedMessagesForAddressReply> {
     const client = getGrpcClient();
     const request: GetFeedMessagesForAddressRequest = {
       ProfilePublicKey: profilePublicKey,
       BlockIndex: blockIndex,
+      LastReactionTallyVersion: lastReactionTallyVersion,
     };
     return client.unaryCall<GetFeedMessagesForAddressRequest, GetFeedMessagesForAddressReply>(
       SERVICE_NAME,

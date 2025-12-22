@@ -32,6 +32,7 @@ export {
   createPersonalFeedTransaction,
   createFeedMessageTransaction,
   createChatFeedTransaction,
+  createReactionTransaction,
   // Types
   type SignatureInfo,
   type UnsignedTransaction,
@@ -42,6 +43,7 @@ export {
   type NewFeedMessagePayload,
   type ChatFeedParticipant,
   type NewChatFeedPayload,
+  type NewReactionPayload,
 } from './transactions';
 
 export {

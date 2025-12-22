@@ -158,10 +158,15 @@ export function buildGetFeedsForAddressRequest(profilePublicKey: string, blockIn
   return new Uint8Array(bytes);
 }
 
-export function buildGetFeedMessagesRequest(profilePublicKey: string, blockIndex: number): Uint8Array {
+export function buildGetFeedMessagesRequest(
+  profilePublicKey: string,
+  blockIndex: number,
+  lastReactionTallyVersion: number = 0
+): Uint8Array {
   const bytes = [
     ...encodeString(1, profilePublicKey),
     ...encodeVarintField(2, blockIndex),
+    ...encodeVarintField(3, lastReactionTallyVersion),
   ];
   return new Uint8Array(bytes);
 }
@@ -403,10 +408,46 @@ export interface FeedMessage {
   issuerName: string;
   timestamp: Date | null;
   blockIndex: number;
+  authorCommitment?: Uint8Array;  // Protocol Omega: Poseidon(author_secret)
+}
+
+// Protocol Omega: EC Point for reaction tallies
+export interface ECPointBytes {
+  x: Uint8Array;
+  y: Uint8Array;
+}
+
+// Protocol Omega: Reaction tally for a message
+export interface ReactionTally {
+  messageId: string;
+  tallyC1: ECPointBytes[];  // 6 aggregated C1 points
+  tallyC2: ECPointBytes[];  // 6 aggregated C2 points
+  tallyVersion: number;
+  reactionCount: number;
+}
+
+// Extended response that includes reaction tallies
+export interface FeedMessagesWithTalliesResponse {
+  messages: FeedMessage[];
+  reactionTallies: ReactionTally[];
+  maxReactionTallyVersion: number;
 }
 
 export function parseFeedMessagesResponse(messageBytes: Uint8Array): FeedMessage[] {
-  const messages: FeedMessage[] = [];
+  const result = parseFeedMessagesWithTalliesResponse(messageBytes);
+  return result.messages;
+}
+
+/**
+ * Parse full feed messages response including reaction tallies (Protocol Omega)
+ */
+export function parseFeedMessagesWithTalliesResponse(messageBytes: Uint8Array): FeedMessagesWithTalliesResponse {
+  const result: FeedMessagesWithTalliesResponse = {
+    messages: [],
+    reactionTallies: [],
+    maxReactionTallyVersion: 0,
+  };
+
   let offset = 0;
 
   while (offset < messageBytes.length) {
@@ -418,12 +459,26 @@ export function parseFeedMessagesResponse(messageBytes: Uint8Array): FeedMessage
     const wireType = tag & 0x07;
 
     if (wireType === 2 && fieldNumber === 1) {
+      // Field 1: FeedMessage (repeated)
       const lenResult = parseVarint(messageBytes, offset);
       offset += lenResult.bytesRead;
       const msgBytes = messageBytes.slice(offset, offset + lenResult.value);
       offset += lenResult.value;
 
-      messages.push(parseSingleMessage(msgBytes));
+      result.messages.push(parseSingleMessage(msgBytes));
+    } else if (wireType === 2 && fieldNumber === 2) {
+      // Field 2: ReactionTallies (repeated)
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead;
+      const tallyBytes = messageBytes.slice(offset, offset + lenResult.value);
+      offset += lenResult.value;
+
+      result.reactionTallies.push(parseSingleReactionTally(tallyBytes));
+    } else if (wireType === 0 && fieldNumber === 3) {
+      // Field 3: MaxReactionTallyVersion (int64)
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+      result.maxReactionTallyVersion = valueResult.value;
     } else if (wireType === 0) {
       const valueResult = parseVarint(messageBytes, offset);
       offset += valueResult.bytesRead;
@@ -435,7 +490,7 @@ export function parseFeedMessagesResponse(messageBytes: Uint8Array): FeedMessage
     }
   }
 
-  return messages;
+  return result;
 }
 
 function parseSingleMessage(bytes: Uint8Array): FeedMessage {
@@ -509,6 +564,115 @@ function parseTimestamp(bytes: Uint8Array): Date | null {
   }
 
   return seconds > 0 ? new Date(seconds * 1000) : null;
+}
+
+/**
+ * Parse a single reaction tally from protobuf bytes (Protocol Omega)
+ *
+ * Proto definition:
+ * message MessageReactionTally {
+ *   string MessageId = 1;
+ *   repeated ECPoint TallyC1 = 2;
+ *   repeated ECPoint TallyC2 = 3;
+ *   int64 TallyVersion = 4;
+ *   int64 ReactionCount = 5;
+ * }
+ */
+function parseSingleReactionTally(bytes: Uint8Array): ReactionTally {
+  const tally: ReactionTally = {
+    messageId: '',
+    tallyC1: [],
+    tallyC2: [],
+    tallyVersion: 0,
+    reactionCount: 0,
+  };
+
+  let offset = 0;
+  while (offset < bytes.length) {
+    const tagResult = parseVarint(bytes, offset);
+    const tag = tagResult.value;
+    offset += tagResult.bytesRead;
+
+    const fieldNumber = tag >> 3;
+    const wireType = tag & 0x07;
+
+    if (wireType === 0) {
+      // Varint fields
+      const valueResult = parseVarint(bytes, offset);
+      offset += valueResult.bytesRead;
+      if (fieldNumber === 4) tally.tallyVersion = valueResult.value;
+      if (fieldNumber === 5) tally.reactionCount = valueResult.value;
+    } else if (wireType === 2) {
+      // Length-delimited fields
+      const lenResult = parseVarint(bytes, offset);
+      offset += lenResult.bytesRead;
+
+      if (fieldNumber === 1) {
+        // MessageId (string)
+        tally.messageId = parseString(bytes, offset, lenResult.value);
+      } else if (fieldNumber === 2) {
+        // TallyC1 (repeated ECPoint)
+        const pointBytes = bytes.slice(offset, offset + lenResult.value);
+        tally.tallyC1.push(parseECPoint(pointBytes));
+      } else if (fieldNumber === 3) {
+        // TallyC2 (repeated ECPoint)
+        const pointBytes = bytes.slice(offset, offset + lenResult.value);
+        tally.tallyC2.push(parseECPoint(pointBytes));
+      }
+      offset += lenResult.value;
+    } else {
+      break;
+    }
+  }
+
+  return tally;
+}
+
+/**
+ * Parse an EC point from protobuf bytes
+ *
+ * Proto definition:
+ * message ECPoint {
+ *   bytes X = 1;
+ *   bytes Y = 2;
+ * }
+ */
+function parseECPoint(bytes: Uint8Array): ECPointBytes {
+  const point: ECPointBytes = {
+    x: new Uint8Array(0),
+    y: new Uint8Array(0),
+  };
+
+  let offset = 0;
+  while (offset < bytes.length) {
+    const tagResult = parseVarint(bytes, offset);
+    const tag = tagResult.value;
+    offset += tagResult.bytesRead;
+
+    const fieldNumber = tag >> 3;
+    const wireType = tag & 0x07;
+
+    if (wireType === 2) {
+      const lenResult = parseVarint(bytes, offset);
+      offset += lenResult.bytesRead;
+
+      if (fieldNumber === 1) {
+        // X coordinate (bytes)
+        point.x = bytes.slice(offset, offset + lenResult.value);
+      } else if (fieldNumber === 2) {
+        // Y coordinate (bytes)
+        point.y = bytes.slice(offset, offset + lenResult.value);
+      }
+      offset += lenResult.value;
+    } else if (wireType === 0) {
+      const valueResult = parseVarint(bytes, offset);
+      offset += valueResult.bytesRead;
+    } else {
+      break;
+    }
+  }
+
+  return point;
 }
 
 export interface SubmitTransactionResponse {
@@ -831,4 +995,201 @@ export function parseGetUnreadCountsResponse(messageBytes: Uint8Array): GetUnrea
   }
 
   return result;
+}
+
+// ============= Reactions Service Builders & Parsers =============
+
+// Encode bytes field for protobuf (wire type 2)
+function encodeBytes(fieldNumber: number, value: Uint8Array): number[] {
+  const tag = (fieldNumber << 3) | 2; // wire type 2 = length-delimited
+  return [...encodeVarint(tag), ...encodeVarint(value.length), ...value];
+}
+
+/**
+ * Build GetTalliesRequest for binary gRPC
+ * Proto: message GetTalliesRequest {
+ *   bytes feed_id = 1;
+ *   repeated bytes message_ids = 2;
+ * }
+ */
+export function buildGetTalliesRequest(feedId: Uint8Array, messageIds: Uint8Array[]): Uint8Array {
+  const bytes: number[] = [
+    ...encodeBytes(1, feedId),
+  ];
+  for (const msgId of messageIds) {
+    bytes.push(...encodeBytes(2, msgId));
+  }
+  return new Uint8Array(bytes);
+}
+
+/**
+ * Parse GetTalliesResponse
+ * Proto: message GetTalliesResponse {
+ *   repeated MessageTally tallies = 1;
+ * }
+ */
+export interface GetTalliesResponseParsed {
+  tallies: ReactionTally[];
+}
+
+export function parseGetTalliesResponse(messageBytes: Uint8Array): GetTalliesResponseParsed {
+  const result: GetTalliesResponseParsed = {
+    tallies: [],
+  };
+
+  let offset = 0;
+  while (offset < messageBytes.length) {
+    const tagResult = parseVarint(messageBytes, offset);
+    const tag = tagResult.value;
+    offset += tagResult.bytesRead;
+
+    const fieldNumber = tag >> 3;
+    const wireType = tag & 0x07;
+
+    if (wireType === 2 && fieldNumber === 1) {
+      // MessageTally (repeated)
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead;
+      const tallyBytes = messageBytes.slice(offset, offset + lenResult.value);
+      offset += lenResult.value;
+      result.tallies.push(parseMessageTally(tallyBytes));
+    } else if (wireType === 0) {
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+    } else if (wireType === 2) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead + lenResult.value;
+    } else {
+      break;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Parse MessageTally from proto bytes
+ * Proto: message MessageTally {
+ *   bytes message_id = 1;
+ *   repeated ECPoint tally_c1 = 2;
+ *   repeated ECPoint tally_c2 = 3;
+ *   int32 total_count = 4;
+ * }
+ */
+function parseMessageTally(bytes: Uint8Array): ReactionTally {
+  const tally: ReactionTally = {
+    messageId: '',
+    tallyC1: [],
+    tallyC2: [],
+    tallyVersion: 0,
+    reactionCount: 0,
+  };
+
+  let offset = 0;
+  while (offset < bytes.length) {
+    const tagResult = parseVarint(bytes, offset);
+    const tag = tagResult.value;
+    offset += tagResult.bytesRead;
+
+    const fieldNumber = tag >> 3;
+    const wireType = tag & 0x07;
+
+    if (wireType === 0) {
+      const valueResult = parseVarint(bytes, offset);
+      offset += valueResult.bytesRead;
+      if (fieldNumber === 4) tally.reactionCount = valueResult.value;
+    } else if (wireType === 2) {
+      const lenResult = parseVarint(bytes, offset);
+      offset += lenResult.bytesRead;
+
+      if (fieldNumber === 1) {
+        // message_id (bytes) - convert to UUID string
+        const idBytes = bytes.slice(offset, offset + lenResult.value);
+        tally.messageId = bytesToUuid(idBytes);
+      } else if (fieldNumber === 2) {
+        // tally_c1 (ECPoint)
+        const pointBytes = bytes.slice(offset, offset + lenResult.value);
+        tally.tallyC1.push(parseECPoint(pointBytes));
+      } else if (fieldNumber === 3) {
+        // tally_c2 (ECPoint)
+        const pointBytes = bytes.slice(offset, offset + lenResult.value);
+        tally.tallyC2.push(parseECPoint(pointBytes));
+      }
+      offset += lenResult.value;
+    } else {
+      break;
+    }
+  }
+
+  return tally;
+}
+
+/**
+ * Convert .NET GUID bytes to UUID string
+ */
+function bytesToUuid(bytes: Uint8Array): string {
+  if (bytes.length !== 16) return '';
+
+  // Part 1: bytes 0-3, reverse (little-endian to big-endian)
+  const p1 = [bytes[3], bytes[2], bytes[1], bytes[0]]
+    .map(b => b.toString(16).padStart(2, '0')).join('');
+
+  // Part 2: bytes 4-5, reverse
+  const p2 = [bytes[5], bytes[4]]
+    .map(b => b.toString(16).padStart(2, '0')).join('');
+
+  // Part 3: bytes 6-7, reverse
+  const p3 = [bytes[7], bytes[6]]
+    .map(b => b.toString(16).padStart(2, '0')).join('');
+
+  // Part 4: bytes 8-9, as-is (big-endian)
+  const p4 = [bytes[8], bytes[9]]
+    .map(b => b.toString(16).padStart(2, '0')).join('');
+
+  // Part 5: bytes 10-15, as-is (big-endian)
+  const p5 = [bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]]
+    .map(b => b.toString(16).padStart(2, '0')).join('');
+
+  return `${p1}-${p2}-${p3}-${p4}-${p5}`;
+}
+
+/**
+ * Convert UUID string to .NET GUID bytes
+ */
+export function uuidToBytes(uuid: string): Uint8Array {
+  const parts = uuid.split('-');
+  const bytes = new Uint8Array(16);
+
+  // Part 1: 4 bytes, little-endian (reverse)
+  const p1 = parts[0];
+  bytes[0] = parseInt(p1.substring(6, 8), 16);
+  bytes[1] = parseInt(p1.substring(4, 6), 16);
+  bytes[2] = parseInt(p1.substring(2, 4), 16);
+  bytes[3] = parseInt(p1.substring(0, 2), 16);
+
+  // Part 2: 2 bytes, little-endian (reverse)
+  const p2 = parts[1];
+  bytes[4] = parseInt(p2.substring(2, 4), 16);
+  bytes[5] = parseInt(p2.substring(0, 2), 16);
+
+  // Part 3: 2 bytes, little-endian (reverse)
+  const p3 = parts[2];
+  bytes[6] = parseInt(p3.substring(2, 4), 16);
+  bytes[7] = parseInt(p3.substring(0, 2), 16);
+
+  // Part 4: 2 bytes, big-endian (as-is)
+  const p4 = parts[3];
+  bytes[8] = parseInt(p4.substring(0, 2), 16);
+  bytes[9] = parseInt(p4.substring(2, 4), 16);
+
+  // Part 5: 6 bytes, big-endian (as-is)
+  const p5 = parts[4];
+  bytes[10] = parseInt(p5.substring(0, 2), 16);
+  bytes[11] = parseInt(p5.substring(2, 4), 16);
+  bytes[12] = parseInt(p5.substring(4, 6), 16);
+  bytes[13] = parseInt(p5.substring(6, 8), 16);
+  bytes[14] = parseInt(p5.substring(8, 10), 16);
+  bytes[15] = parseInt(p5.substring(10, 12), 16);
+
+  return bytes;
 }

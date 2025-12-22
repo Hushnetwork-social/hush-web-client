@@ -6,6 +6,8 @@ import { MessageBubble } from "./MessageBubble";
 import { MessageInput } from "./MessageInput";
 import { useAppStore } from "@/stores";
 import { useFeedsStore, sendMessage } from "@/modules/feeds";
+import { useFeedReactions } from "@/hooks/useFeedReactions";
+import { debugLog } from "@/lib/debug-logger";
 import type { Feed, FeedMessage } from "@/types";
 
 // Empty array constant to avoid creating new references
@@ -27,6 +29,17 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
     () => messagesMap[feed.id] ?? EMPTY_MESSAGES,
     [messagesMap, feed.id]
   );
+
+  // Use the feed reactions hook for optimistic updates
+  const {
+    getReactionCounts,
+    getMyReaction,
+    isPending,
+    handleReactionSelect,
+  } = useFeedReactions({
+    feedId: feed.id,
+    feedAesKey: feed.aesKey,
+  });
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -109,7 +122,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
       </div>
 
       {/* Messages Area */}
-      <div className="flex-1 min-h-0 flex flex-col overflow-y-auto p-4 space-y-3">
+      <div className="flex-1 min-h-0 flex flex-col overflow-y-auto p-4 space-y-2">
         {messages.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center">
             <div className="w-16 h-16 rounded-full bg-hush-bg-dark flex items-center justify-center mb-4">
@@ -133,6 +146,11 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
                 timestamp={formatTime(message.timestamp)}
                 isOwn={isOwnMessage(message)}
                 isConfirmed={message.isConfirmed}
+                messageId={message.id}
+                reactionCounts={getReactionCounts(message.id)}
+                myReaction={getMyReaction(message.id)}
+                isPendingReaction={isPending(message.id)}
+                onReactionSelect={(emojiIndex) => handleReactionSelect(message.id, emojiIndex)}
               />
             ))}
             <div ref={messagesEndRef} />

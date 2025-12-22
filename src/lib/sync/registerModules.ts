@@ -14,6 +14,7 @@ import { debugLog } from '@/lib/debug-logger';
 import { registerBlockchainModule } from '@/modules/blockchain';
 import { registerIdentityModule } from '@/modules/identity';
 import { registerFeedsModule } from '@/modules/feeds';
+import { reactionsSyncable } from '@/modules/reactions';
 // import { registerBankModule } from '@/modules/bank';
 
 /**
@@ -34,6 +35,9 @@ export function registerAllModules(api: SyncProviderAPI): void {
   registerIdentityModule(api);  // Identity must be registered before Feeds
   registerFeedsModule(api);
   // registerBankModule(api);  // TODO: Implement in Step 4
+
+  // Register reactions syncable (Protocol Omega)
+  api.registerSyncable(reactionsSyncable);
 
   debugLog('[registerAllModules] Module registration complete');
 }

@@ -23,6 +23,8 @@ export const FEED_TYPE_MAP: Record<number, Feed['type']> = {
 interface FeedsSyncMetadata {
   lastFeedBlockIndex: number;
   lastMessageBlockIndex: number;
+  /** Last reaction tally version synced (Protocol Omega) */
+  lastReactionTallyVersion: number;
   isPersonalFeedCreationPending: boolean;
   /** Block index when personal feed creation was initiated (for timeout tracking) */
   personalFeedCreationBlockIndex: number;
@@ -120,6 +122,7 @@ const initialState: FeedsState = {
   syncMetadata: {
     lastFeedBlockIndex: 0,
     lastMessageBlockIndex: 0,
+    lastReactionTallyVersion: 0,
     isPersonalFeedCreationPending: false,
     personalFeedCreationBlockIndex: 0,
   },

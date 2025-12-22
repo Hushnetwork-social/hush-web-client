@@ -21,9 +21,11 @@ import {
   eciesDecrypt,
   aesDecrypt,
 } from '@/lib/crypto';
-import { fetchFeeds, fetchMessages, submitTransaction } from './FeedsService';
+import { decryptReactionTally, initializeBsgs } from '@/lib/crypto/reactions';
+import { fetchFeeds, fetchMessages, submitTransaction, type FetchMessagesResponse } from './FeedsService';
 import { useFeedsStore } from './useFeedsStore';
 import { useBlockchainStore } from '../blockchain/useBlockchainStore';
+import { useReactionsStore } from '../reactions/useReactionsStore';
 import type { Feed, FeedMessage } from '@/types';
 import { debugLog, debugWarn, debugError } from '@/lib/debug-logger';
 
@@ -31,7 +33,12 @@ import { debugLog, debugWarn, debugError } from '@/lib/debug-logger';
 const MIN_BLOCKS_BEFORE_RESET = 5;
 
 // Session storage key to detect page reload/refresh
-const SESSION_SYNCED_KEY = 'hush-feeds-session-synced';
+// We use a unique page load ID to detect when the page has been refreshed
+const SESSION_PAGE_LOAD_ID_KEY = 'hush-feeds-page-load-id';
+
+// Generate a unique ID for this page load
+// This changes on every page refresh, even within the same tab
+const CURRENT_PAGE_LOAD_ID = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
 export class FeedsSyncable implements ISyncable {
   name = 'FeedsSyncable';
@@ -42,6 +49,10 @@ export class FeedsSyncable implements ISyncable {
   private isFirstSync = true;
 
   private hasValidatedThisSession = false;
+
+  // Flag to track if THIS sync cycle should reset reaction tally version
+  // Set at the start of syncTask before any operations
+  private shouldResetReactionTallyVersion = false;
 
   async syncTask(): Promise<void> {
     // Prevent concurrent syncs
@@ -55,6 +66,13 @@ export class FeedsSyncable implements ISyncable {
     if (!credentials?.signingPublicKey) {
       debugLog('[FeedsSyncable] Skipping - no credentials');
       return;
+    }
+
+    // Check for new session BEFORE any sync operations
+    // This ensures both syncFeeds and syncMessages can use this flag
+    this.shouldResetReactionTallyVersion = !this.hasValidatedThisSession && this.isNewSession();
+    if (this.shouldResetReactionTallyVersion) {
+      debugLog('[FeedsSyncable] New session detected - will reset reaction tally version');
     }
 
     // Log on first sync
@@ -88,18 +106,24 @@ export class FeedsSyncable implements ISyncable {
     } finally {
       this.isSyncing = false;
       useFeedsStore.getState().setSyncing(false);
+      // Clear the flag after sync completes
+      this.shouldResetReactionTallyVersion = false;
     }
   }
 
   /**
-   * Check if this is a new browser session (page reload/refresh/new tab)
-   * sessionStorage is cleared when tab closes, so absence of key means new session
+   * Check if this is a new page load (page reload/refresh/new tab)
+   * Compares the current page load ID with the stored one.
+   * Every page refresh generates a new CURRENT_PAGE_LOAD_ID, so this
+   * returns true on every refresh until markSessionValidated() is called.
    */
   private isNewSession(): boolean {
     if (typeof window === 'undefined') return false;
 
     try {
-      return !sessionStorage.getItem(SESSION_SYNCED_KEY);
+      const storedPageLoadId = sessionStorage.getItem(SESSION_PAGE_LOAD_ID_KEY);
+      // If no stored ID or stored ID doesn't match current page load, it's a new session
+      return storedPageLoadId !== CURRENT_PAGE_LOAD_ID;
     } catch {
       // sessionStorage may be unavailable (private browsing, etc.)
       return false;
@@ -107,13 +131,14 @@ export class FeedsSyncable implements ISyncable {
   }
 
   /**
-   * Mark that we've validated data this session
+   * Mark that we've validated data this page load
    */
   private markSessionValidated(): void {
     if (typeof window === 'undefined') return;
 
     try {
-      sessionStorage.setItem(SESSION_SYNCED_KEY, 'true');
+      // Store the current page load ID to mark this session as validated
+      sessionStorage.setItem(SESSION_PAGE_LOAD_ID_KEY, CURRENT_PAGE_LOAD_ID);
     } catch {
       // Ignore errors
     }
@@ -269,7 +294,17 @@ export class FeedsSyncable implements ISyncable {
     const { syncMetadata, feeds } = useFeedsStore.getState();
     const blockIndex = syncMetadata.lastMessageBlockIndex;
 
-    const { messages: newMessages, maxBlockIndex } = await fetchMessages(address, blockIndex);
+    // On new session, reset reaction tally version to get all tallies fresh
+    // This ensures we sync all reactions after page reload
+    // Use the flag set at start of syncTask (before hasValidatedThisSession was updated)
+    let lastReactionTallyVersion = syncMetadata.lastReactionTallyVersion;
+    if (this.shouldResetReactionTallyVersion) {
+      lastReactionTallyVersion = 0;
+      debugLog(`[FeedsSyncable] Resetting lastReactionTallyVersion from ${syncMetadata.lastReactionTallyVersion} to 0 for full tally sync`);
+    }
+
+    const response = await fetchMessages(address, blockIndex, lastReactionTallyVersion);
+    const { messages: newMessages, maxBlockIndex, reactionTallies, maxReactionTallyVersion } = response;
 
     if (newMessages.length > 0) {
       debugLog(`[FeedsSyncable] Found ${newMessages.length} new message(s)`);
@@ -311,9 +346,126 @@ export class FeedsSyncable implements ISyncable {
           useFeedsStore.getState().addMessages(feedId, messages);
         }
       }
-
-      useFeedsStore.getState().setSyncMetadata({ lastMessageBlockIndex: maxBlockIndex });
     }
+
+    // Protocol Omega: Process reaction tallies
+    if (reactionTallies.length > 0) {
+      debugLog(`[FeedsSyncable] Found ${reactionTallies.length} updated reaction tally(s), maxVersion=${maxReactionTallyVersion}`);
+      await this.processReactionTallies(reactionTallies, feeds);
+    }
+
+    // Update sync metadata with both block index and reaction tally version
+    if (maxReactionTallyVersion > lastReactionTallyVersion) {
+      debugLog(`[FeedsSyncable] Updating lastReactionTallyVersion: ${lastReactionTallyVersion} -> ${maxReactionTallyVersion}`);
+    }
+    useFeedsStore.getState().setSyncMetadata({
+      lastMessageBlockIndex: maxBlockIndex,
+      lastReactionTallyVersion: maxReactionTallyVersion,
+    });
+  }
+
+  /**
+   * Process reaction tallies from server (Protocol Omega)
+   * Decrypts the homomorphic tallies to get actual emoji counts
+   */
+  private async processReactionTallies(
+    tallies: FetchMessagesResponse['reactionTallies'],
+    feeds: Feed[]
+  ): Promise<void> {
+    const reactionsStore = useReactionsStore.getState();
+    const { messages } = useFeedsStore.getState();
+
+    debugLog(`[FeedsSyncable] Processing ${tallies.length} reaction tallies...`);
+
+    // Ensure BSGS table is ready for decryption
+    await initializeBsgs();
+
+    let processedCount = 0;
+    let skippedCount = 0;
+    let decryptedCount = 0;
+
+    for (const tally of tallies) {
+      // Find which feed this message belongs to
+      const feedId = this.findFeedIdForMessage(tally.messageId, messages);
+
+      if (!feedId) {
+        debugWarn(`[FeedsSyncable] Cannot process tally: feed not found for message ${tally.messageId}`);
+        skippedCount++;
+        continue;
+      }
+
+      // Find the feed to get its AES key for decryption
+      const feed = feeds.find(f => f.id === feedId);
+      const feedAesKey = feed?.aesKey;
+
+      debugLog(`[FeedsSyncable] Processing tally for message ${tally.messageId.substring(0, 8)}..., version=${tally.tallyVersion}, reactionCount=${tally.reactionCount}, feedId=${feedId.substring(0, 8)}..., hasKey=${!!feedAesKey}`);
+
+      // Check if this tally version is newer than what we have
+      const existingReaction = reactionsStore.reactions[tally.messageId];
+      const existingVersion = existingReaction?.tallyVersion ?? 0;
+
+      if (tally.tallyVersion <= existingVersion) {
+        debugLog(`[FeedsSyncable] Skipping tally for ${tally.messageId.substring(0, 8)}... (version ${tally.tallyVersion} <= existing ${existingVersion})`);
+        continue;
+      }
+
+      // Try to decrypt the tally if we have the feed's AES key
+      if (feedAesKey && tally.tallyC1.length > 0 && tally.tallyC2.length > 0) {
+        try {
+          const decryptedCounts = await decryptReactionTally(
+            tally.tallyC1,
+            tally.tallyC2,
+            feedAesKey
+          );
+
+          // Update the store with decrypted counts
+          reactionsStore.updateTally(tally.messageId, decryptedCounts);
+          // Also update the tally version
+          useReactionsStore.setState(state => ({
+            reactions: {
+              ...state.reactions,
+              [tally.messageId]: {
+                ...state.reactions[tally.messageId],
+                tallyVersion: tally.tallyVersion,
+              },
+            },
+          }));
+          decryptedCount++;
+          processedCount++;
+          continue;
+        } catch (err) {
+          debugWarn(`[FeedsSyncable] Failed to decrypt tally for ${tally.messageId.substring(0, 8)}...:`, err);
+          // Fall through to store encrypted tally
+        }
+      }
+
+      // Fallback: Store the encrypted tally for later decryption (when key becomes available)
+      reactionsStore.setTallyFromServer(tally.messageId, {
+        tallyC1: tally.tallyC1,
+        tallyC2: tally.tallyC2,
+        tallyVersion: tally.tallyVersion,
+        reactionCount: tally.reactionCount,
+        feedId,
+      });
+      processedCount++;
+    }
+
+    debugLog(`[FeedsSyncable] Reaction tallies processed: ${processedCount} successful (${decryptedCount} decrypted), ${skippedCount} skipped`);
+  }
+
+  /**
+   * Find the feed ID that contains a specific message
+   */
+  private findFeedIdForMessage(
+    messageId: string,
+    messages: Record<string, FeedMessage[]>
+  ): string | undefined {
+    for (const [feedId, feedMessages] of Object.entries(messages)) {
+      if (feedMessages.some((m) => m.id === messageId)) {
+        return feedId;
+      }
+    }
+    return undefined;
   }
 
   /**

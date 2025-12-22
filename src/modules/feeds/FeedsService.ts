@@ -34,6 +34,23 @@ interface ServerMessage {
   blockIndex: number;
 }
 
+// Server reaction tally response type (Protocol Omega)
+interface ServerReactionTally {
+  messageId: string;
+  tallyC1: { x: string; y: string }[];  // Base64 encoded EC points
+  tallyC2: { x: string; y: string }[];  // Base64 encoded EC points
+  tallyVersion: number;
+  reactionCount: number;
+}
+
+// Extended response type including reaction tallies
+export interface FetchMessagesResponse {
+  messages: FeedMessage[];
+  maxBlockIndex: number;
+  reactionTallies: ServerReactionTally[];
+  maxReactionTallyVersion: number;
+}
+
 /**
  * Fetches feeds for an address since a specific block index.
  * Used for incremental sync.
@@ -93,15 +110,21 @@ export async function fetchFeeds(
 
 /**
  * Fetches messages for an address since a specific block index.
+ * Also fetches reaction tallies for incremental sync (Protocol Omega).
  * Used for incremental sync.
  */
 export async function fetchMessages(
   address: string,
-  blockIndex: number
-): Promise<{ messages: FeedMessage[]; maxBlockIndex: number }> {
-  const response = await fetch(
-    buildApiUrl(`/api/feeds/messages?address=${encodeURIComponent(address)}&blockIndex=${blockIndex}`)
-  );
+  blockIndex: number,
+  lastReactionTallyVersion: number = 0
+): Promise<FetchMessagesResponse> {
+  const params = new URLSearchParams({
+    address,
+    blockIndex: blockIndex.toString(),
+    lastReactionTallyVersion: lastReactionTallyVersion.toString(),
+  });
+
+  const response = await fetch(buildApiUrl(`/api/feeds/messages?${params}`));
 
   if (!response.ok) {
     throw new Error(`Failed to fetch messages: HTTP ${response.status}`);
@@ -110,7 +133,12 @@ export async function fetchMessages(
   const data = await response.json();
 
   if (!data.messages || !Array.isArray(data.messages)) {
-    return { messages: [], maxBlockIndex: blockIndex };
+    return {
+      messages: [],
+      maxBlockIndex: blockIndex,
+      reactionTallies: [],
+      maxReactionTallyVersion: lastReactionTallyVersion,
+    };
   }
 
   // Convert server messages to app message format
@@ -129,7 +157,12 @@ export async function fetchMessages(
     ? Math.max(...messages.map((m) => m.blockHeight || 0), blockIndex)
     : blockIndex;
 
-  return { messages, maxBlockIndex };
+  return {
+    messages,
+    maxBlockIndex,
+    reactionTallies: data.reactionTallies || [],
+    maxReactionTallyVersion: data.maxReactionTallyVersion ?? lastReactionTallyVersion,
+  };
 }
 
 /**

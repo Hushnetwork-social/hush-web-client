@@ -3,3 +3,6 @@ export { identityService } from './identity';
 export { bankService } from './bank';
 export { feedService } from './feed';
 export { notificationService } from './notification';
+export { reactionsService } from './reactions';
+export { membershipService } from './membership';
+export { membershipServiceBinary } from './membership-binary';

@@ -179,10 +179,22 @@ export interface FeedMessageEntity {
 export interface GetFeedMessagesForAddressRequest {
   ProfilePublicKey: string;
   BlockIndex: number;
+  LastReactionTallyVersion: number;  // Only return tallies newer than this version
+}
+
+// Reaction tally returned with feed messages (Protocol Omega)
+export interface MessageReactionTallyEntity {
+  MessageId: string;
+  TallyC1: ECPoint[];    // 6 aggregated C1 points
+  TallyC2: ECPoint[];    // 6 aggregated C2 points
+  TallyVersion: number;  // Monotonic counter for cache invalidation
+  ReactionCount: number; // Total reactions (for quick "has reactions" check)
 }
 
 export interface GetFeedMessagesForAddressReply {
   Messages: FeedMessageEntity[];
+  ReactionTallies: MessageReactionTallyEntity[];  // Tallies for messages with reactions
+  MaxReactionTallyVersion: number;                 // For incremental sync
 }
 
 // ============= Feed Type Enum =============
@@ -240,4 +252,120 @@ export interface GetUnreadCountsRequest {
 
 export interface GetUnreadCountsReply {
   Counts: Record<string, number>;
+}
+
+// ============= Reactions Service Types =============
+
+// Elliptic curve point (Baby JubJub)
+export interface ECPoint {
+  X: string;  // Base64 encoded 32 bytes (big-endian)
+  Y: string;  // Base64 encoded 32 bytes (big-endian)
+}
+
+// Submit Reaction
+export interface SubmitReactionRequest {
+  FeedId: string;                    // Base64 encoded 16 bytes (UUID)
+  MessageId: string;                 // Base64 encoded 16 bytes (UUID)
+  Nullifier: string;                 // Base64 encoded 32 bytes (Poseidon hash)
+  CiphertextC1: ECPoint[];           // 6 points (one per emoji)
+  CiphertextC2: ECPoint[];           // 6 points (one per emoji)
+  ZkProof: string;                   // Base64 encoded ~256 bytes (Groth16 proof)
+  EncryptedEmojiBackup: string;      // Base64 encoded ~32 bytes
+  CircuitVersion: string;            // e.g., "omega-v1.0.0"
+}
+
+export interface SubmitReactionResponse {
+  Success: boolean;
+  ErrorMessage: string;
+  TransactionId: string;             // Base64 encoded 16 bytes (UUID)
+}
+
+// Get Tallies
+export interface GetTalliesRequest {
+  FeedId: string;                    // Base64 encoded 16 bytes (UUID)
+  MessageIds: string[];              // List of Base64 encoded message UUIDs
+}
+
+export interface MessageTally {
+  MessageId: string;                 // Base64 encoded 16 bytes (UUID)
+  TallyC1: ECPoint[];                // 6 aggregated C1 points
+  TallyC2: ECPoint[];                // 6 aggregated C2 points
+  TotalCount: number;                // Total reactions (quick stat)
+}
+
+export interface GetTalliesResponse {
+  Tallies: MessageTally[];
+}
+
+// Nullifier Check
+export interface NullifierExistsRequest {
+  Nullifier: string;                 // Base64 encoded 32 bytes
+}
+
+export interface NullifierExistsResponse {
+  Exists: boolean;
+}
+
+// Cross-Device Recovery
+export interface GetReactionBackupRequest {
+  Nullifier: string;                 // Base64 encoded 32 bytes
+}
+
+export interface GetReactionBackupResponse {
+  Exists: boolean;
+  EncryptedEmojiBackup: string;      // Base64 encoded (empty if legacy)
+}
+
+// ============= Membership Service Types =============
+
+// Get Membership Proof
+export interface GetMembershipProofRequest {
+  FeedId: string;                    // Base64 encoded 16 bytes (UUID)
+  UserCommitment: string;            // Base64 encoded 32 bytes - Poseidon(user_secret)
+}
+
+export interface GetMembershipProofResponse {
+  IsMember: boolean;
+  MerkleRoot: string;                // Base64 encoded 32 bytes
+  PathElements: string[];            // Array of Base64 encoded 32-byte sibling hashes
+  PathIndices: boolean[];            // Left(false)/Right(true) indicators
+  TreeDepth: number;                 // Tree depth (typically 20)
+  RootBlockHeight: number;           // Block height when root was computed
+}
+
+// Get Recent Merkle Roots
+export interface GetRecentRootsRequest {
+  FeedId: string;                    // Base64 encoded 16 bytes (UUID)
+  Count: number;                     // How many recent roots (default: 3, max: 10)
+}
+
+export interface MerkleRootInfo {
+  Root: string;                      // Base64 encoded 32 bytes
+  BlockHeight: number;
+  Timestamp: number;                 // Unix timestamp in milliseconds
+}
+
+export interface GetRecentRootsResponse {
+  Roots: MerkleRootInfo[];
+}
+
+// Commitment Registration
+export interface RegisterCommitmentRequest {
+  FeedId: string;                    // Base64 encoded 16 bytes (UUID)
+  UserCommitment: string;            // Base64 encoded 32 bytes - Poseidon(user_secret)
+}
+
+export interface RegisterCommitmentResponse {
+  Success: boolean;
+  NewMerkleRoot: string;             // Base64 encoded 32 bytes
+  AlreadyRegistered: boolean;
+}
+
+export interface IsCommitmentRegisteredRequest {
+  FeedId: string;                    // Base64 encoded 16 bytes (UUID)
+  UserCommitment: string;            // Base64 encoded 32 bytes
+}
+
+export interface IsCommitmentRegisteredResponse {
+  IsRegistered: boolean;
 }

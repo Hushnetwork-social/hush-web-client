@@ -15,6 +15,7 @@ export const PAYLOAD_GUIDS = {
   NEW_PERSONAL_FEED: '70c718a9-14d0-4b70-ad37-fd8bfe184386',
   NEW_CHAT_FEED: '033c61f5-c6e3-4e43-9eb0-ac9c615110e3',
   NEW_FEED_MESSAGE: '3309d79b-92e9-4435-9b23-0de0b3d24264',
+  NEW_REACTION: 'a7b3c2d1-e4f5-6789-abcd-ef0123456789',
 };
 
 // Feed types (match HushClient FeedType enum)
@@ -382,5 +383,81 @@ export async function createChatFeedTransaction(
     signedTransaction: JSON.stringify(signedTx),
     feedId,
     feedAesKey,
+  };
+}
+
+// =============================================================================
+// Reaction Transaction (Protocol Omega)
+// =============================================================================
+
+/**
+ * NewReactionPayload - matches server's NewReactionPayload record
+ * All byte arrays are serialized as base64 strings in JSON
+ */
+export interface NewReactionPayload {
+  FeedId: string;           // GUID
+  MessageId: string;        // GUID
+  Nullifier: string;        // base64 encoded bytes
+  CiphertextC1X: string[];  // 6 base64 encoded byte arrays
+  CiphertextC1Y: string[];  // 6 base64 encoded byte arrays
+  CiphertextC2X: string[];  // 6 base64 encoded byte arrays
+  CiphertextC2Y: string[];  // 6 base64 encoded byte arrays
+  ZkProof: string;          // base64 encoded bytes
+  CircuitVersion: string;   // e.g., "omega-v1.0.0" or "dev-mode-v1"
+  EncryptedEmojiBackup: string | null; // base64 encoded bytes or null
+}
+
+/**
+ * Creates and signs a reaction transaction for Protocol Omega
+ *
+ * @param feedId - The feed UUID
+ * @param messageId - The message UUID
+ * @param nullifier - The nullifier bytes (already computed)
+ * @param ciphertextC1 - Array of 6 {X, Y} base64-encoded points
+ * @param ciphertextC2 - Array of 6 {X, Y} base64-encoded points
+ * @param zkProof - The ZK proof bytes
+ * @param circuitVersion - The circuit version string
+ * @param encryptedBackup - Optional encrypted emoji backup bytes
+ * @param signingPrivateKey - User's private signing key
+ * @param signingPublicAddress - User's public signing address
+ */
+export async function createReactionTransaction(
+  feedId: string,
+  messageId: string,
+  nullifier: Uint8Array,
+  ciphertextC1: { X: string; Y: string }[],
+  ciphertextC2: { X: string; Y: string }[],
+  zkProof: Uint8Array,
+  circuitVersion: string,
+  encryptedBackup: Uint8Array | null,
+  signingPrivateKey: Uint8Array,
+  signingPublicAddress: string
+): Promise<{ signedTransaction: string; transactionId: string }> {
+  // Create payload with all byte arrays as base64
+  const payload: NewReactionPayload = {
+    FeedId: feedId,
+    MessageId: messageId,
+    Nullifier: bytesToBase64(nullifier),
+    CiphertextC1X: ciphertextC1.map((p) => p.X),
+    CiphertextC1Y: ciphertextC1.map((p) => p.Y),
+    CiphertextC2X: ciphertextC2.map((p) => p.X),
+    CiphertextC2Y: ciphertextC2.map((p) => p.Y),
+    ZkProof: bytesToBase64(zkProof),
+    CircuitVersion: circuitVersion,
+    EncryptedEmojiBackup: encryptedBackup ? bytesToBase64(encryptedBackup) : null,
+  };
+
+  // Create unsigned transaction
+  const unsignedTx = createUnsignedTransaction(PAYLOAD_GUIDS.NEW_REACTION, payload);
+
+  // Sign transaction
+  const signedTx = await signByUser(unsignedTx, {
+    privateKey: signingPrivateKey,
+    publicSigningAddress: signingPublicAddress,
+  });
+
+  return {
+    signedTransaction: JSON.stringify(signedTx),
+    transactionId: signedTx.TransactionId,
   };
 }

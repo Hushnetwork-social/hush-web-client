@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
-    "dev:tauri": "next dev --turbopack --port 3100",
+    "dev:tauri": "cross-env NEXT_PUBLIC_API_URL=http://localhost:3100 next dev --turbopack --port 3100",
     "build": "next build",
     "build:static": "cross-env STATIC_EXPORT=true next build",
     "start": "next start",
@@ -23,6 +23,7 @@
     "@tauri-apps/api": "^2.9.1",
     "@tauri-apps/plugin-notification": "^2.3.3",
     "bip39": "^3.1.0",
+    "circomlibjs": "^0.1.7",
     "emoji-picker-react": "^4.16.1",
     "grpc-web": "^1.5.0",
     "lucide-react": "^0.468.0",
