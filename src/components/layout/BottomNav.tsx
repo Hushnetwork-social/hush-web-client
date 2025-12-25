@@ -1,6 +1,6 @@
 "use client";
 
-import { MessageSquare, PlusCircle, Palette, Users, Download, LogOut } from "lucide-react";
+import { MessageSquare, PlusCircle, Palette, Users, Download, LogOut, UserCircle } from "lucide-react";
 import { useState } from "react";
 
 interface NavItem {
@@ -22,6 +22,7 @@ interface BottomNavProps {
   onNavSelect: (id: string) => void;
   userInitials?: string;
   onDownloadKeys?: () => void;
+  onAccountDetails?: () => void;
   onLogout?: () => void;
 }
 
@@ -30,6 +31,7 @@ export function BottomNav({
   onNavSelect,
   userInitials = "U",
   onDownloadKeys,
+  onAccountDetails,
   onLogout,
 }: BottomNavProps) {
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -94,6 +96,16 @@ export function BottomNav({
             >
               <Download className="w-4 h-4 text-hush-text-accent group-active:text-hush-bg-dark" />
               <span className="text-sm">Download keys</span>
+            </button>
+            <button
+              onClick={() => {
+                onAccountDetails?.();
+                setShowUserMenu(false);
+              }}
+              className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg border border-transparent hover:border-hush-purple active:bg-hush-purple active:text-hush-bg-dark transition-colors text-hush-text-primary group"
+            >
+              <UserCircle className="w-4 h-4 text-hush-text-accent group-active:text-hush-bg-dark" />
+              <span className="text-sm">Account Details</span>
             </button>
             <button
               onClick={() => {

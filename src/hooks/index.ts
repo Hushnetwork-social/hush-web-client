@@ -5,6 +5,7 @@ export * from './useNotifications';
 export * from './useBackButton';
 export * from './useReaction';
 export * from './useFeedReactions';
+export * from './useCopyToClipboard';
 
 // Note: Feed hooks moved to @/modules/feeds (useFeedsStore)
 // Note: Block height polling moved to @/modules/blockchain (useBlockchainStore)
