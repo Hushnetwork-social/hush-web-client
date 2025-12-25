@@ -163,10 +163,14 @@ export default function AccountPage() {
 
         {/* Display Name Section */}
         <section className="bg-hush-bg-element rounded-xl p-4 mb-4">
-          <label className="text-xs font-semibold text-hush-text-accent uppercase tracking-wider">
+          <label
+            htmlFor="display-name"
+            className="text-xs font-semibold text-hush-text-accent uppercase tracking-wider"
+          >
             Display Name
           </label>
           <input
+            id="display-name"
             type="text"
             value={editedName}
             onChange={(e) => setEditedName(e.target.value)}

@@ -84,7 +84,11 @@ describe('AccountPage', () => {
     });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Run all pending timers to prevent act() warnings from state updates
+    await act(async () => {
+      vi.runAllTimers();
+    });
     vi.useRealTimers();
     useAppStore.setState({
       isAuthenticated: false,
@@ -405,12 +409,17 @@ describe('AccountPage', () => {
         vi.advanceTimersByTime(200);
       });
 
-      // Display Name section label
+      // Display Name section label is properly associated with input
       expect(screen.getByText('Display Name')).toBeInTheDocument();
 
-      // Input should be accessible
+      // Input should be accessible and properly labeled
       const nameInput = screen.getByDisplayValue('Alice');
       expect(nameInput).toHaveAttribute('type', 'text');
+      expect(nameInput).toHaveAttribute('id', 'display-name');
+
+      // Label should be associated with input via htmlFor
+      const label = screen.getByText('Display Name');
+      expect(label).toHaveAttribute('for', 'display-name');
     });
 
     it('should have accessible buttons', async () => {
