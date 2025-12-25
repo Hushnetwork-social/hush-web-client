@@ -29,6 +29,7 @@ export {
   createPersonalFeedPayload,
   // High-level transaction functions
   createIdentityTransaction,
+  createUpdateIdentityTransaction,
   createPersonalFeedTransaction,
   createFeedMessageTransaction,
   createChatFeedTransaction,
@@ -39,6 +40,7 @@ export {
   type SignedTransaction,
   type SigningCredentials,
   type FullIdentityPayload,
+  type UpdateIdentityPayload,
   type NewPersonalFeedPayload,
   type NewFeedMessagePayload,
   type ChatFeedParticipant,

@@ -12,6 +12,7 @@ import { generateAesKey, eciesEncrypt, aesEncrypt } from './encryption';
 // Payload GUIDs (match HushClient)
 export const PAYLOAD_GUIDS = {
   FULL_IDENTITY: '351cd60b-3fdf-48d4-b608-e93c0100f7d0',
+  UPDATE_IDENTITY: 'a7e3c4b2-1f8d-4e5a-9c6b-2d3e4f5a6b7c',
   NEW_PERSONAL_FEED: '70c718a9-14d0-4b70-ad37-fd8bfe184386',
   NEW_CHAT_FEED: '033c61f5-c6e3-4e43-9eb0-ac9c615110e3',
   NEW_FEED_MESSAGE: '3309d79b-92e9-4435-9b23-0de0b3d24264',
@@ -65,6 +66,11 @@ export interface FullIdentityPayload {
   PublicSigningAddress: string;
   PublicEncryptAddress: string;
   IsPublic: boolean;
+}
+
+// UpdateIdentityPayload - matches server's UpdateIdentityPayload record
+export interface UpdateIdentityPayload {
+  NewAlias: string;
 }
 
 // NewPersonalFeedPayload - matches server's NewPersonalFeedPayload record
@@ -252,6 +258,36 @@ export async function createIdentityTransaction(
   const signedTx = await signByUser(unsignedTx, {
     privateKey: keys.signingKey.privateKey,
     publicSigningAddress: keys.signingKey.publicKeyHex,
+  });
+
+  // Return as JSON string for submission
+  return JSON.stringify(signedTx);
+}
+
+/**
+ * Creates and signs an UpdateIdentity transaction
+ * Used to change the user's display name (alias)
+ *
+ * @param newAlias - The new display name
+ * @param signingPrivateKey - User's private signing key
+ * @param signingPublicAddress - User's public signing address
+ * @returns JSON string of signed transaction for submission
+ */
+export async function createUpdateIdentityTransaction(
+  newAlias: string,
+  signingPrivateKey: Uint8Array,
+  signingPublicAddress: string
+): Promise<string> {
+  // Create payload
+  const payload: UpdateIdentityPayload = { NewAlias: newAlias };
+
+  // Create unsigned transaction
+  const unsignedTx = createUnsignedTransaction(PAYLOAD_GUIDS.UPDATE_IDENTITY, payload);
+
+  // Sign transaction
+  const signedTx = await signByUser(unsignedTx, {
+    privateKey: signingPrivateKey,
+    publicSigningAddress: signingPublicAddress,
   });
 
   // Return as JSON string for submission

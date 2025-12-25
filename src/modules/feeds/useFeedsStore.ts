@@ -69,6 +69,9 @@ interface FeedsActions {
   /** Update a feed's AES key (after decryption) */
   updateFeedAesKey: (feedId: string, aesKey: string) => void;
 
+  /** Update a feed's display name (after participant identity update) */
+  updateFeedName: (feedId: string, name: string) => void;
+
   /** Set messages for a specific feed */
   setMessages: (feedId: string, messages: FeedMessage[]) => void;
 
@@ -192,6 +195,14 @@ export const useFeedsStore = create<FeedsStore>()(
         set((state) => ({
           feeds: state.feeds.map((f) =>
             f.id === feedId ? { ...f, aesKey } : f
+          ),
+        }));
+      },
+
+      updateFeedName: (feedId, name) => {
+        set((state) => ({
+          feeds: state.feeds.map((f) =>
+            f.id === feedId ? { ...f, name } : f
           ),
         }));
       },

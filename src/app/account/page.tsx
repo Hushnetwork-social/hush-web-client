@@ -3,11 +3,17 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
-import { ArrowLeft, Save, Download, Loader2, Check } from "lucide-react";
+import { ArrowLeft, Save, Download, Loader2, Check, AlertCircle } from "lucide-react";
 import { KeyDisplayField } from "@/components/account";
 import { useAppStore } from "@/stores";
-import { downloadCredentialsFile, type PortableCredentials } from "@/lib/crypto";
-import { debugError } from "@/lib/debug-logger";
+import {
+  downloadCredentialsFile,
+  createUpdateIdentityTransaction,
+  hexToBytes,
+  type PortableCredentials,
+} from "@/lib/crypto";
+import { submitTransaction } from "@/modules/identity/IdentityService";
+import { debugLog, debugError } from "@/lib/debug-logger";
 
 // Dynamic import to prevent SSR issues with password dialog
 const PasswordDialog = dynamic(
@@ -15,15 +21,16 @@ const PasswordDialog = dynamic(
   { ssr: false }
 );
 
-type SaveState = "idle" | "saving" | "success";
+type SaveState = "idle" | "saving" | "success" | "error";
 
 export default function AccountPage() {
   const router = useRouter();
-  const { isAuthenticated, currentUser, credentials } = useAppStore();
+  const { isAuthenticated, currentUser, credentials, setCurrentUser } = useAppStore();
 
   // Local state
   const [editedName, setEditedName] = useState("");
   const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
 
@@ -50,22 +57,65 @@ export default function AccountPage() {
   const originalName = currentUser?.displayName || "";
   const hasNameChanged = editedName !== originalName && editedName.trim() !== "";
 
-  // Handle save button click (UI-only for FEAT-001)
+  // Handle save button click - submits UpdateIdentity transaction
   const handleSave = async () => {
-    if (!hasNameChanged) return;
+    if (!hasNameChanged || !credentials) return;
 
     setSaveState("saving");
+    setSaveError(null);
 
-    // Simulate save operation (UI-only for this feature)
-    // Backend integration will be added in FEAT-002
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    try {
+      debugLog(`[AccountPage] Creating UpdateIdentity transaction for: ${editedName}`);
 
-    setSaveState("success");
+      // Convert hex private key to Uint8Array
+      const signingPrivateKeyBytes = hexToBytes(credentials.signingPrivateKey);
 
-    // Reset to idle after 2 seconds
-    setTimeout(() => {
-      setSaveState("idle");
-    }, 2000);
+      // Create and sign the UpdateIdentity transaction
+      const signedTransaction = await createUpdateIdentityTransaction(
+        editedName,
+        signingPrivateKeyBytes,
+        credentials.signingPublicKey
+      );
+
+      debugLog("[AccountPage] Submitting UpdateIdentity transaction...");
+
+      // Submit transaction to blockchain
+      const result = await submitTransaction(signedTransaction);
+
+      if (!result.successful) {
+        throw new Error(result.message || "Transaction failed");
+      }
+
+      debugLog("[AccountPage] UpdateIdentity transaction submitted successfully");
+
+      // Update local store with new display name
+      if (currentUser) {
+        setCurrentUser({
+          ...currentUser,
+          displayName: editedName,
+          initials: editedName.substring(0, 2).toUpperCase(),
+        });
+      }
+
+      setSaveState("success");
+
+      // Reset to idle after 2 seconds
+      setTimeout(() => {
+        setSaveState("idle");
+      }, 2000);
+    } catch (error) {
+      debugError("[AccountPage] Failed to save display name:", error);
+      setSaveState("error");
+      setSaveError(
+        error instanceof Error ? error.message : "Failed to save display name"
+      );
+
+      // Reset to idle after 3 seconds so user can retry
+      setTimeout(() => {
+        setSaveState("idle");
+        setSaveError(null);
+      }, 3000);
+    }
   };
 
   // Handle Download Keys
@@ -132,6 +182,13 @@ export default function AccountPage() {
             <span>Saved!</span>
           </>
         );
+      case "error":
+        return (
+          <>
+            <AlertCircle className="w-4 h-4" />
+            <span>Failed</span>
+          </>
+        );
       default:
         return (
           <>
@@ -187,10 +244,16 @@ export default function AccountPage() {
                 : "bg-hush-purple text-white hover:bg-hush-purple/90"
               }
               ${saveState === "success" ? "bg-green-600 text-white" : ""}
+              ${saveState === "error" ? "bg-red-600 text-white" : ""}
             `}
           >
             {getSaveButtonContent()}
           </button>
+          {saveError && (
+            <p className="mt-2 text-xs text-red-400" role="alert">
+              {saveError}
+            </p>
+          )}
         </section>
 
         {/* Backup Section */}

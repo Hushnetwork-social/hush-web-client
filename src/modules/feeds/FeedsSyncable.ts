@@ -23,6 +23,7 @@ import {
 } from '@/lib/crypto';
 import { decryptReactionTally, initializeBsgs } from '@/lib/crypto/reactions';
 import { fetchFeeds, fetchMessages, submitTransaction, type FetchMessagesResponse } from './FeedsService';
+import { checkIdentityExists } from '../identity/IdentityService';
 import { useFeedsStore } from './useFeedsStore';
 import { useBlockchainStore } from '../blockchain/useBlockchainStore';
 import { useReactionsStore } from '../reactions/useReactionsStore';
@@ -224,11 +225,20 @@ export class FeedsSyncable implements ISyncable {
     if (serverFeeds.length > 0) {
       debugLog(`[FeedsSyncable] Found ${serverFeeds.length} feed(s) from server`);
       serverFeeds.forEach(f => debugLog(`  - Feed: ${f.name} (${f.type}, id: ${f.id})`));
+
+      // Detect chat feeds with BlockIndex changes (participant may have updated their name)
+      const feedsWithChangedBlockIndex = this.detectBlockIndexChanges(currentFeeds, serverFeeds);
+
       useFeedsStore.getState().addFeeds(serverFeeds);
       useFeedsStore.getState().setSyncMetadata({ lastFeedBlockIndex: maxBlockIndex });
 
       // Decrypt feed keys for new feeds
       await this.decryptFeedKeys(serverFeeds);
+
+      // Refresh participant names for feeds with BlockIndex changes
+      if (feedsWithChangedBlockIndex.length > 0) {
+        await this.refreshParticipantNames(feedsWithChangedBlockIndex);
+      }
     } else if (useFeedsStore.getState().feeds.length === 0) {
       debugLog('[FeedsSyncable] No feeds found for this user');
     }
@@ -568,6 +578,81 @@ export class FeedsSyncable implements ISyncable {
       throw error;
     } finally {
       store.setCreatingPersonalFeed(false);
+    }
+  }
+
+  /**
+   * Detect chat feeds where BlockIndex has increased (participant may have updated their identity)
+   * Returns array of feed objects that need participant name refresh
+   */
+  private detectBlockIndexChanges(
+    currentFeeds: Feed[],
+    serverFeeds: Feed[]
+  ): Feed[] {
+    const changedFeeds: Feed[] = [];
+
+    // Create a map of current feeds by ID for quick lookup
+    const currentFeedsMap = new Map(currentFeeds.map(f => [f.id, f]));
+
+    for (const serverFeed of serverFeeds) {
+      // Only check chat feeds (not personal/group/broadcast)
+      if (serverFeed.type !== 'chat') continue;
+
+      const currentFeed = currentFeedsMap.get(serverFeed.id);
+
+      // Skip new feeds (no previous blockIndex to compare)
+      if (!currentFeed) continue;
+
+      // Check if blockIndex has increased
+      const currentBlockIndex = currentFeed.blockIndex ?? 0;
+      const serverBlockIndex = serverFeed.blockIndex ?? 0;
+
+      if (serverBlockIndex > currentBlockIndex) {
+        debugLog(`[FeedsSyncable] Feed ${serverFeed.id.substring(0, 8)}... BlockIndex changed: ${currentBlockIndex} -> ${serverBlockIndex}`);
+        // Use serverFeed as it has the updated data including otherParticipantPublicSigningAddress
+        changedFeeds.push(serverFeed);
+      }
+    }
+
+    return changedFeeds;
+  }
+
+  /**
+   * Refresh participant display names for feeds with BlockIndex changes
+   * Fetches current profile name from blockchain and updates the feed store
+   */
+  private async refreshParticipantNames(feeds: Feed[]): Promise<void> {
+    debugLog(`[FeedsSyncable] Refreshing participant names for ${feeds.length} feed(s)`);
+
+    for (const feed of feeds) {
+      const participantAddress = feed.otherParticipantPublicSigningAddress;
+
+      if (!participantAddress) {
+        debugLog(`[FeedsSyncable] Feed ${feed.id.substring(0, 8)}... has no otherParticipantPublicSigningAddress, skipping`);
+        continue;
+      }
+
+      try {
+        // Fetch the participant's current identity from blockchain
+        const identityInfo = await checkIdentityExists(participantAddress);
+
+        if (identityInfo.exists && identityInfo.profileName) {
+          const currentName = feed.name;
+          const newName = identityInfo.profileName;
+
+          if (currentName !== newName) {
+            debugLog(`[FeedsSyncable] Updating feed name: "${currentName}" -> "${newName}"`);
+            useFeedsStore.getState().updateFeedName(feed.id, newName);
+          } else {
+            debugLog(`[FeedsSyncable] Feed name unchanged: "${currentName}"`);
+          }
+        } else {
+          debugLog(`[FeedsSyncable] No profile name found for participant ${participantAddress.substring(0, 12)}...`);
+        }
+      } catch (error) {
+        debugError(`[FeedsSyncable] Failed to refresh name for feed ${feed.id.substring(0, 8)}...:`, error);
+        // Continue with other feeds - don't fail the entire refresh
+      }
     }
   }
 }

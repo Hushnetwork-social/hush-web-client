@@ -575,3 +575,184 @@ describe('Sync Integration', () => {
     expect(state.syncMetadata.lastMessageBlockIndex).toBe(100);
   });
 });
+
+describe('Feed Name Updates (FEAT-003)', () => {
+  beforeEach(() => {
+    useFeedsStore.getState().reset();
+  });
+
+  describe('updateFeedName', () => {
+    it('should update the name of an existing feed', () => {
+      // Set up a chat feed
+      const chatFeed: Feed = {
+        id: 'chat-1',
+        type: 'chat',
+        name: 'Alice',
+        participants: ['user-1', 'user-2'],
+        unreadCount: 0,
+        createdAt: 100,
+        updatedAt: 100,
+        blockIndex: 100,
+        otherParticipantPublicSigningAddress: 'user-2',
+      };
+
+      useFeedsStore.getState().setFeeds([chatFeed]);
+
+      // Update the name
+      useFeedsStore.getState().updateFeedName('chat-1', 'Alice Smith');
+
+      // Verify the name was updated
+      const feed = useFeedsStore.getState().getFeed('chat-1');
+      expect(feed?.name).toBe('Alice Smith');
+    });
+
+    it('should not affect other feeds when updating one feed name', () => {
+      const feed1: Feed = {
+        id: 'chat-1',
+        type: 'chat',
+        name: 'Alice',
+        participants: ['user-1', 'user-2'],
+        unreadCount: 0,
+        createdAt: 100,
+        updatedAt: 100,
+      };
+
+      const feed2: Feed = {
+        id: 'chat-2',
+        type: 'chat',
+        name: 'Bob',
+        participants: ['user-1', 'user-3'],
+        unreadCount: 0,
+        createdAt: 100,
+        updatedAt: 100,
+      };
+
+      useFeedsStore.getState().setFeeds([feed1, feed2]);
+
+      // Update only feed1's name
+      useFeedsStore.getState().updateFeedName('chat-1', 'Alice Updated');
+
+      // Verify feed2 is unchanged
+      const updatedFeed2 = useFeedsStore.getState().getFeed('chat-2');
+      expect(updatedFeed2?.name).toBe('Bob');
+    });
+
+    it('should preserve other feed properties when updating name', () => {
+      const chatFeed: Feed = {
+        id: 'chat-1',
+        type: 'chat',
+        name: 'Alice',
+        participants: ['user-1', 'user-2'],
+        unreadCount: 5,
+        createdAt: 100,
+        updatedAt: 200,
+        blockIndex: 150,
+        aesKey: 'encrypted-key',
+        otherParticipantPublicSigningAddress: 'user-2',
+      };
+
+      useFeedsStore.getState().setFeeds([chatFeed]);
+
+      // Update the name
+      useFeedsStore.getState().updateFeedName('chat-1', 'Alice Smith');
+
+      // Verify all other properties are preserved
+      const feed = useFeedsStore.getState().getFeed('chat-1');
+      expect(feed?.name).toBe('Alice Smith');
+      expect(feed?.type).toBe('chat');
+      expect(feed?.unreadCount).toBe(5);
+      expect(feed?.blockIndex).toBe(150);
+      expect(feed?.aesKey).toBe('encrypted-key');
+      expect(feed?.otherParticipantPublicSigningAddress).toBe('user-2');
+    });
+
+    it('should handle updating a non-existent feed gracefully', () => {
+      const chatFeed: Feed = {
+        id: 'chat-1',
+        type: 'chat',
+        name: 'Alice',
+        participants: ['user-1', 'user-2'],
+        unreadCount: 0,
+        createdAt: 100,
+        updatedAt: 100,
+      };
+
+      useFeedsStore.getState().setFeeds([chatFeed]);
+
+      // Try to update a non-existent feed
+      useFeedsStore.getState().updateFeedName('non-existent', 'New Name');
+
+      // Original feed should be unchanged
+      const feed = useFeedsStore.getState().getFeed('chat-1');
+      expect(feed?.name).toBe('Alice');
+      expect(useFeedsStore.getState().feeds).toHaveLength(1);
+    });
+  });
+
+  describe('BlockIndex tracking', () => {
+    it('should store blockIndex when adding feeds from server', async () => {
+      // Set up a feed with blockIndex
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            feeds: [
+              {
+                feedId: 'chat-1',
+                feedTitle: 'Alice',
+                feedOwner: 'user-1',
+                feedType: 1, // chat
+                blockIndex: 200,
+                participants: [
+                  { participantPublicAddress: 'user-1' },
+                  { participantPublicAddress: 'alice-address' },
+                ],
+              },
+            ],
+          }),
+      });
+
+      const result = await FeedsService.fetchFeeds('user-1', 0);
+
+      // Verify blockIndex is included in the feed
+      expect(result.feeds[0].blockIndex).toBe(200);
+    });
+
+    it('should update blockIndex when addFeeds merges server data', () => {
+      // Set up existing feed with old blockIndex
+      const existingFeed: Feed = {
+        id: 'chat-1',
+        type: 'chat',
+        name: 'Alice',
+        participants: ['user-1', 'alice-address'],
+        unreadCount: 0,
+        createdAt: 100,
+        updatedAt: 100,
+        blockIndex: 100,
+        aesKey: 'decrypted-key', // Local-only data
+      };
+
+      useFeedsStore.getState().setFeeds([existingFeed]);
+
+      // Add the same feed with updated blockIndex from server
+      const serverFeed: Feed = {
+        id: 'chat-1',
+        type: 'chat',
+        name: 'Alice',
+        participants: ['user-1', 'alice-address'],
+        unreadCount: 0,
+        createdAt: 100,
+        updatedAt: 200,
+        blockIndex: 200, // Increased blockIndex
+      };
+
+      useFeedsStore.getState().addFeeds([serverFeed]);
+
+      // Verify blockIndex was updated
+      const feed = useFeedsStore.getState().getFeed('chat-1');
+      expect(feed?.blockIndex).toBe(200);
+      // Verify local-only data (aesKey) is preserved
+      expect(feed?.aesKey).toBe('decrypted-key');
+    });
+  });
+});

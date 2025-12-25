@@ -93,6 +93,7 @@ export async function fetchFeeds(
       unreadCount: 0,
       createdAt: feed.blockIndex,
       updatedAt: feed.blockIndex,
+      blockIndex: feed.blockIndex,
       // Store encrypted feed key for current user (will be decrypted later)
       encryptedFeedKey: userParticipant?.encryptedFeedKey || undefined,
       // Store other participant's address for detecting existing feeds

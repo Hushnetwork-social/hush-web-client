@@ -15,6 +15,8 @@ export interface Feed {
   unreadCount: number;
   createdAt: number;
   updatedAt: number;
+  /** Block index of the feed (for detecting changes during sync) */
+  blockIndex?: number;
   /** Decrypted AES-256 key for message encryption/decryption (base64) */
   aesKey?: string;
   /** Encrypted feed key for current user (for key recovery) */

@@ -48,10 +48,19 @@ vi.mock('@/lib/debug-logger', () => ({
   debugError: vi.fn(),
 }));
 
-// Mock the downloadCredentialsFile function
+// Mock the downloadCredentialsFile function and transaction functions
 const mockDownloadCredentialsFile = vi.fn().mockResolvedValue(undefined);
+const mockCreateUpdateIdentityTransaction = vi.fn().mockResolvedValue('{"mocked":"transaction"}');
 vi.mock('@/lib/crypto', () => ({
   downloadCredentialsFile: (...args: any[]) => mockDownloadCredentialsFile(...args),
+  createUpdateIdentityTransaction: (...args: any[]) => mockCreateUpdateIdentityTransaction(...args),
+  hexToBytes: vi.fn().mockReturnValue(new Uint8Array(32)),
+}));
+
+// Mock the IdentityService
+const mockSubmitTransaction = vi.fn().mockResolvedValue({ successful: true, message: 'OK' });
+vi.mock('@/modules/identity/IdentityService', () => ({
+  submitTransaction: (...args: any[]) => mockSubmitTransaction(...args),
 }));
 
 describe('AccountPage', () => {
@@ -75,6 +84,10 @@ describe('AccountPage', () => {
     mockReplace.mockClear();
     mockBack.mockClear();
     mockDownloadCredentialsFile.mockClear();
+    mockCreateUpdateIdentityTransaction.mockClear();
+    mockSubmitTransaction.mockClear();
+    // Reset mock to return successful by default
+    mockSubmitTransaction.mockResolvedValue({ successful: true, message: 'OK' });
 
     // Set authenticated state
     useAppStore.setState({
@@ -283,7 +296,7 @@ describe('AccountPage', () => {
       const saveButton = screen.getByRole('button', { name: /save/i });
       fireEvent.click(saveButton);
 
-      // Should show saving state
+      // Should show saving state immediately
       expect(screen.getByText(/saving/i)).toBeInTheDocument();
     });
 
@@ -300,14 +313,17 @@ describe('AccountPage', () => {
 
       // Click save
       const saveButton = screen.getByRole('button', { name: /save/i });
-      fireEvent.click(saveButton);
-
-      // Fast-forward past the save delay
       await act(async () => {
-        vi.advanceTimersByTime(1000);
+        fireEvent.click(saveButton);
       });
 
-      // Should show saved state
+      // Flush only the async promise, not all timers
+      await act(async () => {
+        await Promise.resolve(); // Flush microtasks
+        await Promise.resolve(); // Flush second level
+      });
+
+      // Should show saved state (before the 2s reset timer)
       expect(screen.getByText(/saved/i)).toBeInTheDocument();
     });
 
@@ -324,11 +340,14 @@ describe('AccountPage', () => {
 
       // Click save
       const saveButton = screen.getByRole('button', { name: /save/i });
-      fireEvent.click(saveButton);
-
-      // Fast-forward past save operation (800ms)
       await act(async () => {
-        vi.advanceTimersByTime(1000);
+        fireEvent.click(saveButton);
+      });
+
+      // Flush only async promises
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
       });
 
       // Should be in success state
@@ -339,10 +358,111 @@ describe('AccountPage', () => {
         vi.advanceTimersByTime(2500);
       });
 
-      // Should be back to showing Save (enabled since name still differs from original)
+      // Should be back to showing Save button (disabled since store was updated
+      // with new name and name now matches - this is correct behavior)
       const saveButtonAfter = screen.getByRole('button', { name: /save/i });
       expect(saveButtonAfter).toBeInTheDocument();
-      expect(saveButtonAfter).not.toBeDisabled();
+      // Button is disabled because the store was updated with the new name
+      expect(saveButtonAfter).toBeDisabled();
+    });
+
+    it('should call transaction functions with correct arguments', async () => {
+      render(<AccountPage />);
+
+      await act(async () => {
+        vi.advanceTimersByTime(200);
+      });
+
+      // Change name
+      const nameInput = screen.getByDisplayValue('Alice');
+      fireEvent.change(nameInput, { target: { value: 'New Name' } });
+
+      // Click save
+      const saveButton = screen.getByRole('button', { name: /save/i });
+      await act(async () => {
+        fireEvent.click(saveButton);
+      });
+
+      // Flush async promises
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      // Verify transaction was created with correct alias
+      expect(mockCreateUpdateIdentityTransaction).toHaveBeenCalledWith(
+        'New Name',
+        expect.any(Uint8Array),
+        mockCredentials.signingPublicKey
+      );
+
+      // Verify transaction was submitted
+      expect(mockSubmitTransaction).toHaveBeenCalledWith('{"mocked":"transaction"}');
+    });
+
+    it('should show error state when transaction fails', async () => {
+      // Make the submission fail
+      mockSubmitTransaction.mockResolvedValueOnce({ successful: false, message: 'Transaction rejected' });
+
+      render(<AccountPage />);
+
+      await act(async () => {
+        vi.advanceTimersByTime(200);
+      });
+
+      // Change name
+      const nameInput = screen.getByDisplayValue('Alice');
+      fireEvent.change(nameInput, { target: { value: 'New Name' } });
+
+      // Click save
+      const saveButton = screen.getByRole('button', { name: /save/i });
+      await act(async () => {
+        fireEvent.click(saveButton);
+      });
+
+      // Flush async promises
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      // Should show error state
+      expect(screen.getByText(/failed/i)).toBeInTheDocument();
+
+      // Error message should be displayed
+      expect(screen.getByText('Transaction rejected')).toBeInTheDocument();
+    });
+
+    it('should update local store on successful save', async () => {
+      render(<AccountPage />);
+
+      await act(async () => {
+        vi.advanceTimersByTime(200);
+      });
+
+      // Change name
+      const nameInput = screen.getByDisplayValue('Alice');
+      fireEvent.change(nameInput, { target: { value: 'Bob' } });
+
+      // Click save
+      const saveButton = screen.getByRole('button', { name: /save/i });
+      await act(async () => {
+        fireEvent.click(saveButton);
+      });
+
+      // Flush async promises
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      // Should show saved state
+      expect(screen.getByText(/saved/i)).toBeInTheDocument();
+
+      // Check store was updated
+      const state = useAppStore.getState();
+      expect(state.currentUser?.displayName).toBe('Bob');
+      expect(state.currentUser?.initials).toBe('BO');
     });
   });
 
