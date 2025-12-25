@@ -103,6 +103,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     setShowPasswordDialog(true);
   };
 
+  const handleAccountDetails = () => {
+    router.push('/account');
+  };
+
   const handlePasswordConfirm = async (password: string) => {
     if (!credentials || !currentUser) return;
 
@@ -163,6 +167,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               userDisplayName={userDisplayName}
               userInitials={userInitials}
               onDownloadKeys={handleDownloadKeys}
+              onAccountDetails={handleAccountDetails}
               onLogout={handleLogout}
             >
               <FeedList />
@@ -196,6 +201,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               onNavSelect={handleNavSelect}
               userInitials={userInitials}
               onDownloadKeys={handleDownloadKeys}
+              onAccountDetails={handleAccountDetails}
               onLogout={handleLogout}
             />
           )}
