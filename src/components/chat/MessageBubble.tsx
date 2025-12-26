@@ -15,7 +15,8 @@ interface MessageBubbleProps {
   reactionCounts?: EmojiCounts;
   myReaction?: number | null;
   isPendingReaction?: boolean;
-  onReactionSelect?: (emojiIndex: number) => void;
+  /** Handler for reaction selection. Receives messageId and emojiIndex for stable reference. */
+  onReactionSelect?: (messageId: string, emojiIndex: number) => void;
 }
 
 export const MessageBubble = memo(function MessageBubble({
@@ -48,7 +49,9 @@ export const MessageBubble = memo(function MessageBubble({
   }, [showPicker]);
 
   const handleReactionClick = (emojiIndex: number) => {
-    onReactionSelect?.(emojiIndex);
+    if (messageId) {
+      onReactionSelect?.(messageId, emojiIndex);
+    }
     setShowPicker(false);
   };
 
@@ -140,7 +143,7 @@ export const MessageBubble = memo(function MessageBubble({
                 counts={reactionCounts}
                 myReaction={myReaction ?? null}
                 isPending={isPendingReaction}
-                onReactionClick={onReactionSelect}
+                onReactionClick={handleReactionClick}
                 isOwnMessage={isOwn}
               />
             </div>

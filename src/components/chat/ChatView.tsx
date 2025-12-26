@@ -41,6 +41,17 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
     feedAesKey: feed.aesKey,
   });
 
+  // Create stable callback for reactions using ref pattern to avoid re-renders
+  const handleReactionSelectRef = useRef(handleReactionSelect);
+  handleReactionSelectRef.current = handleReactionSelect;
+
+  const stableHandleReactionSelect = useCallback(
+    (messageId: string, emojiIndex: number) => {
+      handleReactionSelectRef.current(messageId, emojiIndex);
+    },
+    []
+  );
+
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -150,7 +161,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
                 reactionCounts={getReactionCounts(message.id)}
                 myReaction={getMyReaction(message.id)}
                 isPendingReaction={isPending(message.id)}
-                onReactionSelect={(emojiIndex) => handleReactionSelect(message.id, emojiIndex)}
+                onReactionSelect={stableHandleReactionSelect}
               />
             ))}
             <div ref={messagesEndRef} />
