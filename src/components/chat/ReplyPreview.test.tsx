@@ -33,7 +33,15 @@ describe('ReplyPreview', () => {
       mockGetMessageById.mockReturnValue(mockMessage);
     });
 
-    it('should render sender name (truncated public key)', () => {
+    it('should render sender name from resolver', () => {
+      const resolveDisplayName = vi.fn().mockReturnValue('Paulo Tauri');
+      render(<ReplyPreview messageId="msg-123" resolveDisplayName={resolveDisplayName} />);
+
+      expect(screen.getByText('Paulo Tauri')).toBeInTheDocument();
+      expect(resolveDisplayName).toHaveBeenCalledWith('abc123def456xyz789');
+    });
+
+    it('should fallback to truncated public key when no resolver provided', () => {
       render(<ReplyPreview messageId="msg-123" />);
 
       // Should show first 10 chars + "..."
@@ -80,7 +88,16 @@ describe('ReplyPreview', () => {
       render(<ReplyPreview messageId="msg-123" />);
 
       const button = screen.getByRole('button');
-      expect(button).toHaveAttribute('aria-label', 'Reply to message from abc123de...');
+      // Falls back to truncated public key when no resolver
+      expect(button).toHaveAttribute('aria-label', 'Reply to message from abc123def4...');
+    });
+
+    it('should have aria-label with resolved name', () => {
+      const resolveDisplayName = vi.fn().mockReturnValue('Paulo Tauri');
+      render(<ReplyPreview messageId="msg-123" resolveDisplayName={resolveDisplayName} />);
+
+      const button = screen.getByRole('button');
+      expect(button).toHaveAttribute('aria-label', 'Reply to message from Paulo Tauri');
     });
 
     it('should be keyboard focusable', () => {

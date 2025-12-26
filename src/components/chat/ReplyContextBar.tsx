@@ -7,6 +7,8 @@ import type { FeedMessage } from "@/types";
 interface ReplyContextBarProps {
   /** The message being replied to */
   replyingTo: FeedMessage;
+  /** Display name of the message sender */
+  senderDisplayName: string;
   /** Handler for cancel button click */
   onCancel: () => void;
 }
@@ -19,6 +21,7 @@ interface ReplyContextBarProps {
  */
 export const ReplyContextBar = memo(function ReplyContextBar({
   replyingTo,
+  senderDisplayName,
   onCancel,
 }: ReplyContextBarProps) {
   // Truncate message content if too long
@@ -27,8 +30,8 @@ export const ReplyContextBar = memo(function ReplyContextBar({
     ? replyingTo.content.substring(0, maxLength) + "..."
     : replyingTo.content;
 
-  // Get display name (truncated public key for now)
-  const senderName = replyingTo.senderPublicKey.substring(0, 10) + "...";
+  // Use the provided display name
+  const senderName = senderDisplayName;
 
   return (
     <div

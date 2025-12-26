@@ -21,6 +21,7 @@ describe('ReplyContextBar', () => {
 
   const defaultProps = {
     replyingTo: mockMessage,
+    senderDisplayName: 'Paulo Tauri',
     onCancel: vi.fn(),
   };
 
@@ -35,11 +36,11 @@ describe('ReplyContextBar', () => {
       expect(screen.getByText('Replying to')).toBeInTheDocument();
     });
 
-    it('should render sender name (truncated public key)', () => {
+    it('should render sender display name', () => {
       render(<ReplyContextBar {...defaultProps} />);
 
-      // Should show first 10 chars + "..."
-      expect(screen.getByText('abc123def4...')).toBeInTheDocument();
+      // Should show the display name passed as prop
+      expect(screen.getByText('Paulo Tauri')).toBeInTheDocument();
     });
 
     it('should render message preview', () => {
@@ -53,7 +54,7 @@ describe('ReplyContextBar', () => {
         ...mockMessage,
         content: 'A'.repeat(80), // 80 character message
       };
-      render(<ReplyContextBar replyingTo={longMessage} onCancel={vi.fn()} />);
+      render(<ReplyContextBar replyingTo={longMessage} senderDisplayName="Test User" onCancel={vi.fn()} />);
 
       // Should truncate to 60 chars + "..."
       expect(screen.getByText('A'.repeat(60) + '...')).toBeInTheDocument();
@@ -78,7 +79,7 @@ describe('ReplyContextBar', () => {
 
     it('should call onCancel when cancel button is clicked', () => {
       const onCancel = vi.fn();
-      render(<ReplyContextBar replyingTo={mockMessage} onCancel={onCancel} />);
+      render(<ReplyContextBar replyingTo={mockMessage} senderDisplayName="Test User" onCancel={onCancel} />);
 
       fireEvent.click(screen.getByRole('button', { name: 'Cancel reply' }));
 
@@ -112,7 +113,7 @@ describe('ReplyContextBar', () => {
       render(<ReplyContextBar {...defaultProps} />);
 
       const contextBar = screen.getByRole('status');
-      expect(contextBar).toHaveAttribute('aria-label', 'Replying to abc123def4...');
+      expect(contextBar).toHaveAttribute('aria-label', 'Replying to Paulo Tauri');
     });
 
     it('should have keyboard-focusable cancel button', () => {
@@ -154,21 +155,17 @@ describe('ReplyContextBar', () => {
         ...mockMessage,
         content: '',
       };
-      render(<ReplyContextBar replyingTo={emptyMessage} onCancel={vi.fn()} />);
+      render(<ReplyContextBar replyingTo={emptyMessage} senderDisplayName="Test User" onCancel={vi.fn()} />);
 
       // Should still render without crashing
       expect(screen.getByText('Replying to')).toBeInTheDocument();
     });
 
-    it('should handle very short public key', () => {
-      const shortKeyMessage = {
-        ...mockMessage,
-        senderPublicKey: 'abc',
-      };
-      render(<ReplyContextBar replyingTo={shortKeyMessage} onCancel={vi.fn()} />);
+    it('should display the provided sender name', () => {
+      render(<ReplyContextBar replyingTo={mockMessage} senderDisplayName="Custom Name" onCancel={vi.fn()} />);
 
-      // Should show truncated key even if short
-      expect(screen.getByText('abc...')).toBeInTheDocument();
+      // Should show the provided display name
+      expect(screen.getByText('Custom Name')).toBeInTheDocument();
     });
   });
 });

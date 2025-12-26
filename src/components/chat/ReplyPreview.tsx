@@ -8,6 +8,8 @@ interface ReplyPreviewProps {
   messageId: string;
   /** Handler for when user clicks the preview (to scroll to original) */
   onPreviewClick?: (messageId: string) => void;
+  /** Function to resolve display name from public key */
+  resolveDisplayName?: (publicKey: string) => string;
 }
 
 /**
@@ -20,6 +22,7 @@ interface ReplyPreviewProps {
 export const ReplyPreview = memo(function ReplyPreview({
   messageId,
   onPreviewClick,
+  resolveDisplayName,
 }: ReplyPreviewProps) {
   const getMessageById = useFeedsStore((state) => state.getMessageById);
   const repliedMessage = getMessageById(messageId);
@@ -55,6 +58,11 @@ export const ReplyPreview = memo(function ReplyPreview({
     ? repliedMessage.content.substring(0, maxLength) + "..."
     : repliedMessage.content;
 
+  // Resolve display name or fall back to truncated public key
+  const senderName = resolveDisplayName
+    ? resolveDisplayName(repliedMessage.senderPublicKey)
+    : repliedMessage.senderPublicKey.substring(0, 10) + "...";
+
   return (
     <button
       onClick={handleClick}
@@ -69,11 +77,11 @@ export const ReplyPreview = memo(function ReplyPreview({
         transition-colors duration-150
         focus:outline-none focus:ring-1 focus:ring-hush-purple/50
       "
-      aria-label={`Reply to message from ${repliedMessage.senderPublicKey.substring(0, 8)}...`}
+      aria-label={`Reply to message from ${senderName}`}
       type="button"
     >
       <p className="text-xs font-medium text-hush-purple truncate">
-        {repliedMessage.senderPublicKey.substring(0, 10)}...
+        {senderName}
       </p>
       <p className="text-xs text-hush-text-accent truncate">
         {truncatedContent}

@@ -27,6 +27,8 @@ interface MessageBubbleProps {
   onScrollToMessage?: (messageId: string) => void;
   /** Reply to Message: The full message object (needed for onReplyClick) */
   message?: FeedMessage;
+  /** Reply to Message: Function to resolve display name from public key */
+  resolveDisplayName?: (publicKey: string) => string;
 }
 
 export const MessageBubble = memo(function MessageBubble({
@@ -43,6 +45,7 @@ export const MessageBubble = memo(function MessageBubble({
   onReplyClick,
   onScrollToMessage,
   message,
+  resolveDisplayName,
 }: MessageBubbleProps) {
   const [showPicker, setShowPicker] = useState(false);
   const [isHovering, setIsHovering] = useState(false);
@@ -165,6 +168,7 @@ export const MessageBubble = memo(function MessageBubble({
               <ReplyPreview
                 messageId={replyToMessageId}
                 onPreviewClick={onScrollToMessage}
+                resolveDisplayName={resolveDisplayName}
               />
             )}
             <p className="text-sm break-words">{content}</p>

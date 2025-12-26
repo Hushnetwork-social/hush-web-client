@@ -90,6 +90,20 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
     }
   }, [messages]);
 
+  // Reply to Message: Resolve display name from public key
+  // For chat feeds: if it's the other participant, use feed.name; if it's me, use "You"
+  const resolveDisplayName = useCallback((publicKey: string): string => {
+    if (publicKey === credentials?.signingPublicKey) {
+      return "You";
+    }
+    // For chat feeds, the other participant's name is the feed name
+    if (feed.type === "chat" && publicKey === feed.otherParticipantPublicSigningAddress) {
+      return feed.name;
+    }
+    // Fallback: truncated public key
+    return publicKey.substring(0, 10) + "...";
+  }, [credentials?.signingPublicKey, feed.type, feed.name, feed.otherParticipantPublicSigningAddress]);
+
   // Format timestamp for display
   const formatTime = (timestamp: number): string => {
     return new Date(timestamp).toLocaleTimeString([], {
@@ -207,6 +221,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
                   onReplyClick={handleReplyClick}
                   onScrollToMessage={handleScrollToMessage}
                   message={message}
+                  resolveDisplayName={resolveDisplayName}
                 />
               </div>
             )}
@@ -218,6 +233,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
       {replyingTo && (
         <ReplyContextBar
           replyingTo={replyingTo}
+          senderDisplayName={resolveDisplayName(replyingTo.senderPublicKey)}
           onCancel={handleCancelReply}
         />
       )}
