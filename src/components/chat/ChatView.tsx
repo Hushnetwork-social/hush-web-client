@@ -8,7 +8,6 @@ import { MessageInput } from "./MessageInput";
 import { useAppStore } from "@/stores";
 import { useFeedsStore, sendMessage } from "@/modules/feeds";
 import { useFeedReactions } from "@/hooks/useFeedReactions";
-import { debugLog } from "@/lib/debug-logger";
 import type { Feed, FeedMessage } from "@/types";
 
 // Empty array constant to avoid creating new references
