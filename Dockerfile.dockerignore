@@ -1,0 +1,81 @@
+# ===========================================
+# HushWebClient Docker Build - Exclusions
+# ===========================================
+# This file is used when building with hush-web-client/Dockerfile
+# Excludes everything not needed for the Next.js web client
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE
+.idea
+.vs
+.vscode
+*.suo
+*.user
+
+# ===========================================
+# Exclude .NET Projects (not needed for web client)
+# ===========================================
+Node
+Shared
+Client
+Protos
+*.sln
+*.csproj
+
+# ===========================================
+# Exclude Other Web Projects
+# ===========================================
+hush-chat-landing
+hush-network-presentation-v2
+
+# ===========================================
+# Node.js Build Artifacts (rebuilt in container)
+# ===========================================
+**/node_modules
+hush-web-client/.next
+hush-web-client/out
+hush-web-client/.turbo
+
+# ===========================================
+# Test Artifacts
+# ===========================================
+**/coverage
+**/*.test.ts
+**/*.test.tsx
+**/__tests__
+
+# ===========================================
+# Tauri Desktop App (separate build)
+# ===========================================
+hush-web-client/src-tauri
+
+# ===========================================
+# Documentation & Planning
+# ===========================================
+MemoryBank
+*.md
+!README.md
+
+# ===========================================
+# Local Config
+# ===========================================
+local-config
+.env
+.env.*
+!.env.example
+
+# ===========================================
+# Misc
+# ===========================================
+*.log
+*.tmp
+Thumbs.db
+.DS_Store
+npm-debug.log*
+
+# GitHub workflows (not needed in container)
+.github
