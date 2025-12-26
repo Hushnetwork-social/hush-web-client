@@ -1,10 +1,12 @@
 "use client";
 
 import { useState, useRef, useEffect, memo } from "react";
-import { Check, SmilePlus } from "lucide-react";
+import { Check, SmilePlus, Reply } from "lucide-react";
 import { ReactionPicker } from "./ReactionPicker";
 import { ReactionBar } from "./ReactionBar";
+import { ReplyPreview } from "./ReplyPreview";
 import type { EmojiCounts } from "@/modules/reactions/useReactionsStore";
+import type { FeedMessage } from "@/types";
 
 interface MessageBubbleProps {
   content: string;
@@ -17,6 +19,14 @@ interface MessageBubbleProps {
   isPendingReaction?: boolean;
   /** Handler for reaction selection. Receives messageId and emojiIndex for stable reference. */
   onReactionSelect?: (messageId: string, emojiIndex: number) => void;
+  /** Reply to Message: ID of the parent message being replied to */
+  replyToMessageId?: string;
+  /** Reply to Message: Handler for reply button click */
+  onReplyClick?: (message: FeedMessage) => void;
+  /** Reply to Message: Handler for scrolling to a message when clicking reply preview */
+  onScrollToMessage?: (messageId: string) => void;
+  /** Reply to Message: The full message object (needed for onReplyClick) */
+  message?: FeedMessage;
 }
 
 export const MessageBubble = memo(function MessageBubble({
@@ -29,6 +39,10 @@ export const MessageBubble = memo(function MessageBubble({
   myReaction,
   isPendingReaction = false,
   onReactionSelect,
+  replyToMessageId,
+  onReplyClick,
+  onScrollToMessage,
+  message,
 }: MessageBubbleProps) {
   const [showPicker, setShowPicker] = useState(false);
   const [isHovering, setIsHovering] = useState(false);
@@ -55,6 +69,12 @@ export const MessageBubble = memo(function MessageBubble({
     setShowPicker(false);
   };
 
+  const handleReplyClick = () => {
+    if (message && onReplyClick) {
+      onReplyClick(message);
+    }
+  };
+
   // Check if there are any active reactions to show (including pending/my reaction)
   const hasActiveReactions =
     (reactionCounts && Object.values(reactionCounts).some(c => c > 0)) ||
@@ -73,34 +93,56 @@ export const MessageBubble = memo(function MessageBubble({
       }}
     >
       <div className="relative group max-w-[60%] flex items-center">
-        {/* Reaction button - shows on hover, positioned on the LEFT side for own messages */}
-        {isConfirmed && onReactionSelect && isOwn && (
-          <div className="relative mr-1">
-            <button
-              onClick={() => setShowPicker(!showPicker)}
-              className={`
-                p-1 rounded-full
-                bg-hush-bg-light/80 hover:bg-hush-bg-light
-                text-hush-text-accent hover:text-hush-purple
-                transition-all duration-150
-                ${isHovering || showPicker ? "opacity-100" : "opacity-0"}
-              `}
-              title="Add reaction"
-            >
-              <SmilePlus className="w-4 h-4" />
-            </button>
-            {/* Reaction picker - appears below the button */}
-            {showPicker && (
-              <div
-                ref={pickerRef}
-                className="absolute z-50 right-0 mt-1"
-                style={{ top: "100%" }}
+        {/* Action buttons - shows on hover, positioned on the LEFT side for own messages */}
+        {isConfirmed && isOwn && (
+          <div className="flex items-center mr-1">
+            {/* Reply button */}
+            {onReplyClick && message && (
+              <button
+                onClick={handleReplyClick}
+                className={`
+                  p-1 rounded-full mr-0.5
+                  bg-hush-bg-light/80 hover:bg-hush-bg-light
+                  text-hush-text-accent hover:text-hush-purple
+                  transition-all duration-150
+                  ${isHovering ? "opacity-100" : "opacity-0"}
+                `}
+                title="Reply to message"
+                aria-label={`Reply to message`}
               >
-                <ReactionPicker
-                  onSelect={handleReactionClick}
-                  selectedEmoji={myReaction ?? null}
-                  onClose={() => setShowPicker(false)}
-                />
+                <Reply className="w-4 h-4" />
+              </button>
+            )}
+            {/* Reaction button */}
+            {onReactionSelect && (
+              <div className="relative">
+                <button
+                  onClick={() => setShowPicker(!showPicker)}
+                  className={`
+                    p-1 rounded-full
+                    bg-hush-bg-light/80 hover:bg-hush-bg-light
+                    text-hush-text-accent hover:text-hush-purple
+                    transition-all duration-150
+                    ${isHovering || showPicker ? "opacity-100" : "opacity-0"}
+                  `}
+                  title="Add reaction"
+                >
+                  <SmilePlus className="w-4 h-4" />
+                </button>
+                {/* Reaction picker - appears below the button */}
+                {showPicker && (
+                  <div
+                    ref={pickerRef}
+                    className="absolute z-50 right-0 mt-1"
+                    style={{ top: "100%" }}
+                  >
+                    <ReactionPicker
+                      onSelect={handleReactionClick}
+                      selectedEmoji={myReaction ?? null}
+                      onClose={() => setShowPicker(false)}
+                    />
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -118,6 +160,13 @@ export const MessageBubble = memo(function MessageBubble({
               }
             `}
           >
+            {/* Reply preview - shows when this message is a reply */}
+            {replyToMessageId && (
+              <ReplyPreview
+                messageId={replyToMessageId}
+                onPreviewClick={onScrollToMessage}
+              />
+            )}
             <p className="text-sm break-words">{content}</p>
             {/* Only show timestamp and checkmark when confirmed */}
             {isConfirmed && (
@@ -151,34 +200,56 @@ export const MessageBubble = memo(function MessageBubble({
 
         </div>
 
-        {/* Reaction button - shows on hover, positioned on the RIGHT side for others' messages */}
-        {isConfirmed && onReactionSelect && !isOwn && (
-          <div className="relative ml-1">
-            <button
-              onClick={() => setShowPicker(!showPicker)}
-              className={`
-                p-1 rounded-full
-                bg-hush-bg-light/80 hover:bg-hush-bg-light
-                text-hush-text-accent hover:text-hush-purple
-                transition-all duration-150
-                ${isHovering || showPicker ? "opacity-100" : "opacity-0"}
-              `}
-              title="Add reaction"
-            >
-              <SmilePlus className="w-4 h-4" />
-            </button>
-            {/* Reaction picker - appears below the button */}
-            {showPicker && (
-              <div
-                ref={pickerRef}
-                className="absolute z-50 left-0 mt-1"
-                style={{ top: "100%" }}
+        {/* Action buttons - shows on hover, positioned on the RIGHT side for others' messages */}
+        {isConfirmed && !isOwn && (
+          <div className="flex items-center ml-1">
+            {/* Reply button */}
+            {onReplyClick && message && (
+              <button
+                onClick={handleReplyClick}
+                className={`
+                  p-1 rounded-full mr-0.5
+                  bg-hush-bg-light/80 hover:bg-hush-bg-light
+                  text-hush-text-accent hover:text-hush-purple
+                  transition-all duration-150
+                  ${isHovering ? "opacity-100" : "opacity-0"}
+                `}
+                title="Reply to message"
+                aria-label={`Reply to message`}
               >
-                <ReactionPicker
-                  onSelect={handleReactionClick}
-                  selectedEmoji={myReaction ?? null}
-                  onClose={() => setShowPicker(false)}
-                />
+                <Reply className="w-4 h-4" />
+              </button>
+            )}
+            {/* Reaction button */}
+            {onReactionSelect && (
+              <div className="relative">
+                <button
+                  onClick={() => setShowPicker(!showPicker)}
+                  className={`
+                    p-1 rounded-full
+                    bg-hush-bg-light/80 hover:bg-hush-bg-light
+                    text-hush-text-accent hover:text-hush-purple
+                    transition-all duration-150
+                    ${isHovering || showPicker ? "opacity-100" : "opacity-0"}
+                  `}
+                  title="Add reaction"
+                >
+                  <SmilePlus className="w-4 h-4" />
+                </button>
+                {/* Reaction picker - appears below the button */}
+                {showPicker && (
+                  <div
+                    ref={pickerRef}
+                    className="absolute z-50 left-0 mt-1"
+                    style={{ top: "100%" }}
+                  >
+                    <ReactionPicker
+                      onSelect={handleReactionClick}
+                      selectedEmoji={myReaction ?? null}
+                      onClose={() => setShowPicker(false)}
+                    />
+                  </div>
+                )}
               </div>
             )}
           </div>

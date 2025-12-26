@@ -1,10 +1,11 @@
 "use client";
 
-import { useRef, useMemo, useCallback } from "react";
+import { useRef, useMemo, useCallback, useState, useEffect } from "react";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import { MessageSquare, Lock, ArrowLeft } from "lucide-react";
 import { MessageBubble } from "./MessageBubble";
 import { MessageInput } from "./MessageInput";
+import { ReplyContextBar } from "./ReplyContextBar";
 import { useAppStore } from "@/stores";
 import { useFeedsStore, sendMessage } from "@/modules/feeds";
 import { useFeedReactions } from "@/hooks/useFeedReactions";
@@ -52,6 +53,43 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
     []
   );
 
+  // Reply to Message: State for tracking which message is being replied to
+  const [replyingTo, setReplyingTo] = useState<FeedMessage | null>(null);
+
+  // Reply to Message: Handler for reply button click
+  const handleReplyClick = useCallback((message: FeedMessage) => {
+    setReplyingTo(message);
+  }, []);
+
+  // Reply to Message: Handler for cancel reply
+  const handleCancelReply = useCallback(() => {
+    setReplyingTo(null);
+  }, []);
+
+  // Reply to Message: ESC key handler to cancel reply mode
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && replyingTo) {
+        e.preventDefault();
+        setReplyingTo(null);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [replyingTo]);
+
+  // Reply to Message: Scroll to a specific message when clicking reply preview
+  const handleScrollToMessage = useCallback((messageId: string) => {
+    const messageIndex = messages.findIndex((m) => m.id === messageId);
+    if (messageIndex !== -1 && virtuosoRef.current) {
+      virtuosoRef.current.scrollToIndex({
+        index: messageIndex,
+        behavior: "smooth",
+        align: "center",
+      });
+    }
+  }, [messages]);
+
   // Format timestamp for display
   const formatTime = (timestamp: number): string => {
     return new Date(timestamp).toLocaleTimeString([], {
@@ -82,19 +120,22 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   };
 
   const handleSend = useCallback(async (message: string) => {
-    // Send to blockchain
-    const result = await sendMessage(feed.id, message);
+    // Send to blockchain (include reply reference if replying)
+    const result = await sendMessage(feed.id, message, replyingTo?.id);
 
     if (!result.success) {
       console.error("[ChatView] Failed to send message:", result.error);
       // TODO: Show error toast to user
+    } else {
+      // Clear reply state after successful send
+      setReplyingTo(null);
     }
 
     // Also call optional callback
     if (onSendMessage) {
       onSendMessage(message);
     }
-  }, [feed.id, onSendMessage]);
+  }, [feed.id, onSendMessage, replyingTo?.id]);
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
@@ -162,12 +203,24 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
                   myReaction={getMyReaction(message.id)}
                   isPendingReaction={isPending(message.id)}
                   onReactionSelect={stableHandleReactionSelect}
+                  replyToMessageId={message.replyToMessageId}
+                  onReplyClick={handleReplyClick}
+                  onScrollToMessage={handleScrollToMessage}
+                  message={message}
                 />
               </div>
             )}
           />
         )}
       </div>
+
+      {/* Reply Context Bar - shows when replying to a message */}
+      {replyingTo && (
+        <ReplyContextBar
+          replyingTo={replyingTo}
+          onCancel={handleCancelReply}
+        />
+      )}
 
       {/* Message Input */}
       <MessageInput onSend={handleSend} onEscapeEmpty={onCloseFeed} />
