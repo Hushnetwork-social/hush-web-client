@@ -409,6 +409,7 @@ export interface FeedMessage {
   timestamp: Date | null;
   blockIndex: number;
   authorCommitment?: Uint8Array;  // Protocol Omega: Poseidon(author_secret)
+  replyToMessageId?: string;  // Reply to Message: parent message reference
 }
 
 // Protocol Omega: EC Point for reaction tallies
@@ -525,6 +526,13 @@ function parseSingleMessage(bytes: Uint8Array): FeedMessage {
         // Timestamp (embedded message with seconds/nanos)
         const tsBytes = bytes.slice(offset, offset + lenResult.value);
         msg.timestamp = parseTimestamp(tsBytes);
+      } else if (fieldNumber === 8) {
+        // AuthorCommitment (bytes) - Protocol Omega
+        msg.authorCommitment = bytes.slice(offset, offset + lenResult.value);
+      } else if (fieldNumber === 9) {
+        // ReplyToMessageId (optional string) - Reply to Message
+        const strValue = parseString(bytes, offset, lenResult.value);
+        if (strValue) msg.replyToMessageId = strValue;
       } else {
         const strValue = parseString(bytes, offset, lenResult.value);
         if (fieldNumber === 1) msg.feedId = strValue;

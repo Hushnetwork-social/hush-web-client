@@ -86,6 +86,7 @@ export interface NewFeedMessagePayload {
   FeedMessageId: string;
   FeedId: string;
   MessageContent: string; // Encrypted with feed's AES key
+  ReplyToMessageId?: string; // Reply to Message: parent message reference
 }
 
 // ChatFeedParticipant - matches server's ChatFeedParticipant record
@@ -323,13 +324,21 @@ export async function createPersonalFeedTransaction(
 /**
  * Creates and signs a feed message transaction
  * Returns the signed transaction and the message ID (GUID) for tracking
+ *
+ * @param feedId - The feed to send the message to
+ * @param messageContent - The message text (will be encrypted)
+ * @param feedAesKey - The AES key for encrypting the message
+ * @param signingPrivateKey - User's private signing key
+ * @param signingPublicAddress - User's public signing address
+ * @param replyToMessageId - Optional: ID of the message being replied to
  */
 export async function createFeedMessageTransaction(
   feedId: string,
   messageContent: string,
   feedAesKey: string,
   signingPrivateKey: Uint8Array,
-  signingPublicAddress: string
+  signingPublicAddress: string,
+  replyToMessageId?: string
 ): Promise<{ signedTransaction: string; messageId: string }> {
   // Generate unique message ID
   const messageId = generateGuid();
@@ -342,6 +351,7 @@ export async function createFeedMessageTransaction(
     FeedMessageId: messageId,
     FeedId: feedId,
     MessageContent: encryptedContent,
+    ...(replyToMessageId && { ReplyToMessageId: replyToMessageId }),
   };
 
   // Create unsigned transaction

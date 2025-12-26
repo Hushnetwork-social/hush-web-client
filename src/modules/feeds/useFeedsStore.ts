@@ -66,6 +66,9 @@ interface FeedsActions {
   /** Get a feed by ID */
   getFeed: (feedId: string) => Feed | undefined;
 
+  /** Get a message by ID (searches across all feeds) */
+  getMessageById: (messageId: string) => FeedMessage | undefined;
+
   /** Update a feed's AES key (after decryption) */
   updateFeedAesKey: (feedId: string, aesKey: string) => void;
 
@@ -189,6 +192,15 @@ export const useFeedsStore = create<FeedsStore>()(
 
       getFeed: (feedId) => {
         return get().feeds.find((f) => f.id === feedId);
+      },
+
+      getMessageById: (messageId) => {
+        const allMessages = get().messages;
+        for (const feedMessages of Object.values(allMessages)) {
+          const found = feedMessages.find((m) => m.id === messageId);
+          if (found) return found;
+        }
+        return undefined;
       },
 
       updateFeedAesKey: (feedId, aesKey) => {

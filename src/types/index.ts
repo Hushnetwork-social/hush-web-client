@@ -42,6 +42,7 @@ export interface FeedMessage {
   timestamp: number;
   blockHeight?: number;
   isConfirmed: boolean;
+  replyToMessageId?: string;  // Reply to Message: parent message reference
 }
 
 // Blockchain types

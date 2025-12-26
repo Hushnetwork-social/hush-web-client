@@ -32,6 +32,7 @@ interface ServerMessage {
   issuerName: string;
   timestamp: string;
   blockIndex: number;
+  replyToMessageId?: string;  // Reply to Message: parent message reference
 }
 
 // Server reaction tally response type (Protocol Omega)
@@ -151,6 +152,7 @@ export async function fetchMessages(
     timestamp: msg.timestamp ? new Date(msg.timestamp).getTime() : Date.now(),
     blockHeight: msg.blockIndex,
     isConfirmed: true,
+    replyToMessageId: msg.replyToMessageId || undefined,  // Reply to Message: pass through parent reference
   }));
 
   // Calculate max block index from response
@@ -213,11 +215,13 @@ export async function submitTransaction(signedTransaction: string): Promise<{
  *
  * @param feedId The feed to send the message to
  * @param messageContent The message text (will be encrypted)
+ * @param replyToMessageId Optional: ID of the message being replied to
  * @returns The message ID (GUID) for tracking
  */
 export async function sendMessage(
   feedId: string,
-  messageContent: string
+  messageContent: string,
+  replyToMessageId?: string
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
   const credentials = useAppStore.getState().credentials;
   const feed = useFeedsStore.getState().getFeed(feedId);
@@ -246,7 +250,8 @@ export async function sendMessage(
       messageContent,
       feed.aesKey,
       privateKeyBytes,
-      credentials.signingPublicKey
+      credentials.signingPublicKey,
+      replyToMessageId
     );
 
     // Create optimistic message for immediate UI display
@@ -257,6 +262,7 @@ export async function sendMessage(
       senderPublicKey: credentials.signingPublicKey,
       timestamp: Date.now(),
       isConfirmed: false, // Not yet confirmed - will show single checkmark
+      replyToMessageId: replyToMessageId || undefined,  // Reply to Message: pass through parent reference
     };
 
     // Add to store immediately (optimistic UI)

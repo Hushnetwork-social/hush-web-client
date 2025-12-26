@@ -174,6 +174,7 @@ export interface FeedMessageEntity {
   IssuerName: string;
   TimeStamp: { seconds: number; nanos: number };
   BlockIndex: number;
+  ReplyToMessageId?: string;  // Reply to Message: parent message reference
 }
 
 export interface GetFeedMessagesForAddressRequest {
