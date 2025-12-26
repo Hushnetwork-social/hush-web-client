@@ -103,9 +103,11 @@ describe('MessageBubble', () => {
   describe('Reaction Picker', () => {
     it('should call onReactionSelect when emoji is selected', () => {
       const onReactionSelect = vi.fn();
+      const testMessageId = 'test-message-123';
       render(
         <MessageBubble
           {...defaultProps}
+          messageId={testMessageId}
           onReactionSelect={onReactionSelect}
         />
       );
@@ -117,7 +119,7 @@ describe('MessageBubble', () => {
       const emojiButtons = screen.getAllByRole('option');
       fireEvent.click(emojiButtons[0]);
 
-      expect(onReactionSelect).toHaveBeenCalledWith(0);
+      expect(onReactionSelect).toHaveBeenCalledWith(testMessageId, 0);
     });
 
     it('should close picker after selecting emoji', () => {
@@ -247,9 +249,11 @@ describe('MessageBubble', () => {
 
     it('should call onReactionSelect when clicking reaction in bar', () => {
       const onReactionSelect = vi.fn();
+      const testMessageId = 'test-message-456';
       render(
         <MessageBubble
           {...defaultProps}
+          messageId={testMessageId}
           reactionCounts={countsWithReactions}
           onReactionSelect={onReactionSelect}
         />

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, memo } from "react";
 import { Check, SmilePlus } from "lucide-react";
 import { ReactionPicker } from "./ReactionPicker";
 import { ReactionBar } from "./ReactionBar";
@@ -15,10 +15,11 @@ interface MessageBubbleProps {
   reactionCounts?: EmojiCounts;
   myReaction?: number | null;
   isPendingReaction?: boolean;
-  onReactionSelect?: (emojiIndex: number) => void;
+  /** Handler for reaction selection. Receives messageId and emojiIndex for stable reference. */
+  onReactionSelect?: (messageId: string, emojiIndex: number) => void;
 }
 
-export function MessageBubble({
+export const MessageBubble = memo(function MessageBubble({
   content,
   timestamp,
   isOwn,
@@ -48,7 +49,9 @@ export function MessageBubble({
   }, [showPicker]);
 
   const handleReactionClick = (emojiIndex: number) => {
-    onReactionSelect?.(emojiIndex);
+    if (messageId) {
+      onReactionSelect?.(messageId, emojiIndex);
+    }
     setShowPicker(false);
   };
 
@@ -140,7 +143,7 @@ export function MessageBubble({
                 counts={reactionCounts}
                 myReaction={myReaction ?? null}
                 isPending={isPendingReaction}
-                onReactionClick={onReactionSelect}
+                onReactionClick={handleReactionClick}
                 isOwnMessage={isOwn}
               />
             </div>
@@ -183,4 +186,4 @@ export function MessageBubble({
       </div>
     </div>
   );
-}
+});

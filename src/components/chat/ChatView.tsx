@@ -1,13 +1,13 @@
 "use client";
 
-import { useRef, useEffect, useMemo, useCallback } from "react";
+import { useRef, useMemo, useCallback } from "react";
+import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import { MessageSquare, Lock, ArrowLeft } from "lucide-react";
 import { MessageBubble } from "./MessageBubble";
 import { MessageInput } from "./MessageInput";
 import { useAppStore } from "@/stores";
 import { useFeedsStore, sendMessage } from "@/modules/feeds";
 import { useFeedReactions } from "@/hooks/useFeedReactions";
-import { debugLog } from "@/lib/debug-logger";
 import type { Feed, FeedMessage } from "@/types";
 
 // Empty array constant to avoid creating new references
@@ -22,7 +22,7 @@ interface ChatViewProps {
 }
 
 export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackButton = false }: ChatViewProps) {
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
   const { credentials } = useAppStore();
   const messagesMap = useFeedsStore((state) => state.messages);
   const messages = useMemo(
@@ -41,10 +41,16 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
     feedAesKey: feed.aesKey,
   });
 
-  // Auto-scroll to bottom when new messages arrive
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  // Create stable callback for reactions using ref pattern to avoid re-renders
+  const handleReactionSelectRef = useRef(handleReactionSelect);
+  handleReactionSelectRef.current = handleReactionSelect;
+
+  const stableHandleReactionSelect = useCallback(
+    (messageId: string, emojiIndex: number) => {
+      handleReactionSelectRef.current(messageId, emojiIndex);
+    },
+    []
+  );
 
   // Format timestamp for display
   const formatTime = (timestamp: number): string => {
@@ -122,9 +128,9 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
       </div>
 
       {/* Messages Area */}
-      <div className="flex-1 min-h-0 flex flex-col overflow-y-auto p-4 space-y-2">
+      <div className="flex-1 min-h-0 flex flex-col">
         {messages.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-center">
+          <div className="flex-1 flex flex-col items-center justify-center text-center p-4">
             <div className="w-16 h-16 rounded-full bg-hush-bg-dark flex items-center justify-center mb-4">
               <MessageSquare className="w-8 h-8 text-hush-purple" />
             </div>
@@ -138,23 +144,28 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
             </p>
           </div>
         ) : (
-          <>
-            {messages.map((message) => (
-              <MessageBubble
-                key={message.id}
-                content={message.content}
-                timestamp={formatTime(message.timestamp)}
-                isOwn={isOwnMessage(message)}
-                isConfirmed={message.isConfirmed}
-                messageId={message.id}
-                reactionCounts={getReactionCounts(message.id)}
-                myReaction={getMyReaction(message.id)}
-                isPendingReaction={isPending(message.id)}
-                onReactionSelect={(emojiIndex) => handleReactionSelect(message.id, emojiIndex)}
-              />
-            ))}
-            <div ref={messagesEndRef} />
-          </>
+          <Virtuoso
+            ref={virtuosoRef}
+            data={messages}
+            followOutput="smooth"
+            initialTopMostItemIndex={messages.length - 1}
+            className="flex-1"
+            itemContent={(index, message) => (
+              <div className="px-4 py-1">
+                <MessageBubble
+                  content={message.content}
+                  timestamp={formatTime(message.timestamp)}
+                  isOwn={isOwnMessage(message)}
+                  isConfirmed={message.isConfirmed}
+                  messageId={message.id}
+                  reactionCounts={getReactionCounts(message.id)}
+                  myReaction={getMyReaction(message.id)}
+                  isPendingReaction={isPending(message.id)}
+                  onReactionSelect={stableHandleReactionSelect}
+                />
+              </div>
+            )}
+          />
         )}
       </div>
 
