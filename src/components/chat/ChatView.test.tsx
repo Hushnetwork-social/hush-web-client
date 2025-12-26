@@ -15,6 +15,22 @@ import type { Feed } from '@/types';
 // Mock scrollIntoView for jsdom
 Element.prototype.scrollIntoView = vi.fn();
 
+// Mock react-virtuoso to render all items in tests (JSDOM doesn't support virtualization)
+vi.mock('react-virtuoso', () => ({
+  Virtuoso: ({ data, itemContent, className }: {
+    data: unknown[];
+    itemContent: (index: number, item: unknown) => React.ReactNode;
+    className?: string;
+  }) => (
+    <div data-testid="virtuoso-mock" className={className}>
+      {data.map((item, index) => (
+        <div key={index}>{itemContent(index, item)}</div>
+      ))}
+    </div>
+  ),
+  VirtuosoHandle: {},
+}));
+
 // Mock the crypto constants
 vi.mock('@/lib/crypto/reactions/constants', () => ({
   EMOJIS: ['👍', '❤️', '😂', '😮', '😢', '😡'] as const,
