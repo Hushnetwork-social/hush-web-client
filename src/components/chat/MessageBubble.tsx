@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, memo } from "react";
 import { Check, SmilePlus } from "lucide-react";
 import { ReactionPicker } from "./ReactionPicker";
 import { ReactionBar } from "./ReactionBar";
@@ -18,7 +18,7 @@ interface MessageBubbleProps {
   onReactionSelect?: (emojiIndex: number) => void;
 }
 
-export function MessageBubble({
+export const MessageBubble = memo(function MessageBubble({
   content,
   timestamp,
   isOwn,
@@ -183,4 +183,4 @@ export function MessageBubble({
       </div>
     </div>
   );
-}
+});
