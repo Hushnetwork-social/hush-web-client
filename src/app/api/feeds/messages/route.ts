@@ -56,6 +56,7 @@ export async function GET(request: NextRequest) {
         issuerName: msg.issuerName,
         timestamp: msg.timestamp?.toISOString() || null,
         blockIndex: msg.blockIndex,
+        replyToMessageId: msg.replyToMessageId || undefined,  // Reply to Message: include parent reference
       })),
       // Protocol Omega: Include reaction tallies
       reactionTallies: response.reactionTallies.map(tally => ({
