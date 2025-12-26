@@ -248,4 +248,201 @@ describe('ChatView', () => {
       expect(messageContainer).toBeInTheDocument();
     });
   });
+
+  describe('Reply Flow Integration', () => {
+    beforeEach(() => {
+      // Add messages to the store for reply testing
+      useFeedsStore.getState().addMessages('feed-123', [
+        {
+          id: 'msg-1',
+          feedId: 'feed-123',
+          content: 'Original message to reply to',
+          senderPublicKey: 'other-user',
+          timestamp: Date.now(),
+          isConfirmed: true,
+        },
+        {
+          id: 'msg-2',
+          feedId: 'feed-123',
+          content: 'Another message',
+          senderPublicKey: 'my-public-key',
+          timestamp: Date.now() + 1000,
+          isConfirmed: true,
+        },
+      ]);
+    });
+
+    it('should show reply button on confirmed messages', () => {
+      render(<ChatView feed={mockFeed} />);
+
+      const replyButtons = screen.getAllByTitle('Reply to message');
+      expect(replyButtons.length).toBeGreaterThan(0);
+    });
+
+    it('should show reply context bar when reply button is clicked', () => {
+      render(<ChatView feed={mockFeed} />);
+
+      // Click the reply button
+      const replyButtons = screen.getAllByTitle('Reply to message');
+      fireEvent.click(replyButtons[0]);
+
+      // Context bar should appear
+      expect(screen.getByRole('status')).toBeInTheDocument();
+      expect(screen.getByText('Replying to')).toBeInTheDocument();
+    });
+
+    it('should show original message content in context bar', () => {
+      render(<ChatView feed={mockFeed} />);
+
+      // Click reply on first message
+      const replyButtons = screen.getAllByTitle('Reply to message');
+      fireEvent.click(replyButtons[0]);
+
+      // Should show preview of original message in the context bar
+      // The context bar has role="status", and the message preview is inside it
+      const contextBar = screen.getByRole('status');
+      expect(contextBar).toHaveTextContent('Original message to reply to');
+    });
+
+    it('should hide context bar when cancel button is clicked', () => {
+      render(<ChatView feed={mockFeed} />);
+
+      // Start reply
+      const replyButtons = screen.getAllByTitle('Reply to message');
+      fireEvent.click(replyButtons[0]);
+      expect(screen.getByRole('status')).toBeInTheDocument();
+
+      // Cancel reply
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel reply' }));
+
+      // Context bar should be hidden
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+
+    it('should hide context bar when ESC key is pressed', () => {
+      render(<ChatView feed={mockFeed} />);
+
+      // Start reply
+      const replyButtons = screen.getAllByTitle('Reply to message');
+      fireEvent.click(replyButtons[0]);
+      expect(screen.getByRole('status')).toBeInTheDocument();
+
+      // Press ESC
+      fireEvent.keyDown(window, { key: 'Escape' });
+
+      // Context bar should be hidden
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+
+    it('should not show context bar when not replying', () => {
+      render(<ChatView feed={mockFeed} />);
+
+      // Context bar should not be present
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+
+    it('should not show reply button on unconfirmed messages', () => {
+      useFeedsStore.getState().reset();
+      useFeedsStore.getState().addMessages('feed-123', [
+        {
+          id: 'msg-pending',
+          feedId: 'feed-123',
+          content: 'Pending message',
+          senderPublicKey: 'my-public-key',
+          timestamp: Date.now(),
+          isConfirmed: false,
+        },
+      ]);
+
+      render(<ChatView feed={mockFeed} />);
+
+      expect(screen.queryByTitle('Reply to message')).not.toBeInTheDocument();
+    });
+
+    it('should switch reply target when clicking different message reply button', () => {
+      render(<ChatView feed={mockFeed} />);
+
+      // Click reply on first message
+      const replyButtons = screen.getAllByTitle('Reply to message');
+      fireEvent.click(replyButtons[0]);
+      const contextBar1 = screen.getByRole('status');
+      expect(contextBar1).toHaveTextContent('Original message to reply to');
+
+      // Click reply on second message
+      fireEvent.click(replyButtons[1]);
+      const contextBar2 = screen.getByRole('status');
+      expect(contextBar2).toHaveTextContent('Another message');
+    });
+  });
+
+  describe('Reply Message Display', () => {
+    it('should display reply preview when message has replyToMessageId', () => {
+      useFeedsStore.getState().addMessages('feed-123', [
+        {
+          id: 'original-msg',
+          feedId: 'feed-123',
+          content: 'This is the original message',
+          senderPublicKey: 'other-user',
+          timestamp: Date.now(),
+          isConfirmed: true,
+        },
+        {
+          id: 'reply-msg',
+          feedId: 'feed-123',
+          content: 'This is my reply',
+          senderPublicKey: 'my-public-key',
+          timestamp: Date.now() + 1000,
+          isConfirmed: true,
+          replyToMessageId: 'original-msg',
+        },
+      ]);
+
+      render(<ChatView feed={mockFeed} />);
+
+      // Should show the reply content
+      expect(screen.getByText('This is my reply')).toBeInTheDocument();
+      // Should show preview of original message (via ReplyPreview)
+      // Both the original message and the preview are shown, so we check there are at least 2 instances
+      const originalMessageElements = screen.getAllByText('This is the original message');
+      expect(originalMessageElements.length).toBeGreaterThanOrEqual(2); // One in message bubble, one in reply preview
+    });
+
+    it('should not show reply preview for messages without replyToMessageId', () => {
+      useFeedsStore.getState().addMessages('feed-123', [
+        {
+          id: 'regular-msg',
+          feedId: 'feed-123',
+          content: 'Regular message without reply',
+          senderPublicKey: 'other-user',
+          timestamp: Date.now(),
+          isConfirmed: true,
+        },
+      ]);
+
+      render(<ChatView feed={mockFeed} />);
+
+      // Should show the message
+      expect(screen.getByText('Regular message without reply')).toBeInTheDocument();
+      // Should not have "Reply to deleted message" or any reply preview
+      expect(screen.queryByText('Reply to deleted message')).not.toBeInTheDocument();
+    });
+
+    it('should show deleted message placeholder for reply to non-existent message', () => {
+      useFeedsStore.getState().addMessages('feed-123', [
+        {
+          id: 'reply-to-deleted',
+          feedId: 'feed-123',
+          content: 'Reply to a deleted message',
+          senderPublicKey: 'other-user',
+          timestamp: Date.now(),
+          isConfirmed: true,
+          replyToMessageId: 'deleted-msg-id', // Message doesn't exist
+        },
+      ]);
+
+      render(<ChatView feed={mockFeed} />);
+
+      expect(screen.getByText('Reply to deleted message')).toBeInTheDocument();
+    });
+  });
 });
