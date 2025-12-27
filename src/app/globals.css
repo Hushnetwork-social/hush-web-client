@@ -27,9 +27,10 @@ body {
 }
 
 /* Fix for production build layout calculation issues */
-/* Forces browser to recalculate element positions correctly */
+/* Forces GPU layer and proper position calculation */
 .h-screen {
-  contain: layout style;
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
 }
 
 /* Custom scrollbar for webkit browsers */
