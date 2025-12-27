@@ -6,6 +6,7 @@
  */
 
 import { grpcConfig } from '../config';
+import { debugLog } from '@/lib/debug-logger';
 
 // ============= Protobuf Encoding Helpers =============
 
@@ -341,7 +342,8 @@ export async function getTallies(feedId: string, messageIds: string[]): Promise<
   const grpcData = parseGrpcResponse(responseBytes);
 
   if (!grpcData) {
-    console.warn('[ReactionsBinary] Empty gRPC response for GetReactionTallies');
+    // Empty response is normal - means no reactions exist for these messages
+    debugLog('[ReactionsBinary] Empty gRPC response for GetReactionTallies');
     return [];
   }
 
