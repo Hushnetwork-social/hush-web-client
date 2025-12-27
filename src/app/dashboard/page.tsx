@@ -88,6 +88,7 @@ export default function DashboardPage() {
         ) : selectedFeed ? (
           <div className="flex-1 flex flex-col min-h-0">
             <ChatView
+              key={selectedFeed.id}
               feed={selectedFeed}
               onSendMessage={handleSendMessage}
               showBackButton={true}
@@ -110,7 +111,7 @@ export default function DashboardPage() {
             onFeedSelected={handleFeedSelected}
           />
         ) : selectedFeed ? (
-          <ChatView feed={selectedFeed} onSendMessage={handleSendMessage} onCloseFeed={handleBack} />
+          <ChatView key={selectedFeed.id} feed={selectedFeed} onSendMessage={handleSendMessage} onCloseFeed={handleBack} />
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
             <div className="w-20 h-20 rounded-full bg-hush-bg-dark flex items-center justify-center mb-4">
