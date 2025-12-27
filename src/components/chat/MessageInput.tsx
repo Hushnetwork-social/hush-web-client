@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useImperativeHandle, forwardRef } from "react";
 import { Paperclip, Send, Smile } from "lucide-react";
 import { EmojiPicker } from "./EmojiPicker";
 
@@ -12,10 +12,21 @@ interface MessageInputProps {
   autoFocus?: boolean;
 }
 
-export function MessageInput({ onSend, onAttach, onEscapeEmpty, disabled = false, autoFocus = true }: MessageInputProps) {
+export interface MessageInputHandle {
+  focus: () => void;
+}
+
+export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(function MessageInput({ onSend, onAttach, onEscapeEmpty, disabled = false, autoFocus = true }, ref) {
   const [message, setMessage] = useState("");
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Expose focus method to parent components
+  useImperativeHandle(ref, () => ({
+    focus: () => {
+      inputRef.current?.focus();
+    },
+  }));
 
   // Auto-focus input when component mounts
   useEffect(() => {
@@ -133,4 +144,4 @@ export function MessageInput({ onSend, onAttach, onEscapeEmpty, disabled = false
       </form>
     </div>
   );
-}
+});

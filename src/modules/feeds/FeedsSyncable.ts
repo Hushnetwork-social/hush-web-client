@@ -302,11 +302,18 @@ export class FeedsSyncable implements ISyncable {
    */
   private async syncMessages(address: string): Promise<void> {
     const { syncMetadata, feeds } = useFeedsStore.getState();
-    const blockIndex = syncMetadata.lastMessageBlockIndex;
+    let blockIndex = syncMetadata.lastMessageBlockIndex;
+
+    // On new session, reset to fetch all messages from block 0
+    // This ensures cached messages are updated with any new fields (e.g., replyToMessageId)
+    // Use the flag set at start of syncTask (before hasValidatedThisSession was updated)
+    if (this.shouldResetReactionTallyVersion) {
+      debugLog(`[FeedsSyncable] Resetting lastMessageBlockIndex from ${blockIndex} to 0 for full message sync`);
+      blockIndex = 0;
+    }
 
     // On new session, reset reaction tally version to get all tallies fresh
     // This ensures we sync all reactions after page reload
-    // Use the flag set at start of syncTask (before hasValidatedThisSession was updated)
     let lastReactionTallyVersion = syncMetadata.lastReactionTallyVersion;
     if (this.shouldResetReactionTallyVersion) {
       lastReactionTallyVersion = 0;

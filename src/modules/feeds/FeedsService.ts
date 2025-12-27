@@ -144,16 +144,18 @@ export async function fetchMessages(
   }
 
   // Convert server messages to app message format
-  const messages: FeedMessage[] = data.messages.map((msg: ServerMessage) => ({
-    id: msg.feedMessageId,
-    feedId: msg.feedId,
-    content: msg.messageContent,
-    senderPublicKey: msg.issuerPublicAddress,
-    timestamp: msg.timestamp ? new Date(msg.timestamp).getTime() : Date.now(),
-    blockHeight: msg.blockIndex,
-    isConfirmed: true,
-    replyToMessageId: msg.replyToMessageId || undefined,  // Reply to Message: pass through parent reference
-  }));
+  const messages: FeedMessage[] = data.messages.map((msg: ServerMessage) => {
+    return {
+      id: msg.feedMessageId,
+      feedId: msg.feedId,
+      content: msg.messageContent,
+      senderPublicKey: msg.issuerPublicAddress,
+      timestamp: msg.timestamp ? new Date(msg.timestamp).getTime() : Date.now(),
+      blockHeight: msg.blockIndex,
+      isConfirmed: true,
+      replyToMessageId: msg.replyToMessageId || undefined,  // Reply to Message: pass through parent reference
+    };
+  });
 
   // Calculate max block index from response
   const maxBlockIndex = messages.length > 0

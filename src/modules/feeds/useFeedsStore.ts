@@ -249,6 +249,7 @@ export const useFeedsStore = create<FeedsStore>()(
           let updatedMessages = state.messages[feedId] || [];
 
           // Confirm pending messages by updating their isConfirmed status and metadata
+          // Also merge any fields that may have been missing from cached data (e.g., replyToMessageId)
           if (messagesToConfirm.length > 0) {
             const confirmIds = new Set(messagesToConfirm.map((m) => m.id));
             const confirmMap = new Map(messagesToConfirm.map((m) => [m.id, m]));
@@ -261,6 +262,9 @@ export const useFeedsStore = create<FeedsStore>()(
                   isConfirmed: true,
                   blockHeight: confirmedMsg.blockHeight,
                   timestamp: confirmedMsg.timestamp,
+                  // Merge replyToMessageId from server if local message is missing it
+                  // This handles cached messages from before the Reply feature was added
+                  replyToMessageId: msg.replyToMessageId || confirmedMsg.replyToMessageId,
                 };
               }
               return msg;

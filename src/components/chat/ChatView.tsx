@@ -4,7 +4,7 @@ import { useRef, useMemo, useCallback, useState, useEffect } from "react";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import { MessageSquare, Lock, ArrowLeft } from "lucide-react";
 import { MessageBubble } from "./MessageBubble";
-import { MessageInput } from "./MessageInput";
+import { MessageInput, type MessageInputHandle } from "./MessageInput";
 import { ReplyContextBar } from "./ReplyContextBar";
 import { useAppStore } from "@/stores";
 import { useFeedsStore, sendMessage } from "@/modules/feeds";
@@ -24,6 +24,7 @@ interface ChatViewProps {
 
 export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackButton = false }: ChatViewProps) {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const messageInputRef = useRef<MessageInputHandle>(null);
   const { credentials } = useAppStore();
   const messagesMap = useFeedsStore((state) => state.messages);
   const messages = useMemo(
@@ -59,6 +60,11 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   // Reply to Message: Handler for reply button click
   const handleReplyClick = useCallback((message: FeedMessage) => {
     setReplyingTo(message);
+    // Focus the message input when starting a reply
+    // Use setTimeout to ensure state update completes first
+    setTimeout(() => {
+      messageInputRef.current?.focus();
+    }, 0);
   }, []);
 
   // Reply to Message: Handler for cancel reply
@@ -239,7 +245,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
       )}
 
       {/* Message Input */}
-      <MessageInput onSend={handleSend} onEscapeEmpty={onCloseFeed} />
+      <MessageInput ref={messageInputRef} onSend={handleSend} onEscapeEmpty={onCloseFeed} />
     </div>
   );
 }
