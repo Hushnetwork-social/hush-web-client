@@ -11,6 +11,7 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { useAppStore } from '@/stores';
 import { useFeedsStore } from '@/modules/feeds';
 import { notificationService } from '@/lib/grpc/services';
+import { fetchMessages } from '@/modules/feeds/FeedsService';
 import { aesDecrypt } from '@/lib/crypto/encryption';
 import { detectPlatform } from '@/lib/platform';
 import { showNotification as showPlatformNotification } from '@/lib/notifications';
@@ -85,6 +86,63 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
     setToasts((prev) => prev.filter((t) => t.id !== toastId));
   }, []);
 
+  // Fetch new messages for a specific feed (called when notification arrives for active feed)
+  const fetchMessagesForFeed = useCallback(
+    async (feedId: string) => {
+      const currentUserId = userIdRef.current;
+      if (!currentUserId) return;
+
+      try {
+        debugLog(`[useNotifications] Fetching new messages for active feed ${feedId.substring(0, 8)}...`);
+        const { syncMetadata, feeds, addMessages } = useFeedsStore.getState();
+
+        // Fetch messages from the last synced block
+        const response = await fetchMessages(currentUserId, syncMetadata.lastMessageBlockIndex, syncMetadata.lastReactionTallyVersion);
+
+        // Filter for messages in this feed
+        const feedMessages = response.messages.filter(m => m.feedId === feedId);
+
+        if (feedMessages.length > 0) {
+          debugLog(`[useNotifications] Found ${feedMessages.length} new message(s) for feed ${feedId.substring(0, 8)}...`);
+
+          // Get feed's AES key for decryption
+          const feed = feeds.find(f => f.id === feedId);
+          const feedAesKey = feed?.aesKey;
+
+          if (feedAesKey) {
+            // Decrypt messages
+            const decryptedMessages = await Promise.all(
+              feedMessages.map(async (msg) => {
+                try {
+                  const decryptedContent = await aesDecrypt(msg.content, feedAesKey);
+                  return {
+                    ...msg,
+                    content: decryptedContent,
+                    contentEncrypted: msg.content,
+                  };
+                } catch {
+                  return msg;
+                }
+              })
+            );
+            addMessages(feedId, decryptedMessages);
+          } else {
+            addMessages(feedId, feedMessages);
+          }
+
+          // Update sync metadata
+          useFeedsStore.getState().setSyncMetadata({
+            lastMessageBlockIndex: response.maxBlockIndex,
+            lastReactionTallyVersion: response.maxReactionTallyVersion,
+          });
+        }
+      } catch (error) {
+        debugError('[useNotifications] Failed to fetch messages for active feed:', error);
+      }
+    },
+    []
+  );
+
   // Decrypt message preview using feed's AES key
   const decryptMessagePreview = useCallback(
     async (feedId: string, encryptedPreview: string): Promise<string> => {
@@ -95,8 +153,7 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
           return 'New message';
         }
         const decrypted = await aesDecrypt(encryptedPreview, feed.aesKey);
-        // Truncate if too long
-        return decrypted.length > 100 ? decrypted.slice(0, 100) + '...' : decrypted;
+        return decrypted;
       } catch (error) {
         debugError('[useNotifications] Failed to decrypt message preview:', error);
         return 'New message';
@@ -151,9 +208,11 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
             }
             onNewMessage?.(event);
           } else {
-            // User is viewing this feed - tell server to mark as read
-            // so unread count stays at 0 even if they disconnect
-            debugLog(`[useNotifications] User viewing feed, marking as read: ${event.feedId}`);
+            // User is viewing this feed - fetch the new message immediately
+            debugLog(`[useNotifications] User viewing feed, fetching new messages: ${event.feedId}`);
+            fetchMessagesForFeed(event.feedId);
+
+            // Also tell server to mark as read so unread count stays at 0
             const currentUserId = userIdRef.current;
             if (currentUserId) {
               notificationService.markFeedAsRead(currentUserId, event.feedId).catch((err) => {
@@ -185,6 +244,7 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
       addToast,
       onNewMessage,
       decryptMessagePreview,
+      fetchMessagesForFeed,
     ]
   );
 

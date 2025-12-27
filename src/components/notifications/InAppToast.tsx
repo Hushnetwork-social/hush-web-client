@@ -28,7 +28,7 @@ export function InAppToast({ toast, onDismiss, onNavigate }: InAppToastProps) {
     <div
       className="
         bg-hush-bg-element border border-hush-purple/50 rounded-lg p-4
-        shadow-lg max-w-sm animate-slide-in cursor-pointer
+        shadow-lg w-80 animate-slide-in cursor-pointer
         hover:bg-hush-bg-hover transition-colors
       "
       onClick={handleClick}
