@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev --turbopack",
     "dev:tauri": "cross-env NEXT_PUBLIC_API_URL=http://localhost:3100 next dev --turbopack --port 3100",
+    "dev:tauri:prod": "cross-env NEXT_PUBLIC_API_URL=https://api.hushnetwork.social next dev --turbopack --port 3100",
     "build": "next build",
     "build:static": "cross-env STATIC_EXPORT=true next build",
     "start": "next start",
@@ -15,6 +16,7 @@
     "test:coverage": "vitest run --coverage",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
+    "tauri:prod": "tauri dev --config src-tauri/tauri.prod.conf.json",
     "tauri:build": "tauri build"
   },
   "dependencies": {

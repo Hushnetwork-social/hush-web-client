@@ -41,9 +41,9 @@ export function Sidebar({
   const [showUserMenu, setShowUserMenu] = useState(false);
 
   return (
-    <aside className="w-[280px] flex flex-col gap-1 min-h-0">
+    <aside className="w-[280px] flex flex-col gap-1 min-h-0 max-h-full overflow-hidden">
       {/* Navigation Menu */}
-      <nav className="bg-hush-bg-element p-2 space-y-1">
+      <nav className="bg-hush-bg-element p-2 space-y-1 flex-shrink-0">
         {navItems.map((item) => (
           <button
             key={item.id}
@@ -77,7 +77,7 @@ export function Sidebar({
       </div>
 
       {/* User Profile Section - separate box at bottom with outer corner */}
-      <div className="bg-hush-bg-element rounded-bl-xl p-2 relative">
+      <div className="bg-hush-bg-element rounded-bl-xl p-2 relative flex-shrink-0">
         <button
           onClick={() => setShowUserMenu(!showUserMenu)}
           className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl hover:bg-hush-bg-hover transition-colors cursor-pointer"
