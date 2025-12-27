@@ -73,9 +73,17 @@ export function useFeedReactions({
   const confirmReaction = useReactionsStore((s) => s.confirmReaction);
   const revertReaction = useReactionsStore((s) => s.revertReaction);
 
+  // Track key derivation to prevent duplicate calls (React Strict Mode)
+  const keyDerivationStartedRef = useRef<string | null>(null);
+
   // Derive feed ElGamal keys from AES key
   useEffect(() => {
+    // Skip if no AES key, already have public key, or currently deriving
     if (!feedAesKey || feedPublicKey || isDerivingKey) return;
+
+    // Prevent duplicate derivation for the same feed (React Strict Mode protection)
+    if (keyDerivationStartedRef.current === feedId) return;
+    keyDerivationStartedRef.current = feedId;
 
     const deriveKey = async () => {
       setIsDerivingKey(true);
@@ -89,6 +97,7 @@ export function useFeedReactions({
       } catch (err) {
         debugError(`[useFeedReactions] Failed to derive feed key:`, err);
         setError("Failed to derive feed encryption key");
+        keyDerivationStartedRef.current = null; // Allow retry on error
       } finally {
         setIsDerivingKey(false);
       }
@@ -99,18 +108,22 @@ export function useFeedReactions({
 
   // Poll for reaction tallies periodically
   const lastPollRef = useRef<number>(0);
-  const POLL_INTERVAL_MS = 10_000; // Poll every 10 seconds (reduced frequency to minimize load)
+  const isPollingRef = useRef<boolean>(false);
+  const POLL_INTERVAL_MS = 10_000; // Poll every 10 seconds
 
   useEffect(() => {
-    debugLog(`[useFeedReactions] Poll effect - feedPrivateKey: ${!!feedPrivateKey}`);
     if (!feedPrivateKey) {
-      debugLog(`[useFeedReactions] Skipping poll - private key not ready`);
       return;
     }
 
     const pollTallies = async () => {
+      // Prevent concurrent polls
+      if (isPollingRef.current) return;
+
       const now = Date.now();
       if (now - lastPollRef.current < POLL_INTERVAL_MS) return;
+
+      isPollingRef.current = true;
       lastPollRef.current = now;
 
       // Get message IDs for this feed
@@ -121,7 +134,7 @@ export function useFeedReactions({
         .slice(-20); // Last 20 messages
 
       if (confirmedMessageIds.length === 0) {
-        debugLog(`[useFeedReactions] No confirmed messages to poll`);
+        isPollingRef.current = false;
         return;
       }
 
@@ -134,16 +147,21 @@ export function useFeedReactions({
         debugLog(`[useFeedReactions] Tallies updated`);
       } catch (err) {
         debugError(`[useFeedReactions] Failed to poll tallies:`, err);
+      } finally {
+        isPollingRef.current = false;
       }
     };
 
-    // Initial poll
-    pollTallies();
+    // Initial poll (with small delay to avoid duplicate from strict mode)
+    const initialTimeout = setTimeout(pollTallies, 100);
 
     // Set up interval
     const interval = setInterval(pollTallies, POLL_INTERVAL_MS);
 
-    return () => clearInterval(interval);
+    return () => {
+      clearTimeout(initialTimeout);
+      clearInterval(interval);
+    };
   }, [feedId, feedPrivateKey]);
 
   // Get reaction counts for a message
