@@ -31,15 +31,10 @@ export function ChatListItem({
 
   const handleMouseEnter = (e: React.MouseEvent<HTMLButtonElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    const parent = e.currentTarget.parentElement?.getBoundingClientRect();
-    const grandParent = e.currentTarget.parentElement?.parentElement?.getBoundingClientRect();
-    console.log(`[ChatListItem] HOVER "${name}": mouseX=${e.clientX}, mouseY=${e.clientY}, btnTop=${rect.top.toFixed(0)}, btnBottom=${rect.bottom.toFixed(0)}, btnLeft=${rect.left.toFixed(0)}, btnRight=${rect.right.toFixed(0)}, btnWidth=${rect.width.toFixed(0)}, btnHeight=${rect.height.toFixed(0)}`);
-    if (parent) {
-      console.log(`[ChatListItem] PARENT: left=${parent.left.toFixed(0)}, right=${parent.right.toFixed(0)}, width=${parent.width.toFixed(0)}`);
-    }
-    if (grandParent) {
-      console.log(`[ChatListItem] GRANDPARENT: left=${grandParent.left.toFixed(0)}, right=${grandParent.right.toFixed(0)}, width=${grandParent.width.toFixed(0)}`);
-    }
+    // Calculate where mouse is relative to button
+    const relativeY = e.clientY - rect.top;
+    const relativeX = e.clientX - rect.left;
+    console.log(`[ChatListItem] HOVER "${name}": mouseX=${e.clientX}, mouseY=${e.clientY}, btnTop=${rect.top.toFixed(0)}, btnBottom=${rect.bottom.toFixed(0)}, relativeX=${relativeX.toFixed(0)}, relativeY=${relativeY.toFixed(0)}`);
   };
 
   return (
@@ -48,6 +43,7 @@ export function ChatListItem({
       onMouseEnter={handleMouseEnter}
       className={`
         w-full max-w-full box-border flex items-center p-3 rounded-lg transition-colors cursor-pointer
+        outline outline-1 outline-red-500
         ${isSelected
           ? "bg-hush-purple/20 border-2 border-hush-purple"
           : "bg-hush-bg-element border border-hush-purple/70 hover:bg-hush-bg-hover hover:border-hush-purple/90"
