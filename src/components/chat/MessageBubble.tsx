@@ -152,7 +152,7 @@ export const MessageBubble = memo(function MessageBubble({
         )}
 
         {/* Message bubble wrapper - relative for reaction bar positioning */}
-        <div className="relative min-w-0 overflow-hidden">
+        <div className="relative min-w-0">
           <div
             className={`
               px-3 py-2 min-w-0

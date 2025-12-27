@@ -76,16 +76,15 @@ export const ReplyPreview = memo(function ReplyPreview({
         hover:bg-hush-bg-hover/50
         transition-colors duration-150
         focus:outline-none focus:ring-1 focus:ring-hush-purple/50
-        overflow-hidden
         min-w-0
       "
       aria-label={`Reply to message from ${senderName}`}
       type="button"
     >
-      <p className="text-xs font-medium text-hush-purple truncate">
+      <p className="text-xs font-medium text-hush-purple break-words">
         {senderName}
       </p>
-      <p className="text-xs text-hush-text-accent break-words line-clamp-2">
+      <p className="text-xs text-hush-text-accent break-words whitespace-pre-wrap">
         {truncatedContent}
       </p>
     </button>

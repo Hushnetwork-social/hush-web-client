@@ -115,7 +115,7 @@ interface ReactionsActions {
   setTallies(tallies: Record<string, EmojiCounts>): void;
 
   /** Update a single tally */
-  updateTally(messageId: string, counts: EmojiCounts): void;
+  updateTally(messageId: string, counts: EmojiCounts, tallyVersion?: number): void;
 
   /** Set user's own reaction for a message */
   setMyReaction(messageId: string, emojiIndex: number | null): void;
@@ -211,7 +211,8 @@ export const useReactionsStore = create<ReactionsStore>()(
               counts,
               myReaction: reactions[messageId]?.myReaction ?? null,
               lastFetched: now,
-              tallyVersion: (reactions[messageId]?.tallyVersion ?? 0) + 1,
+              // Keep existing version - don't increment locally
+              tallyVersion: reactions[messageId]?.tallyVersion ?? 0,
             };
           }
 
@@ -219,7 +220,7 @@ export const useReactionsStore = create<ReactionsStore>()(
         });
       },
 
-      updateTally: (messageId, counts) => {
+      updateTally: (messageId, counts, tallyVersion) => {
         set((state) => ({
           reactions: {
             ...state.reactions,
@@ -227,7 +228,8 @@ export const useReactionsStore = create<ReactionsStore>()(
               counts,
               myReaction: state.reactions[messageId]?.myReaction ?? null,
               lastFetched: Date.now(),
-              tallyVersion: (state.reactions[messageId]?.tallyVersion ?? 0) + 1,
+              // Use server version if provided, otherwise keep existing
+              tallyVersion: tallyVersion ?? state.reactions[messageId]?.tallyVersion ?? 0,
             },
           },
         }));

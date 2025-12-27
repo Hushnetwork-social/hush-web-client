@@ -55,8 +55,11 @@ export class FeedsSyncable implements ISyncable {
   // Set at the start of syncTask before any operations
   private shouldResetReactionTallyVersion = false;
 
-  // Track if initial full sync is complete - after this, only sync feed metadata
+  // Track if initial full sync is complete - after this, only sync active feed incrementally
   private isInitialSyncComplete = false;
+
+  // Track the blockIndex we had for each feed before server sync (to detect changes)
+  private previousFeedBlockIndices = new Map<string, number>();
 
   async syncTask(): Promise<void> {
     // Prevent concurrent syncs
@@ -89,16 +92,17 @@ export class FeedsSyncable implements ISyncable {
     useFeedsStore.getState().setSyncing(true);
 
     try {
-      // Sync feeds from blockchain (always - to get new feeds/metadata)
+      // Sync feeds from blockchain (always - to get new feeds/metadata and detect changes)
       await this.syncFeeds(credentials.signingPublicKey);
 
-      // Sync messages ONLY on initial load
-      // After initial sync, messages are fetched on-demand when user selects a feed
-      // New message notifications update badges via useNotifications hook
+      // Initial sync: fetch ALL messages for ALL feeds once
       if (!this.isInitialSyncComplete) {
         await this.syncMessages(credentials.signingPublicKey);
         this.isInitialSyncComplete = true;
-        debugLog('[FeedsSyncable] Initial sync complete - subsequent syncs will only fetch feed metadata');
+        debugLog('[FeedsSyncable] Initial sync complete - subsequent syncs will only fetch active feed messages');
+      } else {
+        // Incremental sync: only fetch messages for the ACTIVE feed if it needs sync
+        await this.syncActiveFeedMessages(credentials.signingPublicKey);
       }
 
       // Check for personal feed and create if missing
@@ -106,6 +110,13 @@ export class FeedsSyncable implements ISyncable {
 
       // Clear any previous error
       useFeedsStore.getState().setError(null);
+
+      // Update previousFeedBlockIndices AFTER all syncing is done
+      // This ensures the next sync cycle can correctly detect changes
+      const currentFeeds = useFeedsStore.getState().feeds;
+      for (const feed of currentFeeds) {
+        this.previousFeedBlockIndices.set(feed.id, feed.blockIndex ?? 0);
+      }
 
       this.isFirstSync = false;
     } catch (error) {
@@ -233,13 +244,20 @@ export class FeedsSyncable implements ISyncable {
 
     if (serverFeeds.length > 0) {
       debugLog(`[FeedsSyncable] Found ${serverFeeds.length} feed(s) from server`);
-      serverFeeds.forEach(f => debugLog(`  - Feed: ${f.name} (${f.type}, id: ${f.id})`));
+      serverFeeds.forEach(f => debugLog(`  - Feed: ${f.name} (${f.type}, id: ${f.id}, blockIndex: ${f.blockIndex})`));
 
       // Detect chat feeds with BlockIndex changes (participant may have updated their name)
       const feedsWithChangedBlockIndex = this.detectBlockIndexChanges(currentFeeds, serverFeeds);
 
+      // Detect feeds that have new messages (blockIndex increased) and mark them as needing sync
+      // NOTE: This runs BEFORE we update previousFeedBlockIndices, so the comparison is correct
+      this.detectAndMarkFeedsNeedingSync(currentFeeds, serverFeeds);
+
       useFeedsStore.getState().addFeeds(serverFeeds);
       useFeedsStore.getState().setSyncMetadata({ lastFeedBlockIndex: maxBlockIndex });
+
+      // NOTE: previousFeedBlockIndices is updated AFTER syncActiveFeedMessages runs
+      // See the end of syncTask where we update it
 
       // Decrypt feed keys for new feeds
       await this.decryptFeedKeys(serverFeeds);
@@ -444,18 +462,8 @@ export class FeedsSyncable implements ISyncable {
             feedAesKey
           );
 
-          // Update the store with decrypted counts
-          reactionsStore.updateTally(tally.messageId, decryptedCounts);
-          // Also update the tally version
-          useReactionsStore.setState(state => ({
-            reactions: {
-              ...state.reactions,
-              [tally.messageId]: {
-                ...state.reactions[tally.messageId],
-                tallyVersion: tally.tallyVersion,
-              },
-            },
-          }));
+          // Update the store with decrypted counts and server's tally version
+          reactionsStore.updateTally(tally.messageId, decryptedCounts, tally.tallyVersion);
           decryptedCount++;
           processedCount++;
           continue;
@@ -670,5 +678,165 @@ export class FeedsSyncable implements ISyncable {
         // Continue with other feeds - don't fail the entire refresh
       }
     }
+  }
+
+  /**
+   * Detect feeds where blockIndex has increased and mark them as needing sync
+   * This enables incremental sync - we only fetch messages for feeds that changed
+   */
+  private detectAndMarkFeedsNeedingSync(
+    currentFeeds: Feed[],
+    serverFeeds: Feed[]
+  ): void {
+    const selectedFeedId = useAppStore.getState().selectedFeedId;
+
+    // Create a map of current feeds by ID for quick lookup
+    const currentFeedsMap = new Map(currentFeeds.map(f => [f.id, f]));
+
+    for (const serverFeed of serverFeeds) {
+      const currentFeed = currentFeedsMap.get(serverFeed.id);
+
+      // For new feeds, mark as needing sync (unless it's the active feed, which will sync immediately)
+      if (!currentFeed) {
+        if (serverFeed.id !== selectedFeedId) {
+          debugLog(`[FeedsSyncable] New feed ${serverFeed.id.substring(0, 8)}... marked as needsSync`);
+          useFeedsStore.getState().markFeedNeedsSync(serverFeed.id, true);
+        }
+        continue;
+      }
+
+      // Check if blockIndex has increased
+      const currentBlockIndex = currentFeed.blockIndex ?? 0;
+      const serverBlockIndex = serverFeed.blockIndex ?? 0;
+
+      if (serverBlockIndex > currentBlockIndex) {
+        // Feed has new data - mark it as needing sync (unless it's the active feed)
+        if (serverFeed.id !== selectedFeedId) {
+          debugLog(`[FeedsSyncable] Feed ${serverFeed.id.substring(0, 8)}... blockIndex changed: ${currentBlockIndex} -> ${serverBlockIndex}, marked as needsSync`);
+          useFeedsStore.getState().markFeedNeedsSync(serverFeed.id, true);
+        } else {
+          debugLog(`[FeedsSyncable] Active feed ${serverFeed.id.substring(0, 8)}... has new data - will sync immediately`);
+        }
+      }
+    }
+  }
+
+  /**
+   * Sync messages only for the currently active feed (incremental sync)
+   * Called after initial sync is complete
+   */
+  private async syncActiveFeedMessages(address: string): Promise<void> {
+    const selectedFeedId = useAppStore.getState().selectedFeedId;
+
+    if (!selectedFeedId) {
+      // No feed selected, nothing to sync
+      return;
+    }
+
+    const { feeds } = useFeedsStore.getState();
+    const activeFeed = feeds.find(f => f.id === selectedFeedId);
+
+    if (!activeFeed) {
+      debugLog(`[FeedsSyncable] Active feed ${selectedFeedId.substring(0, 8)}... not found in store`);
+      return;
+    }
+
+    // Check if the active feed has changes (blockIndex increased from server sync)
+    // We compare with our tracked previousBlockIndex
+    const previousBlockIndex = this.previousFeedBlockIndices.get(selectedFeedId) ?? 0;
+    const currentBlockIndex = activeFeed.blockIndex ?? 0;
+
+    const hasNewMessages = currentBlockIndex > previousBlockIndex || activeFeed.needsSync;
+
+    // Always sync for active feed to get reaction updates
+    // Reactions don't update blockIndex, so we need to poll for them
+    // We pass hasNewMessages to determine if we should process messages or just reactions
+    debugLog(`[FeedsSyncable] syncActiveFeedMessages: feedId=${selectedFeedId.substring(0, 8)}..., hasNewMessages=${hasNewMessages}`);
+    await this.syncMessagesForFeed(address, activeFeed, hasNewMessages);
+
+    // Clear the needsSync flag if it was set
+    if (activeFeed.needsSync) {
+      useFeedsStore.getState().clearFeedNeedsSync(selectedFeedId);
+    }
+  }
+
+  /**
+   * Sync messages for a specific feed
+   * @param processMessages - If true, process new messages. If false, only sync reaction tallies.
+   */
+  private async syncMessagesForFeed(address: string, feed: Feed, processMessages: boolean = true): Promise<void> {
+    const { syncMetadata } = useFeedsStore.getState();
+    let blockIndex = syncMetadata.lastMessageBlockIndex;
+
+    // On new session, reset to fetch all messages from block 0
+    if (this.shouldResetReactionTallyVersion) {
+      blockIndex = 0;
+    }
+
+    // Fetch messages for this specific feed
+    // TODO: The API currently fetches all messages for all feeds
+    // Ideally, we should have a per-feed endpoint: fetchMessagesForFeed(feedId, fromBlock)
+    // For now, we still fetch all but only process the ones we need
+    debugLog(`[FeedsSyncable] syncMessagesForFeed: blockIndex=${blockIndex}, lastReactionTallyVersion=${syncMetadata.lastReactionTallyVersion}, processMessages=${processMessages}`);
+    const response = await fetchMessages(address, blockIndex, syncMetadata.lastReactionTallyVersion);
+    const { messages: newMessages, maxBlockIndex, reactionTallies, maxReactionTallyVersion } = response;
+    debugLog(`[FeedsSyncable] syncMessagesForFeed response: messages=${newMessages.length}, reactionTallies=${reactionTallies.length}, maxReactionTallyVersion=${maxReactionTallyVersion}`);
+
+    // Only process messages if there are new ones expected
+    if (processMessages) {
+      // Filter messages for just this feed
+      const feedMessages = newMessages.filter(m => m.feedId === feed.id);
+
+      if (feedMessages.length > 0) {
+        debugLog(`[FeedsSyncable] Found ${feedMessages.length} new message(s) for feed ${feed.id.substring(0, 8)}...`);
+
+        const feedAesKey = feed.aesKey;
+
+        if (feedAesKey) {
+          // Decrypt message content
+          const decryptedMessages = await Promise.all(
+            feedMessages.map(async (msg) => {
+              try {
+                const decryptedContent = await aesDecrypt(msg.content, feedAesKey);
+                return {
+                  ...msg,
+                  content: decryptedContent,
+                  contentEncrypted: msg.content,
+                };
+              } catch (error) {
+                debugError(`[FeedsSyncable] Failed to decrypt message ${msg.id}:`, error);
+                return msg;
+              }
+            })
+          );
+          useFeedsStore.getState().addMessages(feed.id, decryptedMessages);
+        } else {
+          debugWarn(`[FeedsSyncable] No AES key for feed ${feed.id}, storing encrypted messages`);
+          useFeedsStore.getState().addMessages(feed.id, feedMessages);
+        }
+      }
+    }
+
+    // Always process reaction tallies for this feed
+    if (reactionTallies.length > 0) {
+      const feedTallies = reactionTallies.filter(t => {
+        // Find if this tally belongs to a message in our feed
+        const { messages } = useFeedsStore.getState();
+        const feedMsgs = messages[feed.id] ?? [];
+        return feedMsgs.some(m => m.id === t.messageId);
+      });
+
+      if (feedTallies.length > 0) {
+        debugLog(`[FeedsSyncable] Processing ${feedTallies.length} reaction tally(s) for active feed`);
+        const feeds = useFeedsStore.getState().feeds;
+        await this.processReactionTallies(feedTallies, feeds);
+      }
+    }
+
+    // Update sync metadata
+    useFeedsStore.getState().setSyncMetadata({
+      lastMessageBlockIndex: maxBlockIndex,
+      lastReactionTallyVersion: maxReactionTallyVersion,
+    });
   }
 }
