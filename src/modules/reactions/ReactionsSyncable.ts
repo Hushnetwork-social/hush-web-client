@@ -48,30 +48,25 @@ class ReactionsSyncableClass implements ISyncable {
     // Step 1: Initialize reactions system if not done yet
     if (!isReactionsInitialized() && !this.isInitializing && !this.initializationAttempted) {
       const mnemonic = appStore.credentials?.mnemonic;
-      console.log('[ReactionsSyncable] Checking mnemonic:', mnemonic ? `${mnemonic.length} words` : 'null');
+      debugLog('[ReactionsSyncable] Checking mnemonic:', mnemonic ? `${mnemonic.length} words` : 'null');
       if (mnemonic && mnemonic.length > 0) {
         this.isInitializing = true;
         this.initializationAttempted = true;
-        console.log('[ReactionsSyncable] Initializing reactions system...');
         debugLog('[ReactionsSyncable] Initializing reactions system...');
 
         try {
           const success = await initializeReactionsSystem(mnemonic);
           if (success) {
-            console.log('[ReactionsSyncable] Reactions system initialized successfully');
             debugLog('[ReactionsSyncable] Reactions system initialized');
           } else {
-            console.error('[ReactionsSyncable] Failed to initialize reactions system');
             debugError('[ReactionsSyncable] Failed to initialize reactions system');
           }
         } catch (error) {
-          console.error('[ReactionsSyncable] Error initializing reactions system:', error);
           debugError('[ReactionsSyncable] Error initializing reactions system:', error);
         } finally {
           this.isInitializing = false;
         }
       } else {
-        console.log('[ReactionsSyncable] No mnemonic available, skipping initialization');
         debugLog('[ReactionsSyncable] No mnemonic available, skipping initialization');
         return;
       }
@@ -82,25 +77,26 @@ class ReactionsSyncableClass implements ISyncable {
       return;
     }
 
-    // Step 2: Register commitment for all feeds user is part of
+    // Step 2: Register commitment for new feeds only (skip already registered)
     const feeds = Object.values(feedsStore.feeds);
-    console.log(`[ReactionsSyncable] Found ${feeds.length} feeds to register`);
-    for (const feed of feeds) {
-      if (!this.registeredFeeds.has(feed.id)) {
-        console.log(`[ReactionsSyncable] Registering commitment for feed ${feed.id.substring(0, 8)}...`);
+    const unregisteredFeeds = feeds.filter(f => !this.registeredFeeds.has(f.id));
+
+    if (unregisteredFeeds.length > 0) {
+      debugLog(`[ReactionsSyncable] Found ${unregisteredFeeds.length} new feeds to register`);
+      for (const feed of unregisteredFeeds) {
+        debugLog(`[ReactionsSyncable] Registering commitment for feed ${feed.id.substring(0, 8)}...`);
         // Register in background, don't block
         ensureCommitmentRegistered(feed.id)
           .then((success) => {
             if (success) {
-              console.log(`[ReactionsSyncable] Successfully registered for feed ${feed.id.substring(0, 8)}...`);
+              debugLog(`[ReactionsSyncable] Successfully registered for feed ${feed.id.substring(0, 8)}`);
               this.registeredFeeds.add(feed.id);
             } else {
-              console.warn(`[ReactionsSyncable] Failed to register for feed ${feed.id.substring(0, 8)}...`);
+              debugLog(`[ReactionsSyncable] Failed to register for feed ${feed.id.substring(0, 8)}`);
             }
           })
           .catch((error) => {
-            console.error(`[ReactionsSyncable] Error registering for feed ${feed.id}:`, error);
-            debugError(`[ReactionsSyncable] Failed to register for feed ${feed.id}:`, error);
+            debugError(`[ReactionsSyncable] Error registering for feed ${feed.id}:`, error);
           });
       }
     }

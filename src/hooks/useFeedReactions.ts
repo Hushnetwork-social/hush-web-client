@@ -99,12 +99,12 @@ export function useFeedReactions({
 
   // Poll for reaction tallies periodically
   const lastPollRef = useRef<number>(0);
-  const POLL_INTERVAL_MS = 3_000; // Poll every 3 seconds (matches block production time)
+  const POLL_INTERVAL_MS = 10_000; // Poll every 10 seconds (reduced frequency to minimize load)
 
   useEffect(() => {
-    console.log(`[useFeedReactions] Poll effect - feedPrivateKey: ${!!feedPrivateKey}`);
+    debugLog(`[useFeedReactions] Poll effect - feedPrivateKey: ${!!feedPrivateKey}`);
     if (!feedPrivateKey) {
-      console.log(`[useFeedReactions] Skipping poll - private key not ready`);
+      debugLog(`[useFeedReactions] Skipping poll - private key not ready`);
       return;
     }
 
@@ -121,7 +121,7 @@ export function useFeedReactions({
         .slice(-20); // Last 20 messages
 
       if (confirmedMessageIds.length === 0) {
-        console.log(`[useFeedReactions] No confirmed messages to poll`);
+        debugLog(`[useFeedReactions] No confirmed messages to poll`);
         return;
       }
 
@@ -129,11 +129,11 @@ export function useFeedReactions({
         // Ensure BSGS is loaded (will be instant if already loaded)
         await bsgsManager.ensureLoaded();
 
-        console.log(`[useFeedReactions] Polling tallies for ${confirmedMessageIds.length} messages in feed ${feedId.substring(0, 8)}...`);
+        debugLog(`[useFeedReactions] Polling tallies for ${confirmedMessageIds.length} messages in feed ${feedId.substring(0, 8)}...`);
         await reactionsServiceInstance.getTallies(feedId, confirmedMessageIds, feedPrivateKey);
-        console.log(`[useFeedReactions] Tallies updated`);
+        debugLog(`[useFeedReactions] Tallies updated`);
       } catch (err) {
-        console.error(`[useFeedReactions] Failed to poll tallies:`, err);
+        debugError(`[useFeedReactions] Failed to poll tallies:`, err);
       }
     };
 

@@ -296,7 +296,7 @@ async function grpcCallBrowser(
   const url = `${grpcConfig.serverUrl}/${serviceName}/${methodName}`;
   const frame = createGrpcFrame(requestBytes);
 
-  console.log(`[ReactionsBinary] Calling ${serviceName}/${methodName}`);
+  debugLog(`[ReactionsBinary] Calling ${serviceName}/${methodName}`);
 
   try {
     const response = await fetch(url, {
@@ -310,15 +310,15 @@ async function grpcCallBrowser(
     });
 
     if (!response.ok) {
-      console.error(`[ReactionsBinary] Call failed: HTTP ${response.status} ${response.statusText}`);
+      debugLog(`[ReactionsBinary] Call failed: HTTP ${response.status} ${response.statusText}`);
       throw new Error(`gRPC call failed: ${response.status}`);
     }
 
-    console.log(`[ReactionsBinary] Call succeeded`);
+    debugLog(`[ReactionsBinary] Call succeeded`);
     const buffer = await response.arrayBuffer();
     return new Uint8Array(buffer);
   } catch (error) {
-    console.error(`[ReactionsBinary] Call error:`, error);
+    debugLog(`[ReactionsBinary] Call error:`, error);
     throw error;
   }
 }
