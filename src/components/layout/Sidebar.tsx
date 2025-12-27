@@ -77,58 +77,60 @@ export function Sidebar({
       </div>
 
       {/* User Profile Section - separate box at bottom with outer corner */}
-      <div className="bg-hush-bg-element rounded-bl-xl p-2 relative flex-shrink-0">
-        <button
-          onClick={() => setShowUserMenu(!showUserMenu)}
-          className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl hover:bg-hush-bg-hover transition-colors cursor-pointer"
-        >
-          {/* Avatar */}
-          <div className="w-10 h-10 rounded-full bg-hush-purple flex items-center justify-center flex-shrink-0">
-            <span className="text-sm font-bold text-hush-bg-dark">
-              {userInitials}
+      <div className="bg-hush-bg-element rounded-bl-xl p-2 flex-shrink-0">
+        <div className="relative">
+          <button
+            onClick={() => setShowUserMenu(!showUserMenu)}
+            className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl hover:bg-hush-bg-hover transition-colors cursor-pointer"
+          >
+            {/* Avatar */}
+            <div className="w-10 h-10 rounded-full bg-hush-purple flex items-center justify-center flex-shrink-0">
+              <span className="text-sm font-bold text-hush-bg-dark">
+                {userInitials}
+              </span>
+            </div>
+            {/* Name */}
+            <span className="text-sm text-hush-text-primary truncate">
+              {userDisplayName}
             </span>
-          </div>
-          {/* Name */}
-          <span className="text-sm text-hush-text-primary truncate">
-            {userDisplayName}
-          </span>
-        </button>
+          </button>
 
-        {/* Dropdown Menu */}
-        {showUserMenu && (
-          <div className="absolute bottom-full left-2 right-2 mb-2 bg-hush-bg-dark rounded-xl border border-hush-bg-element shadow-lg p-1.5 space-y-1">
-            <button
-              onClick={() => {
-                onDownloadKeys?.();
-                setShowUserMenu(false);
-              }}
-              className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg border border-transparent hover:border-hush-purple active:bg-hush-purple active:text-hush-bg-dark transition-colors text-hush-text-primary group"
-            >
-              <Download className="w-4 h-4 text-hush-text-accent group-active:text-hush-bg-dark" />
-              <span className="text-sm">Download keys</span>
-            </button>
-            <button
-              onClick={() => {
-                onAccountDetails?.();
-                setShowUserMenu(false);
-              }}
-              className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg border border-transparent hover:border-hush-purple active:bg-hush-purple active:text-hush-bg-dark transition-colors text-hush-text-primary group"
-            >
-              <UserCircle className="w-4 h-4 text-hush-text-accent group-active:text-hush-bg-dark" />
-              <span className="text-sm">Account Details</span>
-            </button>
-            <button
-              onClick={() => {
-                onLogout?.();
-                setShowUserMenu(false);
-              }}
-              className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg border border-transparent hover:border-hush-purple active:bg-hush-purple active:text-hush-bg-dark transition-colors text-hush-text-primary group"
-            >
-              <LogOut className="w-4 h-4 text-hush-text-accent group-active:text-hush-bg-dark" />
-              <span className="text-sm">Logout</span>
-            </button>
-          </div>
-        )}
+          {/* Dropdown Menu */}
+          {showUserMenu && (
+            <div className="absolute bottom-full left-0 right-0 mb-2 bg-hush-bg-dark rounded-xl border border-hush-bg-element shadow-lg p-1.5 space-y-1">
+              <button
+                onClick={() => {
+                  onDownloadKeys?.();
+                  setShowUserMenu(false);
+                }}
+                className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg border border-transparent hover:border-hush-purple active:bg-hush-purple active:text-hush-bg-dark transition-colors text-hush-text-primary group"
+              >
+                <Download className="w-4 h-4 text-hush-text-accent group-active:text-hush-bg-dark" />
+                <span className="text-sm">Download keys</span>
+              </button>
+              <button
+                onClick={() => {
+                  onAccountDetails?.();
+                  setShowUserMenu(false);
+                }}
+                className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg border border-transparent hover:border-hush-purple active:bg-hush-purple active:text-hush-bg-dark transition-colors text-hush-text-primary group"
+              >
+                <UserCircle className="w-4 h-4 text-hush-text-accent group-active:text-hush-bg-dark" />
+                <span className="text-sm">Account Details</span>
+              </button>
+              <button
+                onClick={() => {
+                  onLogout?.();
+                  setShowUserMenu(false);
+                }}
+                className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg border border-transparent hover:border-hush-purple active:bg-hush-purple active:text-hush-bg-dark transition-colors text-hush-text-primary group"
+              >
+                <LogOut className="w-4 h-4 text-hush-text-accent group-active:text-hush-bg-dark" />
+                <span className="text-sm">Logout</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </aside>
   );
