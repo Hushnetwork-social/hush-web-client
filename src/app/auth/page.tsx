@@ -15,6 +15,7 @@ import {
   createPersonalFeedTransaction,
   importFromEncryptedBytes,
 } from "@/lib/crypto";
+import { markIdentityCreatedByAuthPage } from "@/modules/identity";
 
 type Tab = "create" | "import";
 type ImportSubTab = "words" | "file";
@@ -116,6 +117,9 @@ export default function AuthPage() {
         if (!submitResult.successful) {
           throw new Error(submitResult.message || "Failed to create identity");
         }
+
+        // Mark that we just created identity - prevents IdentitySyncable from duplicating
+        markIdentityCreatedByAuthPage();
       } else {
         // Use existing profile name from blockchain
         userDisplayName = identityCheck.identity?.profileName || profileName;

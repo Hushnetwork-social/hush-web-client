@@ -21,6 +21,9 @@ let identityConfirmed = false;
 let identityCreationPending = false;
 let lastCheckedAddress: string | null = null;
 
+// Flag to indicate identity was just created by auth page - skip IdentitySyncable creation attempts
+let identityCreatedByAuthPage = false;
+
 export class IdentitySyncable implements ISyncable {
   name = 'IdentitySyncable';
   requiresAuth = true; // Only runs when authenticated
@@ -76,6 +79,12 @@ export class IdentitySyncable implements ISyncable {
 
       // Identity not found
       debugLog('[IdentitySyncable] Identity NOT found in blockchain');
+
+      // If auth page already submitted identity creation, don't duplicate
+      if (identityCreatedByAuthPage) {
+        debugLog('[IdentitySyncable] Identity was created by auth page, waiting for blockchain confirmation...');
+        return;
+      }
 
       // If already creating, wait for it
       if (identityCreationPending) {
@@ -145,5 +154,16 @@ export class IdentitySyncable implements ISyncable {
 export function resetIdentitySyncState(): void {
   identityConfirmed = false;
   identityCreationPending = false;
+  identityCreatedByAuthPage = false;
   lastCheckedAddress = null;
+}
+
+/**
+ * Mark that identity was just created by auth page.
+ * Call this after submitting identity transaction from auth page to prevent
+ * IdentitySyncable from creating a duplicate while waiting for blockchain confirmation.
+ */
+export function markIdentityCreatedByAuthPage(): void {
+  identityCreatedByAuthPage = true;
+  debugLog('[IdentitySyncable] Marked identity as created by auth page');
 }

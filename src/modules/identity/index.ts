@@ -15,7 +15,7 @@ import { debugLog } from '@/lib/debug-logger';
 
 // Re-export public API
 export { checkIdentityExists, submitTransaction, searchByDisplayName } from './IdentityService';
-export { resetIdentitySyncState } from './IdentitySyncable';
+export { resetIdentitySyncState, markIdentityCreatedByAuthPage } from './IdentitySyncable';
 
 /**
  * Registers the Identity module with the SyncProvider.
