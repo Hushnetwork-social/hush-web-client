@@ -26,6 +26,12 @@ body {
   color: var(--hush-text-primary);
 }
 
+/* Fix for production build layout calculation issues */
+/* Forces browser to recalculate element positions correctly */
+.h-screen {
+  contain: layout style;
+}
+
 /* Custom scrollbar for webkit browsers */
 ::-webkit-scrollbar {
   width: 6px;
