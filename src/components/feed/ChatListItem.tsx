@@ -25,13 +25,13 @@ export function ChatListItem({
 }: ChatListItemProps) {
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    debugLog(`[ChatListItem] Click on "${name}": clickX=${e.clientX}, clickY=${e.clientY}, buttonTop=${rect.top.toFixed(0)}, buttonBottom=${rect.bottom.toFixed(0)}, buttonLeft=${rect.left.toFixed(0)}, buttonRight=${rect.right.toFixed(0)}`);
+    console.log(`[ChatListItem] CLICK "${name}": clickX=${e.clientX}, clickY=${e.clientY}, btnTop=${rect.top.toFixed(0)}, btnBottom=${rect.bottom.toFixed(0)}, btnLeft=${rect.left.toFixed(0)}, btnRight=${rect.right.toFixed(0)}, btnWidth=${rect.width.toFixed(0)}, btnHeight=${rect.height.toFixed(0)}`);
     onClick?.();
   };
 
   const handleMouseEnter = (e: React.MouseEvent<HTMLButtonElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    debugLog(`[ChatListItem] MouseEnter "${name}": mouseX=${e.clientX}, mouseY=${e.clientY}, buttonTop=${rect.top.toFixed(0)}, buttonBottom=${rect.bottom.toFixed(0)}, buttonLeft=${rect.left.toFixed(0)}, buttonRight=${rect.right.toFixed(0)}`);
+    console.log(`[ChatListItem] HOVER "${name}": mouseX=${e.clientX}, mouseY=${e.clientY}, btnTop=${rect.top.toFixed(0)}, btnBottom=${rect.bottom.toFixed(0)}, btnLeft=${rect.left.toFixed(0)}, btnRight=${rect.right.toFixed(0)}, btnWidth=${rect.width.toFixed(0)}, btnHeight=${rect.height.toFixed(0)}`);
   };
 
   return (
