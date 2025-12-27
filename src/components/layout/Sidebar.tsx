@@ -41,9 +41,9 @@ export function Sidebar({
   const [showUserMenu, setShowUserMenu] = useState(false);
 
   return (
-    <aside className="w-[280px] flex-shrink-0 grid grid-rows-[auto_1fr_auto] gap-1 min-h-0 max-h-full overflow-hidden">
+    <aside className="w-[280px] flex-shrink-0 flex flex-col gap-1 min-h-0 max-h-full overflow-hidden">
       {/* Navigation Menu */}
-      <nav className="bg-hush-bg-element p-2 space-y-1">
+      <nav className="flex-shrink-0 bg-hush-bg-element p-2 space-y-1">
         {navItems.map((item) => (
           <button
             key={item.id}
@@ -71,15 +71,18 @@ export function Sidebar({
         ))}
       </nav>
 
-      {/* Feed List Area - scrollable, takes remaining space */}
-      <div className="min-h-0 w-full bg-hush-bg-element overflow-y-auto overflow-x-hidden">
+      {/* Feed List Area - scrollable, shrinks if needed but doesn't grow beyond content */}
+      <div className="flex-shrink min-h-0 w-full bg-hush-bg-element overflow-y-auto overflow-x-hidden">
         <div className="p-2">
           {children}
         </div>
       </div>
 
+      {/* Spacer - absorbs extra space so feed list doesn't have gap */}
+      <div className="flex-1 min-h-0"></div>
+
       {/* User Profile Section - fixed at bottom */}
-      <div className="bg-hush-bg-element rounded-bl-xl p-2">
+      <div className="flex-shrink-0 bg-hush-bg-element rounded-bl-xl p-2">
         <div className="relative">
           <button
             onClick={() => setShowUserMenu(!showUserMenu)}
