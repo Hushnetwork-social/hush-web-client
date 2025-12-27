@@ -41,7 +41,7 @@ export function Sidebar({
   const [showUserMenu, setShowUserMenu] = useState(false);
 
   return (
-    <aside className="w-[280px] flex flex-col gap-1 min-h-0 max-h-full overflow-hidden">
+    <aside className="w-[280px] flex flex-col gap-1 min-h-0 max-h-full overflow-hidden isolate relative">
       {/* Navigation Menu */}
       <nav className="bg-hush-bg-element p-2 space-y-1 flex-shrink-0">
         {navItems.map((item) => (
@@ -72,7 +72,7 @@ export function Sidebar({
       </nav>
 
       {/* Feed List Area - takes all available space with vertical scroll */}
-      <div className="flex-1 min-h-0 bg-hush-bg-element overflow-y-auto overflow-x-hidden p-2">
+      <div className="flex-1 min-h-0 bg-hush-bg-element overflow-y-auto overflow-x-hidden p-2 isolate">
         {children}
       </div>
 

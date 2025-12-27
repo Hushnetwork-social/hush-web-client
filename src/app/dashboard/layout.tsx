@@ -174,7 +174,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             </Sidebar>
 
             {/* Center Content */}
-            <main className="flex-1 min-h-0 flex flex-col overflow-hidden bg-hush-bg-element rounded-br-xl">
+            <main className="flex-1 min-h-0 flex flex-col overflow-hidden bg-hush-bg-element rounded-br-xl isolate">
               {children}
             </main>
           </div>
