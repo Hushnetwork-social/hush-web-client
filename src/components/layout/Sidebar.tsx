@@ -72,7 +72,8 @@ export function Sidebar({
       </nav>
 
       {/* Feed List Area - scrollable, takes remaining space */}
-      <div className="min-h-0 w-full bg-hush-bg-element overflow-y-auto overflow-x-hidden p-2">
+      {/* DEBUG: red background to see container boundaries */}
+      <div className="min-h-0 w-full bg-red-500 overflow-y-auto overflow-x-hidden p-2">
         {children}
       </div>
 
