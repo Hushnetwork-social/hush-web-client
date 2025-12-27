@@ -1,5 +1,7 @@
 "use client";
 
+import { debugLog } from "@/lib/debug-logger";
+
 interface ChatListItemProps {
   name: string;
   initials: string;
@@ -21,9 +23,21 @@ export function ChatListItem({
   isPersonalFeed = false,
   onClick,
 }: ChatListItemProps) {
+  const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    debugLog(`[ChatListItem] Click on "${name}": clickX=${e.clientX}, clickY=${e.clientY}, buttonTop=${rect.top.toFixed(0)}, buttonBottom=${rect.bottom.toFixed(0)}, buttonLeft=${rect.left.toFixed(0)}, buttonRight=${rect.right.toFixed(0)}`);
+    onClick?.();
+  };
+
+  const handleMouseEnter = (e: React.MouseEvent<HTMLButtonElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    debugLog(`[ChatListItem] MouseEnter "${name}": mouseX=${e.clientX}, mouseY=${e.clientY}, buttonTop=${rect.top.toFixed(0)}, buttonBottom=${rect.bottom.toFixed(0)}, buttonLeft=${rect.left.toFixed(0)}, buttonRight=${rect.right.toFixed(0)}`);
+  };
+
   return (
     <button
-      onClick={onClick}
+      onClick={handleClick}
+      onMouseEnter={handleMouseEnter}
       className={`
         w-full max-w-full flex items-center p-3 rounded-lg transition-colors cursor-pointer
         ${isSelected
