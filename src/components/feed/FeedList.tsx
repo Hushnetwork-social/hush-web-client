@@ -97,7 +97,7 @@ export function FeedList({ onFeedSelect }: FeedListProps) {
   }
 
   return (
-    <div className="space-y-2 p-3">
+    <div className="space-y-2">
       {feeds.map((feed) => {
         const lastMessage = getLastMessage(feed.id);
         const isPersonalFeed = feed.type === 'personal';
