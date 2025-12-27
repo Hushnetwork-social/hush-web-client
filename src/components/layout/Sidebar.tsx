@@ -72,7 +72,7 @@ export function Sidebar({
       </nav>
 
       {/* Feed List Area - takes all available space with vertical scroll */}
-      <div className="flex-1 min-h-0 w-full bg-hush-bg-element overflow-y-auto overflow-x-hidden p-2">
+      <div className="flex-1 min-h-0 h-0 w-full bg-hush-bg-element overflow-y-auto overflow-x-hidden p-2">
         {children}
       </div>
 
