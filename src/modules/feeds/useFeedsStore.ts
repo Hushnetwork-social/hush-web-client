@@ -118,6 +118,17 @@ interface FeedsActions {
 
   /** Get total unread count across all feeds */
   getTotalUnreadCount: () => number;
+
+  // ============= Per-Feed Sync Tracking =============
+
+  /** Mark a feed as needing sync (blockIndex changed on server) */
+  markFeedNeedsSync: (feedId: string, needsSync: boolean) => void;
+
+  /** Clear needsSync flag after messages have been fetched */
+  clearFeedNeedsSync: (feedId: string) => void;
+
+  /** Get feeds that need sync */
+  getFeedsNeedingSync: () => Feed[];
 }
 
 type FeedsStore = FeedsState & FeedsActions;
@@ -276,6 +287,9 @@ export const useFeedsStore = create<FeedsStore>()(
             updatedMessages = [...updatedMessages, ...trulyNewMessages];
           }
 
+          // Sort messages by timestamp to ensure correct order
+          updatedMessages.sort((a, b) => a.timestamp - b.timestamp);
+
           return {
             messages: {
               ...state.messages,
@@ -356,6 +370,28 @@ export const useFeedsStore = create<FeedsStore>()(
       getTotalUnreadCount: () => {
         const { feeds } = get();
         return feeds.reduce((total, feed) => total + (feed.unreadCount || 0), 0);
+      },
+
+      // ============= Per-Feed Sync Tracking Implementations =============
+
+      markFeedNeedsSync: (feedId, needsSync) => {
+        set((state) => ({
+          feeds: state.feeds.map((f) =>
+            f.id === feedId ? { ...f, needsSync } : f
+          ),
+        }));
+      },
+
+      clearFeedNeedsSync: (feedId) => {
+        set((state) => ({
+          feeds: state.feeds.map((f) =>
+            f.id === feedId ? { ...f, needsSync: false } : f
+          ),
+        }));
+      },
+
+      getFeedsNeedingSync: () => {
+        return get().feeds.filter((f) => f.needsSync === true);
       },
     }),
     {

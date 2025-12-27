@@ -23,6 +23,8 @@ export interface Feed {
   encryptedFeedKey?: string;
   /** Public signing address of the other participant (for chat feeds) */
   otherParticipantPublicSigningAddress?: string;
+  /** Flag indicating this feed has new data that needs to be fetched (blockIndex changed) */
+  needsSync?: boolean;
 }
 
 // Profile search result type
