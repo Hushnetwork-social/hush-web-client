@@ -41,9 +41,9 @@ export function Sidebar({
   const [showUserMenu, setShowUserMenu] = useState(false);
 
   return (
-    <aside className="w-[280px] flex-shrink-0 flex flex-col gap-1 min-h-0 max-h-full overflow-hidden">
+    <aside className="w-[280px] flex-shrink-0 flex flex-col min-h-0 max-h-full overflow-hidden">
       {/* Navigation Menu */}
-      <nav className="flex-shrink-0 bg-hush-bg-element p-2 space-y-1">
+      <nav className="flex-shrink-0 bg-hush-bg-element p-2 space-y-1 mb-1">
         {navItems.map((item) => (
           <button
             key={item.id}
