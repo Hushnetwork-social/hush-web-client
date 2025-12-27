@@ -55,6 +55,9 @@ export class FeedsSyncable implements ISyncable {
   // Set at the start of syncTask before any operations
   private shouldResetReactionTallyVersion = false;
 
+  // Track if initial full sync is complete - after this, only sync feed metadata
+  private isInitialSyncComplete = false;
+
   async syncTask(): Promise<void> {
     // Prevent concurrent syncs
     if (this.isSyncing) {
@@ -86,11 +89,17 @@ export class FeedsSyncable implements ISyncable {
     useFeedsStore.getState().setSyncing(true);
 
     try {
-      // Sync feeds from blockchain
+      // Sync feeds from blockchain (always - to get new feeds/metadata)
       await this.syncFeeds(credentials.signingPublicKey);
 
-      // Sync messages from blockchain
-      await this.syncMessages(credentials.signingPublicKey);
+      // Sync messages ONLY on initial load
+      // After initial sync, messages are fetched on-demand when user selects a feed
+      // New message notifications update badges via useNotifications hook
+      if (!this.isInitialSyncComplete) {
+        await this.syncMessages(credentials.signingPublicKey);
+        this.isInitialSyncComplete = true;
+        debugLog('[FeedsSyncable] Initial sync complete - subsequent syncs will only fetch feed metadata');
+      }
 
       // Check for personal feed and create if missing
       await this.ensurePersonalFeed(credentials);

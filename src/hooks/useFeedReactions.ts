@@ -106,63 +106,43 @@ export function useFeedReactions({
     deriveKey();
   }, [feedAesKey, feedId, feedPublicKey, isDerivingKey]);
 
-  // Poll for reaction tallies periodically
-  const lastPollRef = useRef<number>(0);
-  const isPollingRef = useRef<boolean>(false);
-  const POLL_INTERVAL_MS = 10_000; // Poll every 10 seconds
+  // Fetch reaction tallies ONCE when feed is first viewed
+  // No periodic polling - reactions are synced via:
+  // 1. FeedsSyncable initial load (server sends tallies with messages)
+  // 2. After user submits a reaction (refreshTallies called below)
+  const hasFetchedTalliesRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    if (!feedPrivateKey) {
-      return;
+  const refreshTallies = useCallback(async () => {
+    if (!feedPrivateKey) return;
+
+    const messages = useFeedsStore.getState().messages[feedId] ?? [];
+    const confirmedMessageIds = messages
+      .filter((m) => m.isConfirmed && m.id)
+      .map((m) => m.id)
+      .slice(-20); // Last 20 messages
+
+    if (confirmedMessageIds.length === 0) return;
+
+    try {
+      await bsgsManager.ensureLoaded();
+      debugLog(`[useFeedReactions] Fetching tallies for ${confirmedMessageIds.length} messages in feed ${feedId.substring(0, 8)}...`);
+      await reactionsServiceInstance.getTallies(feedId, confirmedMessageIds, feedPrivateKey);
+      debugLog(`[useFeedReactions] Tallies updated`);
+    } catch (err) {
+      debugError(`[useFeedReactions] Failed to fetch tallies:`, err);
     }
-
-    const pollTallies = async () => {
-      // Prevent concurrent polls
-      if (isPollingRef.current) return;
-
-      const now = Date.now();
-      if (now - lastPollRef.current < POLL_INTERVAL_MS) return;
-
-      isPollingRef.current = true;
-      lastPollRef.current = now;
-
-      // Get message IDs for this feed
-      const messages = useFeedsStore.getState().messages[feedId] ?? [];
-      const confirmedMessageIds = messages
-        .filter((m) => m.isConfirmed && m.id)
-        .map((m) => m.id)
-        .slice(-20); // Last 20 messages
-
-      if (confirmedMessageIds.length === 0) {
-        isPollingRef.current = false;
-        return;
-      }
-
-      try {
-        // Ensure BSGS is loaded (will be instant if already loaded)
-        await bsgsManager.ensureLoaded();
-
-        debugLog(`[useFeedReactions] Polling tallies for ${confirmedMessageIds.length} messages in feed ${feedId.substring(0, 8)}...`);
-        await reactionsServiceInstance.getTallies(feedId, confirmedMessageIds, feedPrivateKey);
-        debugLog(`[useFeedReactions] Tallies updated`);
-      } catch (err) {
-        debugError(`[useFeedReactions] Failed to poll tallies:`, err);
-      } finally {
-        isPollingRef.current = false;
-      }
-    };
-
-    // Initial poll (with small delay to avoid duplicate from strict mode)
-    const initialTimeout = setTimeout(pollTallies, 100);
-
-    // Set up interval
-    const interval = setInterval(pollTallies, POLL_INTERVAL_MS);
-
-    return () => {
-      clearTimeout(initialTimeout);
-      clearInterval(interval);
-    };
   }, [feedId, feedPrivateKey]);
+
+  // Fetch tallies once when feed is first opened (not on every render)
+  useEffect(() => {
+    if (!feedPrivateKey) return;
+    if (hasFetchedTalliesRef.current === feedId) return; // Already fetched for this feed
+
+    hasFetchedTalliesRef.current = feedId;
+    // Small delay to avoid duplicate from strict mode
+    const timeout = setTimeout(refreshTallies, 100);
+    return () => clearTimeout(timeout);
+  }, [feedId, feedPrivateKey, refreshTallies]);
 
   // Get reaction counts for a message
   const getReactionCounts = useCallback(
@@ -273,6 +253,9 @@ export function useFeedReactions({
         // Confirm the optimistic update - server accepted the reaction
         confirmReaction(messageId);
         debugLog(`[useFeedReactions] Reaction confirmed for ${messageId.substring(0, 8)}...`);
+
+        // Refresh tallies after successful submission to get updated counts
+        refreshTallies();
       } catch (err) {
         // Revert the optimistic update - proof failed or server rejected
         revertReaction(messageId);
@@ -290,6 +273,7 @@ export function useFeedReactions({
       setPendingReaction,
       confirmReaction,
       revertReaction,
+      refreshTallies,
     ]
   );
 
