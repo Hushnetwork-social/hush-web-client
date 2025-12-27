@@ -95,7 +95,7 @@ export const MessageBubble = memo(function MessageBubble({
         if (!showPicker) setShowPicker(false);
       }}
     >
-      <div className="relative group max-w-[60%] flex items-center">
+      <div className="relative group max-w-[60%] flex items-center min-w-0">
         {/* Action buttons - shows on hover, positioned on the LEFT side for own messages */}
         {isConfirmed && isOwn && (
           <div className="flex items-center mr-1">
@@ -152,10 +152,10 @@ export const MessageBubble = memo(function MessageBubble({
         )}
 
         {/* Message bubble wrapper - relative for reaction bar positioning */}
-        <div className="relative">
+        <div className="relative min-w-0 overflow-hidden">
           <div
             className={`
-              px-3 py-2
+              px-3 py-2 min-w-0
               ${
                 isOwn
                   ? "bg-hush-purple text-hush-bg-dark rounded-bubble-sent"
