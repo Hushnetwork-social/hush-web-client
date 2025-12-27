@@ -148,7 +148,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   };
 
   return (
-    <div className="h-screen bg-hush-bg-dark flex flex-col overflow-hidden">
+    <div className="fixed inset-0 bg-hush-bg-dark flex flex-col overflow-hidden">
       {/* Desktop Layout */}
       {!isMobile && (
         <div className="flex-1 min-h-0 flex flex-col p-2 gap-1">
