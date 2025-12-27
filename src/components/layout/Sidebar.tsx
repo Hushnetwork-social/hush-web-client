@@ -79,7 +79,7 @@ export function Sidebar({
       </div>
 
       {/* Spacer - absorbs extra space so feed list doesn't have gap */}
-      <div className="flex-1 min-h-0"></div>
+      <div className="flex-1 min-h-0 bg-hush-bg-element"></div>
 
       {/* User Profile Section - fixed at bottom */}
       <div className="flex-shrink-0 bg-hush-bg-element rounded-bl-xl p-2">
