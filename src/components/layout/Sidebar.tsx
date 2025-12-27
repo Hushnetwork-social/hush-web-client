@@ -41,42 +41,45 @@ export function Sidebar({
   const [showUserMenu, setShowUserMenu] = useState(false);
 
   return (
-    <aside className="w-[280px] flex-shrink-0 flex flex-col gap-1 min-h-0 max-h-full overflow-hidden">
-      {/* Navigation Menu */}
-      <nav className="bg-hush-bg-element p-2 space-y-1 flex-shrink-0">
-        {navItems.map((item) => (
-          <button
-            key={item.id}
-            onClick={() => !item.comingSoon && onNavSelect(item.id)}
-            disabled={item.comingSoon}
-            className={`
-              w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl
-              transition-colors duration-150
-              ${item.comingSoon ? "cursor-not-allowed opacity-60" : "cursor-pointer"}
-              ${
-                selectedNav === item.id && !item.comingSoon
-                  ? "bg-hush-purple text-hush-bg-dark"
-                  : "text-hush-text-accent hover:bg-hush-bg-hover"
-              }
-            `}
-          >
-            {item.icon}
-            <span className="text-sm font-medium">{item.label}</span>
-            {item.comingSoon && (
-              <span className="ml-auto px-1.5 py-0.5 rounded text-[9px] font-semibold bg-hush-text-accent/20 text-hush-text-accent">
-                Soon
-              </span>
-            )}
-          </button>
-        ))}
-      </nav>
+    <aside className="w-[280px] flex-shrink-0 flex flex-col gap-1 min-h-0 max-h-full overflow-hidden justify-between">
+      {/* Top section: Navigation + Feed List */}
+      <div className="flex flex-col gap-1 min-h-0 overflow-hidden">
+        {/* Navigation Menu */}
+        <nav className="bg-hush-bg-element p-2 space-y-1 flex-shrink-0">
+          {navItems.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => !item.comingSoon && onNavSelect(item.id)}
+              disabled={item.comingSoon}
+              className={`
+                w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl
+                transition-colors duration-150
+                ${item.comingSoon ? "cursor-not-allowed opacity-60" : "cursor-pointer"}
+                ${
+                  selectedNav === item.id && !item.comingSoon
+                    ? "bg-hush-purple text-hush-bg-dark"
+                    : "text-hush-text-accent hover:bg-hush-bg-hover"
+                }
+              `}
+            >
+              {item.icon}
+              <span className="text-sm font-medium">{item.label}</span>
+              {item.comingSoon && (
+                <span className="ml-auto px-1.5 py-0.5 rounded text-[9px] font-semibold bg-hush-text-accent/20 text-hush-text-accent">
+                  Soon
+                </span>
+              )}
+            </button>
+          ))}
+        </nav>
 
-      {/* Feed List Area - takes all available space with vertical scroll */}
-      <div className="flex-1 min-h-0 h-0 w-full bg-hush-bg-element overflow-y-auto overflow-x-hidden p-2">
-        {children}
+        {/* Feed List Area - scrollable */}
+        <div className="flex-1 min-h-0 w-full bg-hush-bg-element overflow-y-auto overflow-x-hidden p-2">
+          {children}
+        </div>
       </div>
 
-      {/* User Profile Section - separate box at bottom with outer corner */}
+      {/* User Profile Section - always at bottom */}
       <div className="bg-hush-bg-element rounded-bl-xl p-2 flex-shrink-0">
         <div className="relative">
           <button
