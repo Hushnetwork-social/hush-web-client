@@ -25,7 +25,7 @@ export function ChatListItem({
     <button
       onClick={onClick}
       className={`
-        w-full flex items-center p-3 rounded-lg transition-colors cursor-pointer
+        w-full max-w-full flex items-center p-3 rounded-lg transition-colors cursor-pointer
         ${isSelected
           ? "bg-hush-purple/20 border-2 border-hush-purple"
           : "bg-hush-bg-element border border-hush-purple/70 hover:bg-hush-bg-hover hover:border-hush-purple/90"

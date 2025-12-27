@@ -25,6 +25,7 @@ export function FeedList({ onFeedSelect }: FeedListProps) {
     onFeedSelect?.(feedId);
 
     // Mark feed as read when clicking on it
+    // Note: needsSync is cleared by FeedsSyncable after fetching messages
     const feed = feeds.find((f) => f.id === feedId);
     if (feed && feed.unreadCount > 0 && credentials?.signingPublicKey) {
       // Optimistic update
@@ -97,7 +98,7 @@ export function FeedList({ onFeedSelect }: FeedListProps) {
   }
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2 w-full max-w-full">
       {feeds.map((feed) => {
         const lastMessage = getLastMessage(feed.id);
         const isPersonalFeed = feed.type === 'personal';
