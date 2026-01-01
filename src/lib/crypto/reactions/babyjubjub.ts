@@ -77,9 +77,8 @@ export function addPoints(p1: Point, p2: Point): Point {
   const y1x2 = mod(p1.y * p2.x);
   const y1y2 = mod(p1.y * p2.y);
   const x1x2 = mod(p1.x * p2.x);
-  const dx1x2y1y2 = mod(d * x1x2 * p1.y * p2.y / p1.y / p2.y * y1y2);
 
-  // Recompute dx1x2y1y2 properly
+  // Compute d * x1 * x2 * y1 * y2
   const dxy = mod(d * mod(p1.x * p2.x) * mod(p1.y * p2.y));
 
   const x3Num = mod(x1y2 + y1x2);

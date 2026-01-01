@@ -269,7 +269,7 @@ export default function AccountPage() {
             <span>Download Keys</span>
           </button>
           <p className="mt-2 text-xs text-hush-text-accent">
-            Keep your keys safe! You'll need them to recover your account.
+            Keep your keys safe! You&apos;ll need them to recover your account.
           </p>
         </section>
 

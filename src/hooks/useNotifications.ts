@@ -261,6 +261,7 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
         }, reconnectDelay);
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [autoReconnect, reconnectDelay]
   );
 
@@ -353,6 +354,7 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
     return () => {
       disconnect();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, userId]);
 
   return {

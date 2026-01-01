@@ -173,6 +173,7 @@ class MembershipProofManagerClass {
    * Get recent Merkle roots for grace period verification
    * Note: Not yet implemented in binary service - returns empty for now
    */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async getRecentRoots(_feedId: string, _count: number = 3): Promise<bigint[]> {
     // TODO: Implement getRecentMerkleRoots in membership-binary.ts when needed
     debugLog('[MembershipProofManager] getRecentRoots not yet implemented');

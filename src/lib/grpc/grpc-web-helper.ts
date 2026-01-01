@@ -59,7 +59,8 @@ function encodeVarintField(fieldNumber: number, value: number): number[] {
   return [...encodeVarint(tag), ...encodeVarint(value)];
 }
 
-// Encode a bool field for protobuf
+// Encode a bool field for protobuf (used for protobuf message encoding)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function encodeBoolField(fieldNumber: number, value: boolean): number[] {
   return encodeVarintField(fieldNumber, value ? 1 : 0);
 }

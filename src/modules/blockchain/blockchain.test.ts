@@ -7,7 +7,7 @@
  * 3. Error handling
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { useBlockchainStore } from './useBlockchainStore';
 import { BlockHeightSyncable } from './BlockHeightSyncable';
 import * as BlockchainService from './BlockchainService';

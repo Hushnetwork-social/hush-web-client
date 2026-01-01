@@ -19,6 +19,7 @@ import type { CircuitInputs, WorkerMessage } from './types';
 // Circuit file buffers (loaded on init)
 let wasmBuffer: ArrayBuffer | null = null;
 let zkeyBuffer: ArrayBuffer | null = null;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 let currentVersion: string | null = null;
 
 /**

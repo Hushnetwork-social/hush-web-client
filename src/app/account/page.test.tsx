@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import AccountPage from './page';
 import { useAppStore } from '@/stores';
 
@@ -24,9 +24,9 @@ vi.mock('next/navigation', () => ({
 
 // Mock next/dynamic to render components directly
 vi.mock('next/dynamic', () => ({
-  default: (loader: () => Promise<any>) => {
+  default: () => {
     // Return a mock component that renders nothing for PasswordDialog
-    const Component = ({ isOpen, onConfirm, onCancel, title }: any) => {
+    const Component = ({ isOpen, onConfirm, onCancel, title }: { isOpen: boolean; onConfirm: (password: string) => void; onCancel: () => void; title: string }) => {
       if (!isOpen) return null;
       return (
         <div data-testid="password-dialog" role="dialog">
@@ -52,15 +52,15 @@ vi.mock('@/lib/debug-logger', () => ({
 const mockDownloadCredentialsFile = vi.fn().mockResolvedValue(undefined);
 const mockCreateUpdateIdentityTransaction = vi.fn().mockResolvedValue('{"mocked":"transaction"}');
 vi.mock('@/lib/crypto', () => ({
-  downloadCredentialsFile: (...args: any[]) => mockDownloadCredentialsFile(...args),
-  createUpdateIdentityTransaction: (...args: any[]) => mockCreateUpdateIdentityTransaction(...args),
+  downloadCredentialsFile: (...args: unknown[]) => mockDownloadCredentialsFile(...args),
+  createUpdateIdentityTransaction: (...args: unknown[]) => mockCreateUpdateIdentityTransaction(...args),
   hexToBytes: vi.fn().mockReturnValue(new Uint8Array(32)),
 }));
 
 // Mock the IdentityService
 const mockSubmitTransaction = vi.fn().mockResolvedValue({ successful: true, message: 'OK' });
 vi.mock('@/modules/identity/IdentityService', () => ({
-  submitTransaction: (...args: any[]) => mockSubmitTransaction(...args),
+  submitTransaction: (...args: unknown[]) => mockSubmitTransaction(...args),
 }));
 
 describe('AccountPage', () => {

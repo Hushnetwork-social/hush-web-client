@@ -7,7 +7,7 @@
 
 import { buildPoseidon, type Poseidon } from 'circomlibjs';
 import { BABYJUBJUB, DOMAIN_SEPARATORS, FEED_KEY_DOMAIN } from './constants';
-import { bigintToBytes, bytesToBigint } from './babyjubjub';
+import { bytesToBigint } from './babyjubjub';
 
 // Field modulus (same as Baby JubJub prime)
 const F = BABYJUBJUB.p;

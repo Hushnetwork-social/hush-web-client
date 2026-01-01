@@ -1,6 +1,6 @@
 "use client";
 
-import { EMOJIS, type EmojiType } from "@/lib/crypto/reactions/constants";
+import { EMOJIS } from "@/lib/crypto/reactions/constants";
 import type { EmojiCounts } from "@/modules/reactions/useReactionsStore";
 
 interface ReactionBarProps {

@@ -80,7 +80,7 @@ describe('decryptTally', () => {
     it('should decrypt all 6 emoji slots', async () => {
       mockSolve.mockReturnValue(5);
 
-      const result = await decryptTally(sampleTally, 12345n);
+      await decryptTally(sampleTally, 12345n);
 
       expect(mockGrpcToCiphertext).toHaveBeenCalledTimes(6);
       expect(mockDecrypt).toHaveBeenCalledTimes(6);

@@ -55,13 +55,14 @@ export function decryptEmojiBackup(
  */
 export async function recoverReaction(
   messageId: string,
-  feedId: string,
+  _feedId: string,
   userSecret: bigint,
-  getBackupFromServer: (nullifier: string) => Promise<{ exists: boolean; encryptedBackup: Uint8Array | null }>
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _getBackupFromServer: (nullifier: string) => Promise<{ exists: boolean; encryptedBackup: Uint8Array | null }>
 ): Promise<number | null> {
   // Compute the backup key
   const messageIdBigint = uuidToBigint(messageId);
-  const backupKey = await computeBackupKey(userSecret, messageIdBigint);
+  await computeBackupKey(userSecret, messageIdBigint);
 
   // This would typically involve:
   // 1. Computing the nullifier

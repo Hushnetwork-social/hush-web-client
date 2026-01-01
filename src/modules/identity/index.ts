@@ -10,7 +10,7 @@
  */
 
 import type { SyncProviderAPI } from '@/lib/sync';
-import { IdentitySyncable, resetIdentitySyncState } from './IdentitySyncable';
+import { IdentitySyncable } from './IdentitySyncable';
 import { debugLog } from '@/lib/debug-logger';
 
 // Re-export public API

@@ -8,7 +8,7 @@
  * - Mobile PWA: Web Push notifications
  */
 
-import { detectPlatform, type Platform } from '../platform';
+import { detectPlatform } from '../platform';
 import { debugLog, debugError } from '../debug-logger';
 
 export interface NotificationEvent {
@@ -29,7 +29,8 @@ export interface NotificationHandler {
  * (Already handled by useNotifications hook and InAppToastContainer)
  */
 class BrowserNotificationHandler implements NotificationHandler {
-  async showNotification(event: NotificationEvent): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async showNotification(_event: NotificationEvent): Promise<void> {
     // Browser uses in-app toasts which are handled directly
     // in useNotifications via the addToast callback
     debugLog('[BrowserNotificationHandler] showNotification called (handled by toast system)');
@@ -135,7 +136,7 @@ class MobilePWANotificationHandler implements NotificationHandler {
 
     try {
       // Use the Notification API directly (works without service worker when app is open)
-      const notification = new Notification(event.senderName || 'Hush Feeds', {
+      new Notification(event.senderName || 'Hush Feeds', {
         body: event.messagePreview || 'New message',
         icon: '/icons/icon-192.png',
         badge: '/icons/badge-72.png',

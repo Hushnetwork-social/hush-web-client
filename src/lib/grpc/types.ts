@@ -9,6 +9,7 @@ export interface GrpcResponse<T> {
 
 // ============= Blockchain Service Types =============
 
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface GetBlockchainHeightRequest {}
 
 export interface GetBlockchainHeightReply {

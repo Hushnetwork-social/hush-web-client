@@ -4,7 +4,7 @@
  * Tests for the message bubble component with reaction support.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MessageBubble } from './MessageBubble';
 import type { EmojiCounts } from '@/modules/reactions/useReactionsStore';

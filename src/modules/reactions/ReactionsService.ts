@@ -32,7 +32,7 @@ import {
   localReactionCache,
 } from '@/lib/crypto/reactions/recovery';
 import { bsgsManager, solveDiscreteLog } from '@/lib/crypto/reactions/bsgs';
-import { zkProver, generateProof } from '@/lib/zk';
+import { generateProof } from '@/lib/zk';
 import { circuitManager } from '@/lib/zk/circuitManager';
 import { membershipProofManager } from './MembershipProofManager';
 import { useReactionsStore, type EmojiCounts, EMPTY_EMOJI_COUNTS } from './useReactionsStore';

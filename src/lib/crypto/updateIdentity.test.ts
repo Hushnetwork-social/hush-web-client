@@ -7,7 +7,7 @@
  * 3. Correct PayloadKind GUID
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   PAYLOAD_GUIDS,
   createUpdateIdentityTransaction,

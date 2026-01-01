@@ -10,7 +10,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { EmojiType } from '@/lib/crypto/reactions';
-import { debugLog, debugWarn } from '@/lib/debug-logger';
+import { debugLog } from '@/lib/debug-logger';
 
 /**
  * Emoji counts for a message
@@ -274,6 +274,7 @@ export const useReactionsStore = create<ReactionsStore>()(
         if (!pending) return;
 
         set((state) => {
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
           const { [messageId]: _, ...remainingPending } = state.pendingReactions;
 
           // Update myReaction with the confirmed value
@@ -298,6 +299,7 @@ export const useReactionsStore = create<ReactionsStore>()(
 
       revertReaction: (messageId) => {
         set((state) => {
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
           const { [messageId]: _, ...remainingPending } = state.pendingReactions;
           return { pendingReactions: remainingPending };
         });

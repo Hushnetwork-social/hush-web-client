@@ -147,7 +147,6 @@ class ZkProver {
     // Total: 256 bytes
 
     const buffer = new ArrayBuffer(256);
-    const view = new DataView(buffer);
     let offset = 0;
 
     // Pack pi_a (skip the third element, it's always 1)

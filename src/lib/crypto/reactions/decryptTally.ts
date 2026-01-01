@@ -4,11 +4,11 @@
  * Decrypts the homomorphic ElGamal tally to get actual emoji counts.
  */
 
-import { decrypt, grpcToCiphertext, type Ciphertext } from './elgamal';
+import { decrypt, grpcToCiphertext } from './elgamal';
 import { deriveFeedElGamalKey } from './poseidon';
-import { solveDiscreteLog, bsgsManager } from './bsgs';
+import { bsgsManager } from './bsgs';
 import { EMOJI_COUNT } from './constants';
-import { debugLog, debugWarn, debugError } from '@/lib/debug-logger';
+import { debugLog } from '@/lib/debug-logger';
 
 /**
  * EC Point type - handles both uppercase (X, Y) and lowercase (x, y) formats

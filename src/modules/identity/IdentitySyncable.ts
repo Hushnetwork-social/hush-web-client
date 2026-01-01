@@ -36,7 +36,7 @@ export class IdentitySyncable implements ISyncable {
       return;
     }
 
-    const { credentials, currentUser, isAuthenticated } = useAppStore.getState();
+    const { credentials, currentUser } = useAppStore.getState();
 
     if (!credentials?.signingPublicKey) {
       debugLog('[IdentitySyncable] Skipping - no credentials');

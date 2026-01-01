@@ -131,7 +131,6 @@ describe('KeyDisplayField', () => {
 
     it('should show Copied state when isCopied is true', () => {
       // Re-mock with isCopied = true
-      vi.mocked(vi.importActual('@/hooks')).useCopyToClipboard;
       vi.doMock('@/hooks', () => ({
         useCopyToClipboard: () => ({
           copy: mockCopy,

@@ -19,7 +19,6 @@ import {
   getGenerator,
   isIdentity,
   pointToKey,
-  bytesToBigint,
 } from './babyjubjub';
 import { BSGS } from './constants';
 

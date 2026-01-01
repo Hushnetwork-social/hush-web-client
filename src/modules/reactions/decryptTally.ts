@@ -8,17 +8,15 @@
  */
 
 import {
-  type Point,
   decrypt,
   grpcToCiphertext,
-  solveDiscreteLog,
   bsgsManager,
   EMOJIS,
   type EmojiType,
   deriveFeedElGamalKey,
 } from '@/lib/crypto/reactions';
 import type { EmojiCounts } from './useReactionsStore';
-import { debugLog, debugWarn, debugError } from '@/lib/debug-logger';
+import { debugLog } from '@/lib/debug-logger';
 
 /**
  * Server reaction tally format (received from API)
