@@ -25,19 +25,39 @@ npm run build
 
 ## Code Quality
 
-### Linting
+### Pre-Commit Check (REQUIRED)
 
-ESLint is configured with Next.js recommended rules plus TypeScript strict mode.
+**Before every git commit**, run the local CI script to catch issues early:
 
-```bash
-# Run lint check
-npm run lint
+```powershell
+# Windows (PowerShell)
+cd hush-web-client
+.\scripts\ci-local.ps1
 ```
 
-**Before committing**, ensure:
-1. All tests pass: `npm run test:run`
-2. No lint errors: `npm run lint`
-3. Build succeeds: `npm run build`
+```bash
+# Linux/Mac
+cd hush-web-client
+./scripts/ci-local.sh
+```
+
+This script runs the same checks as GitHub CI:
+1. `npm ci` - Install dependencies
+2. `npm run lint` - ESLint check
+3. `npm run test:run` - Unit tests
+4. `npm run build` - Production build
+
+**Only commit if all 4 steps pass!**
+
+### Manual Commands
+
+If you prefer running checks individually:
+
+```bash
+npm run lint      # ESLint check
+npm run test:run  # Unit tests
+npm run build     # Production build
+```
 
 ### CI/CD
 
