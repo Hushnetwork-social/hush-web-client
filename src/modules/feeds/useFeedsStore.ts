@@ -152,6 +152,9 @@ interface FeedsActions {
   /** Update a member's role in a group feed */
   updateMemberRole: (feedId: string, memberAddress: string, role: GroupMemberRole) => void;
 
+  /** Update a member's data in a group feed (partial update) */
+  updateGroupMember: (feedId: string, memberAddress: string, updates: Partial<GroupFeedMember>) => void;
+
   /** Get members for a specific group feed */
   getGroupMembers: (feedId: string) => GroupFeedMember[];
 
@@ -481,6 +484,21 @@ export const useFeedsStore = create<FeedsStore>()(
               ...state.groupMembers,
               [feedId]: currentMembers.map((m) =>
                 m.publicAddress === memberAddress ? { ...m, role } : m
+              ),
+            },
+          };
+        });
+      },
+
+      updateGroupMember: (feedId, memberAddress, updates) => {
+        debugLog(`[FeedsStore] updateGroupMember: feedId=${feedId}, address=${memberAddress}`, updates);
+        set((state) => {
+          const currentMembers = state.groupMembers[feedId] || [];
+          return {
+            groupMembers: {
+              ...state.groupMembers,
+              [feedId]: currentMembers.map((m) =>
+                m.publicAddress === memberAddress ? { ...m, ...updates } : m
               ),
             },
           };
