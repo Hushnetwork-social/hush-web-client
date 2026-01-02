@@ -266,4 +266,95 @@ describe('MessageBubble', () => {
       expect(onReactionSelect).toHaveBeenCalled();
     });
   });
+
+  describe('Sender Name (Group Messages)', () => {
+    it('should not show sender name when showSender is false', () => {
+      render(
+        <MessageBubble
+          {...defaultProps}
+          showSender={false}
+          senderName="Alice"
+        />
+      );
+      expect(screen.queryByText('Alice')).not.toBeInTheDocument();
+    });
+
+    it('should not show sender name for own messages', () => {
+      render(
+        <MessageBubble
+          {...defaultProps}
+          isOwn={true}
+          showSender={true}
+          senderName="Alice"
+        />
+      );
+      expect(screen.queryByText('Alice')).not.toBeInTheDocument();
+    });
+
+    it('should show sender name for group messages from others', () => {
+      render(
+        <MessageBubble
+          {...defaultProps}
+          isOwn={false}
+          showSender={true}
+          senderName="Alice"
+        />
+      );
+      expect(screen.getByText('Alice')).toBeInTheDocument();
+    });
+
+    it('should show admin badge when sender is Admin', () => {
+      render(
+        <MessageBubble
+          {...defaultProps}
+          isOwn={false}
+          showSender={true}
+          senderName="Bob"
+          senderRole="Admin"
+        />
+      );
+      expect(screen.getByText('Bob')).toBeInTheDocument();
+      // Admin badge should be present (role="status" from RoleBadge)
+      expect(screen.getByRole('status', { name: 'Role: Admin' })).toBeInTheDocument();
+    });
+
+    it('should not show badge when sender is Member', () => {
+      render(
+        <MessageBubble
+          {...defaultProps}
+          isOwn={false}
+          showSender={true}
+          senderName="Charlie"
+          senderRole="Member"
+        />
+      );
+      expect(screen.getByText('Charlie')).toBeInTheDocument();
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+
+    it('should not show badge when sender role is undefined', () => {
+      render(
+        <MessageBubble
+          {...defaultProps}
+          isOwn={false}
+          showSender={true}
+          senderName="Dave"
+        />
+      );
+      expect(screen.getByText('Dave')).toBeInTheDocument();
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+
+    it('should not show sender name when senderName is not provided', () => {
+      render(
+        <MessageBubble
+          {...defaultProps}
+          isOwn={false}
+          showSender={true}
+        />
+      );
+      // Message should render without sender header
+      expect(screen.getByText('Hello, world!')).toBeInTheDocument();
+    });
+  });
 });

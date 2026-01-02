@@ -5,8 +5,9 @@ import { Check, SmilePlus, Reply } from "lucide-react";
 import { ReactionPicker } from "./ReactionPicker";
 import { ReactionBar } from "./ReactionBar";
 import { ReplyPreview } from "./ReplyPreview";
+import { RoleBadge } from "@/components/shared/RoleBadge";
 import type { EmojiCounts } from "@/modules/reactions/useReactionsStore";
-import type { FeedMessage } from "@/types";
+import type { FeedMessage, GroupMemberRole } from "@/types";
 
 interface MessageBubbleProps {
   content: string;
@@ -29,6 +30,12 @@ interface MessageBubbleProps {
   message?: FeedMessage;
   /** Reply to Message: Function to resolve display name from public key */
   resolveDisplayName?: (publicKey: string) => string;
+  /** Group Feed: Whether to show sender name (for group messages from others) */
+  showSender?: boolean;
+  /** Group Feed: Display name of the sender */
+  senderName?: string;
+  /** Group Feed: Role of the sender in the group */
+  senderRole?: GroupMemberRole;
 }
 
 export const MessageBubble = memo(function MessageBubble({
@@ -46,6 +53,9 @@ export const MessageBubble = memo(function MessageBubble({
   onScrollToMessage,
   message,
   resolveDisplayName,
+  showSender = false,
+  senderName,
+  senderRole,
 }: MessageBubbleProps) {
   const [showPicker, setShowPicker] = useState(false);
   const [isHovering, setIsHovering] = useState(false);
@@ -86,16 +96,32 @@ export const MessageBubble = memo(function MessageBubble({
   // Layout: Left (others) 40% | Center (gap) 20% | Right (own) 40%
   return (
     <div
-      className={`flex ${isOwn ? "justify-end" : "justify-start"}`}
+      className={`flex flex-col ${isOwn ? "items-end" : "items-start"}`}
       style={{ marginBottom: hasActiveReactions ? '16px' : undefined }}
-      onMouseEnter={() => setIsHovering(true)}
-      onMouseLeave={() => {
-        setIsHovering(false);
-        // Keep picker open if hovering over it
-        if (!showPicker) setShowPicker(false);
-      }}
     >
-      <div className="relative group max-w-[60%] flex items-center min-w-0">
+      {/* Sender name header - only shown for group messages from others */}
+      {showSender && senderName && !isOwn && (
+        <div className="flex items-center gap-1.5 mb-1 ml-1">
+          <span className="text-xs font-medium text-hush-text-accent">
+            {senderName}
+          </span>
+          {senderRole === 'Admin' && (
+            <RoleBadge role="Admin" size="sm" showLabel={false} />
+          )}
+        </div>
+      )}
+
+      {/* Message row with action buttons */}
+      <div
+        className={`flex ${isOwn ? "justify-end" : "justify-start"} w-full`}
+        onMouseEnter={() => setIsHovering(true)}
+        onMouseLeave={() => {
+          setIsHovering(false);
+          // Keep picker open if hovering over it
+          if (!showPicker) setShowPicker(false);
+        }}
+      >
+        <div className="relative group max-w-[60%] flex items-center min-w-0">
         {/* Action buttons - shows on hover, positioned on the LEFT side for own messages */}
         {isConfirmed && isOwn && (
           <div className="flex items-center mr-1">
@@ -258,6 +284,7 @@ export const MessageBubble = memo(function MessageBubble({
             )}
           </div>
         )}
+        </div>
       </div>
     </div>
   );
