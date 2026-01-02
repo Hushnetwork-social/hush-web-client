@@ -679,5 +679,78 @@ describe('ChatView', () => {
         expect(screen.getByText('• 2 participants')).toBeInTheDocument();
       });
     });
+
+    describe('Member Panel Integration', () => {
+      it('should show Members button for group feeds', () => {
+        render(<ChatView feed={mockGroupFeed} />);
+
+        expect(screen.getByRole('button', { name: /view group members/i })).toBeInTheDocument();
+      });
+
+      it('should not show Members button for chat feeds', () => {
+        render(<ChatView feed={mockFeed} />);
+
+        expect(screen.queryByRole('button', { name: /view group members/i })).not.toBeInTheDocument();
+      });
+
+      it('should open MemberListPanel when Members button is clicked', () => {
+        render(<ChatView feed={mockGroupFeed} />);
+
+        // Click the Members button
+        const membersButton = screen.getByRole('button', { name: /view group members/i });
+        fireEvent.click(membersButton);
+
+        // MemberListPanel should now be visible (it has role="dialog")
+        expect(screen.getByRole('dialog')).toBeInTheDocument();
+      });
+
+      it('should close MemberListPanel when close button is clicked', () => {
+        render(<ChatView feed={mockGroupFeed} />);
+
+        // Open the panel
+        const membersButton = screen.getByRole('button', { name: /view group members/i });
+        fireEvent.click(membersButton);
+
+        // Panel should be open
+        expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+        // Click close button in panel
+        const closeButton = screen.getByRole('button', { name: /close member panel/i });
+        fireEvent.click(closeButton);
+
+        // Panel should be closed
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      });
+
+      it('should show member list in MemberListPanel', () => {
+        render(<ChatView feed={mockGroupFeed} />);
+
+        // Open the panel
+        const membersButton = screen.getByRole('button', { name: /view group members/i });
+        fireEvent.click(membersButton);
+
+        // Should show member count in panel header
+        expect(screen.getByRole('heading', { name: /members \(3\)/i })).toBeInTheDocument();
+
+        // Should show member names
+        expect(screen.getByText('Alice Admin')).toBeInTheDocument();
+        expect(screen.getByText('Bob Member')).toBeInTheDocument();
+      });
+
+      it('should not show MemberListPanel for personal feeds', () => {
+        const personalFeed: Feed = {
+          id: 'personal-feed',
+          name: 'My Feed',
+          type: 'personal',
+          participants: [],
+          createdAt: Date.now(),
+          lastMessageAt: Date.now(),
+        };
+
+        render(<ChatView feed={personalFeed} />);
+
+        expect(screen.queryByRole('button', { name: /view group members/i })).not.toBeInTheDocument();
+      });
+    });
   });
 });
