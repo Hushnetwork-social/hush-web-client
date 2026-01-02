@@ -2,17 +2,18 @@
 
 import { useRef, useMemo, useCallback, useState, useEffect } from "react";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
-import { MessageSquare, Lock, ArrowLeft } from "lucide-react";
+import { MessageSquare, Lock, ArrowLeft, Users } from "lucide-react";
 import { MessageBubble } from "./MessageBubble";
 import { MessageInput, type MessageInputHandle } from "./MessageInput";
 import { ReplyContextBar } from "./ReplyContextBar";
 import { useAppStore } from "@/stores";
 import { useFeedsStore, sendMessage } from "@/modules/feeds";
 import { useFeedReactions } from "@/hooks/useFeedReactions";
-import type { Feed, FeedMessage } from "@/types";
+import type { Feed, FeedMessage, GroupFeedMember, GroupMemberRole } from "@/types";
 
-// Empty array constant to avoid creating new references
+// Empty array constants to avoid creating new references
 const EMPTY_MESSAGES: FeedMessage[] = [];
+const EMPTY_MEMBERS: GroupFeedMember[] = [];
 
 interface ChatViewProps {
   feed: Feed;
@@ -27,10 +28,34 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   const messageInputRef = useRef<MessageInputHandle>(null);
   const { credentials } = useAppStore();
   const messagesMap = useFeedsStore((state) => state.messages);
+  const groupMembersMap = useFeedsStore((state) => state.groupMembers);
   const messages = useMemo(
     () => messagesMap[feed.id] ?? EMPTY_MESSAGES,
     [messagesMap, feed.id]
   );
+  const groupMembers = useMemo(
+    () => (feed.type === 'group' ? groupMembersMap[feed.id] ?? EMPTY_MEMBERS : EMPTY_MEMBERS),
+    [groupMembersMap, feed.id, feed.type]
+  );
+
+  // Check if current user is admin of the group
+  const isGroupFeed = feed.type === 'group';
+
+  // Get sender role for group messages
+  const getSenderRole = useCallback((publicKey: string) => {
+    if (!isGroupFeed) return undefined;
+    const member = groupMembers.find(m => m.publicAddress === publicKey);
+    return member?.role;
+  }, [isGroupFeed, groupMembers]);
+
+  // Get sender display name for group messages
+  const getSenderDisplayName = useCallback((publicKey: string): string | undefined => {
+    if (!isGroupFeed) return undefined;
+    // Don't show sender name for own messages
+    if (publicKey === credentials?.signingPublicKey) return undefined;
+    const member = groupMembers.find(m => m.publicAddress === publicKey);
+    return member?.displayName ?? publicKey.substring(0, 10) + "...";
+  }, [isGroupFeed, groupMembers, credentials?.signingPublicKey]);
 
   // Use the feed reactions hook for optimistic updates
   const {
@@ -98,6 +123,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
 
   // Reply to Message: Resolve display name from public key
   // For chat feeds: if it's the other participant, use feed.name; if it's me, use "You"
+  // For group feeds: look up member in groupMembers list
   const resolveDisplayName = useCallback((publicKey: string): string => {
     if (publicKey === credentials?.signingPublicKey) {
       return "You";
@@ -106,9 +132,16 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
     if (feed.type === "chat" && publicKey === feed.otherParticipantPublicSigningAddress) {
       return feed.name;
     }
+    // For group feeds, look up member display name
+    if (feed.type === "group") {
+      const member = groupMembers.find(m => m.publicAddress === publicKey);
+      if (member) {
+        return member.displayName;
+      }
+    }
     // Fallback: truncated public key
     return publicKey.substring(0, 10) + "...";
-  }, [credentials?.signingPublicKey, feed.type, feed.name, feed.otherParticipantPublicSigningAddress]);
+  }, [credentials?.signingPublicKey, feed.type, feed.name, feed.otherParticipantPublicSigningAddress, groupMembers]);
 
   // Format timestamp for display
   const formatTime = (timestamp: number): string => {
@@ -172,6 +205,12 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
                 <ArrowLeft className="w-5 h-5 text-hush-text-primary" />
               </button>
             )}
+            {/* Group icon for group feeds */}
+            {isGroupFeed && (
+              <div className="w-10 h-10 rounded-full bg-hush-purple/20 flex items-center justify-center flex-shrink-0">
+                <Users className="w-5 h-5 text-hush-purple" aria-hidden="true" />
+              </div>
+            )}
             <div>
               <h2 className="text-lg font-semibold text-hush-text-primary">
                 {feed.name}
@@ -179,9 +218,11 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
               <div className="flex items-center space-x-2 text-xs text-hush-text-accent">
                 <Lock className="w-3 h-3" />
                 <span>{getFeedTypeLabel(feed.type)}</span>
-                {feed.type !== "personal" && feed.participants.length > 0 && (
+                {isGroupFeed && groupMembers.length > 0 ? (
+                  <span>• {groupMembers.length} members</span>
+                ) : feed.type !== "personal" && feed.participants.length > 0 ? (
                   <span>• {feed.participants.length} participants</span>
-                )}
+                ) : null}
               </div>
             </div>
           </div>
@@ -228,6 +269,9 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
                   onScrollToMessage={handleScrollToMessage}
                   message={message}
                   resolveDisplayName={resolveDisplayName}
+                  showSender={isGroupFeed}
+                  senderName={getSenderDisplayName(message.senderPublicKey)}
+                  senderRole={getSenderRole(message.senderPublicKey)}
                 />
               </div>
             )}

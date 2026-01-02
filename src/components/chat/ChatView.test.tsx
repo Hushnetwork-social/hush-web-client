@@ -10,7 +10,7 @@ import { ChatView } from './ChatView';
 import { useAppStore } from '@/stores';
 import { useFeedsStore } from '@/modules/feeds/useFeedsStore';
 import { useReactionsStore } from '@/modules/reactions/useReactionsStore';
-import type { Feed } from '@/types';
+import type { Feed, GroupFeedMember } from '@/types';
 
 // Mock scrollIntoView for jsdom
 Element.prototype.scrollIntoView = vi.fn();
@@ -443,6 +443,241 @@ describe('ChatView', () => {
       render(<ChatView feed={mockFeed} />);
 
       expect(screen.getByText('Reply to deleted message')).toBeInTheDocument();
+    });
+  });
+
+  describe('Group Feed Support', () => {
+    const mockGroupFeed: Feed = {
+      id: 'group-feed-123',
+      name: 'Study Group',
+      type: 'group',
+      participants: ['user-1', 'user-2', 'user-3'],
+      createdAt: Date.now(),
+      lastMessageAt: Date.now(),
+      unreadCount: 0,
+      updatedAt: Date.now(),
+    };
+
+    const mockGroupMembers: GroupFeedMember[] = [
+      { publicAddress: 'admin-user', displayName: 'Alice Admin', role: 'Admin' },
+      { publicAddress: 'member-user', displayName: 'Bob Member', role: 'Member' },
+      { publicAddress: 'my-public-key', displayName: 'TestUser', role: 'Member' },
+    ];
+
+    beforeEach(() => {
+      // Reset stores and set up group members
+      useFeedsStore.getState().reset();
+      useFeedsStore.getState().setGroupMembers('group-feed-123', mockGroupMembers);
+    });
+
+    describe('Header', () => {
+      it('should show group icon for group feeds', () => {
+        const { container } = render(<ChatView feed={mockGroupFeed} />);
+
+        // Group icon should be present (Users icon from lucide-react)
+        const groupIcon = container.querySelector('svg[aria-hidden="true"]');
+        expect(groupIcon).toBeInTheDocument();
+      });
+
+      it('should show member count for group feeds', () => {
+        render(<ChatView feed={mockGroupFeed} />);
+
+        expect(screen.getByText('• 3 members')).toBeInTheDocument();
+      });
+
+      it('should show "Group Chat" label', () => {
+        render(<ChatView feed={mockGroupFeed} />);
+
+        expect(screen.getByText('Group Chat')).toBeInTheDocument();
+      });
+    });
+
+    describe('Sender Names', () => {
+      beforeEach(() => {
+        // Add messages from different group members
+        useFeedsStore.getState().addMessages('group-feed-123', [
+          {
+            id: 'msg-admin',
+            feedId: 'group-feed-123',
+            content: 'Message from admin',
+            senderPublicKey: 'admin-user',
+            timestamp: Date.now(),
+            isConfirmed: true,
+          },
+          {
+            id: 'msg-member',
+            feedId: 'group-feed-123',
+            content: 'Message from member',
+            senderPublicKey: 'member-user',
+            timestamp: Date.now() + 1000,
+            isConfirmed: true,
+          },
+          {
+            id: 'msg-own',
+            feedId: 'group-feed-123',
+            content: 'My own message',
+            senderPublicKey: 'my-public-key',
+            timestamp: Date.now() + 2000,
+            isConfirmed: true,
+          },
+        ]);
+      });
+
+      it('should show sender name for messages from other group members', () => {
+        render(<ChatView feed={mockGroupFeed} />);
+
+        // Should show sender names above messages from others
+        expect(screen.getByText('Alice Admin')).toBeInTheDocument();
+        expect(screen.getByText('Bob Member')).toBeInTheDocument();
+      });
+
+      it('should not show sender name for own messages', () => {
+        render(<ChatView feed={mockGroupFeed} />);
+
+        // Own message should not have "TestUser" label
+        // The message content should be visible, but no sender name above it
+        expect(screen.getByText('My own message')).toBeInTheDocument();
+        // There should be no "TestUser" in the message list (only in credentials)
+        const testUserElements = screen.queryAllByText('TestUser');
+        expect(testUserElements.length).toBe(0);
+      });
+
+      it('should show admin badge for admin sender', () => {
+        render(<ChatView feed={mockGroupFeed} />);
+
+        // Admin badge should be visible
+        const adminBadge = screen.getByRole('status', { name: 'Role: Admin' });
+        expect(adminBadge).toBeInTheDocument();
+      });
+
+      it('should not show badge for regular member', () => {
+        render(<ChatView feed={mockGroupFeed} />);
+
+        // Should only have one role badge (for the admin)
+        const roleBadges = screen.queryAllByRole('status');
+        // Only one badge (for admin), not for regular member or own messages
+        expect(roleBadges.length).toBe(1);
+      });
+    });
+
+    describe('Display Name Resolution', () => {
+      beforeEach(() => {
+        // Add a message with reply from admin to member
+        useFeedsStore.getState().addMessages('group-feed-123', [
+          {
+            id: 'original-group-msg',
+            feedId: 'group-feed-123',
+            content: 'Original message in group',
+            senderPublicKey: 'member-user',
+            timestamp: Date.now(),
+            isConfirmed: true,
+          },
+          {
+            id: 'reply-group-msg',
+            feedId: 'group-feed-123',
+            content: 'Admin reply to member',
+            senderPublicKey: 'admin-user',
+            timestamp: Date.now() + 1000,
+            isConfirmed: true,
+            replyToMessageId: 'original-group-msg',
+          },
+        ]);
+      });
+
+      it('should resolve sender display names in reply previews', () => {
+        render(<ChatView feed={mockGroupFeed} />);
+
+        // Reply preview should show sender name (Bob Member appears both as sender header and in reply preview)
+        const bobElements = screen.getAllByText('Bob Member');
+        expect(bobElements.length).toBeGreaterThanOrEqual(2); // At least: sender header + reply preview
+      });
+
+      it('should show "You" in reply preview when replying to own message', () => {
+        // Reset and add own message with reply
+        useFeedsStore.getState().reset();
+        useFeedsStore.getState().setGroupMembers('group-feed-123', mockGroupMembers);
+        useFeedsStore.getState().addMessages('group-feed-123', [
+          {
+            id: 'my-original',
+            feedId: 'group-feed-123',
+            content: 'My original message',
+            senderPublicKey: 'my-public-key',
+            timestamp: Date.now(),
+            isConfirmed: true,
+          },
+          {
+            id: 'reply-to-me',
+            feedId: 'group-feed-123',
+            content: 'Someone replying to me',
+            senderPublicKey: 'admin-user',
+            timestamp: Date.now() + 1000,
+            isConfirmed: true,
+            replyToMessageId: 'my-original',
+          },
+        ]);
+
+        render(<ChatView feed={mockGroupFeed} />);
+
+        // Should show "You" in the reply preview (via resolveDisplayName)
+        expect(screen.getByText('You')).toBeInTheDocument();
+      });
+
+      it('should show truncated key for unknown members', () => {
+        // Add message from unknown user not in group members
+        useFeedsStore.getState().reset();
+        useFeedsStore.getState().setGroupMembers('group-feed-123', mockGroupMembers);
+        useFeedsStore.getState().addMessages('group-feed-123', [
+          {
+            id: 'unknown-user-msg',
+            feedId: 'group-feed-123',
+            content: 'Message from unknown',
+            senderPublicKey: 'unknown-user-key-12345',
+            timestamp: Date.now(),
+            isConfirmed: true,
+          },
+        ]);
+
+        render(<ChatView feed={mockGroupFeed} />);
+
+        // Should show truncated public key as fallback
+        expect(screen.getByText('unknown-us...')).toBeInTheDocument();
+      });
+    });
+
+    describe('Non-Group Feeds', () => {
+      it('should not show sender names for chat feeds', () => {
+        useFeedsStore.getState().addMessages('feed-123', [
+          {
+            id: 'chat-msg',
+            feedId: 'feed-123',
+            content: 'Chat message',
+            senderPublicKey: 'other-user',
+            timestamp: Date.now(),
+            isConfirmed: true,
+          },
+        ]);
+
+        render(<ChatView feed={mockFeed} />);
+
+        // Should show message content but no sender name (chat feeds don't show sender)
+        expect(screen.getByText('Chat message')).toBeInTheDocument();
+        // No sender name elements should be present
+        expect(screen.queryByText('Alice Admin')).not.toBeInTheDocument();
+      });
+
+      it('should not show group icon for chat feeds', () => {
+        const { container } = render(<ChatView feed={mockFeed} />);
+
+        // No group icon (Users icon with specific parent styling)
+        const groupIconContainer = container.querySelector('.bg-hush-purple\\/20');
+        expect(groupIconContainer).not.toBeInTheDocument();
+      });
+
+      it('should show participants count for chat feeds', () => {
+        render(<ChatView feed={mockFeed} />);
+
+        expect(screen.getByText('• 2 participants')).toBeInTheDocument();
+      });
     });
   });
 });
