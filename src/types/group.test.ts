@@ -68,17 +68,20 @@ describe('isGroupFeedMember', () => {
   });
 
   it('should return false for missing publicAddress', () => {
-    const { publicAddress: _, ...withoutAddress } = validMember;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { publicAddress, ...withoutAddress } = validMember;
     expect(isGroupFeedMember(withoutAddress)).toBe(false);
   });
 
   it('should return false for missing displayName', () => {
-    const { displayName: _, ...withoutName } = validMember;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { displayName, ...withoutName } = validMember;
     expect(isGroupFeedMember(withoutName)).toBe(false);
   });
 
   it('should return false for missing role', () => {
-    const { role: _, ...withoutRole } = validMember;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { role, ...withoutRole } = validMember;
     expect(isGroupFeedMember(withoutRole)).toBe(false);
   });
 
@@ -125,22 +128,26 @@ describe('isPublicGroupInfo', () => {
   });
 
   it('should return false for missing feedId', () => {
-    const { feedId: _, ...withoutId } = validGroup;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { feedId, ...withoutId } = validGroup;
     expect(isPublicGroupInfo(withoutId)).toBe(false);
   });
 
   it('should return false for missing name', () => {
-    const { name: _, ...withoutName } = validGroup;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { name, ...withoutName } = validGroup;
     expect(isPublicGroupInfo(withoutName)).toBe(false);
   });
 
   it('should return false for missing memberCount', () => {
-    const { memberCount: _, ...withoutCount } = validGroup;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { memberCount, ...withoutCount } = validGroup;
     expect(isPublicGroupInfo(withoutCount)).toBe(false);
   });
 
   it('should return false for missing isPublic', () => {
-    const { isPublic: _, ...withoutPublic } = validGroup;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { isPublic, ...withoutPublic } = validGroup;
     expect(isPublicGroupInfo(withoutPublic)).toBe(false);
   });
 
@@ -218,7 +225,8 @@ describe('isGroupCreationData', () => {
   });
 
   it('should return false for missing isPublic', () => {
-    const { isPublic: _, ...withoutPublic } = validData;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { isPublic, ...withoutPublic } = validData;
     expect(isGroupCreationData(withoutPublic)).toBe(false);
   });
 });

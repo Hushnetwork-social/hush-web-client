@@ -371,3 +371,191 @@ export interface IsCommitmentRegisteredRequest {
 export interface IsCommitmentRegisteredResponse {
   IsRegistered: boolean;
 }
+
+// ============= Group Feed Service Types =============
+
+// Participant in a group feed creation request
+export interface GroupFeedParticipantProto {
+  FeedId: string;
+  ParticipantPublicAddress: string;
+  ParticipantType: number;
+  EncryptedFeedKey: string;
+  KeyGeneration: number;
+}
+
+// Member info from query responses
+export interface GroupFeedMemberProto {
+  PublicAddress: string;
+  ParticipantType: number;
+  JoinedAtBlock: number;
+}
+
+// Create Group Feed
+export interface NewGroupFeedRequest {
+  FeedId: string;
+  Title: string;
+  Description: string;
+  IsPublic: boolean;
+  Participants: GroupFeedParticipantProto[];
+}
+
+export interface NewGroupFeedResponse {
+  Success: boolean;
+  Message: string;
+}
+
+// Join Group Feed
+export interface JoinGroupFeedRequest {
+  FeedId: string;
+  JoiningUserPublicAddress: string;
+  InvitationSignature?: string;
+}
+
+export interface JoinGroupFeedResponse {
+  Success: boolean;
+  Message: string;
+}
+
+// Leave Group Feed
+export interface LeaveGroupFeedRequest {
+  FeedId: string;
+  LeavingUserPublicAddress: string;
+}
+
+export interface LeaveGroupFeedResponse {
+  Success: boolean;
+  Message: string;
+}
+
+// Add Member to Group
+export interface AddMemberToGroupFeedRequest {
+  FeedId: string;
+  AdminPublicAddress: string;
+  NewMemberPublicAddress: string;
+  NewMemberPublicEncryptKey: string;
+}
+
+export interface AddMemberToGroupFeedResponse {
+  Success: boolean;
+  Message: string;
+}
+
+// Block Member
+export interface BlockMemberRequest {
+  FeedId: string;
+  AdminPublicAddress: string;
+  BlockedUserPublicAddress: string;
+  Reason?: string;
+}
+
+export interface BlockMemberResponse {
+  Success: boolean;
+  Message: string;
+}
+
+// Unblock Member
+export interface UnblockMemberRequest {
+  FeedId: string;
+  AdminPublicAddress: string;
+  UnblockedUserPublicAddress: string;
+}
+
+export interface UnblockMemberResponse {
+  Success: boolean;
+  Message: string;
+}
+
+// Ban Member
+export interface BanFromGroupFeedRequest {
+  FeedId: string;
+  AdminPublicAddress: string;
+  BannedUserPublicAddress: string;
+  Reason?: string;
+}
+
+export interface BanFromGroupFeedResponse {
+  Success: boolean;
+  Message: string;
+}
+
+// Unban Member
+export interface UnbanFromGroupFeedRequest {
+  FeedId: string;
+  AdminPublicAddress: string;
+  UnbannedUserPublicAddress: string;
+}
+
+export interface UnbanFromGroupFeedResponse {
+  Success: boolean;
+  Message: string;
+}
+
+// Promote to Admin
+export interface PromoteToAdminRequest {
+  FeedId: string;
+  AdminPublicAddress: string;
+  MemberPublicAddress: string;
+}
+
+export interface PromoteToAdminResponse {
+  Success: boolean;
+  Message: string;
+}
+
+// Update Group Title
+export interface UpdateGroupFeedTitleRequest {
+  FeedId: string;
+  AdminPublicAddress: string;
+  NewTitle: string;
+}
+
+export interface UpdateGroupFeedTitleResponse {
+  Success: boolean;
+  Message: string;
+}
+
+// Update Group Description
+export interface UpdateGroupFeedDescriptionRequest {
+  FeedId: string;
+  AdminPublicAddress: string;
+  NewDescription: string;
+}
+
+export interface UpdateGroupFeedDescriptionResponse {
+  Success: boolean;
+  Message: string;
+}
+
+// Delete Group Feed
+export interface DeleteGroupFeedRequest {
+  FeedId: string;
+  AdminPublicAddress: string;
+}
+
+export interface DeleteGroupFeedResponse {
+  Success: boolean;
+  Message: string;
+}
+
+// Get Group Feed Info
+export interface GetGroupFeedRequest {
+  FeedId: string;
+}
+
+export interface GetGroupFeedResponse {
+  FeedId: string;
+  Title: string;
+  Description: string;
+  IsPublic: boolean;
+  MemberCount: number;
+  CurrentKeyGeneration: number;
+}
+
+// Get Group Members
+export interface GetGroupMembersRequest {
+  FeedId: string;
+}
+
+export interface GetGroupMembersResponse {
+  Members: GroupFeedMemberProto[];
+}
