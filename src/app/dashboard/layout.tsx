@@ -80,15 +80,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
 
-  // Show loading while checking auth
-  if (isCheckingAuth || !isAuthenticated) {
-    return (
-      <div className="min-h-screen bg-hush-bg-dark flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-hush-purple" />
-      </div>
-    );
-  }
-
+  // Define all callbacks before any early return
   const handleNavSelect = useCallback((id: string) => {
     if (id === "create-group") {
       // Open wizard modal instead of changing view
@@ -106,22 +98,22 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   }, [selectFeed, setSelectedNav]);
 
   // Handle clicking on a toast notification - navigate to the feed
-  const handleToastNavigate = (feedId: string) => {
+  const handleToastNavigate = useCallback((feedId: string) => {
     selectFeed(feedId);
     // Mark as read when navigating from toast
     markAsRead(feedId);
-  };
+  }, [selectFeed, markAsRead]);
 
-  const handleDownloadKeys = () => {
+  const handleDownloadKeys = useCallback(() => {
     if (!credentials) return;
     setShowPasswordDialog(true);
-  };
+  }, [credentials]);
 
-  const handleAccountDetails = () => {
+  const handleAccountDetails = useCallback(() => {
     router.push('/account');
-  };
+  }, [router]);
 
-  const handlePasswordConfirm = async (password: string) => {
+  const handlePasswordConfirm = useCallback(async (password: string) => {
     if (!credentials || !currentUser) return;
 
     try {
@@ -148,9 +140,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       debugError("Failed to download keys:", error);
       // Dialog stays open on error so user can try again
     }
-  };
+  }, [credentials, currentUser]);
 
-  const handleLogout = () => {
+  const handleLogout = useCallback(() => {
     // Reset all module stores
     useFeedsStore.getState().reset();
     resetIdentitySyncState();
@@ -159,7 +151,16 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     // Reset app store and redirect
     logout();
     router.push("/auth");
-  };
+  }, [logout, router]);
+
+  // Show loading while checking auth
+  if (isCheckingAuth || !isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-hush-bg-dark flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-hush-purple" />
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-hush-bg-dark flex flex-col overflow-hidden">
