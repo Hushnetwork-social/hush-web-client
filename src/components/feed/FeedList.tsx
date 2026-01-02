@@ -63,7 +63,7 @@ export function FeedList({ onFeedSelect }: FeedListProps) {
   };
 
   // Get last message for a feed
-  const getLastMessage = (feedId: string): { content: string; timestamp: number } | null => {
+  const getLastMessage = (feedId: string): { content: string; timestamp: number; senderName?: string } | null => {
     const feedMessages = messages[feedId];
     if (!feedMessages || feedMessages.length === 0) return null;
 
@@ -71,7 +71,19 @@ export function FeedList({ onFeedSelect }: FeedListProps) {
     return {
       content: lastMsg.content,
       timestamp: lastMsg.timestamp,
+      // For group feeds, we'd want to show the sender name in the preview
+      // This will be enhanced when identity lookup is integrated
     };
+  };
+
+  // Format message preview for groups (shows sender name)
+  const formatMessagePreview = (content: string, feedType: string, senderName?: string): string => {
+    if (feedType === 'group' && senderName) {
+      // Truncate sender name if too long
+      const truncatedName = senderName.length > 10 ? senderName.slice(0, 10) + '…' : senderName;
+      return `${truncatedName}: ${content}`;
+    }
+    return content;
   };
 
   // Show loading only on initial load (no feeds yet and syncing)
@@ -102,16 +114,20 @@ export function FeedList({ onFeedSelect }: FeedListProps) {
       {feeds.map((feed) => {
         const lastMessage = getLastMessage(feed.id);
         const isPersonalFeed = feed.type === 'personal';
+        const messagePreview = lastMessage
+          ? formatMessagePreview(lastMessage.content, feed.type, lastMessage.senderName)
+          : "No messages yet";
         return (
           <ChatListItem
             key={feed.id}
             name={feed.name}
             initials={isPersonalFeed ? "YOU" : getInitials(feed.name)}
-            lastMessage={lastMessage?.content || "No messages yet"}
+            lastMessage={messagePreview}
             timestamp={lastMessage ? formatTimestamp(lastMessage.timestamp) : undefined}
             unreadCount={feed.unreadCount}
             isSelected={feed.id === selectedFeedId}
             isPersonalFeed={isPersonalFeed}
+            feedType={feed.type}
             onClick={() => handleFeedClick(feed.id)}
           />
         );

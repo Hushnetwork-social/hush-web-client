@@ -1,5 +1,8 @@
 "use client";
 
+import { Users } from "lucide-react";
+import { memo } from "react";
+
 interface ChatListItemProps {
   name: string;
   initials: string;
@@ -8,10 +11,12 @@ interface ChatListItemProps {
   unreadCount?: number;
   isSelected?: boolean;
   isPersonalFeed?: boolean;
+  /** Feed type for visual distinction (group feeds show group icon) */
+  feedType?: 'personal' | 'chat' | 'group' | 'broadcast';
   onClick?: () => void;
 }
 
-export function ChatListItem({
+export const ChatListItem = memo(function ChatListItem({
   name,
   initials,
   lastMessage,
@@ -19,8 +24,11 @@ export function ChatListItem({
   unreadCount = 0,
   isSelected = false,
   isPersonalFeed = false,
+  feedType = 'chat',
   onClick,
 }: ChatListItemProps) {
+  const isGroup = feedType === 'group';
+
   return (
     <button
       onClick={onClick}
@@ -32,12 +40,18 @@ export function ChatListItem({
         }
       `}
     >
-      {/* Avatar */}
-      <div className="w-9 h-9 rounded-full bg-hush-purple flex items-center justify-center flex-shrink-0">
-        <span className="text-[10px] font-bold text-hush-bg-dark">
-          {initials}
-        </span>
-      </div>
+      {/* Avatar / Group Icon */}
+      {isGroup ? (
+        <div className="w-9 h-9 rounded-full bg-hush-purple/20 flex items-center justify-center flex-shrink-0">
+          <Users className="w-5 h-5 text-hush-purple" aria-hidden="true" />
+        </div>
+      ) : (
+        <div className="w-9 h-9 rounded-full bg-hush-purple flex items-center justify-center flex-shrink-0">
+          <span className="text-[10px] font-bold text-hush-bg-dark">
+            {initials}
+          </span>
+        </div>
+      )}
 
       {/* Content */}
       <div className="flex-1 min-w-0 ml-4">
@@ -74,4 +88,4 @@ export function ChatListItem({
       </div>
     </button>
   );
-}
+});
