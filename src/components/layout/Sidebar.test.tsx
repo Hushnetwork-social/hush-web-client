@@ -116,6 +116,7 @@ describe('Sidebar', () => {
 
       expect(screen.getByText('Feeds')).toBeInTheDocument();
       expect(screen.getByText('New Feed')).toBeInTheDocument();
+      expect(screen.getByText('Create Group')).toBeInTheDocument();
       expect(screen.getByText('Memes')).toBeInTheDocument();
       expect(screen.getByText('Community')).toBeInTheDocument();
     });
@@ -126,6 +127,14 @@ describe('Sidebar', () => {
       fireEvent.click(screen.getByText('Feeds'));
 
       expect(defaultProps.onNavSelect).toHaveBeenCalledWith('feeds');
+    });
+
+    it('should call onNavSelect with create-group when Create Group is clicked', () => {
+      render(<Sidebar {...defaultProps} />);
+
+      fireEvent.click(screen.getByText('Create Group'));
+
+      expect(defaultProps.onNavSelect).toHaveBeenCalledWith('create-group');
     });
   });
 });

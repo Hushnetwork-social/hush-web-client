@@ -1,6 +1,6 @@
 "use client";
 
-import { MessageSquare, PlusCircle, Palette, Users, Download, LogOut, UserCircle } from "lucide-react";
+import { MessageSquare, PlusCircle, UsersRound, Palette, Users, Download, LogOut, UserCircle } from "lucide-react";
 import { useState } from "react";
 
 interface NavItem {
@@ -13,6 +13,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { id: "feeds", label: "Feeds", icon: <MessageSquare className="w-5 h-5" /> },
   { id: "new-chat", label: "New Feed", icon: <PlusCircle className="w-5 h-5" /> },
+  { id: "create-group", label: "New Group", icon: <UsersRound className="w-5 h-5" /> },
   { id: "memes", label: "Memes", icon: <Palette className="w-5 h-5" />, comingSoon: true },
   { id: "community", label: "Community", icon: <Users className="w-5 h-5" />, comingSoon: true },
 ];

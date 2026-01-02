@@ -132,6 +132,7 @@ describe('BottomNav', () => {
 
       expect(screen.getByText('Feeds')).toBeInTheDocument();
       expect(screen.getByText('New Feed')).toBeInTheDocument();
+      expect(screen.getByText('New Group')).toBeInTheDocument();
       expect(screen.getByText('Memes')).toBeInTheDocument();
       expect(screen.getByText('Community')).toBeInTheDocument();
     });
@@ -142,6 +143,14 @@ describe('BottomNav', () => {
       fireEvent.click(screen.getByText('Feeds'));
 
       expect(defaultProps.onNavSelect).toHaveBeenCalledWith('feeds');
+    });
+
+    it('should call onNavSelect with create-group when New Group is clicked', () => {
+      render(<BottomNav {...defaultProps} />);
+
+      fireEvent.click(screen.getByText('New Group'));
+
+      expect(defaultProps.onNavSelect).toHaveBeenCalledWith('create-group');
     });
   });
 });

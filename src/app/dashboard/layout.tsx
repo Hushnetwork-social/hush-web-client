@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { Header, Footer, Sidebar, BottomNav } from "@/components/layout";
@@ -13,6 +13,7 @@ import { useNotifications, useBackButton } from "@/hooks";
 import { downloadCredentialsFile, type PortableCredentials } from "@/lib/crypto";
 import { Loader2 } from "lucide-react";
 import { debugLog, debugError } from "@/lib/debug-logger";
+import { GroupCreationWizard } from "@/components/groups/GroupCreationWizard";
 
 // Dynamic imports to prevent dev mode race condition
 const FeedList = dynamic(
@@ -43,6 +44,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const [isMobile, setIsMobile] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
+  const [showGroupWizard, setShowGroupWizard] = useState(false);
 
   // Initialize notification system
   const { toasts, dismissToast, markAsRead } = useNotifications();
@@ -87,9 +89,21 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     );
   }
 
-  const handleNavSelect = (id: string) => {
-    setSelectedNav(id);
-  };
+  const handleNavSelect = useCallback((id: string) => {
+    if (id === "create-group") {
+      // Open wizard modal instead of changing view
+      setShowGroupWizard(true);
+    } else {
+      setSelectedNav(id);
+    }
+  }, [setSelectedNav]);
+
+  // Handle group created from wizard
+  const handleGroupCreated = useCallback((feedId: string) => {
+    debugLog("[Dashboard] Group created:", feedId);
+    selectFeed(feedId);
+    setSelectedNav("feeds");
+  }, [selectFeed, setSelectedNav]);
 
   // Handle clicking on a toast notification - navigate to the feed
   const handleToastNavigate = (feedId: string) => {
@@ -225,6 +239,13 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         toasts={toasts}
         onDismiss={dismissToast}
         onNavigate={handleToastNavigate}
+      />
+
+      {/* Group Creation Wizard Modal */}
+      <GroupCreationWizard
+        isOpen={showGroupWizard}
+        onClose={() => setShowGroupWizard(false)}
+        onGroupCreated={handleGroupCreated}
       />
     </div>
   );
