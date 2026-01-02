@@ -9,11 +9,15 @@ import { ReplyContextBar } from "./ReplyContextBar";
 import { useAppStore } from "@/stores";
 import { useFeedsStore, sendMessage } from "@/modules/feeds";
 import { useFeedReactions } from "@/hooks/useFeedReactions";
-import type { Feed, FeedMessage, GroupFeedMember, GroupMemberRole } from "@/types";
+import type { Feed, FeedMessage, GroupFeedMember } from "@/types";
 
 // Empty array constants to avoid creating new references
 const EMPTY_MESSAGES: FeedMessage[] = [];
 const EMPTY_MEMBERS: GroupFeedMember[] = [];
+
+// Constants for display name truncation
+const TRUNCATED_KEY_LENGTH = 10;
+const TRUNCATION_SUFFIX = "...";
 
 interface ChatViewProps {
   feed: Feed;
@@ -41,21 +45,25 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   // Check if current user is admin of the group
   const isGroupFeed = feed.type === 'group';
 
-  // Get sender role for group messages
-  const getSenderRole = useCallback((publicKey: string) => {
-    if (!isGroupFeed) return undefined;
-    const member = groupMembers.find(m => m.publicAddress === publicKey);
-    return member?.role;
+  // Create a lookup Map for O(1) member resolution (optimization for groups with many messages)
+  const memberLookup = useMemo(() => {
+    if (!isGroupFeed || groupMembers.length === 0) return new Map<string, GroupFeedMember>();
+    return new Map(groupMembers.map(m => [m.publicAddress, m]));
   }, [isGroupFeed, groupMembers]);
 
-  // Get sender display name for group messages
+  // Get sender role for group messages (O(1) lookup)
+  const getSenderRole = useCallback((publicKey: string) => {
+    return memberLookup.get(publicKey)?.role;
+  }, [memberLookup]);
+
+  // Get sender display name for group messages (O(1) lookup)
   const getSenderDisplayName = useCallback((publicKey: string): string | undefined => {
     if (!isGroupFeed) return undefined;
     // Don't show sender name for own messages
     if (publicKey === credentials?.signingPublicKey) return undefined;
-    const member = groupMembers.find(m => m.publicAddress === publicKey);
-    return member?.displayName ?? publicKey.substring(0, 10) + "...";
-  }, [isGroupFeed, groupMembers, credentials?.signingPublicKey]);
+    const member = memberLookup.get(publicKey);
+    return member?.displayName ?? publicKey.substring(0, TRUNCATED_KEY_LENGTH) + TRUNCATION_SUFFIX;
+  }, [isGroupFeed, memberLookup, credentials?.signingPublicKey]);
 
   // Use the feed reactions hook for optimistic updates
   const {
@@ -123,7 +131,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
 
   // Reply to Message: Resolve display name from public key
   // For chat feeds: if it's the other participant, use feed.name; if it's me, use "You"
-  // For group feeds: look up member in groupMembers list
+  // For group feeds: look up member in memberLookup Map (O(1))
   const resolveDisplayName = useCallback((publicKey: string): string => {
     if (publicKey === credentials?.signingPublicKey) {
       return "You";
@@ -132,16 +140,16 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
     if (feed.type === "chat" && publicKey === feed.otherParticipantPublicSigningAddress) {
       return feed.name;
     }
-    // For group feeds, look up member display name
+    // For group feeds, look up member display name (O(1) via Map)
     if (feed.type === "group") {
-      const member = groupMembers.find(m => m.publicAddress === publicKey);
+      const member = memberLookup.get(publicKey);
       if (member) {
         return member.displayName;
       }
     }
     // Fallback: truncated public key
-    return publicKey.substring(0, 10) + "...";
-  }, [credentials?.signingPublicKey, feed.type, feed.name, feed.otherParticipantPublicSigningAddress, groupMembers]);
+    return publicKey.substring(0, TRUNCATED_KEY_LENGTH) + TRUNCATION_SUFFIX;
+  }, [credentials?.signingPublicKey, feed.type, feed.name, feed.otherParticipantPublicSigningAddress, memberLookup]);
 
   // Format timestamp for display
   const formatTime = (timestamp: number): string => {
