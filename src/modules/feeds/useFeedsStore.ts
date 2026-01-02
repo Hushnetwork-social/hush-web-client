@@ -9,7 +9,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { Feed, FeedMessage } from '@/types';
+import type { Feed, FeedMessage, GroupFeedMember, GroupMemberRole } from '@/types';
 import { debugLog } from '@/lib/debug-logger';
 
 // Feed type mapping from server (FeedType enum)
@@ -48,6 +48,14 @@ interface FeedsState {
 
   /** Last sync error, if any */
   lastError: string | null;
+
+  // ============= Group Feed State =============
+
+  /** Group members indexed by feed ID */
+  groupMembers: Record<string, GroupFeedMember[]>;
+
+  /** Current user's role in each group feed */
+  memberRoles: Record<string, GroupMemberRole>;
 }
 
 interface FeedsActions {
@@ -129,6 +137,32 @@ interface FeedsActions {
 
   /** Get feeds that need sync */
   getFeedsNeedingSync: () => Feed[];
+
+  // ============= Group Feed Actions =============
+
+  /** Set the member list for a group feed */
+  setGroupMembers: (feedId: string, members: GroupFeedMember[]) => void;
+
+  /** Add a single member to a group feed */
+  addGroupMember: (feedId: string, member: GroupFeedMember) => void;
+
+  /** Remove a member from a group feed by address */
+  removeGroupMember: (feedId: string, memberAddress: string) => void;
+
+  /** Update a member's role in a group feed */
+  updateMemberRole: (feedId: string, memberAddress: string, role: GroupMemberRole) => void;
+
+  /** Get members for a specific group feed */
+  getGroupMembers: (feedId: string) => GroupFeedMember[];
+
+  /** Set the current user's role in a group feed */
+  setUserRole: (feedId: string, role: GroupMemberRole) => void;
+
+  /** Get the current user's role in a group feed */
+  getUserRole: (feedId: string) => GroupMemberRole | undefined;
+
+  /** Check if user is an admin of a group feed */
+  isUserAdmin: (feedId: string) => boolean;
 }
 
 type FeedsStore = FeedsState & FeedsActions;
@@ -146,6 +180,8 @@ const initialState: FeedsState = {
   isSyncing: false,
   isCreatingPersonalFeed: false,
   lastError: null,
+  groupMembers: {},
+  memberRoles: {},
 };
 
 /**
@@ -393,14 +429,95 @@ export const useFeedsStore = create<FeedsStore>()(
       getFeedsNeedingSync: () => {
         return get().feeds.filter((f) => f.needsSync === true);
       },
+
+      // ============= Group Feed Implementations =============
+
+      setGroupMembers: (feedId, members) => {
+        debugLog(`[FeedsStore] setGroupMembers: feedId=${feedId}, count=${members.length}`);
+        set((state) => ({
+          groupMembers: {
+            ...state.groupMembers,
+            [feedId]: members,
+          },
+        }));
+      },
+
+      addGroupMember: (feedId, member) => {
+        debugLog(`[FeedsStore] addGroupMember: feedId=${feedId}, member=${member.displayName}`);
+        set((state) => {
+          const currentMembers = state.groupMembers[feedId] || [];
+          // Don't add duplicate members
+          if (currentMembers.some((m) => m.publicAddress === member.publicAddress)) {
+            return state;
+          }
+          return {
+            groupMembers: {
+              ...state.groupMembers,
+              [feedId]: [...currentMembers, member],
+            },
+          };
+        });
+      },
+
+      removeGroupMember: (feedId, memberAddress) => {
+        debugLog(`[FeedsStore] removeGroupMember: feedId=${feedId}, address=${memberAddress}`);
+        set((state) => {
+          const currentMembers = state.groupMembers[feedId] || [];
+          return {
+            groupMembers: {
+              ...state.groupMembers,
+              [feedId]: currentMembers.filter((m) => m.publicAddress !== memberAddress),
+            },
+          };
+        });
+      },
+
+      updateMemberRole: (feedId, memberAddress, role) => {
+        debugLog(`[FeedsStore] updateMemberRole: feedId=${feedId}, address=${memberAddress}, role=${role}`);
+        set((state) => {
+          const currentMembers = state.groupMembers[feedId] || [];
+          return {
+            groupMembers: {
+              ...state.groupMembers,
+              [feedId]: currentMembers.map((m) =>
+                m.publicAddress === memberAddress ? { ...m, role } : m
+              ),
+            },
+          };
+        });
+      },
+
+      getGroupMembers: (feedId) => {
+        return get().groupMembers[feedId] || [];
+      },
+
+      setUserRole: (feedId, role) => {
+        debugLog(`[FeedsStore] setUserRole: feedId=${feedId}, role=${role}`);
+        set((state) => ({
+          memberRoles: {
+            ...state.memberRoles,
+            [feedId]: role,
+          },
+        }));
+      },
+
+      getUserRole: (feedId) => {
+        return get().memberRoles[feedId];
+      },
+
+      isUserAdmin: (feedId) => {
+        return get().memberRoles[feedId] === 'Admin';
+      },
     }),
     {
       name: 'hush-feeds-storage',
       partialize: (state) => ({
-        // Persist feeds, messages, and sync metadata
+        // Persist feeds, messages, sync metadata, and group data
         feeds: state.feeds,
         messages: state.messages,
         syncMetadata: state.syncMetadata,
+        groupMembers: state.groupMembers,
+        memberRoles: state.memberRoles,
       }),
     }
   )

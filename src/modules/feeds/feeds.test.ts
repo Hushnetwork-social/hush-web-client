@@ -755,4 +755,196 @@ describe('Feed Name Updates (FEAT-003)', () => {
       expect(feed?.aesKey).toBe('decrypted-key');
     });
   });
+
+  describe('Group Feed Management', () => {
+    const sampleMember1 = {
+      publicAddress: 'addr-1',
+      displayName: 'Alice',
+      role: 'Admin' as const,
+    };
+
+    const sampleMember2 = {
+      publicAddress: 'addr-2',
+      displayName: 'Bob',
+      role: 'Member' as const,
+    };
+
+    const sampleMember3 = {
+      publicAddress: 'addr-3',
+      displayName: 'Carol',
+      role: 'Member' as const,
+    };
+
+    describe('setGroupMembers', () => {
+      it('should set group members for a feed', () => {
+        const { setGroupMembers, getGroupMembers } = useFeedsStore.getState();
+
+        setGroupMembers('group-1', [sampleMember1, sampleMember2]);
+
+        const members = getGroupMembers('group-1');
+        expect(members).toHaveLength(2);
+        expect(members[0].displayName).toBe('Alice');
+        expect(members[1].displayName).toBe('Bob');
+      });
+
+      it('should replace existing members', () => {
+        const { setGroupMembers, getGroupMembers } = useFeedsStore.getState();
+
+        setGroupMembers('group-1', [sampleMember1, sampleMember2]);
+        setGroupMembers('group-1', [sampleMember3]);
+
+        const members = getGroupMembers('group-1');
+        expect(members).toHaveLength(1);
+        expect(members[0].displayName).toBe('Carol');
+      });
+    });
+
+    describe('addGroupMember', () => {
+      it('should add a member to existing group', () => {
+        const { setGroupMembers, addGroupMember, getGroupMembers } = useFeedsStore.getState();
+
+        setGroupMembers('group-1', [sampleMember1]);
+        addGroupMember('group-1', sampleMember2);
+
+        const members = getGroupMembers('group-1');
+        expect(members).toHaveLength(2);
+      });
+
+      it('should add a member to new group', () => {
+        const { addGroupMember, getGroupMembers } = useFeedsStore.getState();
+
+        addGroupMember('group-new', sampleMember1);
+
+        const members = getGroupMembers('group-new');
+        expect(members).toHaveLength(1);
+        expect(members[0].displayName).toBe('Alice');
+      });
+
+      it('should not add duplicate member', () => {
+        const { setGroupMembers, addGroupMember, getGroupMembers } = useFeedsStore.getState();
+
+        setGroupMembers('group-1', [sampleMember1]);
+        addGroupMember('group-1', sampleMember1);
+
+        const members = getGroupMembers('group-1');
+        expect(members).toHaveLength(1);
+      });
+    });
+
+    describe('removeGroupMember', () => {
+      it('should remove a member by address', () => {
+        const { setGroupMembers, removeGroupMember, getGroupMembers } = useFeedsStore.getState();
+
+        setGroupMembers('group-1', [sampleMember1, sampleMember2, sampleMember3]);
+        removeGroupMember('group-1', 'addr-2');
+
+        const members = getGroupMembers('group-1');
+        expect(members).toHaveLength(2);
+        expect(members.find((m) => m.publicAddress === 'addr-2')).toBeUndefined();
+      });
+
+      it('should handle removing non-existent member', () => {
+        const { setGroupMembers, removeGroupMember, getGroupMembers } = useFeedsStore.getState();
+
+        setGroupMembers('group-1', [sampleMember1]);
+        removeGroupMember('group-1', 'addr-nonexistent');
+
+        const members = getGroupMembers('group-1');
+        expect(members).toHaveLength(1);
+      });
+    });
+
+    describe('updateMemberRole', () => {
+      it('should update member role', () => {
+        const { setGroupMembers, updateMemberRole, getGroupMembers } = useFeedsStore.getState();
+
+        setGroupMembers('group-1', [sampleMember1, sampleMember2]);
+        updateMemberRole('group-1', 'addr-2', 'Admin');
+
+        const members = getGroupMembers('group-1');
+        const bob = members.find((m) => m.publicAddress === 'addr-2');
+        expect(bob?.role).toBe('Admin');
+      });
+
+      it('should handle updating non-existent member', () => {
+        const { setGroupMembers, updateMemberRole, getGroupMembers } = useFeedsStore.getState();
+
+        setGroupMembers('group-1', [sampleMember1]);
+        updateMemberRole('group-1', 'addr-nonexistent', 'Admin');
+
+        const members = getGroupMembers('group-1');
+        expect(members).toHaveLength(1);
+        expect(members[0].role).toBe('Admin'); // Original member unchanged
+      });
+    });
+
+    describe('getGroupMembers', () => {
+      it('should return empty array for unknown feed', () => {
+        const members = useFeedsStore.getState().getGroupMembers('unknown-feed');
+        expect(members).toEqual([]);
+      });
+    });
+
+    describe('setUserRole', () => {
+      it('should set user role for a feed', () => {
+        const { setUserRole, getUserRole } = useFeedsStore.getState();
+
+        setUserRole('group-1', 'Admin');
+
+        expect(getUserRole('group-1')).toBe('Admin');
+      });
+
+      it('should update existing role', () => {
+        const { setUserRole, getUserRole } = useFeedsStore.getState();
+
+        setUserRole('group-1', 'Member');
+        setUserRole('group-1', 'Admin');
+
+        expect(getUserRole('group-1')).toBe('Admin');
+      });
+    });
+
+    describe('getUserRole', () => {
+      it('should return undefined for unknown feed', () => {
+        const role = useFeedsStore.getState().getUserRole('unknown-feed');
+        expect(role).toBeUndefined();
+      });
+    });
+
+    describe('isUserAdmin', () => {
+      it('should return true when user is Admin', () => {
+        const { setUserRole, isUserAdmin } = useFeedsStore.getState();
+
+        setUserRole('group-1', 'Admin');
+
+        expect(isUserAdmin('group-1')).toBe(true);
+      });
+
+      it('should return false when user is Member', () => {
+        const { setUserRole, isUserAdmin } = useFeedsStore.getState();
+
+        setUserRole('group-1', 'Member');
+
+        expect(isUserAdmin('group-1')).toBe(false);
+      });
+
+      it('should return false for unknown feed', () => {
+        expect(useFeedsStore.getState().isUserAdmin('unknown-feed')).toBe(false);
+      });
+    });
+
+    describe('reset clears group data', () => {
+      it('should clear groupMembers and memberRoles on reset', () => {
+        const state = useFeedsStore.getState();
+
+        state.setGroupMembers('group-1', [sampleMember1]);
+        state.setUserRole('group-1', 'Admin');
+        state.reset();
+
+        const newState = useFeedsStore.getState();
+        expect(newState.groupMembers).toEqual({});
+        expect(newState.memberRoles).toEqual({});
+      });
+    });
+  });
 });
