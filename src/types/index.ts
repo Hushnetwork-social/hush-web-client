@@ -5,6 +5,23 @@ export interface User {
   initials: string;
 }
 
+// Group types (re-export from group.ts)
+export type {
+  GroupMemberRole,
+  GroupFeedMember,
+  PublicGroupInfo,
+  GroupCreationData,
+  GroupOperationResult,
+  GroupParticipantData,
+} from './group';
+
+export {
+  isGroupMemberRole,
+  isGroupFeedMember,
+  isPublicGroupInfo,
+  isGroupCreationData,
+} from './group';
+
 // Feed types
 export interface Feed {
   id: string;
