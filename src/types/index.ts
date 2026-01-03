@@ -22,6 +22,25 @@ export {
   isGroupCreationData,
 } from './group';
 
+// Group crypto types (re-export from group-crypto.ts)
+export type {
+  GroupKeyGeneration,
+  GroupKeyState,
+  GroupCryptoResult,
+  GroupParticipantEncryptedKey,
+  NewGroupFeedData,
+  GroupMessageDecryptionContext,
+} from './group-crypto';
+
+export {
+  isGroupKeyGeneration,
+  isGroupKeyState,
+  isGroupCryptoResult,
+  isGroupParticipantEncryptedKey,
+  isNewGroupFeedData,
+  isGroupMessageDecryptionContext,
+} from './group-crypto';
+
 // Feed types
 export interface Feed {
   id: string;
