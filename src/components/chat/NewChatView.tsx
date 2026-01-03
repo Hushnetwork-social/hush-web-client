@@ -1,11 +1,13 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { Search, Loader2, MessageSquare, UserCheck, User, ArrowLeft } from "lucide-react";
+import { Search, Loader2, MessageSquare, UserCheck, User, ArrowLeft, Users } from "lucide-react";
 import { searchByDisplayName } from "@/modules/identity";
 import { findExistingChatFeed, createChatFeed, useFeedsStore } from "@/modules/feeds";
+import { groupService } from "@/lib/grpc/services/group";
 import { useAppStore } from "@/stores";
-import type { ProfileSearchResult } from "@/types";
+import { GroupCard } from "@/components/groups/GroupCard";
+import type { ProfileSearchResult, PublicGroupInfo } from "@/types";
 import { debugLog, debugError } from "@/lib/debug-logger";
 
 interface SearchResultWithFeed extends ProfileSearchResult {
@@ -15,6 +17,9 @@ interface SearchResultWithFeed extends ProfileSearchResult {
   personalFeedId?: string;
 }
 
+// Tab types
+type TabType = "users" | "publicGroups";
+
 interface NewChatViewProps {
   onFeedCreated?: (feedId: string) => void;
   onFeedSelected?: (feedId: string) => void;
@@ -23,12 +28,28 @@ interface NewChatViewProps {
 }
 
 export function NewChatView({ onFeedCreated, onFeedSelected, onBack, showBackButton = false }: NewChatViewProps) {
+  // Tab state
+  const [activeTab, setActiveTab] = useState<TabType>("users");
+
+  // User search state
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResultWithFeed[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Public groups search state
+  const [groupSearchQuery, setGroupSearchQuery] = useState("");
+  const [isSearchingGroups, setIsSearchingGroups] = useState(false);
+  const [groupSearchResults, setGroupSearchResults] = useState<PublicGroupInfo[]>([]);
+  const [hasSearchedGroups, setHasSearchedGroups] = useState(false);
+  const [groupError, setGroupError] = useState<string | null>(null);
+
+  // Group join state
+  const [joiningGroupId, setJoiningGroupId] = useState<string | null>(null);
+  const [joinedGroupIds, setJoinedGroupIds] = useState<Set<string>>(new Set());
+  const [cooldownErrors, setCooldownErrors] = useState<Record<string, string>>({});
 
   // Get initials from display name
   const getInitials = (name: string): string => {
@@ -46,7 +67,7 @@ export function NewChatView({ onFeedCreated, onFeedSelected, onBack, showBackBut
     return `${address.slice(0, 10)}...${address.slice(-8)}`;
   };
 
-  // Handle search
+  // Handle user search
   const handleSearch = useCallback(async () => {
     if (!searchQuery.trim()) {
       setError("Please enter a profile name to search");
@@ -98,6 +119,70 @@ export function NewChatView({ onFeedCreated, onFeedSelected, onBack, showBackBut
       setIsSearching(false);
     }
   }, [searchQuery]);
+
+  // Handle public group search
+  const handleGroupSearch = useCallback(async () => {
+    if (!groupSearchQuery.trim()) {
+      setGroupError("Please enter a group name to search");
+      return;
+    }
+
+    setIsSearchingGroups(true);
+    setGroupError(null);
+    setHasSearchedGroups(true);
+
+    try {
+      // TODO: Replace with actual gRPC call when backend endpoint is available
+      // const results = await groupService.searchPublicGroups(groupSearchQuery);
+
+      // For now, we'll show a message that the feature is coming soon
+      // This is a placeholder until the backend search endpoint is implemented
+      debugLog("[NewChatView] Group search query:", groupSearchQuery);
+
+      // Simulate empty results for now
+      setGroupSearchResults([]);
+    } catch (err) {
+      debugError("[NewChatView] Group search failed:", err);
+      setGroupError("Failed to search groups. Please try again.");
+      setGroupSearchResults([]);
+    } finally {
+      setIsSearchingGroups(false);
+    }
+  }, [groupSearchQuery]);
+
+  // Handle joining a group
+  const handleJoinGroup = useCallback(async (group: PublicGroupInfo) => {
+    const credentials = useAppStore.getState().credentials;
+    if (!credentials?.signingPublicKey) {
+      setGroupError("Please log in to join groups");
+      return;
+    }
+
+    setJoiningGroupId(group.feedId);
+    setCooldownErrors((prev) => ({ ...prev, [group.feedId]: "" }));
+
+    try {
+      const result = await groupService.joinGroup(group.feedId, credentials.signingPublicKey);
+
+      if (result.success) {
+        setJoinedGroupIds((prev) => new Set([...prev, group.feedId]));
+        // Navigate to the joined group
+        onFeedSelected?.(group.feedId);
+      } else {
+        // Check if it's a cooldown error
+        if (result.error?.includes("cooldown") || result.error?.includes("block")) {
+          setCooldownErrors((prev) => ({ ...prev, [group.feedId]: result.error || "" }));
+        } else {
+          setGroupError(result.error || "Failed to join group");
+        }
+      }
+    } catch (err) {
+      debugError("[NewChatView] Join group failed:", err);
+      setGroupError("Failed to join group. Please try again.");
+    } finally {
+      setJoiningGroupId(null);
+    }
+  }, [onFeedSelected]);
 
   // Handle selecting a profile
   const handleSelectProfile = useCallback(
@@ -154,9 +239,21 @@ export function NewChatView({ onFeedCreated, onFeedSelected, onBack, showBackBut
   // Handle Enter key in search input
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") {
-      handleSearch();
+      if (activeTab === "users") {
+        handleSearch();
+      } else {
+        handleGroupSearch();
+      }
     }
   };
+
+  // Handle tab change
+  const handleTabChange = useCallback((tab: TabType) => {
+    setActiveTab(tab);
+    // Clear errors when switching tabs
+    setError(null);
+    setGroupError(null);
+  }, []);
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
@@ -174,9 +271,43 @@ export function NewChatView({ onFeedCreated, onFeedSelected, onBack, showBackBut
           <div>
             <h2 className="text-lg font-semibold text-hush-text-primary">New Feed</h2>
             <p className="text-xs text-hush-text-accent mt-0.5">
-              Search for a profile to start a conversation
+              {activeTab === "users"
+                ? "Search for a profile to start a conversation"
+                : "Find and join public groups"}
             </p>
           </div>
+        </div>
+      </div>
+
+      {/* Tab Bar */}
+      <div className="flex-shrink-0 px-4 pt-3">
+        <div className="flex gap-1 p-1 bg-hush-bg-dark rounded-lg" role="tablist">
+          <button
+            role="tab"
+            aria-selected={activeTab === "users"}
+            onClick={() => handleTabChange("users")}
+            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              activeTab === "users"
+                ? "bg-hush-bg-element text-hush-text-primary"
+                : "text-hush-text-accent hover:text-hush-text-primary hover:bg-hush-bg-hover"
+            }`}
+          >
+            <User className="w-4 h-4" aria-hidden="true" />
+            <span>Users</span>
+          </button>
+          <button
+            role="tab"
+            aria-selected={activeTab === "publicGroups"}
+            onClick={() => handleTabChange("publicGroups")}
+            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              activeTab === "publicGroups"
+                ? "bg-hush-bg-element text-hush-text-primary"
+                : "text-hush-text-accent hover:text-hush-text-primary hover:bg-hush-bg-hover"
+            }`}
+          >
+            <Users className="w-4 h-4" aria-hidden="true" />
+            <span>Public Groups</span>
+          </button>
         </div>
       </div>
 
@@ -186,21 +317,30 @@ export function NewChatView({ onFeedCreated, onFeedSelected, onBack, showBackBut
           <div className="flex-1 relative">
             <input
               type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              value={activeTab === "users" ? searchQuery : groupSearchQuery}
+              onChange={(e) =>
+                activeTab === "users"
+                  ? setSearchQuery(e.target.value)
+                  : setGroupSearchQuery(e.target.value)
+              }
               onKeyDown={handleKeyDown}
-              placeholder="Search by Profile Name"
+              placeholder={
+                activeTab === "users" ? "Search by Profile Name" : "Search Public Groups"
+              }
               className="w-full bg-hush-bg-dark border border-hush-bg-hover rounded-xl px-4 py-2.5 pl-10 text-sm text-hush-text-primary placeholder-hush-text-accent focus:outline-none focus:border-hush-purple"
-              disabled={isSearching || isCreating}
+              disabled={isSearching || isCreating || isSearchingGroups}
             />
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-hush-text-accent" />
           </div>
           <button
-            onClick={handleSearch}
-            disabled={isSearching || isCreating || !searchQuery.trim()}
+            onClick={activeTab === "users" ? handleSearch : handleGroupSearch}
+            disabled={
+              (activeTab === "users" && (isSearching || isCreating || !searchQuery.trim())) ||
+              (activeTab === "publicGroups" && (isSearchingGroups || !groupSearchQuery.trim()))
+            }
             className="px-4 py-2.5 bg-hush-purple text-hush-bg-dark rounded-xl font-medium text-sm hover:bg-hush-purple-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            {isSearching ? (
+            {(activeTab === "users" && isSearching) || (activeTab === "publicGroups" && isSearchingGroups) ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
               "Search"
@@ -208,78 +348,130 @@ export function NewChatView({ onFeedCreated, onFeedSelected, onBack, showBackBut
           </button>
         </div>
 
-        {error && (
-          <p className="mt-2 text-sm text-red-400">{error}</p>
-        )}
+        {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
+        {groupError && <p className="mt-2 text-sm text-red-400">{groupError}</p>}
       </div>
 
-      {/* Search Results */}
+      {/* Content Area */}
       <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4">
-        {isCreating && (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="w-6 h-6 animate-spin text-hush-purple mr-2" />
-            <span className="text-sm text-hush-text-accent">Creating feed...</span>
-          </div>
+        {/* Users Tab Content */}
+        {activeTab === "users" && (
+          <>
+            {isCreating && (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-6 h-6 animate-spin text-hush-purple mr-2" />
+                <span className="text-sm text-hush-text-accent">Creating feed...</span>
+              </div>
+            )}
+
+            {!isCreating && hasSearched && searchResults.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-8 text-center">
+                <div className="w-16 h-16 rounded-full bg-hush-bg-dark flex items-center justify-center mb-4">
+                  <MessageSquare className="w-8 h-8 text-hush-purple" />
+                </div>
+                <h3 className="text-lg font-semibold text-hush-text-primary mb-2">
+                  No profiles found
+                </h3>
+                <p className="text-sm text-hush-text-accent max-w-[280px]">
+                  Try a different search term or check the spelling.
+                </p>
+              </div>
+            )}
+
+            {!isCreating && searchResults.length > 0 && (
+              <div className="space-y-2">
+                {searchResults.map((profile) => (
+                  <button
+                    key={profile.publicSigningAddress}
+                    onClick={() => handleSelectProfile(profile)}
+                    disabled={isCreating}
+                    className="w-full flex items-center p-3 rounded-xl border border-hush-bg-hover bg-hush-bg-dark hover:bg-hush-bg-hover transition-colors text-left disabled:opacity-50"
+                  >
+                    {/* Avatar */}
+                    <div className="w-10 h-10 rounded-full bg-hush-purple flex items-center justify-center flex-shrink-0">
+                      <span className="text-xs font-bold text-hush-bg-dark">
+                        {getInitials(profile.displayName)}
+                      </span>
+                    </div>
+
+                    {/* Profile Info */}
+                    <div className="flex-1 min-w-0 ml-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-hush-text-primary truncate">
+                          {profile.displayName}
+                        </span>
+                        {/* Badge for personal feed */}
+                        {profile.isPersonalFeed && (
+                          <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 text-[10px] font-medium flex-shrink-0">
+                            <User className="w-3 h-3" />
+                            Personal Feed
+                          </span>
+                        )}
+                        {/* Badge for existing feed */}
+                        {!profile.isPersonalFeed && profile.hasExistingFeed && (
+                          <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-hush-purple/20 text-hush-purple text-[10px] font-medium flex-shrink-0">
+                            <UserCheck className="w-3 h-3" />
+                            Feed exists
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-xs text-hush-text-accent truncate block">
+                        {truncateAddress(profile.publicSigningAddress)}
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
         )}
 
-        {!isCreating && hasSearched && searchResults.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-8 text-center">
-            <div className="w-16 h-16 rounded-full bg-hush-bg-dark flex items-center justify-center mb-4">
-              <MessageSquare className="w-8 h-8 text-hush-purple" />
-            </div>
-            <h3 className="text-lg font-semibold text-hush-text-primary mb-2">
-              No profiles found
-            </h3>
-            <p className="text-sm text-hush-text-accent max-w-[280px]">
-              Try a different search term or check the spelling.
-            </p>
-          </div>
-        )}
-
-        {!isCreating && searchResults.length > 0 && (
-          <div className="space-y-2">
-            {searchResults.map((profile) => (
-              <button
-                key={profile.publicSigningAddress}
-                onClick={() => handleSelectProfile(profile)}
-                disabled={isCreating}
-                className="w-full flex items-center p-3 rounded-xl border border-hush-bg-hover bg-hush-bg-dark hover:bg-hush-bg-hover transition-colors text-left disabled:opacity-50"
-              >
-                {/* Avatar */}
-                <div className="w-10 h-10 rounded-full bg-hush-purple flex items-center justify-center flex-shrink-0">
-                  <span className="text-xs font-bold text-hush-bg-dark">
-                    {getInitials(profile.displayName)}
-                  </span>
+        {/* Public Groups Tab Content */}
+        {activeTab === "publicGroups" && (
+          <>
+            {!hasSearchedGroups && (
+              <div className="flex flex-col items-center justify-center py-8 text-center">
+                <div className="w-16 h-16 rounded-full bg-hush-bg-dark flex items-center justify-center mb-4">
+                  <Users className="w-8 h-8 text-hush-purple" />
                 </div>
+                <h3 className="text-lg font-semibold text-hush-text-primary mb-2">
+                  Discover Public Groups
+                </h3>
+                <p className="text-sm text-hush-text-accent max-w-[280px]">
+                  Search for public groups to find communities and join conversations.
+                </p>
+              </div>
+            )}
 
-                {/* Profile Info */}
-                <div className="flex-1 min-w-0 ml-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-hush-text-primary truncate">
-                      {profile.displayName}
-                    </span>
-                    {/* Badge for personal feed */}
-                    {profile.isPersonalFeed && (
-                      <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 text-[10px] font-medium flex-shrink-0">
-                        <User className="w-3 h-3" />
-                        Personal Feed
-                      </span>
-                    )}
-                    {/* Badge for existing feed */}
-                    {!profile.isPersonalFeed && profile.hasExistingFeed && (
-                      <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-hush-purple/20 text-hush-purple text-[10px] font-medium flex-shrink-0">
-                        <UserCheck className="w-3 h-3" />
-                        Feed exists
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-xs text-hush-text-accent truncate block">
-                    {truncateAddress(profile.publicSigningAddress)}
-                  </span>
+            {hasSearchedGroups && groupSearchResults.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-8 text-center">
+                <div className="w-16 h-16 rounded-full bg-hush-bg-dark flex items-center justify-center mb-4">
+                  <Users className="w-8 h-8 text-hush-purple" />
                 </div>
-              </button>
-            ))}
-          </div>
+                <h3 className="text-lg font-semibold text-hush-text-primary mb-2">
+                  No groups found
+                </h3>
+                <p className="text-sm text-hush-text-accent max-w-[280px]">
+                  No public groups match your search. Try a different search term.
+                </p>
+              </div>
+            )}
+
+            {groupSearchResults.length > 0 && (
+              <div className="space-y-3">
+                {groupSearchResults.map((group) => (
+                  <GroupCard
+                    key={group.feedId}
+                    group={group}
+                    onJoin={() => handleJoinGroup(group)}
+                    isJoining={joiningGroupId === group.feedId}
+                    isJoined={joinedGroupIds.has(group.feedId)}
+                    cooldownError={cooldownErrors[group.feedId] || null}
+                  />
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

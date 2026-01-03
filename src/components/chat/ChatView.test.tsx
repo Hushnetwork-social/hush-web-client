@@ -752,5 +752,97 @@ describe('ChatView', () => {
         expect(screen.queryByRole('button', { name: /view group members/i })).not.toBeInTheDocument();
       });
     });
+
+    describe('Settings Panel Integration', () => {
+      it('should show Settings button for group feeds', () => {
+        render(<ChatView feed={mockGroupFeed} />);
+
+        expect(screen.getByRole('button', { name: /group settings/i })).toBeInTheDocument();
+      });
+
+      it('should not show Settings button for chat feeds', () => {
+        const chatFeed: Feed = {
+          id: 'chat-feed',
+          name: 'Chat with Bob',
+          type: 'chat',
+          participants: [],
+          createdAt: Date.now(),
+          lastMessageAt: Date.now(),
+        };
+
+        render(<ChatView feed={chatFeed} />);
+
+        expect(screen.queryByRole('button', { name: /group settings/i })).not.toBeInTheDocument();
+      });
+
+      it('should open GroupSettingsPanel when Settings button is clicked', () => {
+        render(<ChatView feed={mockGroupFeed} />);
+
+        const settingsButton = screen.getByRole('button', { name: /group settings/i });
+        fireEvent.click(settingsButton);
+
+        // GroupSettingsPanel should now be visible (it has role="dialog")
+        // Since MemberListPanel also has role="dialog", we need to find the settings panel specifically
+        const dialogs = screen.getAllByRole('dialog');
+        expect(dialogs.length).toBeGreaterThan(0);
+        // Look for settings panel header
+        expect(screen.getByRole('heading', { name: /group settings/i })).toBeInTheDocument();
+      });
+
+      it('should close GroupSettingsPanel when close button is clicked', () => {
+        render(<ChatView feed={mockGroupFeed} />);
+
+        // Open the panel
+        const settingsButton = screen.getByRole('button', { name: /group settings/i });
+        fireEvent.click(settingsButton);
+
+        // Panel should be open
+        expect(screen.getByRole('heading', { name: /group settings/i })).toBeInTheDocument();
+
+        // Click close button in panel
+        const closeButton = screen.getByRole('button', { name: /close settings panel/i });
+        fireEvent.click(closeButton);
+
+        // Panel should be closed
+        expect(screen.queryByRole('heading', { name: /group settings/i })).not.toBeInTheDocument();
+      });
+
+      it('should display group name and description in settings panel', () => {
+        const groupFeedWithDescription: Feed = {
+          ...mockGroupFeed,
+          name: 'My Test Group',
+          description: 'A description for testing',
+          isPublic: true,
+        };
+
+        render(<ChatView feed={groupFeedWithDescription} />);
+
+        // Open the panel
+        const settingsButton = screen.getByRole('button', { name: /group settings/i });
+        fireEvent.click(settingsButton);
+
+        // Should show group info
+        const nameInput = screen.getByLabelText(/name/i);
+        expect(nameInput).toHaveValue('My Test Group');
+
+        const descInput = screen.getByLabelText(/description/i);
+        expect(descInput).toHaveValue('A description for testing');
+      });
+
+      it('should not show Settings button for personal feeds', () => {
+        const personalFeed: Feed = {
+          id: 'personal-feed',
+          name: 'My Feed',
+          type: 'personal',
+          participants: [],
+          createdAt: Date.now(),
+          lastMessageAt: Date.now(),
+        };
+
+        render(<ChatView feed={personalFeed} />);
+
+        expect(screen.queryByRole('button', { name: /group settings/i })).not.toBeInTheDocument();
+      });
+    });
   });
 });

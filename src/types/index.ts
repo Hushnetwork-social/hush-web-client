@@ -42,6 +42,10 @@ export interface Feed {
   otherParticipantPublicSigningAddress?: string;
   /** Flag indicating this feed has new data that needs to be fetched (blockIndex changed) */
   needsSync?: boolean;
+  /** Group description (for group feeds) */
+  description?: string;
+  /** Whether the group is public (for group feeds) */
+  isPublic?: boolean;
 }
 
 // Profile search result type

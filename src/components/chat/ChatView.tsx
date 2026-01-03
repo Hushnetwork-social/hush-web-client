@@ -2,11 +2,12 @@
 
 import { useRef, useMemo, useCallback, useState, useEffect } from "react";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
-import { MessageSquare, Lock, ArrowLeft, Users } from "lucide-react";
+import { MessageSquare, Lock, ArrowLeft, Users, Settings } from "lucide-react";
 import { MessageBubble } from "./MessageBubble";
 import { MessageInput, type MessageInputHandle } from "./MessageInput";
 import { ReplyContextBar } from "./ReplyContextBar";
 import { MemberListPanel } from "@/components/groups/MemberListPanel";
+import { GroupSettingsPanel } from "@/components/groups/GroupSettingsPanel";
 import { useAppStore } from "@/stores";
 import { useFeedsStore, sendMessage } from "@/modules/feeds";
 import { useFeedReactions } from "@/hooks/useFeedReactions";
@@ -49,12 +50,22 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   // State for member panel visibility
   const [showMemberPanel, setShowMemberPanel] = useState(false);
 
+  // State for settings panel visibility
+  const [showSettingsPanel, setShowSettingsPanel] = useState(false);
+
   // Get current user's role in the group
   const currentUserRole = useMemo(() => {
     if (!isGroupFeed || !credentials?.signingPublicKey) return 'Member' as const;
     const member = groupMembers.find(m => m.publicAddress === credentials.signingPublicKey);
     return member?.role ?? 'Member' as const;
   }, [isGroupFeed, credentials?.signingPublicKey, groupMembers]);
+
+  // Check if current user is the last admin (for delete button visibility)
+  const isLastAdmin = useMemo(() => {
+    if (!isGroupFeed || currentUserRole !== 'Admin') return false;
+    const adminCount = groupMembers.filter(m => m.role === 'Admin').length;
+    return adminCount === 1;
+  }, [isGroupFeed, currentUserRole, groupMembers]);
 
   // Create a lookup Map for O(1) member resolution (optimization for groups with many messages)
   const memberLookup = useMemo(() => {
@@ -124,6 +135,31 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   const handleCloseMemberPanel = useCallback(() => {
     setShowMemberPanel(false);
   }, []);
+
+  // Settings Panel: Handler for opening/closing
+  const handleOpenSettingsPanel = useCallback(() => {
+    setShowSettingsPanel(true);
+  }, []);
+
+  const handleCloseSettingsPanel = useCallback(() => {
+    setShowSettingsPanel(false);
+  }, []);
+
+  // Settings Panel: Handler for leave group action
+  const handleLeaveGroup = useCallback(() => {
+    // Navigate away from the group (back to feed list)
+    if (onBack) {
+      onBack();
+    }
+  }, [onBack]);
+
+  // Settings Panel: Handler for delete group action
+  const handleDeleteGroup = useCallback(() => {
+    // Navigate away from the deleted group (back to feed list)
+    if (onBack) {
+      onBack();
+    }
+  }, [onBack]);
 
   // Reply to Message: ESC key handler to cancel reply mode
   useEffect(() => {
@@ -254,16 +290,26 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
               </div>
             </div>
           </div>
-          {/* Members button for group feeds */}
+          {/* Action buttons for group feeds */}
           {isGroupFeed && (
-            <button
-              onClick={handleOpenMemberPanel}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-hush-text-accent hover:bg-hush-bg-hover hover:text-hush-text-primary transition-colors"
-              aria-label="View group members"
-            >
-              <Users className="w-4 h-4" />
-              <span className="hidden sm:inline">Members</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleOpenMemberPanel}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-hush-text-accent hover:bg-hush-bg-hover hover:text-hush-text-primary transition-colors"
+                aria-label="View group members"
+              >
+                <Users className="w-4 h-4" />
+                <span className="hidden sm:inline">Members</span>
+              </button>
+              <button
+                onClick={handleOpenSettingsPanel}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-hush-text-accent hover:bg-hush-bg-hover hover:text-hush-text-primary transition-colors"
+                aria-label="Group settings"
+              >
+                <Settings className="w-4 h-4" />
+                <span className="hidden sm:inline">Settings</span>
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -339,6 +385,23 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
           currentUserAddress={credentials.signingPublicKey}
           currentUserRole={currentUserRole}
           members={groupMembers}
+        />
+      )}
+
+      {/* Group Settings Panel (Group feeds only) */}
+      {isGroupFeed && credentials?.signingPublicKey && (
+        <GroupSettingsPanel
+          isOpen={showSettingsPanel}
+          onClose={handleCloseSettingsPanel}
+          feedId={feed.id}
+          groupName={feed.name}
+          groupDescription={feed.description ?? ""}
+          isPublic={feed.isPublic ?? false}
+          currentUserRole={currentUserRole}
+          currentUserAddress={credentials.signingPublicKey}
+          isLastAdmin={isLastAdmin}
+          onLeave={handleLeaveGroup}
+          onDelete={handleDeleteGroup}
         />
       )}
     </div>
