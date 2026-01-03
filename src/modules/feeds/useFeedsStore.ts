@@ -9,7 +9,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { Feed, FeedMessage, GroupFeedMember, GroupMemberRole } from '@/types';
+import type { Feed, FeedMessage, GroupFeedMember, GroupMemberRole, GroupKeyGeneration, GroupKeyState } from '@/types';
 import { debugLog } from '@/lib/debug-logger';
 
 // Feed type mapping from server (FeedType enum)
@@ -56,6 +56,9 @@ interface FeedsState {
 
   /** Current user's role in each group feed */
   memberRoles: Record<string, GroupMemberRole>;
+
+  /** KeyGeneration state indexed by group feed ID */
+  groupKeyStates: Record<string, GroupKeyState>;
 }
 
 interface FeedsActions {
@@ -166,6 +169,32 @@ interface FeedsActions {
 
   /** Check if user is an admin of a group feed */
   isUserAdmin: (feedId: string) => boolean;
+
+  // ============= Group KeyGeneration Actions =============
+
+  /** Set the complete key state for a group feed */
+  setGroupKeyState: (feedId: string, keyState: GroupKeyState) => void;
+
+  /** Add a single key generation to a group feed */
+  addKeyGeneration: (feedId: string, keyGen: GroupKeyGeneration) => void;
+
+  /** Get the current AES key for sending messages to a group */
+  getCurrentGroupKey: (feedId: string) => string | undefined;
+
+  /** Get the AES key for a specific key generation (for decryption) */
+  getGroupKeyByGeneration: (feedId: string, keyGeneration: number) => string | undefined;
+
+  /** Check if there are missing key generations (unban gap) */
+  hasMissingKeyGenerations: (feedId: string) => boolean;
+
+  /** Get the list of missing key generation numbers */
+  getMissingKeyGenerations: (feedId: string) => number[];
+
+  /** Record a missing key generation (when message cannot be decrypted) */
+  recordMissingKeyGeneration: (feedId: string, keyGeneration: number) => void;
+
+  /** Get the GroupKeyState for a feed */
+  getGroupKeyState: (feedId: string) => GroupKeyState | undefined;
 }
 
 type FeedsStore = FeedsState & FeedsActions;
@@ -185,6 +214,7 @@ const initialState: FeedsState = {
   lastError: null,
   groupMembers: {},
   memberRoles: {},
+  groupKeyStates: {},
 };
 
 /**
@@ -526,6 +556,147 @@ export const useFeedsStore = create<FeedsStore>()(
       isUserAdmin: (feedId) => {
         return get().memberRoles[feedId] === 'Admin';
       },
+
+      // ============= Group KeyGeneration Implementations =============
+
+      setGroupKeyState: (feedId, keyState) => {
+        debugLog(`[FeedsStore] setGroupKeyState: feedId=${feedId}, currentKeyGen=${keyState.currentKeyGeneration}, keyCount=${keyState.keyGenerations.length}`);
+        set((state) => ({
+          groupKeyStates: {
+            ...state.groupKeyStates,
+            [feedId]: keyState,
+          },
+        }));
+      },
+
+      addKeyGeneration: (feedId, keyGen) => {
+        debugLog(`[FeedsStore] addKeyGeneration: feedId=${feedId}, keyGen=${keyGen.keyGeneration}, validFromBlock=${keyGen.validFromBlock}`);
+        set((state) => {
+          const currentState = state.groupKeyStates[feedId] || {
+            currentKeyGeneration: 0,
+            keyGenerations: [],
+            missingKeyGenerations: [],
+          };
+
+          // Check if this key generation already exists
+          const existingIndex = currentState.keyGenerations.findIndex(
+            (k) => k.keyGeneration === keyGen.keyGeneration
+          );
+
+          let updatedKeyGenerations: GroupKeyGeneration[];
+          if (existingIndex >= 0) {
+            // Update existing key generation
+            updatedKeyGenerations = [...currentState.keyGenerations];
+            updatedKeyGenerations[existingIndex] = keyGen;
+          } else {
+            // Add new key generation
+            updatedKeyGenerations = [...currentState.keyGenerations, keyGen];
+          }
+
+          // Sort by keyGeneration number
+          updatedKeyGenerations.sort((a, b) => a.keyGeneration - b.keyGeneration);
+
+          // Update validToBlock for previous key generation if this is a new higher one
+          if (keyGen.keyGeneration > 0) {
+            const prevIndex = updatedKeyGenerations.findIndex(
+              (k) => k.keyGeneration === keyGen.keyGeneration - 1
+            );
+            if (prevIndex >= 0 && !updatedKeyGenerations[prevIndex].validToBlock) {
+              updatedKeyGenerations[prevIndex] = {
+                ...updatedKeyGenerations[prevIndex],
+                validToBlock: keyGen.validFromBlock,
+              };
+            }
+          }
+
+          // Update currentKeyGeneration if this is a higher one
+          const newCurrentKeyGen = Math.max(currentState.currentKeyGeneration, keyGen.keyGeneration);
+
+          // Remove from missingKeyGenerations if it was there
+          const updatedMissing = currentState.missingKeyGenerations.filter(
+            (n) => n !== keyGen.keyGeneration
+          );
+
+          return {
+            groupKeyStates: {
+              ...state.groupKeyStates,
+              [feedId]: {
+                currentKeyGeneration: newCurrentKeyGen,
+                keyGenerations: updatedKeyGenerations,
+                missingKeyGenerations: updatedMissing,
+              },
+            },
+          };
+        });
+      },
+
+      getCurrentGroupKey: (feedId) => {
+        const keyState = get().groupKeyStates[feedId];
+        if (!keyState) return undefined;
+
+        const currentKeyGen = keyState.keyGenerations.find(
+          (k) => k.keyGeneration === keyState.currentKeyGeneration
+        );
+        return currentKeyGen?.aesKey;
+      },
+
+      getGroupKeyByGeneration: (feedId, keyGeneration) => {
+        const keyState = get().groupKeyStates[feedId];
+        if (!keyState) return undefined;
+
+        const keyGen = keyState.keyGenerations.find(
+          (k) => k.keyGeneration === keyGeneration
+        );
+        return keyGen?.aesKey;
+      },
+
+      hasMissingKeyGenerations: (feedId) => {
+        const keyState = get().groupKeyStates[feedId];
+        if (!keyState) return false;
+        return keyState.missingKeyGenerations.length > 0;
+      },
+
+      getMissingKeyGenerations: (feedId) => {
+        const keyState = get().groupKeyStates[feedId];
+        if (!keyState) return [];
+        return [...keyState.missingKeyGenerations];
+      },
+
+      recordMissingKeyGeneration: (feedId, keyGeneration) => {
+        debugLog(`[FeedsStore] recordMissingKeyGeneration: feedId=${feedId}, keyGen=${keyGeneration}`);
+        set((state) => {
+          const currentState = state.groupKeyStates[feedId] || {
+            currentKeyGeneration: 0,
+            keyGenerations: [],
+            missingKeyGenerations: [],
+          };
+
+          // Don't record if we already have this key
+          const hasKey = currentState.keyGenerations.some(
+            (k) => k.keyGeneration === keyGeneration
+          );
+          if (hasKey) return state;
+
+          // Don't record if already in missing list
+          if (currentState.missingKeyGenerations.includes(keyGeneration)) {
+            return state;
+          }
+
+          return {
+            groupKeyStates: {
+              ...state.groupKeyStates,
+              [feedId]: {
+                ...currentState,
+                missingKeyGenerations: [...currentState.missingKeyGenerations, keyGeneration].sort((a, b) => a - b),
+              },
+            },
+          };
+        });
+      },
+
+      getGroupKeyState: (feedId) => {
+        return get().groupKeyStates[feedId];
+      },
     }),
     {
       name: 'hush-feeds-storage',
@@ -536,6 +707,7 @@ export const useFeedsStore = create<FeedsStore>()(
         syncMetadata: state.syncMetadata,
         groupMembers: state.groupMembers,
         memberRoles: state.memberRoles,
+        groupKeyStates: state.groupKeyStates,
       }),
     }
   )
