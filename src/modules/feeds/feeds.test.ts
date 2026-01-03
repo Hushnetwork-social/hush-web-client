@@ -947,4 +947,367 @@ describe('Feed Name Updates (FEAT-003)', () => {
       });
     });
   });
+
+  describe('Group KeyGeneration Management', () => {
+    const sampleKeyGen0 = {
+      keyGeneration: 0,
+      validFromBlock: 1000,
+      aesKey: 'key0-aes-base64==',
+    };
+
+    const sampleKeyGen1 = {
+      keyGeneration: 1,
+      validFromBlock: 2000,
+      aesKey: 'key1-aes-base64==',
+    };
+
+    const sampleKeyGen2 = {
+      keyGeneration: 2,
+      validFromBlock: 3000,
+      aesKey: 'key2-aes-base64==',
+    };
+
+    describe('setGroupKeyState', () => {
+      it('should set complete key state for a group', () => {
+        const { setGroupKeyState, getGroupKeyState } = useFeedsStore.getState();
+
+        const keyState = {
+          currentKeyGeneration: 1,
+          keyGenerations: [sampleKeyGen0, sampleKeyGen1],
+          missingKeyGenerations: [],
+        };
+
+        setGroupKeyState('group-1', keyState);
+
+        const result = getGroupKeyState('group-1');
+        expect(result).toEqual(keyState);
+      });
+
+      it('should replace existing key state', () => {
+        const { setGroupKeyState, getGroupKeyState } = useFeedsStore.getState();
+
+        setGroupKeyState('group-1', {
+          currentKeyGeneration: 0,
+          keyGenerations: [sampleKeyGen0],
+          missingKeyGenerations: [],
+        });
+
+        setGroupKeyState('group-1', {
+          currentKeyGeneration: 2,
+          keyGenerations: [sampleKeyGen0, sampleKeyGen1, sampleKeyGen2],
+          missingKeyGenerations: [],
+        });
+
+        const result = getGroupKeyState('group-1');
+        expect(result?.currentKeyGeneration).toBe(2);
+        expect(result?.keyGenerations).toHaveLength(3);
+      });
+    });
+
+    describe('addKeyGeneration', () => {
+      it('should add first key generation (KeyGen 0)', () => {
+        const { addKeyGeneration, getGroupKeyState } = useFeedsStore.getState();
+
+        addKeyGeneration('group-1', sampleKeyGen0);
+
+        const result = getGroupKeyState('group-1');
+        expect(result?.currentKeyGeneration).toBe(0);
+        expect(result?.keyGenerations).toHaveLength(1);
+        expect(result?.keyGenerations[0].aesKey).toBe('key0-aes-base64==');
+      });
+
+      it('should add subsequent key generation and update currentKeyGeneration', () => {
+        const { addKeyGeneration, getGroupKeyState } = useFeedsStore.getState();
+
+        addKeyGeneration('group-1', sampleKeyGen0);
+        addKeyGeneration('group-1', sampleKeyGen1);
+
+        const result = getGroupKeyState('group-1');
+        expect(result?.currentKeyGeneration).toBe(1);
+        expect(result?.keyGenerations).toHaveLength(2);
+      });
+
+      it('should set validToBlock on previous key generation', () => {
+        const { addKeyGeneration, getGroupKeyState } = useFeedsStore.getState();
+
+        addKeyGeneration('group-1', sampleKeyGen0);
+        addKeyGeneration('group-1', sampleKeyGen1);
+
+        const result = getGroupKeyState('group-1');
+        expect(result?.keyGenerations[0].validToBlock).toBe(2000);
+        expect(result?.keyGenerations[1].validToBlock).toBeUndefined();
+      });
+
+      it('should sort key generations by number', () => {
+        const { addKeyGeneration, getGroupKeyState } = useFeedsStore.getState();
+
+        // Add out of order
+        addKeyGeneration('group-1', sampleKeyGen2);
+        addKeyGeneration('group-1', sampleKeyGen0);
+        addKeyGeneration('group-1', sampleKeyGen1);
+
+        const result = getGroupKeyState('group-1');
+        expect(result?.keyGenerations[0].keyGeneration).toBe(0);
+        expect(result?.keyGenerations[1].keyGeneration).toBe(1);
+        expect(result?.keyGenerations[2].keyGeneration).toBe(2);
+      });
+
+      it('should update existing key generation instead of adding duplicate', () => {
+        const { addKeyGeneration, getGroupKeyState } = useFeedsStore.getState();
+
+        addKeyGeneration('group-1', sampleKeyGen0);
+        addKeyGeneration('group-1', { ...sampleKeyGen0, aesKey: 'updated-key==' });
+
+        const result = getGroupKeyState('group-1');
+        expect(result?.keyGenerations).toHaveLength(1);
+        expect(result?.keyGenerations[0].aesKey).toBe('updated-key==');
+      });
+
+      it('should remove key from missingKeyGenerations when added', () => {
+        const { setGroupKeyState, addKeyGeneration, getGroupKeyState } = useFeedsStore.getState();
+
+        // Set up state with missing key generation 1
+        setGroupKeyState('group-1', {
+          currentKeyGeneration: 2,
+          keyGenerations: [sampleKeyGen0, sampleKeyGen2],
+          missingKeyGenerations: [1],
+        });
+
+        // Add the missing key
+        addKeyGeneration('group-1', sampleKeyGen1);
+
+        const result = getGroupKeyState('group-1');
+        expect(result?.missingKeyGenerations).toEqual([]);
+        expect(result?.keyGenerations).toHaveLength(3);
+      });
+    });
+
+    describe('getCurrentGroupKey', () => {
+      it('should return current AES key', () => {
+        const { setGroupKeyState, getCurrentGroupKey } = useFeedsStore.getState();
+
+        setGroupKeyState('group-1', {
+          currentKeyGeneration: 1,
+          keyGenerations: [sampleKeyGen0, sampleKeyGen1],
+          missingKeyGenerations: [],
+        });
+
+        expect(getCurrentGroupKey('group-1')).toBe('key1-aes-base64==');
+      });
+
+      it('should return undefined for unknown feed', () => {
+        expect(useFeedsStore.getState().getCurrentGroupKey('unknown-feed')).toBeUndefined();
+      });
+
+      it('should return undefined when current key is missing', () => {
+        const { setGroupKeyState, getCurrentGroupKey } = useFeedsStore.getState();
+
+        setGroupKeyState('group-1', {
+          currentKeyGeneration: 2,
+          keyGenerations: [sampleKeyGen0, sampleKeyGen1], // Missing key 2
+          missingKeyGenerations: [2],
+        });
+
+        expect(getCurrentGroupKey('group-1')).toBeUndefined();
+      });
+    });
+
+    describe('getGroupKeyByGeneration', () => {
+      it('should return AES key for specific generation', () => {
+        const { setGroupKeyState, getGroupKeyByGeneration } = useFeedsStore.getState();
+
+        setGroupKeyState('group-1', {
+          currentKeyGeneration: 2,
+          keyGenerations: [sampleKeyGen0, sampleKeyGen1, sampleKeyGen2],
+          missingKeyGenerations: [],
+        });
+
+        expect(getGroupKeyByGeneration('group-1', 0)).toBe('key0-aes-base64==');
+        expect(getGroupKeyByGeneration('group-1', 1)).toBe('key1-aes-base64==');
+        expect(getGroupKeyByGeneration('group-1', 2)).toBe('key2-aes-base64==');
+      });
+
+      it('should return undefined for missing generation', () => {
+        const { setGroupKeyState, getGroupKeyByGeneration } = useFeedsStore.getState();
+
+        setGroupKeyState('group-1', {
+          currentKeyGeneration: 2,
+          keyGenerations: [sampleKeyGen0, sampleKeyGen2],
+          missingKeyGenerations: [1],
+        });
+
+        expect(getGroupKeyByGeneration('group-1', 1)).toBeUndefined();
+      });
+
+      it('should return undefined for unknown feed', () => {
+        expect(useFeedsStore.getState().getGroupKeyByGeneration('unknown-feed', 0)).toBeUndefined();
+      });
+    });
+
+    describe('hasMissingKeyGenerations', () => {
+      it('should return true when there are missing keys', () => {
+        const { setGroupKeyState, hasMissingKeyGenerations } = useFeedsStore.getState();
+
+        setGroupKeyState('group-1', {
+          currentKeyGeneration: 4,
+          keyGenerations: [sampleKeyGen0, sampleKeyGen1],
+          missingKeyGenerations: [2, 3],
+        });
+
+        expect(hasMissingKeyGenerations('group-1')).toBe(true);
+      });
+
+      it('should return false when no missing keys', () => {
+        const { setGroupKeyState, hasMissingKeyGenerations } = useFeedsStore.getState();
+
+        setGroupKeyState('group-1', {
+          currentKeyGeneration: 1,
+          keyGenerations: [sampleKeyGen0, sampleKeyGen1],
+          missingKeyGenerations: [],
+        });
+
+        expect(hasMissingKeyGenerations('group-1')).toBe(false);
+      });
+
+      it('should return false for unknown feed', () => {
+        expect(useFeedsStore.getState().hasMissingKeyGenerations('unknown-feed')).toBe(false);
+      });
+    });
+
+    describe('getMissingKeyGenerations', () => {
+      it('should return list of missing key generation numbers', () => {
+        const { setGroupKeyState, getMissingKeyGenerations } = useFeedsStore.getState();
+
+        setGroupKeyState('group-1', {
+          currentKeyGeneration: 4,
+          keyGenerations: [sampleKeyGen0, sampleKeyGen1],
+          missingKeyGenerations: [2, 3],
+        });
+
+        expect(getMissingKeyGenerations('group-1')).toEqual([2, 3]);
+      });
+
+      it('should return empty array when no missing keys', () => {
+        const { setGroupKeyState, getMissingKeyGenerations } = useFeedsStore.getState();
+
+        setGroupKeyState('group-1', {
+          currentKeyGeneration: 1,
+          keyGenerations: [sampleKeyGen0, sampleKeyGen1],
+          missingKeyGenerations: [],
+        });
+
+        expect(getMissingKeyGenerations('group-1')).toEqual([]);
+      });
+
+      it('should return empty array for unknown feed', () => {
+        expect(useFeedsStore.getState().getMissingKeyGenerations('unknown-feed')).toEqual([]);
+      });
+
+      it('should return a copy of the array (not mutating original)', () => {
+        const { setGroupKeyState, getMissingKeyGenerations, getGroupKeyState } = useFeedsStore.getState();
+
+        setGroupKeyState('group-1', {
+          currentKeyGeneration: 3,
+          keyGenerations: [sampleKeyGen0],
+          missingKeyGenerations: [1, 2],
+        });
+
+        const missing = getMissingKeyGenerations('group-1');
+        missing.push(99);
+
+        expect(getGroupKeyState('group-1')?.missingKeyGenerations).toEqual([1, 2]);
+      });
+    });
+
+    describe('recordMissingKeyGeneration', () => {
+      it('should record a missing key generation', () => {
+        const { addKeyGeneration, recordMissingKeyGeneration, getMissingKeyGenerations } = useFeedsStore.getState();
+
+        addKeyGeneration('group-1', sampleKeyGen0);
+        recordMissingKeyGeneration('group-1', 2);
+
+        expect(getMissingKeyGenerations('group-1')).toEqual([2]);
+      });
+
+      it('should not record duplicate missing key', () => {
+        const { addKeyGeneration, recordMissingKeyGeneration, getMissingKeyGenerations } = useFeedsStore.getState();
+
+        addKeyGeneration('group-1', sampleKeyGen0);
+        recordMissingKeyGeneration('group-1', 2);
+        recordMissingKeyGeneration('group-1', 2);
+
+        expect(getMissingKeyGenerations('group-1')).toEqual([2]);
+      });
+
+      it('should not record key that already exists', () => {
+        const { setGroupKeyState, recordMissingKeyGeneration, getMissingKeyGenerations } = useFeedsStore.getState();
+
+        setGroupKeyState('group-1', {
+          currentKeyGeneration: 1,
+          keyGenerations: [sampleKeyGen0, sampleKeyGen1],
+          missingKeyGenerations: [],
+        });
+
+        recordMissingKeyGeneration('group-1', 0);
+        recordMissingKeyGeneration('group-1', 1);
+
+        expect(getMissingKeyGenerations('group-1')).toEqual([]);
+      });
+
+      it('should sort missing keys by number', () => {
+        const { addKeyGeneration, recordMissingKeyGeneration, getMissingKeyGenerations } = useFeedsStore.getState();
+
+        addKeyGeneration('group-1', sampleKeyGen0);
+        recordMissingKeyGeneration('group-1', 3);
+        recordMissingKeyGeneration('group-1', 1);
+        recordMissingKeyGeneration('group-1', 2);
+
+        expect(getMissingKeyGenerations('group-1')).toEqual([1, 2, 3]);
+      });
+
+      it('should work for unknown feed (creates initial state)', () => {
+        const { recordMissingKeyGeneration, getMissingKeyGenerations } = useFeedsStore.getState();
+
+        recordMissingKeyGeneration('new-group', 5);
+
+        expect(getMissingKeyGenerations('new-group')).toEqual([5]);
+      });
+    });
+
+    describe('getGroupKeyState', () => {
+      it('should return complete key state', () => {
+        const { setGroupKeyState, getGroupKeyState } = useFeedsStore.getState();
+
+        const keyState = {
+          currentKeyGeneration: 2,
+          keyGenerations: [sampleKeyGen0, sampleKeyGen1, sampleKeyGen2],
+          missingKeyGenerations: [],
+        };
+
+        setGroupKeyState('group-1', keyState);
+
+        expect(getGroupKeyState('group-1')).toEqual(keyState);
+      });
+
+      it('should return undefined for unknown feed', () => {
+        expect(useFeedsStore.getState().getGroupKeyState('unknown-feed')).toBeUndefined();
+      });
+    });
+
+    describe('reset clears key state', () => {
+      it('should clear groupKeyStates on reset', () => {
+        const state = useFeedsStore.getState();
+
+        state.setGroupKeyState('group-1', {
+          currentKeyGeneration: 1,
+          keyGenerations: [sampleKeyGen0, sampleKeyGen1],
+          missingKeyGenerations: [],
+        });
+
+        state.reset();
+
+        expect(useFeedsStore.getState().groupKeyStates).toEqual({});
+      });
+    });
+  });
 });
