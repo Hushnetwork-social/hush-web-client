@@ -36,6 +36,9 @@ import type {
   GetGroupFeedResponse,
   GetGroupMembersRequest,
   GetGroupMembersResponse,
+  GetKeyGenerationsRequest,
+  GetKeyGenerationsResponse,
+  KeyGenerationProto,
   GroupFeedParticipantProto,
 } from '../types';
 import type { GroupCreationData, GroupOperationResult, GroupFeedMember } from '@/types';
@@ -507,6 +510,37 @@ export const groupService = {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to get group members';
       debugLog('[GroupService] getGroupMembers error:', message);
+      return [];
+    }
+  },
+
+  /**
+   * Get KeyGenerations for a user in a group
+   *
+   * Returns all KeyGenerations the user has access to. The server only returns
+   * KeyGenerations where the user was an active member when the key was created.
+   * Gaps in KeyGeneration numbers indicate periods when the user was banned.
+   */
+  async getKeyGenerations(feedId: string, userAddress: string): Promise<KeyGenerationProto[]> {
+    debugLog('[GroupService] getKeyGenerations:', { feedId: feedId.substring(0, 8), userAddress: userAddress.substring(0, 8) });
+    try {
+      const client = getGrpcClient();
+      const request: GetKeyGenerationsRequest = {
+        FeedId: feedId,
+        UserPublicAddress: userAddress,
+      };
+
+      const response = await client.unaryCall<GetKeyGenerationsRequest, GetKeyGenerationsResponse>(
+        SERVICE_NAME,
+        'GetKeyGenerations',
+        request
+      );
+
+      debugLog('[GroupService] getKeyGenerations result:', { count: response.KeyGenerations?.length ?? 0 });
+      return response.KeyGenerations ?? [];
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to get key generations';
+      debugLog('[GroupService] getKeyGenerations error:', message);
       return [];
     }
   },

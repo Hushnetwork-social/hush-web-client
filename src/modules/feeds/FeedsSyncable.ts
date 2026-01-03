@@ -27,6 +27,7 @@ import { checkIdentityExists } from '../identity/IdentityService';
 import { useFeedsStore } from './useFeedsStore';
 import { useBlockchainStore } from '../blockchain/useBlockchainStore';
 import { useReactionsStore } from '../reactions/useReactionsStore';
+import { syncGroupMembers, syncKeyGenerations } from '@/lib/sync/group-sync';
 import type { Feed, FeedMessage } from '@/types';
 import { debugLog, debugWarn, debugError } from '@/lib/debug-logger';
 
@@ -262,6 +263,9 @@ export class FeedsSyncable implements ISyncable {
       // Decrypt feed keys for new feeds
       await this.decryptFeedKeys(serverFeeds);
 
+      // Sync group-specific data for group feeds
+      await this.syncGroupFeedData(serverFeeds, address);
+
       // Refresh participant names for feeds with BlockIndex changes
       if (feedsWithChangedBlockIndex.length > 0) {
         await this.refreshParticipantNames(feedsWithChangedBlockIndex);
@@ -322,6 +326,59 @@ export class FeedsSyncable implements ISyncable {
         debugLog(`[FeedsSyncable] Feed "${f.name}" missing aesKey (hasEncryptedKey: ${!!f.encryptedFeedKey})`);
       }
     });
+  }
+
+  /**
+   * Sync group-specific data (members, KeyGenerations) for group feeds
+   *
+   * For each group feed in the list, this method:
+   * 1. Syncs the member list via group-sync.ts
+   * 2. Syncs KeyGenerations and decrypts them with user's private key
+   *
+   * This ensures group-specific state is kept up-to-date after feed sync.
+   */
+  private async syncGroupFeedData(feeds: Feed[], userAddress: string): Promise<void> {
+    const credentials = useAppStore.getState().credentials;
+    if (!credentials?.encryptionPrivateKey) {
+      debugLog('[FeedsSyncable] Cannot sync group data - no encryption private key');
+      return;
+    }
+
+    // Filter to only group feeds
+    const groupFeeds = feeds.filter((f) => f.type === 'group');
+
+    if (groupFeeds.length === 0) {
+      return;
+    }
+
+    debugLog(`[FeedsSyncable] Syncing data for ${groupFeeds.length} group feed(s)`);
+
+    // Sync each group feed in parallel
+    const syncPromises = groupFeeds.map(async (feed) => {
+      try {
+        // Sync members
+        const membersResult = await syncGroupMembers(feed.id, userAddress);
+        if (!membersResult.success) {
+          debugWarn(`[FeedsSyncable] Failed to sync members for group ${feed.id.substring(0, 8)}...: ${membersResult.error}`);
+        }
+
+        // Sync KeyGenerations
+        const keysResult = await syncKeyGenerations(
+          feed.id,
+          userAddress,
+          credentials.encryptionPrivateKey
+        );
+        if (!keysResult.success) {
+          debugWarn(`[FeedsSyncable] Failed to sync KeyGenerations for group ${feed.id.substring(0, 8)}...: ${keysResult.error}`);
+        } else if (keysResult.data) {
+          debugLog(`[FeedsSyncable] Synced KeyGenerations for group ${feed.id.substring(0, 8)}...: keyGen=${keysResult.data.currentKeyGeneration}, count=${keysResult.data.keyGenerations.length}`);
+        }
+      } catch (error) {
+        debugError(`[FeedsSyncable] Error syncing group ${feed.id.substring(0, 8)}...:`, error);
+      }
+    });
+
+    await Promise.all(syncPromises);
   }
 
   /**

@@ -559,3 +559,20 @@ export interface GetGroupMembersRequest {
 export interface GetGroupMembersResponse {
   Members: GroupFeedMemberProto[];
 }
+
+// Get KeyGenerations for a user
+export interface GetKeyGenerationsRequest {
+  FeedId: string;
+  UserPublicAddress: string;
+}
+
+export interface KeyGenerationProto {
+  KeyGeneration: number;
+  EncryptedKey: string;
+  ValidFromBlock: number;
+  ValidToBlock?: number;
+}
+
+export interface GetKeyGenerationsResponse {
+  KeyGenerations: KeyGenerationProto[];
+}
