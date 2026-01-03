@@ -15,6 +15,7 @@ export const PAYLOAD_GUIDS = {
   UPDATE_IDENTITY: 'a7e3c4b2-1f8d-4e5a-9c6b-2d3e4f5a6b7c',
   NEW_PERSONAL_FEED: '70c718a9-14d0-4b70-ad37-fd8bfe184386',
   NEW_CHAT_FEED: '033c61f5-c6e3-4e43-9eb0-ac9c615110e3',
+  NEW_GROUP_FEED: 'a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d',
   NEW_FEED_MESSAGE: '3309d79b-92e9-4435-9b23-0de0b3d24264',
   NEW_REACTION: 'a7b3c2d1-e4f5-6789-abcd-ef0123456789',
 };
@@ -25,6 +26,16 @@ export const FEED_TYPES = {
   CHAT: 1,
   GROUP: 2,
   BROADCAST: 3,
+};
+
+// Participant types for group feeds (match HushClient ParticipantType enum)
+export const PARTICIPANT_TYPES = {
+  OWNER: 0,
+  MEMBER: 1,
+  GUEST: 2,
+  ADMIN: 3,
+  BLOCKED: 4,
+  BANNED: 5,
 };
 
 // =============================================================================
@@ -101,6 +112,24 @@ export interface NewChatFeedPayload {
   FeedId: string;
   FeedType: number;
   FeedParticipants: ChatFeedParticipant[];
+}
+
+// GroupFeedParticipant - matches server's GroupFeedParticipant record
+export interface GroupFeedParticipant {
+  FeedId: string;
+  ParticipantPublicAddress: string;
+  ParticipantType: number;
+  EncryptedFeedKey: string;
+  KeyGeneration: number;
+}
+
+// NewGroupFeedPayload - matches server's NewGroupFeedPayload record
+export interface NewGroupFeedPayload {
+  FeedId: string;
+  Title: string;
+  Description: string;
+  IsPublic: boolean;
+  Participants: GroupFeedParticipant[];
 }
 
 // =============================================================================
@@ -423,6 +452,97 @@ export async function createChatFeedTransaction(
   const signedTx = await signByUser(unsignedTx, {
     privateKey: signingPrivateKey,
     publicSigningAddress: ownPublicSigningAddress,
+  });
+
+  return {
+    signedTransaction: JSON.stringify(signedTx),
+    feedId,
+    feedAesKey,
+  };
+}
+
+/**
+ * Input for a group participant - includes both signing and encryption addresses
+ */
+export interface GroupParticipantInput {
+  publicSigningAddress: string;
+  publicEncryptAddress: string;
+}
+
+/**
+ * Creates and signs a group feed transaction
+ * Creates a new group feed with multiple participants (N participants)
+ *
+ * The creator is automatically set as Owner (ParticipantType = 0)
+ * Other participants are set as Members (ParticipantType = 1)
+ *
+ * @param title Group name/title
+ * @param description Group description
+ * @param isPublic Whether the group is publicly discoverable
+ * @param creatorPublicSigningAddress Creator's public signing address
+ * @param creatorPublicEncryptAddress Creator's public encryption address
+ * @param participants Array of other participants (signing + encryption addresses)
+ * @param signingPrivateKey Creator's private signing key
+ * @returns Signed transaction, feed ID, and feed AES key
+ */
+export async function createGroupFeedTransaction(
+  title: string,
+  description: string,
+  isPublic: boolean,
+  creatorPublicSigningAddress: string,
+  creatorPublicEncryptAddress: string,
+  participants: GroupParticipantInput[],
+  signingPrivateKey: Uint8Array
+): Promise<{ signedTransaction: string; feedId: string; feedAesKey: string }> {
+  // Generate feed ID and AES key
+  const feedId = generateGuid();
+  const feedAesKey = generateAesKey();
+
+  // Initial KeyGeneration is 0 for new groups
+  const keyGeneration = 0;
+
+  // Encrypt AES key for creator (Owner) using ECIES
+  const creatorEncryptedKey = await eciesEncrypt(feedAesKey, creatorPublicEncryptAddress);
+
+  // Build participants array - creator first as Owner
+  const groupParticipants: GroupFeedParticipant[] = [
+    {
+      FeedId: feedId,
+      ParticipantPublicAddress: creatorPublicSigningAddress,
+      ParticipantType: PARTICIPANT_TYPES.OWNER,
+      EncryptedFeedKey: creatorEncryptedKey,
+      KeyGeneration: keyGeneration,
+    },
+  ];
+
+  // Encrypt AES key for each other participant (Members)
+  for (const participant of participants) {
+    const encryptedKey = await eciesEncrypt(feedAesKey, participant.publicEncryptAddress);
+    groupParticipants.push({
+      FeedId: feedId,
+      ParticipantPublicAddress: participant.publicSigningAddress,
+      ParticipantType: PARTICIPANT_TYPES.MEMBER,
+      EncryptedFeedKey: encryptedKey,
+      KeyGeneration: keyGeneration,
+    });
+  }
+
+  // Create payload
+  const payload: NewGroupFeedPayload = {
+    FeedId: feedId,
+    Title: title,
+    Description: description,
+    IsPublic: isPublic,
+    Participants: groupParticipants,
+  };
+
+  // Create unsigned transaction
+  const unsignedTx = createUnsignedTransaction(PAYLOAD_GUIDS.NEW_GROUP_FEED, payload);
+
+  // Sign transaction
+  const signedTx = await signByUser(unsignedTx, {
+    privateKey: signingPrivateKey,
+    publicSigningAddress: creatorPublicSigningAddress,
   });
 
   return {
