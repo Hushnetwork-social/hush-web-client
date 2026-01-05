@@ -277,6 +277,14 @@ export class FeedsSyncable implements ISyncable {
     // Mark session as validated after successful full sync
     if (forceFullSync) {
       this.markSessionValidated();
+
+      // On new session, also sync group data for ALL cached group feeds
+      // This ensures joinedAtBlock and KeyGenerations are fresh
+      const allGroupFeeds = useFeedsStore.getState().feeds.filter(f => f.type === 'group');
+      if (allGroupFeeds.length > 0) {
+        debugLog(`[FeedsSyncable] New session - syncing group data for ${allGroupFeeds.length} cached group feed(s)`);
+        await this.syncGroupFeedData(allGroupFeeds, address);
+      }
     }
 
     // Also check if any existing feeds are missing decrypted keys
@@ -815,6 +823,12 @@ export class FeedsSyncable implements ISyncable {
     // We pass hasNewMessages to determine if we should process messages or just reactions
     debugLog(`[FeedsSyncable] syncActiveFeedMessages: feedId=${selectedFeedId.substring(0, 8)}..., hasNewMessages=${hasNewMessages}`);
     await this.syncMessagesForFeed(address, activeFeed, hasNewMessages);
+
+    // For group feeds, also sync members and KeyGenerations periodically
+    // This ensures system messages for new members appear without page refresh
+    if (activeFeed.type === 'group') {
+      await this.syncGroupFeedData([activeFeed], address);
+    }
 
     // Clear the needsSync flag if it was set
     if (activeFeed.needsSync) {

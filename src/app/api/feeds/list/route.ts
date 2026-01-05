@@ -2,15 +2,15 @@
 // Retrieves all feeds for a user
 
 import { NextRequest, NextResponse } from 'next/server';
-
-// Mark as dynamic to exclude from static export
-export const dynamic = 'force-dynamic';
 import {
   grpcCall,
   parseGrpcResponse,
   buildGetFeedsForAddressRequest,
   parseFeedsResponse,
 } from '@/lib/grpc/grpc-web-helper';
+
+// Mark as dynamic to exclude from static export
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   const address = request.nextUrl.searchParams.get('address');

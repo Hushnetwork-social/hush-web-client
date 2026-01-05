@@ -2,15 +2,15 @@
 // Searches for identities by display name
 
 import { NextRequest, NextResponse } from 'next/server';
-
-// Mark as dynamic to exclude from static export
-export const dynamic = 'force-dynamic';
 import {
   grpcCall,
   parseGrpcResponse,
   buildSearchByDisplayNameRequest,
   parseSearchByDisplayNameResponse,
 } from '@/lib/grpc/grpc-web-helper';
+
+// Mark as dynamic to exclude from static export
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   const name = request.nextUrl.searchParams.get('name');

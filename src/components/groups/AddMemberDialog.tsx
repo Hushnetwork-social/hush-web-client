@@ -4,7 +4,8 @@ import { memo, useState, useCallback, useMemo } from "react";
 import { X, Search, Loader2, UserPlus, Check, AlertCircle } from "lucide-react";
 import { searchByDisplayName } from "@/modules/identity";
 import { addMemberToGroup } from "@/lib/crypto/group-transactions";
-import { useFeedsStore } from "@/modules/feeds";
+import { syncGroupMembers, syncKeyGenerations } from "@/lib/sync/group-sync";
+import { useAppStore } from "@/stores";
 import type { ProfileSearchResult, GroupFeedMember } from "@/types";
 import { debugLog, debugError } from "@/lib/debug-logger";
 
@@ -49,8 +50,6 @@ export const AddMemberDialog = memo(function AddMemberDialog({
   const [selectedMember, setSelectedMember] = useState<ProfileSearchResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Get store update function
-  const addGroupMember = useFeedsStore((state) => state.addGroupMember);
 
   // Get current member addresses for filtering (memoized to prevent re-creating on each render)
   const currentMemberAddresses = useMemo(
@@ -160,15 +159,35 @@ export const AddMemberDialog = memo(function AddMemberDialog({
         return;
       }
 
-      // Add member to local store
-      const newMember: GroupFeedMember = {
-        publicAddress: selectedMember.publicSigningAddress,
-        displayName: selectedMember.displayName,
-        role: "Member",
-      };
+      // Refresh members and KeyGenerations from server to get complete data
+      // This ensures the system message "X joined the group" appears immediately
+      debugLog("[AddMemberDialog] Syncing group data from server...");
 
-      addGroupMember(feedId, newMember);
-      onMemberAdded?.(newMember);
+      // Get credentials for KeyGeneration sync
+      const credentials = useAppStore.getState().credentials;
+
+      // Sync both members and KeyGenerations in parallel
+      const [membersResult, keysResult] = await Promise.all([
+        syncGroupMembers(feedId, adminAddress),
+        credentials?.encryptionPrivateKey
+          ? syncKeyGenerations(feedId, adminAddress, credentials.encryptionPrivateKey)
+          : Promise.resolve({ success: false, error: 'No encryption key' }),
+      ]);
+
+      debugLog("[AddMemberDialog] Sync results:", {
+        membersSuccess: membersResult.success,
+        keysSuccess: keysResult.success,
+      });
+
+      if (membersResult.success && membersResult.data) {
+        // Find the newly added member from the synced data
+        const newMember = membersResult.data.find(
+          m => m.publicAddress === selectedMember.publicSigningAddress
+        );
+        if (newMember) {
+          onMemberAdded?.(newMember);
+        }
+      }
 
       setDialogState("success");
 
@@ -181,7 +200,7 @@ export const AddMemberDialog = memo(function AddMemberDialog({
       setError(err instanceof Error ? err.message : "Failed to add member");
       setDialogState("error");
     }
-  }, [selectedMember, feedId, adminAddress, addGroupMember, onMemberAdded, handleClose]);
+  }, [selectedMember, feedId, adminAddress, onMemberAdded, handleClose]);
 
   if (!isOpen) return null;
 

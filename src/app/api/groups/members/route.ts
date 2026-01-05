@@ -2,15 +2,15 @@
 // Retrieves all members of a group feed
 
 import { NextRequest, NextResponse } from 'next/server';
-
-// Mark as dynamic to exclude from static export
-export const dynamic = 'force-dynamic';
 import {
   grpcCall,
   parseGrpcResponse,
   buildGetGroupMembersRequest,
   parseGetGroupMembersResponse,
 } from '@/lib/grpc/grpc-web-helper';
+
+// Mark as dynamic to exclude from static export
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   const feedId = request.nextUrl.searchParams.get('feedId');
