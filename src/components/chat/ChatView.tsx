@@ -4,6 +4,7 @@ import { useRef, useMemo, useCallback, useState, useEffect } from "react";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import { MessageSquare, Lock, ArrowLeft, Users, Settings } from "lucide-react";
 import { MessageBubble } from "./MessageBubble";
+import { SystemMessage } from "./SystemMessage";
 import { MessageInput, type MessageInputHandle } from "./MessageInput";
 import { ReplyContextBar } from "./ReplyContextBar";
 import { MemberListPanel } from "@/components/groups/MemberListPanel";
@@ -16,6 +17,18 @@ import type { Feed, FeedMessage, GroupFeedMember } from "@/types";
 // Empty array constants to avoid creating new references
 const EMPTY_MESSAGES: FeedMessage[] = [];
 const EMPTY_MEMBERS: GroupFeedMember[] = [];
+
+// Type for system events displayed in the chat
+interface SystemEvent {
+  id: string;
+  type: 'system';
+  eventType: 'member_joined' | 'key_rotated';
+  memberName?: string;
+  timestamp: number;
+}
+
+// Combined chat item type (regular message or system event)
+type ChatItem = (FeedMessage & { type: 'message' }) | SystemEvent;
 
 // Constants for display name truncation
 const TRUNCATED_KEY_LENGTH = 10;
@@ -35,14 +48,119 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   const { credentials } = useAppStore();
   const messagesMap = useFeedsStore((state) => state.messages);
   const groupMembersMap = useFeedsStore((state) => state.groupMembers);
-  const messages = useMemo(
-    () => messagesMap[feed.id] ?? EMPTY_MESSAGES,
+  // Filter out messages that failed decryption (user doesn't have the key)
+  const regularMessages = useMemo(
+    () => (messagesMap[feed.id] ?? EMPTY_MESSAGES).filter(m => !m.decryptionFailed),
     [messagesMap, feed.id]
   );
   const groupMembers = useMemo(
     () => (feed.type === 'group' ? groupMembersMap[feed.id] ?? EMPTY_MEMBERS : EMPTY_MEMBERS),
     [groupMembersMap, feed.id, feed.type]
   );
+
+  // Track group key state for system messages
+  const groupKeyStates = useFeedsStore((state) => state.groupKeyStates);
+  const keyState = groupKeyStates[feed.id];
+  const currentKeyGeneration = keyState?.currentKeyGeneration ?? 0;
+  const previousKeyGenRef = useRef<number>(currentKeyGeneration);
+
+  // Generate system events for all member joins in the group
+  // Shows "X joined the group" for each member based on their joinedAtBlock
+  const historicalSystemEvents = useMemo((): SystemEvent[] => {
+    if (feed.type !== 'group') return [];
+
+    const events: SystemEvent[] = [];
+    const keyGenerations = keyState?.keyGenerations ?? [];
+
+    // Sort members by joinedAtBlock to show joins in chronological order
+    const sortedMembers = [...groupMembers]
+      .filter(m => m.joinedAtBlock && m.joinedAtBlock > 0)
+      .sort((a, b) => (a.joinedAtBlock ?? 0) - (b.joinedAtBlock ?? 0));
+
+    // Find the earliest message timestamp to use as reference for block-to-time conversion
+    const sortedMessages = [...regularMessages].sort((a, b) => a.timestamp - b.timestamp);
+
+    // Build a map of block -> approximate timestamp using messages
+    const blockTimestampMap = new Map<number, number>();
+    for (const msg of sortedMessages) {
+      if (msg.blockHeight && !blockTimestampMap.has(msg.blockHeight)) {
+        blockTimestampMap.set(msg.blockHeight, msg.timestamp);
+      }
+    }
+
+    // For each member, create a "joined" event
+    for (const member of sortedMembers) {
+      const joinBlock = member.joinedAtBlock ?? 0;
+
+      // Find KeyGeneration that corresponds to this join (if any)
+      // KeyGeneration 0 is the initial group creation
+      const correspondingKeyGen = keyGenerations.find(kg => {
+        // Check if this member's join block matches this KeyGeneration's validFromBlock
+        return Math.abs(kg.validFromBlock - joinBlock) <= 5;
+      });
+
+      // Estimate timestamp for this join event
+      let estimatedTimestamp: number;
+
+      // Try to find a message close to this block for timestamp reference
+      const closestBlockEntry = [...blockTimestampMap.entries()]
+        .sort((a, b) => Math.abs(a[0] - joinBlock) - Math.abs(b[0] - joinBlock))[0];
+
+      if (closestBlockEntry) {
+        const [refBlock, refTimestamp] = closestBlockEntry;
+        // Estimate ~10 seconds per block
+        const blockDiff = joinBlock - refBlock;
+        estimatedTimestamp = refTimestamp + (blockDiff * 10000);
+      } else {
+        // Fallback: use KeyGeneration number * some offset if no messages
+        const keyGenNum = correspondingKeyGen?.keyGeneration ?? 0;
+        estimatedTimestamp = feed.createdAt ? feed.createdAt + (keyGenNum * 60000) : Date.now() - (sortedMembers.length - sortedMembers.indexOf(member)) * 60000;
+      }
+
+      events.push({
+        id: `system-member-join-${member.publicAddress.substring(0, 16)}`,
+        type: 'system' as const,
+        eventType: 'member_joined' as const,
+        memberName: member.displayName,
+        timestamp: estimatedTimestamp,
+      });
+    }
+
+    return events;
+  }, [feed.type, feed.createdAt, regularMessages, keyState?.keyGenerations, groupMembers]);
+
+  // Live system events state for real-time key rotation notifications
+  const [liveSystemEvents, setLiveSystemEvents] = useState<SystemEvent[]>([]);
+
+  // Detect live key rotation (new member joined while viewing chat)
+  useEffect(() => {
+    if (feed.type !== 'group') return;
+
+    const prevKeyGen = previousKeyGenRef.current;
+    if (currentKeyGeneration > prevKeyGen && prevKeyGen > 0) {
+      // Key rotation happened - add a live system event
+      // Note: This may duplicate a historical event, but we dedupe by ID
+      setLiveSystemEvents(prev => [...prev, {
+        id: `system-live-${Date.now()}`,
+        type: 'system',
+        eventType: 'key_rotated',
+        timestamp: Date.now(),
+      }]);
+    }
+    previousKeyGenRef.current = currentKeyGeneration;
+  }, [currentKeyGeneration, feed.type]);
+
+  // Combine messages and system events into a single sorted array
+  const chatItems = useMemo((): ChatItem[] => {
+    const messageItems: ChatItem[] = regularMessages.map(m => ({ ...m, type: 'message' as const }));
+    // Combine historical and live system events
+    const allSystemEvents = [...historicalSystemEvents, ...liveSystemEvents];
+    const allItems = [...messageItems, ...allSystemEvents];
+    return allItems.sort((a, b) => a.timestamp - b.timestamp);
+  }, [regularMessages, historicalSystemEvents, liveSystemEvents]);
+
+  // For backward compatibility, keep messages reference (used elsewhere)
+  const messages = regularMessages;
 
   // Check if current user is admin of the group
   const isGroupFeed = feed.type === 'group';
@@ -316,7 +434,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
 
       {/* Messages Area */}
       <div className="flex-1 min-h-0 flex flex-col">
-        {messages.length === 0 ? (
+        {chatItems.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center p-4">
             <div className="w-16 h-16 rounded-full bg-hush-bg-dark flex items-center justify-center mb-4">
               <MessageSquare className="w-8 h-8 text-hush-purple" />
@@ -333,31 +451,39 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
         ) : (
           <Virtuoso
             ref={virtuosoRef}
-            data={messages}
+            data={chatItems}
             followOutput="smooth"
-            initialTopMostItemIndex={messages.length - 1}
+            initialTopMostItemIndex={chatItems.length - 1}
             className="flex-1"
-            itemContent={(index, message) => (
+            itemContent={(index, item) => (
               <div className="px-4 py-1">
-                <MessageBubble
-                  content={message.content}
-                  timestamp={formatTime(message.timestamp)}
-                  isOwn={isOwnMessage(message)}
-                  isConfirmed={message.isConfirmed}
-                  messageId={message.id}
-                  reactionCounts={getReactionCounts(message.id)}
-                  myReaction={getMyReaction(message.id)}
-                  isPendingReaction={isPending(message.id)}
-                  onReactionSelect={stableHandleReactionSelect}
-                  replyToMessageId={message.replyToMessageId}
-                  onReplyClick={handleReplyClick}
-                  onScrollToMessage={handleScrollToMessage}
-                  message={message}
-                  resolveDisplayName={resolveDisplayName}
-                  showSender={isGroupFeed}
-                  senderName={getSenderDisplayName(message.senderPublicKey)}
-                  senderRole={getSenderRole(message.senderPublicKey)}
-                />
+                {item.type === 'system' ? (
+                  <SystemMessage
+                    type={item.eventType}
+                    memberName={item.memberName}
+                    timestamp={formatTime(item.timestamp)}
+                  />
+                ) : (
+                  <MessageBubble
+                    content={item.content}
+                    timestamp={formatTime(item.timestamp)}
+                    isOwn={isOwnMessage(item)}
+                    isConfirmed={item.isConfirmed}
+                    messageId={item.id}
+                    reactionCounts={getReactionCounts(item.id)}
+                    myReaction={getMyReaction(item.id)}
+                    isPendingReaction={isPending(item.id)}
+                    onReactionSelect={stableHandleReactionSelect}
+                    replyToMessageId={item.replyToMessageId}
+                    onReplyClick={handleReplyClick}
+                    onScrollToMessage={handleScrollToMessage}
+                    message={item}
+                    resolveDisplayName={resolveDisplayName}
+                    showSender={isGroupFeed}
+                    senderName={getSenderDisplayName(item.senderPublicKey)}
+                    senderRole={getSenderRole(item.senderPublicKey)}
+                  />
+                )}
               </div>
             )}
           />
