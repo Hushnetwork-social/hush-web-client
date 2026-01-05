@@ -1202,3 +1202,297 @@ export function uuidToBytes(uuid: string): Uint8Array {
 
   return bytes;
 }
+
+// ============= Group Feed Query Service Builders & Parsers (FEAT-017) =============
+
+/**
+ * Build GetGroupMembersRequest for binary gRPC
+ * Proto: message GetGroupMembersRequest {
+ *   string FeedId = 1;
+ * }
+ */
+export function buildGetGroupMembersRequest(feedId: string): Uint8Array {
+  const bytes = encodeString(1, feedId);
+  return new Uint8Array(bytes);
+}
+
+/**
+ * Group member info from GetGroupMembersResponse
+ */
+export interface GroupMemberInfo {
+  publicAddress: string;
+  participantType: number;
+  joinedAtBlock: number;
+}
+
+/**
+ * Parse GetGroupMembersResponse
+ * Proto: message GetGroupMembersResponse {
+ *   repeated GroupFeedMemberProto Members = 1;
+ * }
+ *
+ * message GroupFeedMemberProto {
+ *   string PublicAddress = 1;
+ *   int32 ParticipantType = 2;
+ *   int64 JoinedAtBlock = 3;
+ * }
+ */
+export function parseGetGroupMembersResponse(messageBytes: Uint8Array): GroupMemberInfo[] {
+  const members: GroupMemberInfo[] = [];
+  let offset = 0;
+
+  while (offset < messageBytes.length) {
+    const tagResult = parseVarint(messageBytes, offset);
+    const tag = tagResult.value;
+    offset += tagResult.bytesRead;
+
+    const fieldNumber = tag >> 3;
+    const wireType = tag & 0x07;
+
+    if (wireType === 2 && fieldNumber === 1) {
+      // GroupFeedMemberProto (repeated)
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead;
+      const memberBytes = messageBytes.slice(offset, offset + lenResult.value);
+      offset += lenResult.value;
+      members.push(parseGroupMember(memberBytes));
+    } else if (wireType === 0) {
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+    } else if (wireType === 2) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead + lenResult.value;
+    } else {
+      break;
+    }
+  }
+
+  return members;
+}
+
+/**
+ * Parse a single GroupFeedMemberProto from protobuf bytes
+ */
+function parseGroupMember(bytes: Uint8Array): GroupMemberInfo {
+  const member: GroupMemberInfo = {
+    publicAddress: '',
+    participantType: 0,
+    joinedAtBlock: 0,
+  };
+
+  let offset = 0;
+  while (offset < bytes.length) {
+    const tagResult = parseVarint(bytes, offset);
+    const tag = tagResult.value;
+    offset += tagResult.bytesRead;
+
+    const fieldNumber = tag >> 3;
+    const wireType = tag & 0x07;
+
+    if (wireType === 0) {
+      const valueResult = parseVarint(bytes, offset);
+      offset += valueResult.bytesRead;
+      if (fieldNumber === 2) member.participantType = valueResult.value;
+      if (fieldNumber === 3) member.joinedAtBlock = valueResult.value;
+    } else if (wireType === 2) {
+      const lenResult = parseVarint(bytes, offset);
+      offset += lenResult.bytesRead;
+      const strValue = parseString(bytes, offset, lenResult.value);
+      offset += lenResult.value;
+      if (fieldNumber === 1) member.publicAddress = strValue;
+    } else {
+      break;
+    }
+  }
+
+  return member;
+}
+
+/**
+ * Build GetKeyGenerationsRequest for binary gRPC
+ * Proto: message GetKeyGenerationsRequest {
+ *   string FeedId = 1;
+ *   string UserPublicAddress = 2;
+ * }
+ */
+export function buildGetKeyGenerationsRequest(feedId: string, userPublicAddress: string): Uint8Array {
+  const bytes = [
+    ...encodeString(1, feedId),
+    ...encodeString(2, userPublicAddress),
+  ];
+  return new Uint8Array(bytes);
+}
+
+/**
+ * KeyGeneration info from GetKeyGenerationsResponse
+ */
+export interface KeyGenerationInfo {
+  keyGeneration: number;
+  encryptedKey: string;
+  validFromBlock: number;
+  validToBlock?: number;
+}
+
+/**
+ * Parse GetKeyGenerationsResponse
+ * Proto: message GetKeyGenerationsResponse {
+ *   repeated KeyGenerationProto KeyGenerations = 1;
+ * }
+ *
+ * message KeyGenerationProto {
+ *   int32 KeyGeneration = 1;
+ *   string EncryptedKey = 2;
+ *   int64 ValidFromBlock = 3;
+ *   optional int64 ValidToBlock = 4;
+ * }
+ */
+export function parseGetKeyGenerationsResponse(messageBytes: Uint8Array): KeyGenerationInfo[] {
+  const keyGenerations: KeyGenerationInfo[] = [];
+  let offset = 0;
+
+  while (offset < messageBytes.length) {
+    const tagResult = parseVarint(messageBytes, offset);
+    const tag = tagResult.value;
+    offset += tagResult.bytesRead;
+
+    const fieldNumber = tag >> 3;
+    const wireType = tag & 0x07;
+
+    if (wireType === 2 && fieldNumber === 1) {
+      // KeyGenerationProto (repeated)
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead;
+      const kgBytes = messageBytes.slice(offset, offset + lenResult.value);
+      offset += lenResult.value;
+      keyGenerations.push(parseKeyGeneration(kgBytes));
+    } else if (wireType === 0) {
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+    } else if (wireType === 2) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead + lenResult.value;
+    } else {
+      break;
+    }
+  }
+
+  return keyGenerations;
+}
+
+/**
+ * Parse a single KeyGenerationProto from protobuf bytes
+ */
+function parseKeyGeneration(bytes: Uint8Array): KeyGenerationInfo {
+  const kg: KeyGenerationInfo = {
+    keyGeneration: 0,
+    encryptedKey: '',
+    validFromBlock: 0,
+  };
+
+  let offset = 0;
+  while (offset < bytes.length) {
+    const tagResult = parseVarint(bytes, offset);
+    const tag = tagResult.value;
+    offset += tagResult.bytesRead;
+
+    const fieldNumber = tag >> 3;
+    const wireType = tag & 0x07;
+
+    if (wireType === 0) {
+      const valueResult = parseVarint(bytes, offset);
+      offset += valueResult.bytesRead;
+      if (fieldNumber === 1) kg.keyGeneration = valueResult.value;
+      if (fieldNumber === 3) kg.validFromBlock = valueResult.value;
+      if (fieldNumber === 4) kg.validToBlock = valueResult.value;
+    } else if (wireType === 2) {
+      const lenResult = parseVarint(bytes, offset);
+      offset += lenResult.bytesRead;
+      const strValue = parseString(bytes, offset, lenResult.value);
+      offset += lenResult.value;
+      if (fieldNumber === 2) kg.encryptedKey = strValue;
+    } else {
+      break;
+    }
+  }
+
+  return kg;
+}
+
+// ============= Group Feed Admin Operations (FEAT-017) =============
+
+/**
+ * Build AddMemberToGroupFeedRequest for binary gRPC
+ * Proto: message AddMemberToGroupFeedRequest {
+ *   string FeedId = 1;
+ *   string AdminPublicAddress = 2;
+ *   string NewMemberPublicAddress = 3;
+ *   string NewMemberPublicEncryptKey = 4;
+ * }
+ */
+export function buildAddMemberToGroupFeedRequest(
+  feedId: string,
+  adminPublicAddress: string,
+  newMemberPublicAddress: string,
+  newMemberPublicEncryptKey: string
+): Uint8Array {
+  const bytes = [
+    ...encodeString(1, feedId),
+    ...encodeString(2, adminPublicAddress),
+    ...encodeString(3, newMemberPublicAddress),
+    ...encodeString(4, newMemberPublicEncryptKey),
+  ];
+  return new Uint8Array(bytes);
+}
+
+/**
+ * Response from AddMemberToGroupFeed
+ */
+export interface AddMemberToGroupFeedResult {
+  success: boolean;
+  message: string;
+}
+
+/**
+ * Parse AddMemberToGroupFeedResponse
+ * Proto: message AddMemberToGroupFeedResponse {
+ *   bool Success = 1;
+ *   string Message = 2;
+ * }
+ */
+export function parseAddMemberToGroupFeedResponse(messageBytes: Uint8Array): AddMemberToGroupFeedResult {
+  const result: AddMemberToGroupFeedResult = {
+    success: false,
+    message: '',
+  };
+
+  let offset = 0;
+  while (offset < messageBytes.length) {
+    const tagResult = parseVarint(messageBytes, offset);
+    const tag = tagResult.value;
+    offset += tagResult.bytesRead;
+
+    const fieldNumber = tag >> 3;
+    const wireType = tag & 0x07;
+
+    if (wireType === 0 && fieldNumber === 1) {
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+      result.success = valueResult.value === 1;
+    } else if (wireType === 2 && fieldNumber === 2) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead;
+      result.message = parseString(messageBytes, offset, lenResult.value);
+      offset += lenResult.value;
+    } else if (wireType === 0) {
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+    } else if (wireType === 2) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead + lenResult.value;
+    } else {
+      break;
+    }
+  }
+
+  return result;
+}

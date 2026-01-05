@@ -7,7 +7,12 @@ import { GroupDetailsForm } from "./GroupDetailsForm";
 import { useAppStore } from "@/stores";
 import { useFeedsStore } from "@/modules/feeds";
 import { debugLog, debugError } from "@/lib/debug-logger";
-import { generateGuid } from "@/lib/crypto/transactions";
+import {
+  createGroupFeedTransaction,
+  type GroupParticipantInput,
+} from "@/lib/crypto/transactions";
+import { hexToBytes } from "@/lib/crypto/keys";
+import { submitTransaction } from "@/modules/blockchain";
 
 interface GroupCreationWizardProps {
   isOpen: boolean;
@@ -83,21 +88,42 @@ export const GroupCreationWizard = memo(function GroupCreationWizard({
 
       try {
         debugLog("[GroupCreationWizard] Creating group:", data.name);
-
-        // Generate a new feed ID
-        const feedId = generateGuid();
-
-        debugLog("[GroupCreationWizard] Generated feedId:", feedId);
         debugLog("[GroupCreationWizard] Selected members:", selectedMembers.length);
 
-        // TODO: Full group creation requires:
-        // 1. Generate AES feed key
-        // 2. Encrypt feed key for each participant using their public encrypt key
-        // 3. Call groupService.createGroup with encrypted feed keys
-        // For now, we create a local feed entry and the backend call will be
-        // implemented in a later phase with proper key exchange
+        // Convert selected members to GroupParticipantInput format
+        const participants: GroupParticipantInput[] = selectedMembers.map((m) => ({
+          publicSigningAddress: m.publicSigningAddress,
+          publicEncryptAddress: m.publicEncryptAddress,
+        }));
 
-        // Add the new group feed to the store (local only for now)
+        // Convert hex private key to bytes for signing
+        const signingPrivateKeyBytes = hexToBytes(credentials.signingPrivateKey);
+
+        // Create the group transaction with encrypted keys for all participants
+        debugLog("[GroupCreationWizard] Creating group transaction...");
+        const { signedTransaction, feedId, feedAesKey } = await createGroupFeedTransaction(
+          data.name,
+          data.description,
+          data.isPublic,
+          credentials.signingPublicKey,
+          credentials.encryptionPublicKey,
+          participants,
+          signingPrivateKeyBytes
+        );
+
+        debugLog("[GroupCreationWizard] Transaction created, feedId:", feedId);
+
+        // Submit the transaction to the blockchain
+        debugLog("[GroupCreationWizard] Submitting transaction to blockchain...");
+        const result = await submitTransaction(signedTransaction);
+
+        if (!result.successful) {
+          throw new Error(result.message || "Failed to submit group creation transaction");
+        }
+
+        debugLog("[GroupCreationWizard] Transaction submitted successfully");
+
+        // Add the new group feed to the local store
         useFeedsStore.getState().addFeeds([{
           id: feedId,
           type: "group",
@@ -110,6 +136,9 @@ export const GroupCreationWizard = memo(function GroupCreationWizard({
           createdAt: Date.now(),
           updatedAt: Date.now(),
         }]);
+
+        // Store the AES key locally for message encryption/decryption
+        useFeedsStore.getState().updateFeedAesKey(feedId, feedAesKey);
 
         // Set user role as Admin for this group
         useFeedsStore.getState().setUserRole(feedId, "Admin");
@@ -128,7 +157,7 @@ export const GroupCreationWizard = memo(function GroupCreationWizard({
           })),
         ]);
 
-        debugLog("[GroupCreationWizard] Group created locally:", feedId);
+        debugLog("[GroupCreationWizard] Group created successfully:", feedId);
 
         // Notify parent and close
         onGroupCreated(feedId);

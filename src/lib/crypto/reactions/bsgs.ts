@@ -21,6 +21,7 @@ import {
   pointToKey,
 } from './babyjubjub';
 import { BSGS } from './constants';
+import { buildAssetUrl } from '@/lib/api-config';
 
 /**
  * BSGS Manager - handles table loading and discrete log solving
@@ -65,8 +66,9 @@ class BSGSManager {
 
     // Try fetching precomputed table
     try {
-      console.log('[BSGS] Fetching table from server...');
-      const response = await fetch(BSGS.tableUrl);
+      const tableUrl = buildAssetUrl(BSGS.tableUrl);
+      console.log('[BSGS] Fetching table from server:', tableUrl);
+      const response = await fetch(tableUrl);
       if (response.ok) {
         const buffer = await response.arrayBuffer();
         this.initializeFromBuffer(new Uint8Array(buffer));

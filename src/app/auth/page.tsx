@@ -16,6 +16,7 @@ import {
   importFromEncryptedBytes,
 } from "@/lib/crypto";
 import { markIdentityCreatedByAuthPage } from "@/modules/identity";
+import { buildApiUrl } from "@/lib/api-config";
 
 type Tab = "create" | "import";
 type ImportSubTab = "words" | "file";
@@ -96,7 +97,7 @@ export default function AuthPage() {
       // 2. Check if identity exists in blockchain
       setCreationStatus("checking_identity");
       const identityCheckResponse = await fetch(
-        `/api/identity/check?address=${encodeURIComponent(keys.signingKey.publicKeyHex)}`
+        buildApiUrl(`/api/identity/check?address=${encodeURIComponent(keys.signingKey.publicKeyHex)}`)
       );
       const identityCheck = await identityCheckResponse.json();
 
@@ -107,7 +108,7 @@ export default function AuthPage() {
         setCreationStatus("creating_identity");
         const identityTx = await createIdentityTransaction(profileName, keys, false);
 
-        const submitResponse = await fetch("/api/blockchain/submit", {
+        const submitResponse = await fetch(buildApiUrl("/api/blockchain/submit"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ signedTransaction: identityTx }),
@@ -128,7 +129,7 @@ export default function AuthPage() {
       // 4. Check for personal feed
       setCreationStatus("checking_feed");
       const feedCheckResponse = await fetch(
-        `/api/feeds/has-personal?address=${encodeURIComponent(keys.signingKey.publicKeyHex)}`
+        buildApiUrl(`/api/feeds/has-personal?address=${encodeURIComponent(keys.signingKey.publicKeyHex)}`)
       );
       const feedCheck = await feedCheckResponse.json();
 
@@ -137,7 +138,7 @@ export default function AuthPage() {
         setCreationStatus("creating_feed");
         const { signedTransaction: feedTx } = await createPersonalFeedTransaction(keys);
 
-        const feedSubmitResponse = await fetch("/api/blockchain/submit", {
+        const feedSubmitResponse = await fetch(buildApiUrl("/api/blockchain/submit"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ signedTransaction: feedTx }),
@@ -152,7 +153,7 @@ export default function AuthPage() {
       // 6. Load feeds and messages
       setCreationStatus("loading_data");
       const feedsResponse = await fetch(
-        `/api/feeds/list?address=${encodeURIComponent(keys.signingKey.publicKeyHex)}&blockIndex=0`
+        buildApiUrl(`/api/feeds/list?address=${encodeURIComponent(keys.signingKey.publicKeyHex)}&blockIndex=0`)
       );
       const feedsData = await feedsResponse.json();
 
@@ -172,7 +173,7 @@ export default function AuthPage() {
         // Load messages for each feed
         for (const feed of feedsData.feeds) {
           const messagesResponse = await fetch(
-            `/api/feeds/messages?address=${encodeURIComponent(keys.signingKey.publicKeyHex)}&blockIndex=0`
+            buildApiUrl(`/api/feeds/messages?address=${encodeURIComponent(keys.signingKey.publicKeyHex)}&blockIndex=0`)
           );
           const messagesData = await messagesResponse.json();
 
@@ -250,7 +251,7 @@ export default function AuthPage() {
       // Check if identity exists
       setCreationStatus("checking_identity");
       const identityCheckResponse = await fetch(
-        `/api/identity/check?address=${encodeURIComponent(keys.signingKey.publicKeyHex)}`
+        buildApiUrl(`/api/identity/check?address=${encodeURIComponent(keys.signingKey.publicKeyHex)}`)
       );
       const identityCheck = await identityCheckResponse.json();
 
@@ -261,7 +262,7 @@ export default function AuthPage() {
       // Load user data
       setCreationStatus("loading_data");
       const feedsResponse = await fetch(
-        `/api/feeds/list?address=${encodeURIComponent(keys.signingKey.publicKeyHex)}&blockIndex=0`
+        buildApiUrl(`/api/feeds/list?address=${encodeURIComponent(keys.signingKey.publicKeyHex)}&blockIndex=0`)
       );
       const feedsData = await feedsResponse.json();
 
@@ -348,7 +349,7 @@ export default function AuthPage() {
       // Check if identity exists
       setCreationStatus("checking_identity");
       const identityCheckResponse = await fetch(
-        `/api/identity/check?address=${encodeURIComponent(credentials.signingPublicKey)}`
+        buildApiUrl(`/api/identity/check?address=${encodeURIComponent(credentials.signingPublicKey)}`)
       );
       const identityCheck = await identityCheckResponse.json();
 
@@ -359,7 +360,7 @@ export default function AuthPage() {
       // Load user data
       setCreationStatus("loading_data");
       const feedsResponse = await fetch(
-        `/api/feeds/list?address=${encodeURIComponent(credentials.signingPublicKey)}&blockIndex=0`
+        buildApiUrl(`/api/feeds/list?address=${encodeURIComponent(credentials.signingPublicKey)}&blockIndex=0`)
       );
       const feedsData = await feedsResponse.json();
 

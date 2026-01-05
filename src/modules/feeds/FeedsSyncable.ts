@@ -420,31 +420,36 @@ export class FeedsSyncable implements ISyncable {
 
       // Decrypt and add messages to each feed
       for (const [feedId, messages] of messagesByFeed) {
-        // Get the feed's AES key for decryption
         const feed = feeds.find((f) => f.id === feedId);
-        const feedAesKey = feed?.aesKey;
 
-        if (feedAesKey) {
-          // Decrypt message content
-          const decryptedMessages = await Promise.all(
-            messages.map(async (msg) => {
-              try {
-                const decryptedContent = await aesDecrypt(msg.content, feedAesKey);
-                return {
-                  ...msg,
-                  content: decryptedContent,
-                  contentEncrypted: msg.content, // Keep encrypted version
-                };
-              } catch (error) {
-                debugError(`[FeedsSyncable] Failed to decrypt message ${msg.id}:`, error);
-                return msg; // Keep original if decryption fails
-              }
-            })
-          );
+        // For group feeds, use multi-key decryption with fallback to trying all keys
+        if (feed?.type === 'group') {
+          const decryptedMessages = await this.decryptGroupMessages(feedId, messages);
           useFeedsStore.getState().addMessages(feedId, decryptedMessages);
         } else {
-          debugWarn(`[FeedsSyncable] No AES key for feed ${feedId}, storing encrypted messages`);
-          useFeedsStore.getState().addMessages(feedId, messages);
+          // Non-group feeds: Use the single AES key
+          const feedAesKey = feed?.aesKey;
+          if (feedAesKey) {
+            const decryptedMessages = await Promise.all(
+              messages.map(async (msg) => {
+                try {
+                  const decryptedContent = await aesDecrypt(msg.content, feedAesKey);
+                  return {
+                    ...msg,
+                    content: decryptedContent,
+                    contentEncrypted: msg.content,
+                  };
+                } catch (error) {
+                  debugError(`[FeedsSyncable] Failed to decrypt message ${msg.id}:`, error);
+                  return msg;
+                }
+              })
+            );
+            useFeedsStore.getState().addMessages(feedId, decryptedMessages);
+          } else {
+            debugWarn(`[FeedsSyncable] No AES key for feed ${feedId}, storing encrypted messages`);
+            useFeedsStore.getState().addMessages(feedId, messages);
+          }
         }
       }
     }
@@ -839,18 +844,20 @@ export class FeedsSyncable implements ISyncable {
     const { messages: newMessages, maxBlockIndex, reactionTallies, maxReactionTallyVersion } = response;
     debugLog(`[FeedsSyncable] syncMessagesForFeed response: messages=${newMessages.length}, reactionTallies=${reactionTallies.length}, maxReactionTallyVersion=${maxReactionTallyVersion}`);
 
-    // Only process messages if there are new ones expected
-    if (processMessages) {
-      // Filter messages for just this feed
-      const feedMessages = newMessages.filter(m => m.feedId === feed.id);
+    // Process messages if the server returned any for this feed
+    // (Always process, regardless of processMessages flag - server returned them for a reason)
+    const feedMessages = newMessages.filter(m => m.feedId === feed.id);
+    if (feedMessages.length > 0) {
+      debugLog(`[FeedsSyncable] Found ${feedMessages.length} new message(s) for feed ${feed.id.substring(0, 8)}...`);
 
-      if (feedMessages.length > 0) {
-        debugLog(`[FeedsSyncable] Found ${feedMessages.length} new message(s) for feed ${feed.id.substring(0, 8)}...`);
-
+      // For group feeds, use multi-key decryption with fallback to trying all keys
+      if (feed.type === 'group') {
+        const decryptedMessages = await this.decryptGroupMessages(feed.id, feedMessages);
+        useFeedsStore.getState().addMessages(feed.id, decryptedMessages);
+      } else {
+        // Non-group feeds: Use the single AES key
         const feedAesKey = feed.aesKey;
-
         if (feedAesKey) {
-          // Decrypt message content
           const decryptedMessages = await Promise.all(
             feedMessages.map(async (msg) => {
               try {
@@ -895,5 +902,112 @@ export class FeedsSyncable implements ISyncable {
       lastMessageBlockIndex: maxBlockIndex,
       lastReactionTallyVersion: maxReactionTallyVersion,
     });
+  }
+
+  /**
+   * Decrypt group feed messages by trying all available KeyGeneration keys.
+   *
+   * Since the server doesn't yet return the KeyGeneration with each message,
+   * we try all available keys until one works. Messages that fail all decryption
+   * attempts are marked with decryptionFailed: true.
+   *
+   * @param feedId - The group feed ID
+   * @param messages - Messages to decrypt
+   * @returns Array of messages with decrypted content or decryptionFailed flag
+   */
+  private async decryptGroupMessages(feedId: string, messages: FeedMessage[]): Promise<FeedMessage[]> {
+    const keyState = useFeedsStore.getState().getGroupKeyState(feedId);
+
+    if (!keyState || keyState.keyGenerations.length === 0) {
+      debugWarn(`[FeedsSyncable] No KeyGenerations available for group feed ${feedId.substring(0, 8)}...`);
+      // Mark all messages as decryption failed
+      return messages.map(msg => ({
+        ...msg,
+        contentEncrypted: msg.content,
+        decryptionFailed: true,
+      }));
+    }
+
+    // Get all available AES keys, sorted by keyGeneration descending (try newest first)
+    const keysToTry = [...keyState.keyGenerations]
+      .filter(kg => kg.aesKey) // Only try keys we have
+      .sort((a, b) => b.keyGeneration - a.keyGeneration); // Newest first
+
+    debugLog(`[FeedsSyncable] Decrypting ${messages.length} group messages, ${keysToTry.length} keys available`);
+
+    const decryptedMessages = await Promise.all(
+      messages.map(async (msg) => {
+        // If message has KeyGeneration from server, use that specific key
+        if (msg.keyGeneration !== undefined) {
+          const specificKey = keyState.keyGenerations.find(
+            kg => kg.keyGeneration === msg.keyGeneration
+          );
+
+          if (specificKey?.aesKey) {
+            try {
+              const decryptedContent = await aesDecrypt(msg.content, specificKey.aesKey);
+              return {
+                ...msg,
+                content: decryptedContent,
+                contentEncrypted: msg.content,
+                decryptionFailed: false,
+              };
+            } catch {
+              debugWarn(`[FeedsSyncable] Failed to decrypt msg ${msg.id.substring(0, 8)}... with keyGen=${msg.keyGeneration}`);
+              // Mark as failed - we have the key but it didn't work
+              return {
+                ...msg,
+                contentEncrypted: msg.content,
+                decryptionFailed: true,
+              };
+            }
+          } else {
+            // We don't have this KeyGeneration (unban gap)
+            debugLog(`[FeedsSyncable] Missing keyGen=${msg.keyGeneration} for msg ${msg.id.substring(0, 8)}...`);
+            useFeedsStore.getState().recordMissingKeyGeneration(feedId, msg.keyGeneration);
+            return {
+              ...msg,
+              contentEncrypted: msg.content,
+              decryptionFailed: true,
+            };
+          }
+        }
+
+        // No KeyGeneration in message - try all keys until one works
+        for (const keyGen of keysToTry) {
+          try {
+            const decryptedContent = await aesDecrypt(msg.content, keyGen.aesKey);
+            // Success! Record which key worked
+            debugLog(`[FeedsSyncable] Decrypted msg ${msg.id.substring(0, 8)}... with keyGen=${keyGen.keyGeneration}`);
+            return {
+              ...msg,
+              content: decryptedContent,
+              contentEncrypted: msg.content,
+              keyGeneration: keyGen.keyGeneration, // Remember which key worked
+              decryptionFailed: false,
+            };
+          } catch {
+            // This key didn't work, try next
+            continue;
+          }
+        }
+
+        // All keys failed - mark message as decryption failed
+        debugWarn(`[FeedsSyncable] All ${keysToTry.length} keys failed for msg ${msg.id.substring(0, 8)}...`);
+        return {
+          ...msg,
+          contentEncrypted: msg.content,
+          decryptionFailed: true,
+        };
+      })
+    );
+
+    // Log summary
+    const failedCount = decryptedMessages.filter(m => m.decryptionFailed).length;
+    if (failedCount > 0) {
+      debugWarn(`[FeedsSyncable] ${failedCount}/${messages.length} messages could not be decrypted`);
+    }
+
+    return decryptedMessages;
   }
 }

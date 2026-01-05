@@ -13,11 +13,12 @@ import type { Feed, FeedMessage, GroupFeedMember, GroupMemberRole, GroupKeyGener
 import { debugLog } from '@/lib/debug-logger';
 
 // Feed type mapping from server (FeedType enum)
+// Server: Personal=0, Chat=1, Broadcast=2, Group=3
 export const FEED_TYPE_MAP: Record<number, Feed['type']> = {
   0: 'personal',
   1: 'chat',
-  2: 'group',
-  3: 'broadcast',
+  2: 'broadcast',
+  3: 'group',
 };
 
 interface FeedsSyncMetadata {

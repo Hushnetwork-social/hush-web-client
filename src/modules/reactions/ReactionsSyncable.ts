@@ -76,26 +76,29 @@ class ReactionsSyncableClass implements ISyncable {
     }
 
     // Step 2: Register commitment for new feeds only (skip already registered)
+    // NOTE: Registrations must be done sequentially to avoid server-side serialization conflicts
     const feeds = Object.values(feedsStore.feeds);
     const unregisteredFeeds = feeds.filter(f => !this.registeredFeeds.has(f.id));
 
     if (unregisteredFeeds.length > 0) {
       debugLog(`[ReactionsSyncable] Found ${unregisteredFeeds.length} new feeds to register`);
+
+      // Register feeds sequentially to avoid database serialization conflicts
       for (const feed of unregisteredFeeds) {
         debugLog(`[ReactionsSyncable] Registering commitment for feed ${feed.id.substring(0, 8)}...`);
-        // Register in background, don't block
-        ensureCommitmentRegistered(feed.id)
-          .then((success) => {
-            if (success) {
-              debugLog(`[ReactionsSyncable] Successfully registered for feed ${feed.id.substring(0, 8)}`);
-              this.registeredFeeds.add(feed.id);
-            } else {
-              debugLog(`[ReactionsSyncable] Failed to register for feed ${feed.id.substring(0, 8)}`);
-            }
-          })
-          .catch((error) => {
-            debugError(`[ReactionsSyncable] Error registering for feed ${feed.id}:`, error);
-          });
+        try {
+          const success = await ensureCommitmentRegistered(feed.id);
+          if (success) {
+            debugLog(`[ReactionsSyncable] Successfully registered for feed ${feed.id.substring(0, 8)}`);
+            this.registeredFeeds.add(feed.id);
+          } else {
+            debugLog(`[ReactionsSyncable] Failed to register for feed ${feed.id.substring(0, 8)}`);
+            // Don't add to registeredFeeds - will retry on next sync cycle
+          }
+        } catch (error) {
+          debugError(`[ReactionsSyncable] Error registering for feed ${feed.id}:`, error);
+          // Don't add to registeredFeeds - will retry on next sync cycle
+        }
       }
     }
 

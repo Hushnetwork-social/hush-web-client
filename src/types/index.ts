@@ -85,6 +85,8 @@ export interface FeedMessage {
   blockHeight?: number;
   isConfirmed: boolean;
   replyToMessageId?: string;  // Reply to Message: parent message reference
+  keyGeneration?: number;     // Group Feeds: Key generation used to encrypt this message
+  decryptionFailed?: boolean; // True if message could not be decrypted (user lacks key)
 }
 
 // Blockchain types

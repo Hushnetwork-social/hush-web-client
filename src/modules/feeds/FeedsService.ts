@@ -33,6 +33,7 @@ interface ServerMessage {
   timestamp: string;
   blockIndex: number;
   replyToMessageId?: string;  // Reply to Message: parent message reference
+  keyGeneration?: number;     // Group Feeds: Key generation used to encrypt this message
 }
 
 // Server reaction tally response type (Protocol Omega)
@@ -154,6 +155,7 @@ export async function fetchMessages(
       blockHeight: msg.blockIndex,
       isConfirmed: true,
       replyToMessageId: msg.replyToMessageId || undefined,  // Reply to Message: pass through parent reference
+      keyGeneration: msg.keyGeneration,  // Group Feeds: key generation used for encryption
     };
   });
 

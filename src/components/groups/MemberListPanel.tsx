@@ -1,10 +1,11 @@
 "use client";
 
 import { memo, useMemo, useCallback, useState } from "react";
-import { X, Users, Loader2 } from "lucide-react";
+import { X, Users, Loader2, UserPlus } from "lucide-react";
 import { RoleBadge } from "./RoleBadge";
 import { AdminActionButtons } from "./AdminActionButtons";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { AddMemberDialog } from "./AddMemberDialog";
 import { groupService } from "@/lib/grpc/services/group";
 import { useFeedsStore } from "@/modules/feeds";
 import type { GroupFeedMember, GroupMemberRole } from "@/types";
@@ -52,6 +53,7 @@ export const MemberListPanel = memo(function MemberListPanel({
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showAddMemberDialog, setShowAddMemberDialog] = useState(false);
 
   // Get store update function
   const updateGroupMember = useFeedsStore((state) => state.updateGroupMember);
@@ -233,13 +235,26 @@ export const MemberListPanel = memo(function MemberListPanel({
               Members ({members.length})
             </h2>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 rounded-lg text-hush-text-accent hover:bg-hush-bg-hover hover:text-hush-text-primary transition-colors"
-            aria-label="Close member panel"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Add Member button - admin only */}
+            {isAdmin && (
+              <button
+                onClick={() => setShowAddMemberDialog(true)}
+                className="p-2 rounded-lg text-hush-purple hover:bg-hush-bg-hover transition-colors"
+                aria-label="Add member"
+                title="Add member"
+              >
+                <UserPlus className="w-5 h-5" />
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="p-2 rounded-lg text-hush-text-accent hover:bg-hush-bg-hover hover:text-hush-text-primary transition-colors"
+              aria-label="Close member panel"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Error message */}
@@ -325,6 +340,15 @@ export const MemberListPanel = memo(function MemberListPanel({
         variant={pendingAction?.action === "ban" ? "danger" : "default"}
         onConfirm={handleConfirm}
         onCancel={handleCancelConfirm}
+      />
+
+      {/* Add Member Dialog */}
+      <AddMemberDialog
+        isOpen={showAddMemberDialog}
+        onClose={() => setShowAddMemberDialog(false)}
+        feedId={feedId}
+        adminAddress={currentUserAddress}
+        currentMembers={members}
       />
     </>
   );

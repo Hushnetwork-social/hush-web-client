@@ -20,6 +20,7 @@ export interface IdentityInfo {
  */
 export async function checkIdentityExists(address: string): Promise<IdentityInfo> {
   const url = buildApiUrl(`/api/identity/check?address=${encodeURIComponent(address)}`);
+  console.log('[IdentityService] checkIdentityExists URL:', url);
 
   const response = await fetch(url);
 
@@ -72,10 +73,25 @@ export async function searchByDisplayName(partialName: string): Promise<ProfileS
   }
 
   const url = buildApiUrl(`/api/identity/search?name=${encodeURIComponent(partialName.trim())}`);
+  console.log('[IdentityService] searchByDisplayName URL:', url);
 
   const response = await fetch(url);
 
   if (!response.ok) {
+    // Try to get response body for more details
+    let errorDetails = '';
+    try {
+      const text = await response.text();
+      errorDetails = text.substring(0, 200); // Limit to first 200 chars
+    } catch {
+      errorDetails = '(could not read response body)';
+    }
+    console.error('[IdentityService] searchByDisplayName failed:', {
+      status: response.status,
+      statusText: response.statusText,
+      url: url,
+      responseBody: errorDetails,
+    });
     throw new Error(`Failed to search identities: HTTP ${response.status}`);
   }
 

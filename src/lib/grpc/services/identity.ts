@@ -1,41 +1,93 @@
-import { getGrpcClient } from '../client';
 import type {
-  GetIdentityRequest,
   GetIdentityReply,
-  SearchByDisplayNameRequest,
   SearchByDisplayNameReply,
 } from '../types';
-
-const SERVICE_NAME = 'rpcHush.HushIdentity';
+import { debugLog } from '@/lib/debug-logger';
+import { buildApiUrl } from '@/lib/api-config';
 
 export const identityService = {
   /**
    * Get identity by public signing address
+   * Uses API route for proper binary protobuf communication
    */
   async getIdentity(publicSigningAddress: string): Promise<GetIdentityReply> {
-    const client = getGrpcClient();
-    const request: GetIdentityRequest = {
-      PublicSigningAddress: publicSigningAddress,
-    };
-    return client.unaryCall<GetIdentityRequest, GetIdentityReply>(
-      SERVICE_NAME,
-      'GetIdentity',
-      request
-    );
+    debugLog('[IdentityService] getIdentity:', { address: publicSigningAddress.substring(0, 10) });
+    try {
+      const url = buildApiUrl(`/api/identity/check?address=${encodeURIComponent(publicSigningAddress)}`);
+      debugLog('[IdentityService] getIdentity URL:', url);
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      if (data.error) {
+        return {
+          Successfull: false,
+          Message: data.error,
+          ProfileName: '',
+          PublicSigningAddress: publicSigningAddress,
+          PublicEncryptAddress: '',
+          IsPublic: false,
+        };
+      }
+
+      return {
+        Successfull: data.exists,
+        Message: data.message || '',
+        ProfileName: data.identity?.profileName || '',
+        PublicSigningAddress: data.identity?.publicSigningAddress || publicSigningAddress,
+        PublicEncryptAddress: data.identity?.publicEncryptAddress || '',
+        IsPublic: data.identity?.isPublic || false,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to get identity';
+      debugLog('[IdentityService] getIdentity error:', message);
+      return {
+        Successfull: false,
+        Message: message,
+        ProfileName: '',
+        PublicSigningAddress: publicSigningAddress,
+        PublicEncryptAddress: '',
+        IsPublic: false,
+      };
+    }
   },
 
   /**
    * Search for identities by partial display name
+   * Uses API route for proper binary protobuf communication
    */
   async searchByDisplayName(partialDisplayName: string): Promise<SearchByDisplayNameReply> {
-    const client = getGrpcClient();
-    const request: SearchByDisplayNameRequest = {
-      PartialDisplayName: partialDisplayName,
-    };
-    return client.unaryCall<SearchByDisplayNameRequest, SearchByDisplayNameReply>(
-      SERVICE_NAME,
-      'SearchByDisplayName',
-      request
-    );
+    debugLog('[IdentityService] searchByDisplayName:', { query: partialDisplayName });
+    try {
+      const url = buildApiUrl(`/api/identity/search?name=${encodeURIComponent(partialDisplayName)}`);
+      debugLog('[IdentityService] searchByDisplayName URL:', url);
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      if (data.error) {
+        return { Identities: [] };
+      }
+
+      return {
+        Identities: (data.identities || []).map((i: { displayName: string; publicSigningAddress: string; publicEncryptAddress: string }) => ({
+          DisplayName: i.displayName,
+          PublicSigningAddress: i.publicSigningAddress,
+          PublicEncryptAddress: i.publicEncryptAddress,
+        })),
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to search identities';
+      debugLog('[IdentityService] searchByDisplayName error:', message);
+      return { Identities: [] };
+    }
   },
 };

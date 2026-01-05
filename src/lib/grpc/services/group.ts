@@ -7,6 +7,7 @@
 
 import { getGrpcClient } from '../client';
 import { debugLog } from '@/lib/debug-logger';
+import { buildApiUrl } from '@/lib/api-config';
 import type {
   NewGroupFeedRequest,
   NewGroupFeedResponse,
@@ -14,8 +15,6 @@ import type {
   JoinGroupFeedResponse,
   LeaveGroupFeedRequest,
   LeaveGroupFeedResponse,
-  AddMemberToGroupFeedRequest,
-  AddMemberToGroupFeedResponse,
   BlockMemberRequest,
   BlockMemberResponse,
   UnblockMemberRequest,
@@ -34,10 +33,6 @@ import type {
   DeleteGroupFeedResponse,
   GetGroupFeedRequest,
   GetGroupFeedResponse,
-  GetGroupMembersRequest,
-  GetGroupMembersResponse,
-  GetKeyGenerationsRequest,
-  GetKeyGenerationsResponse,
   KeyGenerationProto,
   GroupFeedParticipantProto,
 } from '../types';
@@ -153,6 +148,7 @@ export const groupService = {
 
   /**
    * Add a member to a group (admin only)
+   * Uses API route for proper binary protobuf communication
    */
   async addMember(
     feedId: string,
@@ -162,24 +158,36 @@ export const groupService = {
   ): Promise<GroupOperationResult> {
     debugLog('[GroupService] addMember:', { feedId, memberAddress });
     try {
-      const client = getGrpcClient();
-      const request: AddMemberToGroupFeedRequest = {
-        FeedId: feedId,
-        AdminPublicAddress: adminAddress,
-        NewMemberPublicAddress: memberAddress,
-        NewMemberPublicEncryptKey: memberEncryptKey,
-      };
+      const url = buildApiUrl('/api/groups/add-member');
+      debugLog('[GroupService] addMember URL:', url);
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          feedId,
+          adminPublicAddress: adminAddress,
+          newMemberPublicAddress: memberAddress,
+          newMemberPublicEncryptKey: memberEncryptKey,
+        }),
+      });
 
-      const response = await client.unaryCall<AddMemberToGroupFeedRequest, AddMemberToGroupFeedResponse>(
-        SERVICE_NAME,
-        'AddMemberToGroupFeed',
-        request
-      );
-
-      if (response.Success) {
-        return wrapResult(true, { message: response.Message });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
-      return wrapResult(false, undefined, response.Message);
+
+      const data = await response.json();
+      debugLog('[GroupService] addMember result:', data);
+
+      if (data.error && !data.success) {
+        return wrapResult(false, undefined, data.error);
+      }
+
+      if (data.success) {
+        return wrapResult(true, { message: data.message });
+      }
+      return wrapResult(false, undefined, data.message || 'Failed to add member');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to add member';
       debugLog('[GroupService] addMember error:', message);
@@ -485,28 +493,35 @@ export const groupService = {
 
   /**
    * Get group members
+   * Uses API route for proper binary protobuf communication
    */
   async getGroupMembers(feedId: string): Promise<GroupFeedMember[]> {
     debugLog('[GroupService] getGroupMembers:', { feedId });
     try {
-      const client = getGrpcClient();
-      const request: GetGroupMembersRequest = {
-        FeedId: feedId,
-      };
+      const url = buildApiUrl(`/api/groups/members?feedId=${encodeURIComponent(feedId)}`);
+      debugLog('[GroupService] getGroupMembers URL:', url);
+      const response = await fetch(url);
 
-      const response = await client.unaryCall<GetGroupMembersRequest, GetGroupMembersResponse>(
-        SERVICE_NAME,
-        'GetGroupMembers',
-        request
-      );
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
 
-      // Map proto response to GroupFeedMember type
-      return response.Members.map((m) => ({
-        publicAddress: m.PublicAddress,
+      const data = await response.json();
+
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      // Map API response to GroupFeedMember type
+      const members = (data.members || []).map((m: { publicAddress: string; participantType: number; joinedAtBlock: number }) => ({
+        publicAddress: m.publicAddress,
         displayName: '', // Will be populated by identity lookup
-        role: mapParticipantTypeToRole(m.ParticipantType),
-        joinedAtBlock: m.JoinedAtBlock,
+        role: mapParticipantTypeToRole(m.participantType),
+        joinedAtBlock: m.joinedAtBlock,
       }));
+
+      debugLog('[GroupService] getGroupMembers result:', { count: members.length });
+      return members;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to get group members';
       debugLog('[GroupService] getGroupMembers error:', message);
@@ -516,6 +531,7 @@ export const groupService = {
 
   /**
    * Get KeyGenerations for a user in a group
+   * Uses API route for proper binary protobuf communication
    *
    * Returns all KeyGenerations the user has access to. The server only returns
    * KeyGenerations where the user was an active member when the key was created.
@@ -524,20 +540,30 @@ export const groupService = {
   async getKeyGenerations(feedId: string, userAddress: string): Promise<KeyGenerationProto[]> {
     debugLog('[GroupService] getKeyGenerations:', { feedId: feedId.substring(0, 8), userAddress: userAddress.substring(0, 8) });
     try {
-      const client = getGrpcClient();
-      const request: GetKeyGenerationsRequest = {
-        FeedId: feedId,
-        UserPublicAddress: userAddress,
-      };
+      const url = buildApiUrl(`/api/groups/key-generations?feedId=${encodeURIComponent(feedId)}&userAddress=${encodeURIComponent(userAddress)}`);
+      debugLog('[GroupService] getKeyGenerations URL:', url);
+      const response = await fetch(url);
 
-      const response = await client.unaryCall<GetKeyGenerationsRequest, GetKeyGenerationsResponse>(
-        SERVICE_NAME,
-        'GetKeyGenerations',
-        request
-      );
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
 
-      debugLog('[GroupService] getKeyGenerations result:', { count: response.KeyGenerations?.length ?? 0 });
-      return response.KeyGenerations ?? [];
+      const data = await response.json();
+
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      // Map API response to KeyGenerationProto type
+      const keyGenerations = (data.keyGenerations || []).map((kg: { keyGeneration: number; encryptedKey: string; validFromBlock: number; validToBlock?: number }) => ({
+        KeyGeneration: kg.keyGeneration,
+        EncryptedKey: kg.encryptedKey,
+        ValidFromBlock: kg.validFromBlock,
+        ValidToBlock: kg.validToBlock,
+      }));
+
+      debugLog('[GroupService] getKeyGenerations result:', { count: keyGenerations.length });
+      return keyGenerations;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to get key generations';
       debugLog('[GroupService] getKeyGenerations error:', message);
@@ -548,14 +574,19 @@ export const groupService = {
 
 /**
  * Map ParticipantType enum to GroupMemberRole
+ *
+ * Server-side ParticipantType enum:
+ *   Owner = 0, Member = 1, Guest = 2, Admin = 3, Blocked = 4, Banned = 5
  */
 function mapParticipantTypeToRole(participantType: number): 'Admin' | 'Member' | 'Blocked' {
   switch (participantType) {
     case 0: // Owner
-    case 2: // Admin
+    case 3: // Admin
       return 'Admin';
-    case 3: // Blocked (if we add this to enum)
+    case 4: // Blocked
       return 'Blocked';
+    case 1: // Member
+    case 2: // Guest
     default:
       return 'Member';
   }

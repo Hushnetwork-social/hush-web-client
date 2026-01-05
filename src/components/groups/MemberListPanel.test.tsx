@@ -9,6 +9,7 @@ vi.mock("@/modules/feeds", () => ({
     const state = {
       updateGroupMember: vi.fn(),
       removeGroupMember: vi.fn(),
+      addGroupMember: vi.fn(),
     };
     return selector(state);
   }),
@@ -22,6 +23,16 @@ vi.mock("@/lib/grpc/services/group", () => ({
     banMember: vi.fn().mockResolvedValue({ success: true }),
     promoteToAdmin: vi.fn().mockResolvedValue({ success: true }),
   },
+}));
+
+// Mock the AddMemberDialog component
+vi.mock("./AddMemberDialog", () => ({
+  AddMemberDialog: ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) =>
+    isOpen ? (
+      <div data-testid="add-member-dialog">
+        <button onClick={onClose}>Close Add Member Dialog</button>
+      </div>
+    ) : null,
 }));
 
 describe("MemberListPanel", () => {
@@ -233,6 +244,58 @@ describe("MemberListPanel", () => {
       render(<MemberListPanel {...defaultProps} />);
 
       expect(screen.getByRole("button", { name: /close member panel/i })).toBeInTheDocument();
+    });
+  });
+
+  describe("Add member functionality", () => {
+    it("should show Add Member button when user is admin", () => {
+      render(<MemberListPanel {...defaultProps} currentUserRole="Admin" />);
+
+      expect(screen.getByRole("button", { name: /add member/i })).toBeInTheDocument();
+    });
+
+    it("should not show Add Member button when user is not admin", () => {
+      render(<MemberListPanel {...defaultProps} currentUserRole="Member" />);
+
+      expect(screen.queryByRole("button", { name: /add member/i })).not.toBeInTheDocument();
+    });
+
+    it("should open AddMemberDialog when Add Member button is clicked", () => {
+      render(<MemberListPanel {...defaultProps} currentUserRole="Admin" />);
+
+      // Dialog should not be visible initially
+      expect(screen.queryByTestId("add-member-dialog")).not.toBeInTheDocument();
+
+      // Click Add Member button
+      const addMemberButton = screen.getByRole("button", { name: /add member/i });
+      fireEvent.click(addMemberButton);
+
+      // Dialog should now be visible
+      expect(screen.getByTestId("add-member-dialog")).toBeInTheDocument();
+    });
+
+    it("should close AddMemberDialog when close is triggered", () => {
+      render(<MemberListPanel {...defaultProps} currentUserRole="Admin" />);
+
+      // Open dialog
+      const addMemberButton = screen.getByRole("button", { name: /add member/i });
+      fireEvent.click(addMemberButton);
+
+      expect(screen.getByTestId("add-member-dialog")).toBeInTheDocument();
+
+      // Close dialog
+      const closeDialogButton = screen.getByRole("button", { name: /close add member dialog/i });
+      fireEvent.click(closeDialogButton);
+
+      // Dialog should be closed
+      expect(screen.queryByTestId("add-member-dialog")).not.toBeInTheDocument();
+    });
+
+    it("should have Add Member button with correct title attribute", () => {
+      render(<MemberListPanel {...defaultProps} currentUserRole="Admin" />);
+
+      const addMemberButton = screen.getByRole("button", { name: /add member/i });
+      expect(addMemberButton).toHaveAttribute("title", "Add member");
     });
   });
 });
