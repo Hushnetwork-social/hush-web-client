@@ -63,11 +63,22 @@ export function FeedList({ onFeedSelect }: FeedListProps) {
   };
 
   // Get last message for a feed
+  // For group feeds, find the last message the user can actually read (has decryption key for)
   const getLastMessage = (feedId: string): { content: string; timestamp: number; senderName?: string } | null => {
     const feedMessages = messages[feedId];
     if (!feedMessages || feedMessages.length === 0) return null;
 
-    const lastMsg = feedMessages[feedMessages.length - 1];
+    // For preview, find the last message that was successfully decrypted
+    // Messages with decryptionFailed: true should not be shown as preview
+    // (they contain raw encrypted content that looks like gibberish)
+    const decryptedMessages = feedMessages.filter(msg => !msg.decryptionFailed);
+
+    if (decryptedMessages.length === 0) {
+      // No decrypted messages - user probably just joined and can't read old messages
+      return null;
+    }
+
+    const lastMsg = decryptedMessages[decryptedMessages.length - 1];
     return {
       content: lastMsg.content,
       timestamp: lastMsg.timestamp,

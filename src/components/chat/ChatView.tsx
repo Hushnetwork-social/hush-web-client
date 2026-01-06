@@ -46,13 +46,17 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const messageInputRef = useRef<MessageInputHandle>(null);
   const { credentials } = useAppStore();
-  const messagesMap = useFeedsStore((state) => state.messages);
-  const groupMembersMap = useFeedsStore((state) => state.groupMembers);
-  // Filter out messages that failed decryption (user doesn't have the key)
-  const regularMessages = useMemo(
-    () => (messagesMap[feed.id] ?? EMPTY_MESSAGES).filter(m => !m.decryptionFailed),
-    [messagesMap, feed.id]
+  // Subscribe to just this feed's messages for efficient updates
+  const feedMessages = useFeedsStore(
+    (state) => state.messages[feed.id] ?? EMPTY_MESSAGES
   );
+  const groupMembersMap = useFeedsStore((state) => state.groupMembers);
+
+  const regularMessages = useMemo(
+    () => feedMessages.filter(m => !m.decryptionFailed),
+    [feedMessages]
+  );
+
   const groupMembers = useMemo(
     () => (feed.type === 'group' ? groupMembersMap[feed.id] ?? EMPTY_MEMBERS : EMPTY_MEMBERS),
     [groupMembersMap, feed.id, feed.type]
@@ -151,13 +155,70 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   }, [currentKeyGeneration, feed.type]);
 
   // Combine messages and system events into a single sorted array
+  // Pending (unconfirmed) messages are always placed at the end for optimistic UI
   const chatItems = useMemo((): ChatItem[] => {
     const messageItems: ChatItem[] = regularMessages.map(m => ({ ...m, type: 'message' as const }));
     // Combine historical and live system events
     const allSystemEvents = [...historicalSystemEvents, ...liveSystemEvents];
     const allItems = [...messageItems, ...allSystemEvents];
-    return allItems.sort((a, b) => a.timestamp - b.timestamp);
+
+    // Custom sort: sort by timestamp, but unconfirmed messages go to the end
+    const sorted = allItems.sort((a, b) => {
+      const aIsUnconfirmed = a.type === 'message' && a.isConfirmed === false;
+      const bIsUnconfirmed = b.type === 'message' && b.isConfirmed === false;
+
+      // Unconfirmed messages always go last
+      if (aIsUnconfirmed && !bIsUnconfirmed) return 1;
+      if (!aIsUnconfirmed && bIsUnconfirmed) return -1;
+
+      // Otherwise sort by timestamp
+      return a.timestamp - b.timestamp;
+    });
+
+    return sorted;
   }, [regularMessages, historicalSystemEvents, liveSystemEvents]);
+
+  // Track previous chatItems length to detect new pending messages
+  // Use -1 as sentinel value to indicate first render hasn't happened yet
+  const prevChatItemsCountRef = useRef(-1);
+
+  // Auto-scroll to bottom when a new pending message is added (optimistic UI)
+  // This ensures the message appears immediately in the viewport
+  useEffect(() => {
+    const currentCount = chatItems.length;
+    const prevCount = prevChatItemsCountRef.current;
+
+    // Skip the first effect call (initialization)
+    if (prevCount === -1) {
+      prevChatItemsCountRef.current = currentCount;
+      return;
+    }
+
+    // Check if new items were added
+    if (currentCount > prevCount) {
+      // Find any unconfirmed message in the chatItems (not just the last item,
+      // since system events might have timestamps that sort them after the new message)
+      const unconfirmedMsgIndex = chatItems.findIndex(
+        item => item.type === 'message' && item.isConfirmed === false
+      );
+
+      if (unconfirmedMsgIndex !== -1) {
+        // Scroll to the unconfirmed message immediately
+        // Use a small delay to ensure Virtuoso has processed the new data
+        setTimeout(() => {
+          if (virtuosoRef.current) {
+            virtuosoRef.current.scrollToIndex({
+              index: unconfirmedMsgIndex,
+              behavior: 'auto',
+              align: 'center',
+            });
+          }
+        }, 100);
+      }
+    }
+
+    prevChatItemsCountRef.current = currentCount;
+  }, [chatItems]);
 
   // For backward compatibility, keep messages reference (used elsewhere)
   const messages = regularMessages;
@@ -455,6 +516,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
             followOutput="smooth"
             initialTopMostItemIndex={chatItems.length - 1}
             className="flex-1"
+            computeItemKey={(index, item) => item.id}
             itemContent={(index, item) => (
               <div className="px-4 py-1">
                 {item.type === 'system' ? (

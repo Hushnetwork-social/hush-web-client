@@ -370,6 +370,7 @@ export const useFeedsStore = create<FeedsStore>()(
       },
 
       addPendingMessage: (feedId, message) => {
+        debugLog(`[FeedsStore] addPendingMessage: feedId=${feedId}, messageId=${message.id}, isConfirmed=${message.isConfirmed}`);
         set((state) => ({
           messages: {
             ...state.messages,

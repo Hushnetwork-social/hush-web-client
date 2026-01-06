@@ -235,13 +235,34 @@ export async function sendMessage(
     return { success: false, error: 'Not authenticated' };
   }
 
-  // Validate feed and AES key
+  // Validate feed
   if (!feed) {
     return { success: false, error: 'Feed not found' };
   }
 
-  if (!feed.aesKey) {
-    return { success: false, error: 'Feed encryption key not available' };
+  // Determine the AES key to use for encryption
+  // For group feeds, use the current KeyGeneration's key from groupKeyStates
+  // For other feeds (personal, chat), use the feed's direct aesKey
+  let aesKey: string | undefined;
+
+  if (feed.type === 'group') {
+    // Group feeds: use the current KeyGeneration's key
+    aesKey = useFeedsStore.getState().getCurrentGroupKey(feedId);
+    if (!aesKey) {
+      const keyState = useFeedsStore.getState().getGroupKeyState(feedId);
+      debugError(`[FeedsService] No current group key for feed ${feedId}. KeyState:`, {
+        hasKeyState: !!keyState,
+        currentKeyGen: keyState?.currentKeyGeneration,
+        keyCount: keyState?.keyGenerations.length,
+      });
+      return { success: false, error: 'Group encryption key not available. You may need to wait for key sync.' };
+    }
+  } else {
+    // Non-group feeds: use the feed's direct AES key
+    aesKey = feed.aesKey;
+    if (!aesKey) {
+      return { success: false, error: 'Feed encryption key not available' };
+    }
   }
 
   try {
@@ -252,7 +273,7 @@ export async function sendMessage(
     const { signedTransaction, messageId } = await createFeedMessageTransaction(
       feedId,
       messageContent,
-      feed.aesKey,
+      aesKey,
       privateKeyBytes,
       credentials.signingPublicKey,
       replyToMessageId

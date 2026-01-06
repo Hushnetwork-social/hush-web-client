@@ -96,6 +96,11 @@ export class FeedsSyncable implements ISyncable {
       // Sync feeds from blockchain (always - to get new feeds/metadata and detect changes)
       await this.syncFeeds(credentials.signingPublicKey);
 
+      // CRITICAL: Sync KeyGenerations for ALL group feeds on every cycle
+      // This ensures existing members get new keys when members are added/removed
+      // Without this, senders would encrypt with old keys that new members can't decrypt
+      await this.syncAllGroupKeyGenerations(credentials.signingPublicKey);
+
       // Initial sync: fetch ALL messages for ALL feeds once
       if (!this.isInitialSyncComplete) {
         await this.syncMessages(credentials.signingPublicKey);
@@ -383,6 +388,54 @@ export class FeedsSyncable implements ISyncable {
         }
       } catch (error) {
         debugError(`[FeedsSyncable] Error syncing group ${feed.id.substring(0, 8)}...:`, error);
+      }
+    });
+
+    await Promise.all(syncPromises);
+  }
+
+  /**
+   * Sync KeyGenerations for ALL group feeds on every sync cycle.
+   *
+   * This is CRITICAL for group messaging to work correctly:
+   * - When a new member joins, a new KeyGeneration is created
+   * - Existing members MUST sync this new key BEFORE sending messages
+   * - Otherwise, they'll encrypt with an old key that new members can't decrypt
+   *
+   * This method only syncs KeyGenerations (lightweight), not full group data.
+   */
+  private async syncAllGroupKeyGenerations(userAddress: string): Promise<void> {
+    const credentials = useAppStore.getState().credentials;
+    if (!credentials?.encryptionPrivateKey) {
+      return;
+    }
+
+    const allGroupFeeds = useFeedsStore.getState().feeds.filter(f => f.type === 'group');
+
+    if (allGroupFeeds.length === 0) {
+      return;
+    }
+
+    // Sync KeyGenerations for all group feeds in parallel
+    const syncPromises = allGroupFeeds.map(async (feed) => {
+      try {
+        const keysResult = await syncKeyGenerations(
+          feed.id,
+          userAddress,
+          credentials.encryptionPrivateKey
+        );
+
+        if (!keysResult.success) {
+          debugWarn(`[FeedsSyncable] Failed to sync KeyGenerations for group ${feed.id.substring(0, 8)}...: ${keysResult.error}`);
+        } else if (keysResult.data) {
+          // Only log if there's a change (new key generation)
+          const currentState = useFeedsStore.getState().getGroupKeyState(feed.id);
+          if (!currentState || currentState.currentKeyGeneration !== keysResult.data.currentKeyGeneration) {
+            debugLog(`[FeedsSyncable] KeyGen updated for group ${feed.id.substring(0, 8)}...: keyGen=${keysResult.data.currentKeyGeneration}`);
+          }
+        }
+      } catch (error) {
+        debugError(`[FeedsSyncable] Error syncing KeyGenerations for group ${feed.id.substring(0, 8)}...:`, error);
       }
     });
 
