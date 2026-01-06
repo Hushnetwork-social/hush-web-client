@@ -79,6 +79,8 @@ export interface FeedMessage {
   id: string;
   feedId: string;
   senderPublicKey: string;
+  /** Display name of the sender (from server, current name at sync time) */
+  senderName?: string;
   content: string;
   contentEncrypted?: string;
   timestamp: number;

@@ -28,8 +28,8 @@ interface MessageBubbleProps {
   onScrollToMessage?: (messageId: string) => void;
   /** Reply to Message: The full message object (needed for onReplyClick) */
   message?: FeedMessage;
-  /** Reply to Message: Function to resolve display name from public key */
-  resolveDisplayName?: (publicKey: string) => string;
+  /** Reply to Message: Function to resolve display name from public key (with optional server-provided name) */
+  resolveDisplayName?: (publicKey: string, senderName?: string) => string;
   /** Group Feed: Whether to show sender name (for group messages from others) */
   showSender?: boolean;
   /** Group Feed: Display name of the sender */

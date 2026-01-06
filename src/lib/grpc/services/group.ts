@@ -13,8 +13,6 @@ import type {
   NewGroupFeedResponse,
   JoinGroupFeedRequest,
   JoinGroupFeedResponse,
-  LeaveGroupFeedRequest,
-  LeaveGroupFeedResponse,
   BlockMemberRequest,
   BlockMemberResponse,
   UnblockMemberRequest,
@@ -119,26 +117,39 @@ export const groupService = {
 
   /**
    * Leave a group feed
+   * Uses API route for proper binary protobuf communication
    */
   async leaveGroup(feedId: string, userAddress: string): Promise<GroupOperationResult> {
     debugLog('[GroupService] leaveGroup:', { feedId, userAddress });
     try {
-      const client = getGrpcClient();
-      const request: LeaveGroupFeedRequest = {
-        FeedId: feedId,
-        LeavingUserPublicAddress: userAddress,
-      };
+      const url = buildApiUrl('/api/groups/leave');
+      debugLog('[GroupService] leaveGroup URL:', url);
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          feedId,
+          leavingUserPublicAddress: userAddress,
+        }),
+      });
 
-      const response = await client.unaryCall<LeaveGroupFeedRequest, LeaveGroupFeedResponse>(
-        SERVICE_NAME,
-        'LeaveGroupFeed',
-        request
-      );
-
-      if (response.Success) {
-        return wrapResult(true, { message: response.Message });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
-      return wrapResult(false, undefined, response.Message);
+
+      const data = await response.json();
+      debugLog('[GroupService] leaveGroup result:', data);
+
+      if (data.error && !data.success) {
+        return wrapResult(false, undefined, data.error);
+      }
+
+      if (data.success) {
+        return wrapResult(true, { message: data.message });
+      }
+      return wrapResult(false, undefined, data.message || 'Failed to leave group');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to leave group';
       debugLog('[GroupService] leaveGroup error:', message);
@@ -513,11 +524,19 @@ export const groupService = {
       }
 
       // Map API response to GroupFeedMember type
-      const members = (data.members || []).map((m: { publicAddress: string; participantType: number; joinedAtBlock: number }) => ({
+      // Server now returns displayName and leftAtBlock for historical membership tracking
+      const members = (data.members || []).map((m: {
+        publicAddress: string;
+        participantType: number;
+        joinedAtBlock: number;
+        leftAtBlock?: number;
+        displayName?: string;
+      }) => ({
         publicAddress: m.publicAddress,
-        displayName: '', // Will be populated by identity lookup
+        displayName: m.displayName || '', // Server provides display name now
         role: mapParticipantTypeToRole(m.participantType),
         joinedAtBlock: m.joinedAtBlock,
+        leftAtBlock: m.leftAtBlock, // For historical "member left" events
       }));
 
       debugLog('[GroupService] getGroupMembers result:', { count: members.length });

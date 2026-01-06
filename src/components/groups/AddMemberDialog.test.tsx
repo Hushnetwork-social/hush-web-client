@@ -241,6 +241,43 @@ describe("AddMemberDialog", () => {
         expect(screen.getByText("No users found")).toBeInTheDocument();
       });
     });
+
+    it("should NOT filter out members who have left (leftAtBlock is set)", async () => {
+      // A member who left the group - has leftAtBlock set
+      const membersWithLeftMember: GroupFeedMember[] = [
+        { publicAddress: "admin-address", displayName: "Admin User", role: "Admin" },
+        { publicAddress: "member-address", displayName: "Existing Member", role: "Member" },
+        { publicAddress: "left-member-address", displayName: "Left Member", role: "Member", leftAtBlock: 500 },
+      ];
+
+      // Search returns the left member
+      const resultsWithLeftMember = [
+        {
+          publicSigningAddress: "left-member-address",
+          publicEncryptAddress: "left-member-key",
+          displayName: "Left Member",
+        },
+      ];
+      mockSearchByDisplayName.mockResolvedValue(resultsWithLeftMember);
+
+      render(
+        <AddMemberDialog
+          {...defaultProps}
+          currentMembers={membersWithLeftMember}
+        />
+      );
+
+      const searchInput = screen.getByLabelText("Search for members");
+      fireEvent.change(searchInput, { target: { value: "Left" } });
+
+      const searchButton = screen.getByRole("button", { name: /^search$/i });
+      fireEvent.click(searchButton);
+
+      // Left member should appear in results (can be re-added)
+      await waitFor(() => {
+        expect(screen.getByText("Left Member")).toBeInTheDocument();
+      });
+    });
   });
 
   describe("Member selection and confirmation", () => {

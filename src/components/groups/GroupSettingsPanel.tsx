@@ -4,6 +4,7 @@ import { memo, useState, useCallback, useMemo, useEffect } from "react";
 import { X, Settings, Globe, Lock, LogOut, Trash2, Loader2 } from "lucide-react";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { groupService } from "@/lib/grpc/services/group";
+import { useFeedsStore } from "@/modules/feeds";
 import type { GroupMemberRole } from "@/types";
 
 interface GroupSettingsPanelProps {
@@ -72,6 +73,9 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
   // Check if current user is admin
   const isAdmin = currentUserRole === "Admin";
 
+  // Get store function to remove member after leaving
+  const removeGroupMember = useFeedsStore((state) => state.removeGroupMember);
+
   // Check if there are unsaved changes
   const hasChanges = useMemo(() => {
     return name !== groupName || description !== groupDescription;
@@ -132,6 +136,9 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
     try {
       const result = await groupService.leaveGroup(feedId, currentUserAddress);
       if (result.success) {
+        // Remove the current user from the group members in the store
+        // This ensures the UI immediately reflects that the user left
+        removeGroupMember(feedId, currentUserAddress);
         setShowLeaveConfirm(false);
         onLeave();
         onClose();
@@ -143,7 +150,7 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
     } finally {
       setIsLeaving(false);
     }
-  }, [feedId, currentUserAddress, onLeave, onClose]);
+  }, [feedId, currentUserAddress, removeGroupMember, onLeave, onClose]);
 
   // Handle delete group
   const handleDelete = useCallback(async () => {

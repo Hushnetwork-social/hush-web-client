@@ -42,6 +42,8 @@ export async function GET(request: NextRequest) {
         publicAddress: m.publicAddress,
         participantType: m.participantType,
         joinedAtBlock: m.joinedAtBlock,
+        leftAtBlock: m.leftAtBlock,
+        displayName: m.displayName,
       })),
     });
   } catch (error) {

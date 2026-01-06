@@ -51,9 +51,10 @@ export const AddMemberDialog = memo(function AddMemberDialog({
   const [error, setError] = useState<string | null>(null);
 
 
-  // Get current member addresses for filtering (memoized to prevent re-creating on each render)
+  // Get current ACTIVE member addresses for filtering (exclude members who have left)
+  // Members who left (have leftAtBlock set) should be searchable for re-adding
   const currentMemberAddresses = useMemo(
-    () => new Set(currentMembers.map((m) => m.publicAddress)),
+    () => new Set(currentMembers.filter((m) => !m.leftAtBlock).map((m) => m.publicAddress)),
     [currentMembers]
   );
 

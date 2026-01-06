@@ -22,6 +22,8 @@ export interface GroupFeedMember {
   role: GroupMemberRole;
   /** Block height when the member joined (optional) */
   joinedAtBlock?: number;
+  /** Block height when the member left/was banned (optional, only for historical members) */
+  leftAtBlock?: number;
 }
 
 /**

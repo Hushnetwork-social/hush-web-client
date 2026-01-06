@@ -845,4 +845,74 @@ describe('ChatView', () => {
       });
     });
   });
+
+  describe('Member Left and Rejoin - Input Area State', () => {
+    const mockGroupFeed: Feed = {
+      id: 'group-feed-456',
+      name: 'Test Group',
+      type: 'group',
+      participants: [],
+      createdAt: Date.now(),
+      lastMessageAt: Date.now(),
+    };
+
+    beforeEach(() => {
+      useAppStore.setState({
+        credentials: {
+          signingPublicKey: 'current-user-key',
+          signingPrivateKey: 'private-key',
+          encryptPublicKey: 'enc-public',
+          encryptPrivateKey: 'enc-private',
+          displayName: 'CurrentUser',
+        },
+      });
+      useFeedsStore.getState().reset();
+    });
+
+    it('should disable input area when current user has leftAtBlock set', () => {
+      // User has left the group (leftAtBlock is set)
+      const membersWithLeftUser: GroupFeedMember[] = [
+        { publicAddress: 'admin-key', displayName: 'Admin', role: 'Admin' },
+        { publicAddress: 'current-user-key', displayName: 'CurrentUser', role: 'Member', leftAtBlock: 500 },
+      ];
+      useFeedsStore.getState().setGroupMembers('group-feed-456', membersWithLeftUser);
+
+      render(<ChatView feed={mockGroupFeed} />);
+
+      // Input should be disabled, showing "no longer a member" message
+      expect(screen.getByText(/no longer a member/i)).toBeInTheDocument();
+      expect(screen.queryByPlaceholderText(/type a message/i)).not.toBeInTheDocument();
+    });
+
+    it('should enable input area when current user rejoins (leftAtBlock cleared)', () => {
+      // User rejoined the group (leftAtBlock is undefined/null)
+      const membersAfterRejoin: GroupFeedMember[] = [
+        { publicAddress: 'admin-key', displayName: 'Admin', role: 'Admin' },
+        { publicAddress: 'current-user-key', displayName: 'CurrentUser', role: 'Member', joinedAtBlock: 600 },
+        // Note: leftAtBlock is not set (undefined) - user has rejoined
+      ];
+      useFeedsStore.getState().setGroupMembers('group-feed-456', membersAfterRejoin);
+
+      render(<ChatView feed={mockGroupFeed} />);
+
+      // Input should be enabled
+      expect(screen.queryByText(/no longer a member/i)).not.toBeInTheDocument();
+      expect(screen.getByPlaceholderText(/type a message/i)).toBeInTheDocument();
+    });
+
+    it('should enable input area for active member (no leftAtBlock)', () => {
+      // Normal active member
+      const activeMembers: GroupFeedMember[] = [
+        { publicAddress: 'admin-key', displayName: 'Admin', role: 'Admin' },
+        { publicAddress: 'current-user-key', displayName: 'CurrentUser', role: 'Member', joinedAtBlock: 100 },
+      ];
+      useFeedsStore.getState().setGroupMembers('group-feed-456', activeMembers);
+
+      render(<ChatView feed={mockGroupFeed} />);
+
+      // Input should be enabled
+      expect(screen.queryByText(/no longer a member/i)).not.toBeInTheDocument();
+      expect(screen.getByPlaceholderText(/type a message/i)).toBeInTheDocument();
+    });
+  });
 });

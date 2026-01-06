@@ -151,6 +151,7 @@ export async function fetchMessages(
       feedId: msg.feedId,
       content: msg.messageContent,
       senderPublicKey: msg.issuerPublicAddress,
+      senderName: msg.issuerName || undefined,  // Display name from server (current name at sync time)
       timestamp: msg.timestamp ? new Date(msg.timestamp).getTime() : Date.now(),
       blockHeight: msg.blockIndex,
       isConfirmed: true,

@@ -1223,6 +1223,8 @@ export interface GroupMemberInfo {
   publicAddress: string;
   participantType: number;
   joinedAtBlock: number;
+  leftAtBlock?: number;  // Set if member has left or been banned
+  displayName?: string;  // Display name at time of query
 }
 
 /**
@@ -1235,6 +1237,8 @@ export interface GroupMemberInfo {
  *   string PublicAddress = 1;
  *   int32 ParticipantType = 2;
  *   int64 JoinedAtBlock = 3;
+ *   optional int64 LeftAtBlock = 4;
+ *   optional string DisplayName = 5;
  * }
  */
 export function parseGetGroupMembersResponse(messageBytes: Uint8Array): GroupMemberInfo[] {
@@ -1294,12 +1298,14 @@ function parseGroupMember(bytes: Uint8Array): GroupMemberInfo {
       offset += valueResult.bytesRead;
       if (fieldNumber === 2) member.participantType = valueResult.value;
       if (fieldNumber === 3) member.joinedAtBlock = valueResult.value;
+      if (fieldNumber === 4) member.leftAtBlock = valueResult.value;
     } else if (wireType === 2) {
       const lenResult = parseVarint(bytes, offset);
       offset += lenResult.bytesRead;
       const strValue = parseString(bytes, offset, lenResult.value);
       offset += lenResult.value;
       if (fieldNumber === 1) member.publicAddress = strValue;
+      if (fieldNumber === 5) member.displayName = strValue;
     } else {
       break;
     }
@@ -1461,6 +1467,79 @@ export interface AddMemberToGroupFeedResult {
  */
 export function parseAddMemberToGroupFeedResponse(messageBytes: Uint8Array): AddMemberToGroupFeedResult {
   const result: AddMemberToGroupFeedResult = {
+    success: false,
+    message: '',
+  };
+
+  let offset = 0;
+  while (offset < messageBytes.length) {
+    const tagResult = parseVarint(messageBytes, offset);
+    const tag = tagResult.value;
+    offset += tagResult.bytesRead;
+
+    const fieldNumber = tag >> 3;
+    const wireType = tag & 0x07;
+
+    if (wireType === 0 && fieldNumber === 1) {
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+      result.success = valueResult.value === 1;
+    } else if (wireType === 2 && fieldNumber === 2) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead;
+      result.message = parseString(messageBytes, offset, lenResult.value);
+      offset += lenResult.value;
+    } else if (wireType === 0) {
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+    } else if (wireType === 2) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead + lenResult.value;
+    } else {
+      break;
+    }
+  }
+
+  return result;
+}
+
+// ============= Leave Group Feed Operation =============
+
+/**
+ * Build LeaveGroupFeedRequest for binary gRPC
+ * Proto: message LeaveGroupFeedRequest {
+ *   string FeedId = 1;
+ *   string LeavingUserPublicAddress = 2;
+ * }
+ */
+export function buildLeaveGroupFeedRequest(
+  feedId: string,
+  leavingUserPublicAddress: string
+): Uint8Array {
+  const bytes = [
+    ...encodeString(1, feedId),
+    ...encodeString(2, leavingUserPublicAddress),
+  ];
+  return new Uint8Array(bytes);
+}
+
+/**
+ * Response from LeaveGroupFeed
+ */
+export interface LeaveGroupFeedResult {
+  success: boolean;
+  message: string;
+}
+
+/**
+ * Parse LeaveGroupFeedResponse
+ * Proto: message LeaveGroupFeedResponse {
+ *   bool Success = 1;
+ *   string Message = 2;
+ * }
+ */
+export function parseLeaveGroupFeedResponse(messageBytes: Uint8Array): LeaveGroupFeedResult {
+  const result: LeaveGroupFeedResult = {
     success: false,
     message: '',
   };

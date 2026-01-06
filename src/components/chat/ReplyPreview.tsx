@@ -8,8 +8,8 @@ interface ReplyPreviewProps {
   messageId: string;
   /** Handler for when user clicks the preview (to scroll to original) */
   onPreviewClick?: (messageId: string) => void;
-  /** Function to resolve display name from public key */
-  resolveDisplayName?: (publicKey: string) => string;
+  /** Function to resolve display name from public key (with optional server-provided name fallback) */
+  resolveDisplayName?: (publicKey: string, senderName?: string) => string;
 }
 
 /**
@@ -59,9 +59,10 @@ export const ReplyPreview = memo(function ReplyPreview({
     : repliedMessage.content;
 
   // Resolve display name or fall back to truncated public key
+  // Pass senderName from message for users who left (server-provided name)
   const senderName = resolveDisplayName
-    ? resolveDisplayName(repliedMessage.senderPublicKey)
-    : repliedMessage.senderPublicKey.substring(0, 10) + "...";
+    ? resolveDisplayName(repliedMessage.senderPublicKey, repliedMessage.senderName)
+    : repliedMessage.senderName ?? repliedMessage.senderPublicKey.substring(0, 10) + "...";
 
   return (
     <button

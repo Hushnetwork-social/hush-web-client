@@ -2,7 +2,7 @@
 
 import { useRef, useMemo, useCallback, useState, useEffect } from "react";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
-import { MessageSquare, Lock, ArrowLeft, Users, Settings } from "lucide-react";
+import { MessageSquare, Lock, ArrowLeft, Users, Settings, LogOut, Ban } from "lucide-react";
 import { MessageBubble } from "./MessageBubble";
 import { SystemMessage } from "./SystemMessage";
 import { MessageInput, type MessageInputHandle } from "./MessageInput";
@@ -22,7 +22,7 @@ const EMPTY_MEMBERS: GroupFeedMember[] = [];
 interface SystemEvent {
   id: string;
   type: 'system';
-  eventType: 'member_joined' | 'key_rotated';
+  eventType: 'member_joined' | 'member_left' | 'key_rotated';
   memberName?: string;
   timestamp: number;
 }
@@ -128,13 +128,43 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
         memberName: member.displayName,
         timestamp: estimatedTimestamp,
       });
+
+      // If the member has left, also create a "left" event
+      if (member.leftAtBlock) {
+        const leftBlock = member.leftAtBlock;
+
+        // Try to find a message close to the leave block for timestamp reference
+        const closestLeftBlockEntry = [...blockTimestampMap.entries()]
+          .sort((a, b) => Math.abs(a[0] - leftBlock) - Math.abs(b[0] - leftBlock))[0];
+
+        let leftTimestamp: number;
+        if (closestLeftBlockEntry) {
+          const [refBlock, refTimestamp] = closestLeftBlockEntry;
+          const blockDiff = leftBlock - refBlock;
+          leftTimestamp = refTimestamp + (blockDiff * 10000);
+        } else {
+          // Fallback: estimate based on join timestamp + some offset
+          leftTimestamp = estimatedTimestamp + 60000; // 1 minute after join as fallback
+        }
+
+        events.push({
+          id: `system-member-left-${member.publicAddress.substring(0, 16)}`,
+          type: 'system' as const,
+          eventType: 'member_left' as const,
+          memberName: member.displayName,
+          timestamp: leftTimestamp,
+        });
+      }
     }
 
     return events;
   }, [feed.type, feed.createdAt, regularMessages, keyState?.keyGenerations, groupMembers]);
 
-  // Live system events state for real-time key rotation notifications
+  // Live system events state for real-time notifications (key rotation, member left)
   const [liveSystemEvents, setLiveSystemEvents] = useState<SystemEvent[]>([]);
+
+  // Track previous members (with display names) to detect when someone leaves
+  const previousMembersRef = useRef<Map<string, string>>(new Map());
 
   // Detect live key rotation (new member joined while viewing chat)
   useEffect(() => {
@@ -153,6 +183,38 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
     }
     previousKeyGenRef.current = currentKeyGeneration;
   }, [currentKeyGeneration, feed.type]);
+
+  // Detect when members leave the group (real-time notification)
+  useEffect(() => {
+    if (feed.type !== 'group') return;
+
+    const currentMemberAddresses = new Set(groupMembers.map(m => m.publicAddress));
+    const prevMembersMap = previousMembersRef.current;
+
+    // Skip first render (no previous data to compare)
+    if (prevMembersMap.size > 0) {
+      // Find members who left (were in previous map but not in current set)
+      for (const [prevAddress, prevDisplayName] of prevMembersMap) {
+        if (!currentMemberAddresses.has(prevAddress)) {
+          // Member left - use the display name from previous render
+          setLiveSystemEvents(prev => [...prev, {
+            id: `system-member-left-${prevAddress.substring(0, 16)}-${Date.now()}`,
+            type: 'system',
+            eventType: 'member_left',
+            memberName: prevDisplayName,
+            timestamp: Date.now(),
+          }]);
+        }
+      }
+    }
+
+    // Update ref for next comparison (store address -> displayName map)
+    const newMembersMap = new Map<string, string>();
+    for (const member of groupMembers) {
+      newMembersMap.set(member.publicAddress, member.displayName);
+    }
+    previousMembersRef.current = newMembersMap;
+  }, [feed.type, groupMembers]);
 
   // Combine messages and system events into a single sorted array
   // Pending (unconfirmed) messages are always placed at the end for optimistic UI
@@ -232,12 +294,26 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   // State for settings panel visibility
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
 
+  // Get current user's membership info in the group
+  const currentUserMember = useMemo(() => {
+    if (!isGroupFeed || !credentials?.signingPublicKey) return null;
+    return groupMembers.find(m => m.publicAddress === credentials.signingPublicKey) ?? null;
+  }, [isGroupFeed, credentials?.signingPublicKey, groupMembers]);
+
+  // Check if current user is still an active member of the group
+  // User is NOT a member if: they left (leftAtBlock set), were banned, or are not in the members list
+  const isCurrentUserMember = currentUserMember !== null && !currentUserMember.leftAtBlock;
+
   // Get current user's role in the group
   const currentUserRole = useMemo(() => {
-    if (!isGroupFeed || !credentials?.signingPublicKey) return 'Member' as const;
-    const member = groupMembers.find(m => m.publicAddress === credentials.signingPublicKey);
-    return member?.role ?? 'Member' as const;
-  }, [isGroupFeed, credentials?.signingPublicKey, groupMembers]);
+    if (!currentUserMember) return 'Member' as const;
+    return currentUserMember.role ?? 'Member' as const;
+  }, [currentUserMember]);
+
+  // Check if current user can send messages
+  // For group feeds: only Admin and Member can send, Blocked users cannot
+  // For non-group feeds: always allowed (personal, chat, broadcast)
+  const canSendMessages = !isGroupFeed || (isCurrentUserMember && currentUserRole !== 'Blocked');
 
   // Check if current user is the last admin (for delete button visibility)
   const isLastAdmin = useMemo(() => {
@@ -258,12 +334,14 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   }, [memberLookup]);
 
   // Get sender display name for group messages (O(1) lookup)
-  const getSenderDisplayName = useCallback((publicKey: string): string | undefined => {
+  // Falls back to message.senderName (from server) for users who have left
+  const getSenderDisplayName = useCallback((publicKey: string, messageSenderName?: string): string | undefined => {
     if (!isGroupFeed) return undefined;
     // Don't show sender name for own messages
     if (publicKey === credentials?.signingPublicKey) return undefined;
     const member = memberLookup.get(publicKey);
-    return member?.displayName ?? publicKey.substring(0, TRUNCATED_KEY_LENGTH) + TRUNCATION_SUFFIX;
+    // Priority: active member name > server-provided name > truncated key
+    return member?.displayName ?? messageSenderName ?? publicKey.substring(0, TRUNCATED_KEY_LENGTH) + TRUNCATION_SUFFIX;
   }, [isGroupFeed, memberLookup, credentials?.signingPublicKey]);
 
   // Use the feed reactions hook for optimistic updates
@@ -367,7 +445,8 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   // Reply to Message: Resolve display name from public key
   // For chat feeds: if it's the other participant, use feed.name; if it's me, use "You"
   // For group feeds: look up member in memberLookup Map (O(1))
-  const resolveDisplayName = useCallback((publicKey: string): string => {
+  // Falls back to messageSenderName (from server) for users who have left
+  const resolveDisplayName = useCallback((publicKey: string, messageSenderName?: string): string => {
     if (publicKey === credentials?.signingPublicKey) {
       return "You";
     }
@@ -380,6 +459,10 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
       const member = memberLookup.get(publicKey);
       if (member) {
         return member.displayName;
+      }
+      // Fallback to server-provided name for users who left
+      if (messageSenderName) {
+        return messageSenderName;
       }
     }
     // Fallback: truncated public key
@@ -542,7 +625,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
                     message={item}
                     resolveDisplayName={resolveDisplayName}
                     showSender={isGroupFeed}
-                    senderName={getSenderDisplayName(item.senderPublicKey)}
+                    senderName={getSenderDisplayName(item.senderPublicKey, item.senderName)}
                     senderRole={getSenderRole(item.senderPublicKey)}
                   />
                 )}
@@ -553,16 +636,34 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
       </div>
 
       {/* Reply Context Bar - shows when replying to a message */}
-      {replyingTo && (
+      {replyingTo && canSendMessages && (
         <ReplyContextBar
           replyingTo={replyingTo}
-          senderDisplayName={resolveDisplayName(replyingTo.senderPublicKey)}
+          senderDisplayName={resolveDisplayName(replyingTo.senderPublicKey, replyingTo.senderName)}
           onCancel={handleCancelReply}
         />
       )}
 
-      {/* Message Input */}
-      <MessageInput ref={messageInputRef} onSend={handleSend} onEscapeEmpty={onCloseFeed} />
+      {/* Message Input or "Not a member" notice for group feeds */}
+      {isGroupFeed && !canSendMessages ? (
+        <div className="flex-shrink-0 px-4 py-3 border-t border-hush-bg-hover bg-hush-bg-dark/50">
+          <div className="flex items-center gap-3 p-3 rounded-lg bg-hush-bg-element text-hush-text-accent">
+            {currentUserRole === 'Blocked' ? (
+              <>
+                <Ban className="w-5 h-5 text-orange-400 flex-shrink-0" aria-hidden="true" />
+                <span className="text-sm">You are blocked and cannot send messages in this group.</span>
+              </>
+            ) : (
+              <>
+                <LogOut className="w-5 h-5 text-hush-text-accent flex-shrink-0" aria-hidden="true" />
+                <span className="text-sm">You are no longer a member of this group.</span>
+              </>
+            )}
+          </div>
+        </div>
+      ) : (
+        <MessageInput ref={messageInputRef} onSend={handleSend} onEscapeEmpty={onCloseFeed} />
+      )}
 
       {/* Member List Panel (Group feeds only) */}
       {isGroupFeed && credentials?.signingPublicKey && (

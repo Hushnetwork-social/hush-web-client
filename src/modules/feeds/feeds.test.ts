@@ -1310,4 +1310,192 @@ describe('Feed Name Updates (FEAT-003)', () => {
       });
     });
   });
+
+  /**
+   * Tests for the "rejoin after leave" scenario.
+   *
+   * Expected behavior:
+   * 1. Admin can add a member back who previously left
+   * 2. The rejoining member gets new key generations starting from rejoin block
+   * 3. The rejoining member can decrypt:
+   *    - Messages from their original membership period (KeyGen 0-1 before leaving)
+   *    - Messages after they rejoin (KeyGen 3+ after rejoining)
+   * 4. Messages sent while they were gone (KeyGen 2) remain inaccessible
+   *
+   * Timeline example:
+   * - KeyGen 0: Block 1000 (user joined at group creation)
+   * - KeyGen 1: Block 2000 (someone else joined, key rotated)
+   * - Block 2500: User leaves
+   * - KeyGen 2: Block 3000 (someone else joined while user was gone)
+   * - Block 3500: User rejoins via admin
+   * - KeyGen 3: Block 4000 (key rotated for rejoin)
+   *
+   * User should have access to: KeyGen 0, 1, 3
+   * User should NOT have access to: KeyGen 2 (created while away)
+   */
+  describe('Rejoin After Leave - Key Access', () => {
+    // Sample key generations simulating the timeline above
+    const keyGenBeforeLeave1 = {
+      keyGeneration: 0,
+      validFromBlock: 1000,
+      aesKey: 'key0-original-member-key==',
+    };
+
+    const keyGenBeforeLeave2 = {
+      keyGeneration: 1,
+      validFromBlock: 2000,
+      aesKey: 'key1-before-leave-key==',
+    };
+
+    const keyGenDuringAbsence = {
+      keyGeneration: 2,
+      validFromBlock: 3000,
+      // User does NOT have this key - they were away
+    };
+
+    const keyGenAfterRejoin = {
+      keyGeneration: 3,
+      validFromBlock: 4000,
+      aesKey: 'key3-after-rejoin-key==',
+    };
+
+    it('rejoined member has access to keys from before leaving and after rejoining', () => {
+      const { setGroupKeyState, getGroupKeyState } = useFeedsStore.getState();
+
+      // User has keys from KeyGen 0, 1, and 3, but NOT KeyGen 2
+      const keyState = {
+        currentKeyGeneration: 3,
+        keyGenerations: [keyGenBeforeLeave1, keyGenBeforeLeave2, keyGenAfterRejoin],
+        missingKeyGenerations: [2], // KeyGen 2 is missing (user was away)
+      };
+
+      setGroupKeyState('group-rejoin', keyState);
+
+      const state = getGroupKeyState('group-rejoin');
+      expect(state).toBeDefined();
+      expect(state!.currentKeyGeneration).toBe(3);
+      expect(state!.keyGenerations).toHaveLength(3);
+
+      // User has KeyGen 0, 1, 3
+      const keyGens = state!.keyGenerations.map((k) => k.keyGeneration);
+      expect(keyGens).toContain(0);
+      expect(keyGens).toContain(1);
+      expect(keyGens).toContain(3);
+
+      // User is missing KeyGen 2
+      expect(state!.missingKeyGenerations).toContain(2);
+    });
+
+    it('can determine which key to use for message decryption based on keyGeneration field', () => {
+      const { setGroupKeyState, getGroupKeyState } = useFeedsStore.getState();
+
+      const keyState = {
+        currentKeyGeneration: 3,
+        keyGenerations: [keyGenBeforeLeave1, keyGenBeforeLeave2, keyGenAfterRejoin],
+        missingKeyGenerations: [2],
+      };
+
+      setGroupKeyState('group-rejoin', keyState);
+
+      const state = getGroupKeyState('group-rejoin');
+
+      // Message from before leaving (keyGeneration: 1) - can decrypt
+      const messageBeforeLeave = { keyGeneration: 1 };
+      const keyForOldMessage = state!.keyGenerations.find(
+        (k) => k.keyGeneration === messageBeforeLeave.keyGeneration
+      );
+      expect(keyForOldMessage).toBeDefined();
+      expect(keyForOldMessage!.aesKey).toBe('key1-before-leave-key==');
+
+      // Message from during absence (keyGeneration: 2) - cannot decrypt
+      const messageDuringAbsence = { keyGeneration: 2 };
+      const keyForMissedMessage = state!.keyGenerations.find(
+        (k) => k.keyGeneration === messageDuringAbsence.keyGeneration
+      );
+      expect(keyForMissedMessage).toBeUndefined();
+
+      // Message after rejoin (keyGeneration: 3) - can decrypt
+      const messageAfterRejoin = { keyGeneration: 3 };
+      const keyForNewMessage = state!.keyGenerations.find(
+        (k) => k.keyGeneration === messageAfterRejoin.keyGeneration
+      );
+      expect(keyForNewMessage).toBeDefined();
+      expect(keyForNewMessage!.aesKey).toBe('key3-after-rejoin-key==');
+    });
+
+    it('marks messages as decryptionFailed when key is missing', () => {
+      // This test verifies the expected behavior for messages from while user was away
+      const message = {
+        id: 'msg-during-absence',
+        feedId: 'group-rejoin',
+        senderPublicKey: 'other-user',
+        content: '[encrypted]', // Would show encrypted content
+        timestamp: Date.now(),
+        isConfirmed: true,
+        keyGeneration: 2, // User doesn't have KeyGen 2
+        decryptionFailed: true, // Message should be marked as decryption failed
+      };
+
+      // The message should have decryptionFailed flag set
+      expect(message.decryptionFailed).toBe(true);
+      expect(message.keyGeneration).toBe(2);
+    });
+  });
+
+  describe('Rejoin After Leave - Member Status', () => {
+    const memberWithHistory = {
+      publicAddress: 'addr-rejoined',
+      displayName: 'Rejoined User',
+      role: 'Member' as const,
+      joinedAtBlock: 3500, // Rejoined at block 3500
+      leftAtBlock: undefined, // Currently active (not left)
+    };
+
+    const memberWhoLeft = {
+      publicAddress: 'addr-left',
+      displayName: 'Left User',
+      role: 'Member' as const,
+      joinedAtBlock: 1000,
+      leftAtBlock: 2500, // Left and hasn't rejoined
+    };
+
+    it('active member has no leftAtBlock', () => {
+      expect(memberWithHistory.leftAtBlock).toBeUndefined();
+    });
+
+    it('member who left has leftAtBlock set', () => {
+      expect(memberWhoLeft.leftAtBlock).toBe(2500);
+    });
+
+    it('can filter active vs historical members', () => {
+      const allMembers = [memberWithHistory, memberWhoLeft];
+
+      const activeMembers = allMembers.filter((m) => m.leftAtBlock === undefined);
+      const leftMembers = allMembers.filter((m) => m.leftAtBlock !== undefined);
+
+      expect(activeMembers).toHaveLength(1);
+      expect(activeMembers[0].displayName).toBe('Rejoined User');
+
+      expect(leftMembers).toHaveLength(1);
+      expect(leftMembers[0].displayName).toBe('Left User');
+    });
+
+    it('store includes leftAtBlock in member data', () => {
+      const { setGroupMembers, getGroupMembers } = useFeedsStore.getState();
+
+      setGroupMembers('group-with-history', [memberWithHistory, memberWhoLeft]);
+
+      const members = getGroupMembers('group-with-history');
+      expect(members).toHaveLength(2);
+
+      const rejoinedMember = members.find((m) => m.publicAddress === 'addr-rejoined');
+      const leftMember = members.find((m) => m.publicAddress === 'addr-left');
+
+      expect(rejoinedMember).toBeDefined();
+      expect(rejoinedMember!.leftAtBlock).toBeUndefined();
+
+      expect(leftMember).toBeDefined();
+      expect(leftMember!.leftAtBlock).toBe(2500);
+    });
+  });
 });

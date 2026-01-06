@@ -25,6 +25,7 @@ describe('ReplyPreview', () => {
       id: 'msg-123',
       content: 'This is the original message content',
       senderPublicKey: 'abc123def456xyz789',
+      senderName: 'Server User Name',
       timestamp: Date.now(),
       isConfirmed: true,
     };
@@ -38,10 +39,26 @@ describe('ReplyPreview', () => {
       render(<ReplyPreview messageId="msg-123" resolveDisplayName={resolveDisplayName} />);
 
       expect(screen.getByText('Paulo Tauri')).toBeInTheDocument();
-      expect(resolveDisplayName).toHaveBeenCalledWith('abc123def456xyz789');
+      // Now passes both publicKey and senderName to resolver
+      expect(resolveDisplayName).toHaveBeenCalledWith('abc123def456xyz789', 'Server User Name');
     });
 
-    it('should fallback to truncated public key when no resolver provided', () => {
+    it('should use senderName when no resolver provided', () => {
+      render(<ReplyPreview messageId="msg-123" />);
+
+      // Now uses senderName from message when no resolver
+      expect(screen.getByText('Server User Name')).toBeInTheDocument();
+    });
+
+    it('should fallback to truncated public key when no resolver and no senderName', () => {
+      // Message without senderName
+      mockGetMessageById.mockReturnValue({
+        id: 'msg-123',
+        content: 'Test message',
+        senderPublicKey: 'abc123def456xyz789',
+        timestamp: Date.now(),
+        isConfirmed: true,
+      });
       render(<ReplyPreview messageId="msg-123" />);
 
       // Should show first 10 chars + "..."
@@ -88,8 +105,8 @@ describe('ReplyPreview', () => {
       render(<ReplyPreview messageId="msg-123" />);
 
       const button = screen.getByRole('button');
-      // Falls back to truncated public key when no resolver
-      expect(button).toHaveAttribute('aria-label', 'Reply to message from abc123def4...');
+      // Now uses senderName when no resolver
+      expect(button).toHaveAttribute('aria-label', 'Reply to message from Server User Name');
     });
 
     it('should have aria-label with resolved name', () => {
