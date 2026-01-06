@@ -2,7 +2,7 @@
 
 import { useRef, useMemo, useCallback, useState, useEffect } from "react";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
-import { MessageSquare, Lock, ArrowLeft, Users, Settings, LogOut, Ban } from "lucide-react";
+import { MessageSquare, Lock, ArrowLeft, Users, Settings, LogOut, Ban, Globe } from "lucide-react";
 import { MessageBubble } from "./MessageBubble";
 import { SystemMessage } from "./SystemMessage";
 import { MessageInput, type MessageInputHandle } from "./MessageInput";
@@ -12,7 +12,8 @@ import { GroupSettingsPanel } from "@/components/groups/GroupSettingsPanel";
 import { useAppStore } from "@/stores";
 import { useFeedsStore, sendMessage } from "@/modules/feeds";
 import { useFeedReactions } from "@/hooks/useFeedReactions";
-import type { Feed, FeedMessage, GroupFeedMember } from "@/types";
+import type { Feed, FeedMessage, GroupFeedMember, SettingsChangeRecord } from "@/types";
+import { onVisibilityChange, type SettingsChange } from "@/lib/events";
 
 // Empty array constants to avoid creating new references
 const EMPTY_MESSAGES: FeedMessage[] = [];
@@ -22,8 +23,12 @@ const EMPTY_MEMBERS: GroupFeedMember[] = [];
 interface SystemEvent {
   id: string;
   type: 'system';
-  eventType: 'member_joined' | 'member_left' | 'key_rotated';
+  eventType: 'member_joined' | 'member_left' | 'key_rotated' | 'visibility_changed' | 'settings_changed';
   memberName?: string;
+  /** For visibility_changed events: the new visibility state */
+  isPublic?: boolean;
+  /** For settings_changed events: all the changes that occurred */
+  settingsChange?: SettingsChange;
   timestamp: number;
 }
 
@@ -70,6 +75,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
 
   // Generate system events for all member joins in the group
   // Shows "X joined the group" for each member based on their joinedAtBlock
+  // Also includes historical settings changes from settingsChangeHistory
   const historicalSystemEvents = useMemo((): SystemEvent[] => {
     if (feed.type !== 'group') return [];
 
@@ -157,8 +163,40 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
       }
     }
 
+    // Add historical settings change events from persisted history
+    // Deduplicate by ID to handle any legacy duplicates in persisted storage
+    const settingsHistory = feed.settingsChangeHistory ?? [];
+    const seenSettingsIds = new Set<string>();
+    for (const record of settingsHistory) {
+      // Skip duplicates (can occur from legacy data before uniqueness fix)
+      if (seenSettingsIds.has(record.id)) continue;
+      seenSettingsIds.add(record.id);
+      // Convert SettingsChangeRecord to SettingsChange format for the event
+      const settingsChange: SettingsChange = {};
+      if (record.nameChange) {
+        settingsChange.previousName = record.nameChange.previous;
+        settingsChange.newName = record.nameChange.new;
+      }
+      if (record.descriptionChange) {
+        settingsChange.previousDescription = record.descriptionChange.previous;
+        settingsChange.newDescription = record.descriptionChange.new;
+      }
+      if (record.visibilityChange) {
+        settingsChange.previousIsPublic = record.visibilityChange.previous;
+        settingsChange.newIsPublic = record.visibilityChange.new;
+      }
+
+      events.push({
+        id: record.id,
+        type: 'system' as const,
+        eventType: 'settings_changed' as const,
+        settingsChange,
+        timestamp: record.timestamp,
+      });
+    }
+
     return events;
-  }, [feed.type, feed.createdAt, regularMessages, keyState?.keyGenerations, groupMembers]);
+  }, [feed.type, feed.createdAt, feed.settingsChangeHistory, regularMessages, keyState?.keyGenerations, groupMembers]);
 
   // Live system events state for real-time notifications (key rotation, member left)
   const [liveSystemEvents, setLiveSystemEvents] = useState<SystemEvent[]>([]);
@@ -215,6 +253,35 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
     }
     previousMembersRef.current = newMembersMap;
   }, [feed.type, groupMembers]);
+
+  // Listen for visibility change events while viewing this group
+  // NOTE: This is kept for backwards compatibility. The new settings_changed event
+  // includes visibility changes and provides a more comprehensive notification.
+  useEffect(() => {
+    if (feed.type !== 'group') return;
+
+    const unsubscribe = onVisibilityChange((event) => {
+      // Only handle events for the current feed
+      if (event.feedId === feed.id) {
+        setLiveSystemEvents(prev => [...prev, {
+          id: `system-visibility-${event.timestamp}`,
+          type: 'system',
+          eventType: 'visibility_changed',
+          isPublic: event.isPublic,
+          timestamp: event.timestamp,
+        }]);
+      }
+    });
+
+    return unsubscribe;
+  }, [feed.type, feed.id]);
+
+  // NOTE: Settings change events are now handled via persisted settingsChangeHistory
+  // The historicalSystemEvents useMemo reads from feed.settingsChangeHistory and generates
+  // system events reactively. We no longer need to listen for real-time events since:
+  // 1. Local changes: handleUpdateSettings persists to history immediately
+  // 2. Remote changes: FeedsSyncable persists to history on sync
+  // Both cases update the store, triggering a re-render with updated historicalSystemEvents.
 
   // Combine messages and system events into a single sorted array
   // Pending (unconfirmed) messages are always placed at the end for optimistic UI
@@ -418,6 +485,62 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
     }
   }, [onBack]);
 
+  // Settings Panel: Handler for settings update (name, description, visibility)
+  const handleUpdateSettings = useCallback((name: string, description: string, isPublic: boolean) => {
+    // Capture previous values BEFORE updating the store
+    const previousName = feed.name;
+    const previousDescription = feed.description;
+    const previousIsPublic = feed.isPublic;
+
+    // Update the feed in the store immediately for optimistic UI
+    useFeedsStore.getState().updateFeedInfo(feed.id, {
+      name,
+      description,
+      isPublic,
+    });
+
+    // Detect changes and persist to history (this is local user's change)
+    const nameChanged = previousName !== name;
+    const descriptionChanged = previousDescription !== description;
+    const visibilityChanged = previousIsPublic !== isPublic;
+
+    if (nameChanged || descriptionChanged || visibilityChanged) {
+      // Use the timestamp of the last message + 1ms to ensure the settings change
+      // appears AFTER the last message. This handles timezone differences between
+      // local time and server timestamps.
+      const lastMessageTimestamp = regularMessages.length > 0
+        ? Math.max(...regularMessages.map(m => m.timestamp))
+        : Date.now();
+      // Also factor in any existing settings change records to avoid duplicate timestamps
+      const lastSettingsTimestamp = (feed.settingsChangeHistory ?? []).length > 0
+        ? Math.max(...(feed.settingsChangeHistory ?? []).map(r => r.timestamp))
+        : 0;
+      const timestamp = Math.max(lastMessageTimestamp + 1, lastSettingsTimestamp + 1, Date.now());
+      const blockIndex = feed.blockIndex ?? 0;
+      // Add random suffix to ensure uniqueness even if timestamp somehow collides
+      const uniqueSuffix = Math.random().toString(36).substring(2, 6);
+
+      // Create and persist the settings change record
+      const record: SettingsChangeRecord = {
+        id: `settings-${feed.id}-${blockIndex}-${timestamp}-${uniqueSuffix}`,
+        blockIndex,
+        timestamp,
+        ...(nameChanged && {
+          nameChange: { previous: previousName!, new: name },
+        }),
+        ...(descriptionChanged && {
+          descriptionChange: { previous: previousDescription ?? '', new: description },
+        }),
+        ...(visibilityChanged && {
+          visibilityChange: { previous: previousIsPublic ?? false, new: isPublic },
+        }),
+      };
+
+      // Persist to feed history - this will be included in historicalSystemEvents
+      useFeedsStore.getState().addSettingsChangeRecord(feed.id, record);
+    }
+  }, [feed.id, feed.name, feed.description, feed.isPublic, feed.blockIndex, feed.settingsChangeHistory, regularMessages]);
+
   // Reply to Message: ESC key handler to cancel reply mode
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -531,10 +654,16 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
                 <ArrowLeft className="w-5 h-5 text-hush-text-primary" />
               </button>
             )}
-            {/* Group icon for group feeds */}
+            {/* Group icon for group feeds - shows globe for public, users for private */}
             {isGroupFeed && (
-              <div className="w-10 h-10 rounded-full bg-hush-purple/20 flex items-center justify-center flex-shrink-0">
-                <Users className="w-5 h-5 text-hush-purple" aria-hidden="true" />
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
+                feed.isPublic ? 'bg-green-500/20' : 'bg-hush-purple/20'
+              }`}>
+                {feed.isPublic ? (
+                  <Globe className="w-5 h-5 text-green-400" aria-hidden="true" />
+                ) : (
+                  <Users className="w-5 h-5 text-hush-purple" aria-hidden="true" />
+                )}
               </div>
             )}
             <div>
@@ -542,7 +671,12 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
                 {feed.name}
               </h2>
               <div className="flex items-center space-x-2 text-xs text-hush-text-accent">
-                <Lock className="w-3 h-3" />
+                {/* Show lock for private, globe for public */}
+                {isGroupFeed && feed.isPublic ? (
+                  <Globe className="w-3 h-3 text-green-400" />
+                ) : (
+                  <Lock className="w-3 h-3" />
+                )}
                 <span>{getFeedTypeLabel(feed.type)}</span>
                 {isGroupFeed && groupMembers.length > 0 ? (
                   <span>• {groupMembers.length} members</span>
@@ -606,6 +740,8 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
                   <SystemMessage
                     type={item.eventType}
                     memberName={item.memberName}
+                    isPublic={item.isPublic}
+                    settingsChange={item.settingsChange}
                     timestamp={formatTime(item.timestamp)}
                   />
                 ) : (
@@ -691,6 +827,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
           isLastAdmin={isLastAdmin}
           onLeave={handleLeaveGroup}
           onDelete={handleDeleteGroup}
+          onUpdate={handleUpdateSettings}
         />
       )}
     </div>

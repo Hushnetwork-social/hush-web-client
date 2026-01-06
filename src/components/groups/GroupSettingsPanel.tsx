@@ -31,7 +31,7 @@ interface GroupSettingsPanelProps {
   /** Callback when group is deleted */
   onDelete: () => void;
   /** Callback when group info is updated */
-  onUpdate?: (name: string, description: string) => void;
+  onUpdate?: (name: string, description: string, isPublic: boolean) => void;
 }
 
 /**
@@ -56,6 +56,7 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
   // Form state
   const [name, setName] = useState(groupName);
   const [description, setDescription] = useState(groupDescription);
+  const [visibility, setVisibility] = useState(isPublic);
 
   // Loading states
   const [isSaving, setIsSaving] = useState(false);
@@ -78,17 +79,18 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
 
   // Check if there are unsaved changes
   const hasChanges = useMemo(() => {
-    return name !== groupName || description !== groupDescription;
-  }, [name, description, groupName, groupDescription]);
+    return name !== groupName || description !== groupDescription || visibility !== isPublic;
+  }, [name, description, visibility, groupName, groupDescription, isPublic]);
 
   // Reset form when panel opens/closes or group data changes
   useEffect(() => {
     if (isOpen) {
       setName(groupName);
       setDescription(groupDescription);
+      setVisibility(isPublic);
       setError(null);
     }
-  }, [isOpen, groupName, groupDescription]);
+  }, [isOpen, groupName, groupDescription, isPublic]);
 
   // Handle save
   const handleSave = useCallback(async () => {
@@ -98,35 +100,41 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
     setError(null);
 
     try {
-      // Update title if changed
+      // Build settings object with only changed fields
+      const settings: { newTitle?: string; newDescription?: string; isPublic?: boolean } = {};
+
       if (name !== groupName) {
-        const titleResult = await groupService.updateTitle(feedId, currentUserAddress, name);
-        if (!titleResult.success) {
-          setError(titleResult.error || "Failed to update title");
-          setIsSaving(false);
-          return;
-        }
+        settings.newTitle = name;
       }
 
-      // Update description if changed
       if (description !== groupDescription) {
-        const descResult = await groupService.updateDescription(feedId, currentUserAddress, description);
-        if (!descResult.success) {
-          setError(descResult.error || "Failed to update description");
-          setIsSaving(false);
-          return;
-        }
+        settings.newDescription = description;
+      }
+
+      if (visibility !== isPublic) {
+        settings.isPublic = visibility;
+      }
+
+      // Single API call to update all changed settings
+      console.log('[GroupSettingsPanel] Calling updateSettings with:', { feedId, settings });
+      const result = await groupService.updateSettings(feedId, currentUserAddress, settings);
+      console.log('[GroupSettingsPanel] updateSettings result:', result);
+      if (!result.success) {
+        setError(result.error || "Failed to update settings");
+        setIsSaving(false);
+        return;
       }
 
       // Notify parent of update
-      onUpdate?.(name, description);
+      console.log('[GroupSettingsPanel] Settings updated successfully, notifying parent');
+      onUpdate?.(name, description, visibility);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save changes");
     } finally {
       setIsSaving(false);
     }
-  }, [isAdmin, hasChanges, name, description, groupName, groupDescription, feedId, currentUserAddress, onUpdate, onClose]);
+  }, [isAdmin, hasChanges, name, description, visibility, groupName, groupDescription, isPublic, feedId, currentUserAddress, onUpdate, onClose]);
 
   // Handle leave group
   const handleLeave = useCallback(async () => {
@@ -291,25 +299,72 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
           {/* Visibility Section */}
           <section>
             <h3 className="text-sm font-medium text-hush-text-accent mb-3">Visibility</h3>
-            <div className="flex items-center gap-3 p-3 bg-hush-bg-element rounded-lg">
-              {isPublic ? (
-                <>
-                  <Globe className="w-5 h-5 text-green-400" aria-hidden="true" />
-                  <div>
-                    <p className="text-sm font-medium text-hush-text-primary">Public Group</p>
+            {isAdmin ? (
+              <div className="space-y-2">
+                {/* Public option */}
+                <button
+                  type="button"
+                  onClick={() => setVisibility(true)}
+                  className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-colors ${
+                    visibility
+                      ? "bg-green-500/10 border-green-500/30"
+                      : "bg-hush-bg-element border-hush-bg-hover hover:bg-hush-bg-hover"
+                  }`}
+                >
+                  <Globe className={`w-5 h-5 ${visibility ? "text-green-400" : "text-hush-text-accent"}`} aria-hidden="true" />
+                  <div className="text-left">
+                    <p className={`text-sm font-medium ${visibility ? "text-green-400" : "text-hush-text-primary"}`}>Public Group</p>
                     <p className="text-xs text-hush-text-accent">Anyone can find and join this group</p>
                   </div>
-                </>
-              ) : (
-                <>
-                  <Lock className="w-5 h-5 text-hush-text-accent" aria-hidden="true" />
-                  <div>
-                    <p className="text-sm font-medium text-hush-text-primary">Private Group</p>
+                  {visibility && (
+                    <div className="ml-auto w-4 h-4 rounded-full bg-green-400 flex items-center justify-center">
+                      <span className="text-hush-bg-dark text-xs">✓</span>
+                    </div>
+                  )}
+                </button>
+                {/* Private option */}
+                <button
+                  type="button"
+                  onClick={() => setVisibility(false)}
+                  className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-colors ${
+                    !visibility
+                      ? "bg-hush-purple/10 border-hush-purple/30"
+                      : "bg-hush-bg-element border-hush-bg-hover hover:bg-hush-bg-hover"
+                  }`}
+                >
+                  <Lock className={`w-5 h-5 ${!visibility ? "text-hush-purple" : "text-hush-text-accent"}`} aria-hidden="true" />
+                  <div className="text-left">
+                    <p className={`text-sm font-medium ${!visibility ? "text-hush-purple" : "text-hush-text-primary"}`}>Private Group</p>
                     <p className="text-xs text-hush-text-accent">Only invited members can join</p>
                   </div>
-                </>
-              )}
-            </div>
+                  {!visibility && (
+                    <div className="ml-auto w-4 h-4 rounded-full bg-hush-purple flex items-center justify-center">
+                      <span className="text-white text-xs">✓</span>
+                    </div>
+                  )}
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 p-3 bg-hush-bg-element rounded-lg">
+                {isPublic ? (
+                  <>
+                    <Globe className="w-5 h-5 text-green-400" aria-hidden="true" />
+                    <div>
+                      <p className="text-sm font-medium text-hush-text-primary">Public Group</p>
+                      <p className="text-xs text-hush-text-accent">Anyone can find and join this group</p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <Lock className="w-5 h-5 text-hush-text-accent" aria-hidden="true" />
+                    <div>
+                      <p className="text-sm font-medium text-hush-text-primary">Private Group</p>
+                      <p className="text-xs text-hush-text-accent">Only invited members can join</p>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
           </section>
 
           {/* Danger Zone */}

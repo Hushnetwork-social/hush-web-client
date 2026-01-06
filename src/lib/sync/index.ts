@@ -19,3 +19,7 @@ export { SyncProvider, useSyncContext, createSyncProviderAPI } from './SyncProvi
 
 // Module Registration
 export { registerAllModules } from './registerModules';
+
+// Group Sync
+export type { GroupSyncResult, GroupInfoSyncResult, MemberSyncResult } from './group-sync';
+export { syncGroupFeedData, syncGroupFeedInfo, syncGroupMembers } from './group-sync';

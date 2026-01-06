@@ -15,7 +15,7 @@ import { fetchMessages } from '@/modules/feeds/FeedsService';
 import { aesDecrypt } from '@/lib/crypto/encryption';
 import { detectPlatform } from '@/lib/platform';
 import { showNotification as showPlatformNotification } from '@/lib/notifications';
-import { onMemberJoin } from '@/lib/events';
+import { onMemberJoin, onVisibilityChange } from '@/lib/events';
 import type { FeedEventResponse } from '@/lib/grpc/grpc-web-helper';
 import { debugLog, debugError } from '@/lib/debug-logger';
 
@@ -461,6 +461,46 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
             feedId: event.feedId,
             senderName: event.feedName,
             messagePreview: `${event.member.displayName} joined the group`,
+            timestamp: event.timestamp,
+          };
+          addToast(toast);
+        }
+      }
+    });
+
+    return unsubscribe;
+  }, [isAuthenticated, addToast]);
+
+  // Subscribe to visibility change events for toast notifications
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const unsubscribe = onVisibilityChange((event) => {
+      const visibilityText = event.isPublic ? 'Public' : 'Private';
+      debugLog(`[useNotifications] Visibility change event: ${event.feedName} changed to ${visibilityText}`);
+
+      // Use current selectedFeedId from ref (not stale closure)
+      const currentSelectedFeedId = selectedFeedIdRef.current;
+
+      // Only show notification if user is not currently viewing this group
+      if (event.feedId !== currentSelectedFeedId) {
+        const platform = detectPlatform();
+
+        if (platform === 'tauri') {
+          // Tauri: Use native OS notification
+          showPlatformNotification({
+            feedId: event.feedId,
+            senderName: event.feedName,
+            messagePreview: `Group visibility changed to ${visibilityText}`,
+            timestamp: event.timestamp,
+          });
+        } else {
+          // Browser: Use in-app toast
+          const toast: NotificationToast = {
+            id: `visibility-change-${event.feedId}-${event.timestamp}`,
+            feedId: event.feedId,
+            senderName: event.feedName,
+            messagePreview: `Group visibility changed to ${visibilityText}`,
             timestamp: event.timestamp,
           };
           addToast(toast);

@@ -41,6 +41,56 @@ export interface MemberSyncResult extends SyncResult {
 }
 
 /**
+ * Result for group info sync - includes all settings changes
+ */
+export interface GroupInfoSyncResult extends SyncResult {
+  /** True if visibility changed from the previous value */
+  visibilityChanged?: boolean;
+  /** New visibility value (if changed) */
+  isPublic?: boolean;
+  /** True if name changed */
+  nameChanged?: boolean;
+  /** New name (if changed) */
+  newName?: string;
+  /** Previous name (if changed) */
+  previousName?: string;
+  /** True if description changed */
+  descriptionChanged?: boolean;
+  /** New description (if changed) */
+  newDescription?: string;
+  /** Previous description (if changed) */
+  previousDescription?: string;
+  /** Previous visibility (if changed) */
+  previousIsPublic?: boolean;
+}
+
+/**
+ * Result for full group sync - includes all change notifications
+ */
+export interface GroupSyncResult extends SyncResult {
+  /** New members detected during sync (for notifications) */
+  newMembers?: GroupFeedMember[];
+  /** Visibility changed during sync */
+  visibilityChanged?: boolean;
+  /** New visibility value (if changed) */
+  isPublic?: boolean;
+  /** Previous visibility (if changed) */
+  previousIsPublic?: boolean;
+  /** Name changed during sync */
+  nameChanged?: boolean;
+  /** New name (if changed) */
+  newName?: string;
+  /** Previous name (if changed) */
+  previousName?: string;
+  /** Description changed during sync */
+  descriptionChanged?: boolean;
+  /** New description (if changed) */
+  newDescription?: string;
+  /** Previous description (if changed) */
+  previousDescription?: string;
+}
+
+/**
  * Sync group members for a specific group feed
  *
  * Flow:
@@ -264,29 +314,130 @@ function detectMissingKeyGenerations(
 }
 
 /**
+ * Previous settings to compare against (for change detection)
+ */
+export interface PreviousGroupSettings {
+  name?: string;
+  description?: string;
+  isPublic?: boolean;
+}
+
+/**
+ * Sync group feed info (title, description, isPublic)
+ *
+ * Fetches the current group feed settings from the server and updates
+ * the local feed store. This ensures visibility changes are reflected.
+ *
+ * @param feedId - Group feed ID
+ * @param previousSettings - Optional previous settings for change detection.
+ *        If not provided, uses current store values (which may have been updated already).
+ *        For accurate change detection, caller should capture settings BEFORE any sync operations.
+ * @returns GroupInfoSyncResult with all settings changes
+ */
+export async function syncGroupFeedInfo(
+  feedId: string,
+  previousSettings?: PreviousGroupSettings
+): Promise<GroupInfoSyncResult> {
+  debugLog('[GroupSync] syncGroupFeedInfo:', { feedId: feedId.substring(0, 8) });
+
+  try {
+    // Get previous values either from parameter or from store
+    // Using provided previousSettings is more reliable for change detection
+    const currentFeed = useFeedsStore.getState().getFeed(feedId);
+    const previousName = previousSettings?.name ?? currentFeed?.name;
+    const previousDescription = previousSettings?.description ?? currentFeed?.description;
+    const previousIsPublic = previousSettings?.isPublic ?? currentFeed?.isPublic;
+
+    const groupInfo = await groupService.getGroupInfo(feedId);
+
+    if (!groupInfo) {
+      debugLog('[GroupSync] getGroupInfo returned null');
+      return { success: false, error: 'Failed to get group info' };
+    }
+
+    // Detect all changes (only if we had previous values)
+    const nameChanged = previousName !== undefined && previousName !== groupInfo.Title;
+    const descriptionChanged = previousDescription !== undefined && previousDescription !== groupInfo.Description;
+    const visibilityChanged = previousIsPublic !== undefined && previousIsPublic !== groupInfo.IsPublic;
+
+    const hasAnyChange = nameChanged || descriptionChanged || visibilityChanged;
+
+    if (hasAnyChange) {
+      debugLog('[GroupSync] Settings changed:', {
+        nameChanged: nameChanged ? { from: previousName, to: groupInfo.Title } : false,
+        descriptionChanged: descriptionChanged ? { from: previousDescription, to: groupInfo.Description } : false,
+        visibilityChanged: visibilityChanged ? { from: previousIsPublic, to: groupInfo.IsPublic } : false,
+      });
+    }
+
+    // Update the feed in the store with the latest info
+    useFeedsStore.getState().updateFeedInfo(feedId, {
+      name: groupInfo.Title,
+      description: groupInfo.Description,
+      isPublic: groupInfo.IsPublic,
+    });
+
+    debugLog('[GroupSync] Group info synced:', {
+      title: groupInfo.Title,
+      isPublic: groupInfo.IsPublic,
+    });
+
+    return {
+      success: true,
+      // Visibility change
+      visibilityChanged,
+      isPublic: visibilityChanged ? groupInfo.IsPublic : undefined,
+      previousIsPublic: visibilityChanged ? previousIsPublic : undefined,
+      // Name change
+      nameChanged,
+      newName: nameChanged ? groupInfo.Title : undefined,
+      previousName: nameChanged ? previousName : undefined,
+      // Description change
+      descriptionChanged,
+      newDescription: descriptionChanged ? groupInfo.Description : undefined,
+      previousDescription: descriptionChanged ? previousDescription : undefined,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to sync group info';
+    debugError('[GroupSync] syncGroupFeedInfo error:', message);
+    return { success: false, error: message };
+  }
+}
+
+/**
  * Sync all group-related data for a specific group feed
  *
  * This is a convenience function that combines:
+ * - syncGroupFeedInfo (title, description, visibility)
  * - syncGroupMembers
  * - syncKeyGenerations
  *
  * @param feedId - Group feed ID
  * @param userAddress - User's public signing address
  * @param privateEncryptKeyHex - User's private encryption key (hex)
- * @returns Combined sync result
+ * @param previousSettings - Optional previous settings for change detection.
+ *        If provided, used for accurate change detection.
+ * @returns Combined sync result including all changes
  */
 export async function syncGroupFeedData(
   feedId: string,
   userAddress: string,
-  privateEncryptKeyHex: string
-): Promise<SyncResult> {
+  privateEncryptKeyHex: string,
+  previousSettings?: PreviousGroupSettings
+): Promise<GroupSyncResult> {
   debugLog('[GroupSync] syncGroupFeedData:', { feedId: feedId.substring(0, 8) });
 
-  // Sync members and keys in parallel for efficiency
-  const [membersResult, keysResult] = await Promise.all([
+  // Sync group info, members, and keys in parallel for efficiency
+  const [infoResult, membersResult, keysResult] = await Promise.all([
+    syncGroupFeedInfo(feedId, previousSettings),
     syncGroupMembers(feedId, userAddress),
     syncKeyGenerations(feedId, userAddress, privateEncryptKeyHex),
   ]);
+
+  if (!infoResult.success) {
+    debugWarn('[GroupSync] Group info sync failed:', infoResult.error);
+    // Don't fail the whole sync if info sync fails - continue with other data
+  }
 
   if (!membersResult.success) {
     return { success: false, error: membersResult.error };
@@ -296,7 +447,22 @@ export async function syncGroupFeedData(
     return { success: false, error: keysResult.error };
   }
 
-  return { success: true };
+  return {
+    success: true,
+    newMembers: membersResult.newMembers,
+    // Visibility change
+    visibilityChanged: infoResult.visibilityChanged,
+    isPublic: infoResult.isPublic,
+    previousIsPublic: infoResult.previousIsPublic,
+    // Name change
+    nameChanged: infoResult.nameChanged,
+    newName: infoResult.newName,
+    previousName: infoResult.previousName,
+    // Description change
+    descriptionChanged: infoResult.descriptionChanged,
+    newDescription: infoResult.newDescription,
+    previousDescription: infoResult.previousDescription,
+  };
 }
 
 /**

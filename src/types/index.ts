@@ -41,6 +41,22 @@ export {
   isGroupMessageDecryptionContext,
 } from './group-crypto';
 
+// Settings change record for group feeds (persisted for historical system messages)
+export interface SettingsChangeRecord {
+  /** Unique ID for this change record */
+  id: string;
+  /** Block index when the change was detected */
+  blockIndex: number;
+  /** Timestamp when the change was detected */
+  timestamp: number;
+  /** Name change: previous -> new */
+  nameChange?: { previous: string; new: string };
+  /** Description change: previous -> new */
+  descriptionChange?: { previous: string; new: string };
+  /** Visibility change: previous -> new */
+  visibilityChange?: { previous: boolean; new: boolean };
+}
+
 // Feed types
 export interface Feed {
   id: string;
@@ -65,6 +81,8 @@ export interface Feed {
   description?: string;
   /** Whether the group is public (for group feeds) */
   isPublic?: boolean;
+  /** History of settings changes (for group feeds - used for historical system messages) */
+  settingsChangeHistory?: SettingsChangeRecord[];
 }
 
 // Profile search result type

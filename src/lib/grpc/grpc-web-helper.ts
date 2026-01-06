@@ -46,7 +46,7 @@ export function parseString(bytes: Uint8Array, offset: number, length: number): 
 }
 
 // Encode a string field for protobuf
-function encodeString(fieldNumber: number, value: string): number[] {
+export function encodeString(fieldNumber: number, value: string): number[] {
   const encoder = new TextEncoder();
   const strBytes = encoder.encode(value);
   const tag = (fieldNumber << 3) | 2; // wire type 2 = length-delimited
@@ -54,14 +54,13 @@ function encodeString(fieldNumber: number, value: string): number[] {
 }
 
 // Encode a varint field for protobuf
-function encodeVarintField(fieldNumber: number, value: number): number[] {
+export function encodeVarintField(fieldNumber: number, value: number): number[] {
   const tag = (fieldNumber << 3) | 0; // wire type 0 = varint
   return [...encodeVarint(tag), ...encodeVarint(value)];
 }
 
 // Encode a bool field for protobuf (used for protobuf message encoding)
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function encodeBoolField(fieldNumber: number, value: boolean): number[] {
+export function encodeBoolField(fieldNumber: number, value: boolean): number[] {
   return encodeVarintField(fieldNumber, value ? 1 : 0);
 }
 
@@ -1467,6 +1466,84 @@ export interface AddMemberToGroupFeedResult {
  */
 export function parseAddMemberToGroupFeedResponse(messageBytes: Uint8Array): AddMemberToGroupFeedResult {
   const result: AddMemberToGroupFeedResult = {
+    success: false,
+    message: '',
+  };
+
+  let offset = 0;
+  while (offset < messageBytes.length) {
+    const tagResult = parseVarint(messageBytes, offset);
+    const tag = tagResult.value;
+    offset += tagResult.bytesRead;
+
+    const fieldNumber = tag >> 3;
+    const wireType = tag & 0x07;
+
+    if (wireType === 0 && fieldNumber === 1) {
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+      result.success = valueResult.value === 1;
+    } else if (wireType === 2 && fieldNumber === 2) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead;
+      result.message = parseString(messageBytes, offset, lenResult.value);
+      offset += lenResult.value;
+    } else if (wireType === 0) {
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+    } else if (wireType === 2) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead + lenResult.value;
+    } else {
+      break;
+    }
+  }
+
+  return result;
+}
+
+// ============= Join Group Feed Operation =============
+
+/**
+ * Build JoinGroupFeedRequest for binary gRPC
+ * Proto: message JoinGroupFeedRequest {
+ *   string FeedId = 1;
+ *   string JoiningUserPublicAddress = 2;
+ *   optional string InvitationSignature = 3;
+ * }
+ */
+export function buildJoinGroupFeedRequest(
+  feedId: string,
+  joiningUserPublicAddress: string,
+  invitationSignature?: string
+): Uint8Array {
+  const bytes = [
+    ...encodeString(1, feedId),
+    ...encodeString(2, joiningUserPublicAddress),
+  ];
+  if (invitationSignature) {
+    bytes.push(...encodeString(3, invitationSignature));
+  }
+  return new Uint8Array(bytes);
+}
+
+/**
+ * Response from JoinGroupFeed
+ */
+export interface JoinGroupFeedResult {
+  success: boolean;
+  message: string;
+}
+
+/**
+ * Parse JoinGroupFeedResponse
+ * Proto: message JoinGroupFeedResponse {
+ *   bool Success = 1;
+ *   string Message = 2;
+ * }
+ */
+export function parseJoinGroupFeedResponse(messageBytes: Uint8Array): JoinGroupFeedResult {
+  const result: JoinGroupFeedResult = {
     success: false,
     message: '',
   };

@@ -543,6 +543,8 @@ export interface GetGroupFeedRequest {
 }
 
 export interface GetGroupFeedResponse {
+  Success?: boolean;
+  Message?: string;
   FeedId: string;
   Title: string;
   Description: string;
@@ -575,4 +577,24 @@ export interface KeyGenerationProto {
 
 export interface GetKeyGenerationsResponse {
   KeyGenerations: KeyGenerationProto[];
+}
+
+// Search Public Groups
+export interface SearchPublicGroupsRequest {
+  SearchQuery: string;
+  MaxResults: number;
+}
+
+export interface PublicGroupInfoProto {
+  FeedId: string;
+  Title: string;
+  Description: string;
+  MemberCount: number;
+  CreatedAtBlock: number;
+}
+
+export interface SearchPublicGroupsResponse {
+  Success: boolean;
+  Message: string;
+  Groups: PublicGroupInfoProto[];
 }

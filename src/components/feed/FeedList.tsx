@@ -165,6 +165,7 @@ export function FeedList({ onFeedSelect }: FeedListProps) {
             isSelected={feed.id === selectedFeedId}
             isPersonalFeed={isPersonalFeed}
             feedType={feed.type}
+            isPublic={feed.isPublic}
             onClick={() => handleFeedClick(feed.id)}
           />
         );

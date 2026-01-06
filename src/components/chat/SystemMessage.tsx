@@ -1,24 +1,32 @@
 "use client";
 
 import { memo } from "react";
-import { UserPlus, UserMinus, Key } from "lucide-react";
+import { UserPlus, UserMinus, Key, Globe, Lock, Settings } from "lucide-react";
+import type { SettingsChange } from "@/lib/events";
+import { buildSettingsChangeSummary } from "@/lib/events";
 
-export type SystemMessageType = "member_joined" | "member_left" | "key_rotated";
+export type SystemMessageType = "member_joined" | "member_left" | "key_rotated" | "visibility_changed" | "settings_changed";
 
 interface SystemMessageProps {
   type: SystemMessageType;
   memberName?: string;
+  /** For visibility_changed: true = public, false = private */
+  isPublic?: boolean;
+  /** For settings_changed: all the changes that occurred */
+  settingsChange?: SettingsChange;
   timestamp?: string;
 }
 
 /**
  * SystemMessage - Displays centered system notifications in the chat feed.
- * Used for events like member joins, leaves, and key rotations.
+ * Used for events like member joins, leaves, key rotations, visibility changes, and settings changes.
  * Styled to be subtle and non-obstructive.
  */
 export const SystemMessage = memo(function SystemMessage({
   type,
   memberName,
+  isPublic,
+  settingsChange,
   timestamp,
 }: SystemMessageProps) {
   const getIcon = () => {
@@ -29,6 +37,10 @@ export const SystemMessage = memo(function SystemMessage({
         return <UserMinus className="w-3 h-3" />;
       case "key_rotated":
         return <Key className="w-3 h-3" />;
+      case "visibility_changed":
+        return isPublic ? <Globe className="w-3 h-3" /> : <Lock className="w-3 h-3" />;
+      case "settings_changed":
+        return <Settings className="w-3 h-3" />;
     }
   };
 
@@ -40,6 +52,14 @@ export const SystemMessage = memo(function SystemMessage({
         return memberName ? `${memberName} left the group` : "A member left the group";
       case "key_rotated":
         return "Group encryption keys updated";
+      case "visibility_changed":
+        return isPublic
+          ? "Group visibility changed to Public"
+          : "Group visibility changed to Private";
+      case "settings_changed":
+        return settingsChange
+          ? buildSettingsChangeSummary(settingsChange)
+          : "Group settings updated";
     }
   };
 

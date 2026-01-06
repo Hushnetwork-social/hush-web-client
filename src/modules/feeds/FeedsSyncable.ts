@@ -27,9 +27,9 @@ import { checkIdentityExists } from '../identity/IdentityService';
 import { useFeedsStore } from './useFeedsStore';
 import { useBlockchainStore } from '../blockchain/useBlockchainStore';
 import { useReactionsStore } from '../reactions/useReactionsStore';
-import { syncGroupMembers, syncKeyGenerations } from '@/lib/sync/group-sync';
-import { emitMemberJoin } from '@/lib/events';
-import type { Feed, FeedMessage } from '@/types';
+import { syncGroupMembers, syncKeyGenerations, syncGroupFeedInfo, type PreviousGroupSettings } from '@/lib/sync/group-sync';
+import { emitMemberJoin, emitSettingsChange, type SettingsChange } from '@/lib/events';
+import type { Feed, FeedMessage, SettingsChangeRecord } from '@/types';
 import { debugLog, debugWarn, debugError } from '@/lib/debug-logger';
 
 // Minimum blocks to wait before resetting pending personal feed creation
@@ -63,6 +63,10 @@ export class FeedsSyncable implements ISyncable {
   // Track the blockIndex we had for each feed before server sync (to detect changes)
   private previousFeedBlockIndices = new Map<string, number>();
 
+  // Track previous group settings for each group feed (for change detection)
+  // This is captured at the START of each sync cycle, BEFORE any updates
+  private previousGroupSettings = new Map<string, PreviousGroupSettings>();
+
   async syncTask(): Promise<void> {
     // Prevent concurrent syncs
     if (this.isSyncing) {
@@ -92,6 +96,10 @@ export class FeedsSyncable implements ISyncable {
 
     this.isSyncing = true;
     useFeedsStore.getState().setSyncing(true);
+
+    // CRITICAL: Capture previous group settings BEFORE any sync operations
+    // This ensures we can accurately detect changes by comparing pre-sync vs post-sync values
+    this.captureGroupSettings();
 
     try {
       // Sync feeds from blockchain (always - to get new feeds/metadata and detect changes)
@@ -171,6 +179,34 @@ export class FeedsSyncable implements ISyncable {
       // Ignore errors
     }
     this.hasValidatedThisSession = true;
+  }
+
+  /**
+   * Capture current group settings for all group feeds.
+   * Called at the START of each sync cycle to enable accurate change detection.
+   */
+  private captureGroupSettings(): void {
+    const feeds = useFeedsStore.getState().feeds;
+    const groupFeeds = feeds.filter(f => f.type === 'group');
+
+    for (const feed of groupFeeds) {
+      this.previousGroupSettings.set(feed.id, {
+        name: feed.name,
+        description: feed.description,
+        isPublic: feed.isPublic,
+      });
+    }
+
+    if (groupFeeds.length > 0) {
+      debugLog(`[FeedsSyncable] Captured settings for ${groupFeeds.length} group feed(s)`);
+    }
+  }
+
+  /**
+   * Get previous settings for a group feed (captured at start of sync)
+   */
+  private getPreviousGroupSettings(feedId: string): PreviousGroupSettings | undefined {
+    return this.previousGroupSettings.get(feedId);
   }
 
   /**
@@ -406,6 +442,74 @@ export class FeedsSyncable implements ISyncable {
     // Sync each group feed in parallel
     const syncPromises = groupFeeds.map(async (feed) => {
       try {
+        // Get previous settings captured at start of sync cycle
+        const previousSettings = this.getPreviousGroupSettings(feed.id);
+
+        // Sync group info (title, description, visibility) with previous settings for change detection
+        const infoResult = await syncGroupFeedInfo(feed.id, previousSettings);
+        if (!infoResult.success) {
+          debugWarn(`[FeedsSyncable] Failed to sync info for group ${feed.id.substring(0, 8)}...: ${infoResult.error}`);
+        } else {
+          // Check if ANY settings changed
+          const hasAnyChange = infoResult.visibilityChanged || infoResult.nameChanged || infoResult.descriptionChanged;
+
+          if (hasAnyChange) {
+            // Build the changes object for the event
+            const changes: SettingsChange = {};
+
+            if (infoResult.nameChanged) {
+              changes.previousName = infoResult.previousName;
+              changes.newName = infoResult.newName;
+            }
+            if (infoResult.descriptionChanged) {
+              changes.previousDescription = infoResult.previousDescription;
+              changes.newDescription = infoResult.newDescription;
+            }
+            if (infoResult.visibilityChanged) {
+              changes.previousIsPublic = infoResult.previousIsPublic;
+              changes.newIsPublic = infoResult.isPublic;
+            }
+
+            // Get the updated feed name for the event (use new name if changed)
+            const currentFeedName = infoResult.newName ?? feed.name;
+
+            // Get the feed's current blockIndex (this is when the change was recorded)
+            const currentFeed = useFeedsStore.getState().getFeed(feed.id);
+            const blockIndex = currentFeed?.blockIndex ?? 0;
+            const timestamp = Date.now();
+
+            // Create and persist the settings change record
+            const record: SettingsChangeRecord = {
+              id: `settings-${feed.id}-${blockIndex}-${timestamp}`,
+              blockIndex,
+              timestamp,
+              ...(infoResult.nameChanged && {
+                nameChange: { previous: infoResult.previousName!, new: infoResult.newName! },
+              }),
+              ...(infoResult.descriptionChanged && {
+                descriptionChange: { previous: infoResult.previousDescription!, new: infoResult.newDescription! },
+              }),
+              ...(infoResult.visibilityChanged && {
+                visibilityChange: { previous: infoResult.previousIsPublic!, new: infoResult.isPublic! },
+              }),
+            };
+
+            // Persist the settings change record to feed history
+            useFeedsStore.getState().addSettingsChangeRecord(feed.id, record);
+            debugLog(`[FeedsSyncable] Persisted settings change record for group ${feed.id.substring(0, 8)}...`, record);
+
+            // Also emit event for real-time UI updates (for users currently viewing the feed)
+            emitSettingsChange({
+              feedId: feed.id,
+              feedName: currentFeedName,
+              changes,
+              timestamp,
+            });
+
+            debugLog(`[FeedsSyncable] Emitted settings change for group ${feed.id.substring(0, 8)}...`, changes);
+          }
+        }
+
         // Sync members
         const membersResult = await syncGroupMembers(feed.id, userAddress);
         if (!membersResult.success) {

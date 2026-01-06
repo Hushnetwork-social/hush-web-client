@@ -1,6 +1,6 @@
 "use client";
 
-import { Users } from "lucide-react";
+import { Users, Globe } from "lucide-react";
 import { memo } from "react";
 
 interface ChatListItemProps {
@@ -13,6 +13,8 @@ interface ChatListItemProps {
   isPersonalFeed?: boolean;
   /** Feed type for visual distinction (group feeds show group icon) */
   feedType?: 'personal' | 'chat' | 'group' | 'broadcast';
+  /** Whether the group is public (only for group feeds) */
+  isPublic?: boolean;
   onClick?: () => void;
 }
 
@@ -25,9 +27,11 @@ export const ChatListItem = memo(function ChatListItem({
   isSelected = false,
   isPersonalFeed = false,
   feedType = 'chat',
+  isPublic = false,
   onClick,
 }: ChatListItemProps) {
   const isGroup = feedType === 'group';
+  const isPublicGroup = isGroup && isPublic;
 
   return (
     <button
@@ -40,8 +44,12 @@ export const ChatListItem = memo(function ChatListItem({
         }
       `}
     >
-      {/* Avatar / Group Icon */}
-      {isGroup ? (
+      {/* Avatar / Group Icon - Globe for public groups, Users for private groups */}
+      {isPublicGroup ? (
+        <div className="w-9 h-9 rounded-full bg-green-500/20 flex items-center justify-center flex-shrink-0">
+          <Globe className="w-5 h-5 text-green-400" aria-hidden="true" />
+        </div>
+      ) : isGroup ? (
         <div className="w-9 h-9 rounded-full bg-hush-purple/20 flex items-center justify-center flex-shrink-0">
           <Users className="w-5 h-5 text-hush-purple" aria-hidden="true" />
         </div>

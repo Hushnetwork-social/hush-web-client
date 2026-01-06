@@ -9,7 +9,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { Feed, FeedMessage, GroupFeedMember, GroupMemberRole, GroupKeyGeneration, GroupKeyState } from '@/types';
+import type { Feed, FeedMessage, GroupFeedMember, GroupMemberRole, GroupKeyGeneration, GroupKeyState, SettingsChangeRecord } from '@/types';
 import { debugLog } from '@/lib/debug-logger';
 
 // Feed type mapping from server (FeedType enum)
@@ -86,6 +86,12 @@ interface FeedsActions {
 
   /** Update a feed's display name (after participant identity update) */
   updateFeedName: (feedId: string, name: string) => void;
+
+  /** Update a feed's info (name, description, isPublic) - for group feeds */
+  updateFeedInfo: (feedId: string, info: { name?: string; description?: string; isPublic?: boolean }) => void;
+
+  /** Add a settings change record to a feed's history (for group feeds) */
+  addSettingsChangeRecord: (feedId: string, record: SettingsChangeRecord) => void;
 
   /** Set messages for a specific feed */
   setMessages: (feedId: string, messages: FeedMessage[]) => void;
@@ -296,6 +302,35 @@ export const useFeedsStore = create<FeedsStore>()(
         set((state) => ({
           feeds: state.feeds.map((f) =>
             f.id === feedId ? { ...f, name } : f
+          ),
+        }));
+      },
+
+      updateFeedInfo: (feedId, info) => {
+        set((state) => ({
+          feeds: state.feeds.map((f) =>
+            f.id === feedId
+              ? {
+                  ...f,
+                  ...(info.name !== undefined && { name: info.name }),
+                  ...(info.description !== undefined && { description: info.description }),
+                  ...(info.isPublic !== undefined && { isPublic: info.isPublic }),
+                }
+              : f
+          ),
+        }));
+      },
+
+      addSettingsChangeRecord: (feedId, record) => {
+        debugLog(`[FeedsStore] addSettingsChangeRecord: feedId=${feedId}, recordId=${record.id}`);
+        set((state) => ({
+          feeds: state.feeds.map((f) =>
+            f.id === feedId
+              ? {
+                  ...f,
+                  settingsChangeHistory: [...(f.settingsChangeHistory ?? []), record],
+                }
+              : f
           ),
         }));
       },

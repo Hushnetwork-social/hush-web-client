@@ -132,15 +132,10 @@ export function NewChatView({ onFeedCreated, onFeedSelected, onBack, showBackBut
     setHasSearchedGroups(true);
 
     try {
-      // TODO: Replace with actual gRPC call when backend endpoint is available
-      // const results = await groupService.searchPublicGroups(groupSearchQuery);
-
-      // For now, we'll show a message that the feature is coming soon
-      // This is a placeholder until the backend search endpoint is implemented
-      debugLog("[NewChatView] Group search query:", groupSearchQuery);
-
-      // Simulate empty results for now
-      setGroupSearchResults([]);
+      debugLog("[NewChatView] Searching public groups:", groupSearchQuery);
+      const results = await groupService.searchPublicGroups(groupSearchQuery);
+      debugLog("[NewChatView] Group search results:", results.length);
+      setGroupSearchResults(results);
     } catch (err) {
       debugError("[NewChatView] Group search failed:", err);
       setGroupError("Failed to search groups. Please try again.");

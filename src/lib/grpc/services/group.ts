@@ -11,8 +11,6 @@ import { buildApiUrl } from '@/lib/api-config';
 import type {
   NewGroupFeedRequest,
   NewGroupFeedResponse,
-  JoinGroupFeedRequest,
-  JoinGroupFeedResponse,
   BlockMemberRequest,
   BlockMemberResponse,
   UnblockMemberRequest,
@@ -29,12 +27,11 @@ import type {
   UpdateGroupFeedDescriptionResponse,
   DeleteGroupFeedRequest,
   DeleteGroupFeedResponse,
-  GetGroupFeedRequest,
   GetGroupFeedResponse,
   KeyGenerationProto,
   GroupFeedParticipantProto,
 } from '../types';
-import type { GroupCreationData, GroupOperationResult, GroupFeedMember } from '@/types';
+import type { GroupCreationData, GroupOperationResult, GroupFeedMember, PublicGroupInfo } from '@/types';
 
 const SERVICE_NAME = 'rpcHush.HushFeed';
 
@@ -88,26 +85,39 @@ export const groupService = {
 
   /**
    * Join a public group feed
+   * Uses API route for proper binary protobuf communication
    */
   async joinGroup(feedId: string, userAddress: string): Promise<GroupOperationResult> {
     debugLog('[GroupService] joinGroup:', { feedId, userAddress });
     try {
-      const client = getGrpcClient();
-      const request: JoinGroupFeedRequest = {
-        FeedId: feedId,
-        JoiningUserPublicAddress: userAddress,
-      };
+      const url = buildApiUrl('/api/groups/join');
+      debugLog('[GroupService] joinGroup URL:', url);
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          feedId,
+          joiningUserPublicAddress: userAddress,
+        }),
+      });
 
-      const response = await client.unaryCall<JoinGroupFeedRequest, JoinGroupFeedResponse>(
-        SERVICE_NAME,
-        'JoinGroupFeed',
-        request
-      );
-
-      if (response.Success) {
-        return wrapResult(true, { feedId, message: response.Message });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
-      return wrapResult(false, undefined, response.Message);
+
+      const data = await response.json();
+      debugLog('[GroupService] joinGroup result:', data);
+
+      if (data.error && !data.success) {
+        return wrapResult(false, undefined, data.error);
+      }
+
+      if (data.success) {
+        return wrapResult(true, { feedId, message: data.message });
+      }
+      return wrapResult(false, undefined, data.message || 'Failed to join group');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to join group';
       debugLog('[GroupService] joinGroup error:', message);
@@ -449,6 +459,50 @@ export const groupService = {
   },
 
   /**
+   * Update group settings (title, description, visibility) in a single call (admin only)
+   * Only provided fields will be updated
+   */
+  async updateSettings(
+    feedId: string,
+    adminAddress: string,
+    settings: {
+      newTitle?: string;
+      newDescription?: string;
+      isPublic?: boolean;
+    }
+  ): Promise<GroupOperationResult> {
+    debugLog('[GroupService] updateSettings:', { feedId, settings });
+    try {
+      const url = buildApiUrl('/api/groups/settings');
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          feedId,
+          adminPublicAddress: adminAddress,
+          ...settings,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP ${response.status}`);
+      }
+
+      const result = await response.json();
+      debugLog('[GroupService] updateSettings result:', result);
+      if (result.success) {
+        return wrapResult(true, { message: result.message });
+      }
+      return wrapResult(false, undefined, result.message || result.error);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to update settings';
+      debugLog('[GroupService] updateSettings error:', message);
+      return wrapResult(false, undefined, message);
+    }
+  },
+
+  /**
    * Delete a group feed (admin only)
    */
   async deleteGroup(feedId: string, adminAddress: string): Promise<GroupOperationResult> {
@@ -479,22 +533,39 @@ export const groupService = {
 
   /**
    * Get group feed information
+   * Uses API route for proper binary protobuf communication
    */
   async getGroupInfo(feedId: string): Promise<GetGroupFeedResponse | null> {
     debugLog('[GroupService] getGroupInfo:', { feedId });
     try {
-      const client = getGrpcClient();
-      const request: GetGroupFeedRequest = {
-        FeedId: feedId,
+      const url = buildApiUrl(`/api/groups/info?feedId=${encodeURIComponent(feedId)}`);
+      debugLog('[GroupService] getGroupInfo URL:', url);
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      // Map API response to GetGroupFeedResponse type (PascalCase)
+      const result: GetGroupFeedResponse = {
+        Success: data.success,
+        Message: data.message || '',
+        FeedId: data.feedId || '',
+        Title: data.title || '',
+        Description: data.description || '',
+        IsPublic: data.isPublic || false,
+        MemberCount: data.memberCount || 0,
+        CurrentKeyGeneration: data.currentKeyGeneration || 0,
       };
 
-      const response = await client.unaryCall<GetGroupFeedRequest, GetGroupFeedResponse>(
-        SERVICE_NAME,
-        'GetGroupFeed',
-        request
-      );
-
-      return response;
+      debugLog('[GroupService] getGroupInfo result:', { success: result.Success, title: result.Title });
+      return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to get group info';
       debugLog('[GroupService] getGroupInfo error:', message);
@@ -586,6 +657,52 @@ export const groupService = {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to get key generations';
       debugLog('[GroupService] getKeyGenerations error:', message);
+      return [];
+    }
+  },
+
+  /**
+   * Search for public groups by title or description
+   * Uses API route for proper binary protobuf communication
+   */
+  async searchPublicGroups(searchQuery: string, maxResults: number = 20): Promise<PublicGroupInfo[]> {
+    debugLog('[GroupService] searchPublicGroups:', { searchQuery, maxResults });
+    try {
+      const url = buildApiUrl(`/api/groups/search?query=${encodeURIComponent(searchQuery)}&maxResults=${maxResults}`);
+      debugLog('[GroupService] searchPublicGroups URL:', url);
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      debugLog('[GroupService] searchPublicGroups response:', { success: data.success, count: data.groups?.length ?? 0 });
+
+      if (!data.success) {
+        debugLog('[GroupService] searchPublicGroups failed:', data.message);
+        return [];
+      }
+
+      // Map API response to PublicGroupInfo type
+      const groups: PublicGroupInfo[] = (data.groups || []).map((g: { feedId: string; title: string; description?: string; memberCount: number }) => ({
+        feedId: g.feedId,
+        name: g.title,
+        description: g.description || undefined,
+        memberCount: g.memberCount,
+        isPublic: true, // Search only returns public groups
+      }));
+
+      debugLog('[GroupService] searchPublicGroups result:', { count: groups.length });
+      return groups;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to search public groups';
+      debugLog('[GroupService] searchPublicGroups error:', message);
       return [];
     }
   },
