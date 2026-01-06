@@ -1,5 +1,5 @@
-// API Route: GET /api/groups/info?feedId=<feedId>
-// Gets group feed information (title, description, visibility)
+// API Route: GET /api/groups/by-code?code=<inviteCode>
+// Looks up a public group feed by its invite code
 
 import { NextRequest, NextResponse } from 'next/server';
 import {
@@ -12,22 +12,22 @@ import {
 export const dynamic = 'force-dynamic';
 
 /**
- * Build GetGroupFeedRequest protobuf message
+ * Build GetGroupFeedByInviteCodeRequest protobuf message
  *
  * Proto definition:
- * message GetGroupFeedRequest {
- *   string FeedId = 1;
+ * message GetGroupFeedByInviteCodeRequest {
+ *   string InviteCode = 1;
  * }
  */
-function buildGetGroupFeedRequest(feedId: string): Uint8Array {
-  return new Uint8Array([...encodeString(1, feedId)]);
+function buildGetGroupFeedByInviteCodeRequest(inviteCode: string): Uint8Array {
+  return new Uint8Array([...encodeString(1, inviteCode)]);
 }
 
 /**
- * Parse GetGroupFeedResponse protobuf message
+ * Parse GetGroupFeedByInviteCodeResponse protobuf message
  *
  * Proto definition:
- * message GetGroupFeedResponse {
+ * message GetGroupFeedByInviteCodeResponse {
  *   bool Success = 1;
  *   string Message = 2;
  *   string FeedId = 3;
@@ -35,11 +35,9 @@ function buildGetGroupFeedRequest(feedId: string): Uint8Array {
  *   string Description = 5;
  *   bool IsPublic = 6;
  *   int32 MemberCount = 7;
- *   int32 CurrentKeyGeneration = 8;
- *   optional string InviteCode = 9;
  * }
  */
-function parseGetGroupFeedResponse(data: Uint8Array): {
+function parseGetGroupFeedByInviteCodeResponse(data: Uint8Array): {
   success: boolean;
   message: string;
   feedId: string;
@@ -47,20 +45,8 @@ function parseGetGroupFeedResponse(data: Uint8Array): {
   description: string;
   isPublic: boolean;
   memberCount: number;
-  currentKeyGeneration: number;
-  inviteCode?: string;
 } {
-  const result: {
-    success: boolean;
-    message: string;
-    feedId: string;
-    title: string;
-    description: string;
-    isPublic: boolean;
-    memberCount: number;
-    currentKeyGeneration: number;
-    inviteCode?: string;
-  } = {
+  const result = {
     success: false,
     message: '',
     feedId: '',
@@ -68,7 +54,6 @@ function parseGetGroupFeedResponse(data: Uint8Array): {
     description: '',
     isPublic: false,
     memberCount: 0,
-    currentKeyGeneration: 0,
   };
 
   let pos = 0;
@@ -93,7 +78,6 @@ function parseGetGroupFeedResponse(data: Uint8Array): {
       if (fieldNumber === 1) result.success = value === 1;
       else if (fieldNumber === 6) result.isPublic = value === 1;
       else if (fieldNumber === 7) result.memberCount = value;
-      else if (fieldNumber === 8) result.currentKeyGeneration = value;
     } else if (wireType === 2) {
       // Length-delimited (string)
       let len = 0;
@@ -112,7 +96,6 @@ function parseGetGroupFeedResponse(data: Uint8Array): {
       else if (fieldNumber === 3) result.feedId = strValue;
       else if (fieldNumber === 4) result.title = strValue;
       else if (fieldNumber === 5) result.description = strValue;
-      else if (fieldNumber === 9) result.inviteCode = strValue;
     }
   }
 
@@ -120,38 +103,49 @@ function parseGetGroupFeedResponse(data: Uint8Array): {
 }
 
 export async function GET(request: NextRequest) {
-  const feedId = request.nextUrl.searchParams.get('feedId');
+  const inviteCode = request.nextUrl.searchParams.get('code');
 
-  if (!feedId) {
+  if (!inviteCode) {
     return NextResponse.json(
-      { error: 'Missing feedId parameter' },
+      { error: 'Missing code parameter', success: false },
+      { status: 400 }
+    );
+  }
+
+  // Normalize the code (uppercase, trim)
+  const normalizedCode = inviteCode.trim().toUpperCase();
+
+  // Validate format (8 chars, alphanumeric)
+  if (!/^[A-Z0-9]{6,12}$/.test(normalizedCode)) {
+    return NextResponse.json(
+      { error: 'Invalid invite code format', success: false },
       { status: 400 }
     );
   }
 
   try {
-    console.log(`[API] GetGroupFeed request: feedId=${feedId.substring(0, 8)}...`);
+    console.log(`[API] GetGroupFeedByInviteCode request: code=${normalizedCode}`);
 
-    const requestBytes = buildGetGroupFeedRequest(feedId);
-    const responseBytes = await grpcCall('rpcHush.HushFeed', 'GetGroupFeed', requestBytes);
+    const requestBytes = buildGetGroupFeedByInviteCodeRequest(normalizedCode);
+    const responseBytes = await grpcCall('rpcHush.HushFeed', 'GetGroupFeedByInviteCode', requestBytes);
     const messageBytes = parseGrpcResponse(responseBytes);
 
     if (!messageBytes) {
-      console.log('[API] GetGroupFeed: empty response');
+      console.log('[API] GetGroupFeedByInviteCode: empty response');
       return NextResponse.json({
         success: false,
         message: 'Empty response from server',
       });
     }
 
-    const result = parseGetGroupFeedResponse(messageBytes);
-    console.log(`[API] GetGroupFeed result: success=${result.success}, title=${result.title}, isPublic=${result.isPublic}`);
+    const result = parseGetGroupFeedByInviteCodeResponse(messageBytes);
+    console.log(`[API] GetGroupFeedByInviteCode result: success=${result.success}, title=${result.title}`);
 
     return NextResponse.json(result);
   } catch (error) {
-    console.error('[API] GetGroupFeed failed:', error);
+    console.error('[API] GetGroupFeedByInviteCode failed:', error);
     return NextResponse.json(
-      { error: 'Failed to get group feed info', success: false },
+      { error: 'Failed to lookup group by invite code', success: false },
       { status: 502 }
     );
   }

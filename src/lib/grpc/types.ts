@@ -551,6 +551,22 @@ export interface GetGroupFeedResponse {
   IsPublic: boolean;
   MemberCount: number;
   CurrentKeyGeneration: number;
+  InviteCode?: string;  // Unique invite code for public groups
+}
+
+// Get Group Feed by Invite Code
+export interface GetGroupFeedByInviteCodeRequest {
+  InviteCode: string;
+}
+
+export interface GetGroupFeedByInviteCodeResponse {
+  Success: boolean;
+  Message: string;
+  FeedId: string;
+  Title: string;
+  Description: string;
+  IsPublic: boolean;
+  MemberCount: number;
 }
 
 // Get Group Members

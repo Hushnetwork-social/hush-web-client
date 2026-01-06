@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useState, useCallback, useMemo, useEffect } from "react";
-import { X, Settings, Globe, Lock, LogOut, Trash2, Loader2 } from "lucide-react";
+import { X, Settings, Globe, Lock, LogOut, Trash2, Loader2, Link, Copy, Check } from "lucide-react";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { groupService } from "@/lib/grpc/services/group";
 import { useFeedsStore } from "@/modules/feeds";
@@ -20,6 +20,8 @@ interface GroupSettingsPanelProps {
   groupDescription: string;
   /** Whether the group is public */
   isPublic: boolean;
+  /** Invite code for public groups */
+  inviteCode?: string;
   /** Current user's role in the group */
   currentUserRole: GroupMemberRole;
   /** Current user's public address */
@@ -46,6 +48,7 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
   groupName,
   groupDescription,
   isPublic,
+  inviteCode,
   currentUserRole,
   currentUserAddress,
   isLastAdmin,
@@ -66,6 +69,10 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
   // Error state
   const [error, setError] = useState<string | null>(null);
 
+  // Copy state for invite link
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedCode, setCopiedCode] = useState(false);
+
   // Confirmation dialog states
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -73,6 +80,53 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
 
   // Check if current user is admin
   const isAdmin = currentUserRole === "Admin";
+
+  // Generate invite URL based on current window location
+  const inviteUrl = useMemo(() => {
+    if (!inviteCode || typeof window === 'undefined') return '';
+    const baseUrl = window.location.origin;
+    return `${baseUrl}/join/${inviteCode}`;
+  }, [inviteCode]);
+
+  // Handle copy invite link
+  const handleCopyLink = useCallback(async () => {
+    if (!inviteUrl) return;
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+    } catch {
+      // Fallback for older browsers
+      const textArea = document.createElement('textarea');
+      textArea.value = inviteUrl;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+    }
+  }, [inviteUrl]);
+
+  // Handle copy invite code
+  const handleCopyCode = useCallback(async () => {
+    if (!inviteCode) return;
+    try {
+      await navigator.clipboard.writeText(inviteCode);
+      setCopiedCode(true);
+      setTimeout(() => setCopiedCode(false), 2000);
+    } catch {
+      // Fallback
+      const textArea = document.createElement('textarea');
+      textArea.value = inviteCode;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      setCopiedCode(true);
+      setTimeout(() => setCopiedCode(false), 2000);
+    }
+  }, [inviteCode]);
 
   // Get store function to remove member after leaving
   const removeGroupMember = useFeedsStore((state) => state.removeGroupMember);
@@ -366,6 +420,67 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
               </div>
             )}
           </section>
+
+          {/* Invite Link Section (only for public groups) */}
+          {(isPublic || visibility) && inviteCode && (
+            <section>
+              <h3 className="text-sm font-medium text-hush-text-accent mb-3 flex items-center gap-2">
+                <Link className="w-4 h-4" aria-hidden="true" />
+                Invite Link
+              </h3>
+              <div className="space-y-3">
+                {/* Invite URL */}
+                <div>
+                  <label className="block text-xs text-hush-text-accent mb-1">Shareable Link</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={inviteUrl}
+                      readOnly
+                      className="flex-1 px-3 py-2 bg-hush-bg-element border border-hush-bg-hover rounded-lg text-hush-text-primary text-sm font-mono truncate"
+                    />
+                    <button
+                      onClick={handleCopyLink}
+                      className="px-3 py-2 bg-hush-purple/20 border border-hush-purple/30 rounded-lg text-hush-purple hover:bg-hush-purple/30 transition-colors flex items-center gap-1.5"
+                      title="Copy link"
+                    >
+                      {copiedLink ? (
+                        <Check className="w-4 h-4" />
+                      ) : (
+                        <Copy className="w-4 h-4" />
+                      )}
+                      <span className="text-sm">{copiedLink ? "Copied!" : "Copy"}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Invite Code */}
+                <div>
+                  <label className="block text-xs text-hush-text-accent mb-1">Invite Code (for manual entry)</label>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 px-3 py-2 bg-hush-bg-element border border-hush-bg-hover rounded-lg text-hush-text-primary text-lg font-mono tracking-widest text-center">
+                      {inviteCode}
+                    </div>
+                    <button
+                      onClick={handleCopyCode}
+                      className="px-3 py-2 bg-hush-bg-element border border-hush-bg-hover rounded-lg text-hush-text-accent hover:bg-hush-bg-hover hover:text-hush-text-primary transition-colors flex items-center gap-1.5"
+                      title="Copy code"
+                    >
+                      {copiedCode ? (
+                        <Check className="w-4 h-4 text-green-400" />
+                      ) : (
+                        <Copy className="w-4 h-4" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                <p className="text-xs text-hush-text-accent">
+                  Share this link or code with others to invite them to join this group.
+                </p>
+              </div>
+            </section>
+          )}
 
           {/* Danger Zone */}
           <section>

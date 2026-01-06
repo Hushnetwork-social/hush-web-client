@@ -375,6 +375,7 @@ export async function syncGroupFeedInfo(
       name: groupInfo.Title,
       description: groupInfo.Description,
       isPublic: groupInfo.IsPublic,
+      inviteCode: groupInfo.InviteCode,
     });
 
     debugLog('[GroupSync] Group info synced:', {

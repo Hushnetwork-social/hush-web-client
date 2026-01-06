@@ -75,29 +75,50 @@ export function useFeedReactions({
 
   // Track key derivation to prevent duplicate calls (React Strict Mode)
   const keyDerivationStartedRef = useRef<string | null>(null);
+  // Track the AES key we derived from, to detect when it changes (key rotation)
+  const derivedFromAesKeyRef = useRef<string | null>(null);
 
   // Derive feed ElGamal keys from AES key
   useEffect(() => {
-    // Skip if no AES key, already have public key, or currently deriving
-    if (!feedAesKey || feedPublicKey || isDerivingKey) return;
+    // Skip if no AES key or currently deriving
+    if (!feedAesKey || isDerivingKey) return;
 
-    // Prevent duplicate derivation for the same feed (React Strict Mode protection)
-    if (keyDerivationStartedRef.current === feedId) return;
-    keyDerivationStartedRef.current = feedId;
+    // If AES key changed (key rotation), clear the old derived keys and re-derive
+    if (derivedFromAesKeyRef.current !== null && derivedFromAesKeyRef.current !== feedAesKey) {
+      debugLog(`[useFeedReactions] AES key changed for feed ${feedId.substring(0, 8)}... (key rotation detected)`);
+      debugLog(`[useFeedReactions]   Previous AES key: ${derivedFromAesKeyRef.current.substring(0, 16)}...`);
+      debugLog(`[useFeedReactions]   New AES key: ${feedAesKey.substring(0, 16)}...`);
+      debugLog(`[useFeedReactions]   Re-deriving ElGamal keys...`);
+      setFeedPublicKey(null);
+      setFeedPrivateKey(null);
+      keyDerivationStartedRef.current = null;
+      derivedFromAesKeyRef.current = null;
+    }
+
+    // Skip if already have public key derived from current AES key
+    if (feedPublicKey && derivedFromAesKeyRef.current === feedAesKey) return;
+
+    // Prevent duplicate derivation for the same feed+key (React Strict Mode protection)
+    const derivationKey = `${feedId}:${feedAesKey.substring(0, 16)}`;
+    if (keyDerivationStartedRef.current === derivationKey) return;
+    keyDerivationStartedRef.current = derivationKey;
 
     const deriveKey = async () => {
       setIsDerivingKey(true);
       try {
-        debugLog(`[useFeedReactions] Deriving ElGamal key for feed ${feedId.substring(0, 8)}...`);
+        debugLog(`[useFeedReactions] Deriving ElGamal key for feed ${feedId.substring(0, 8)}... from AES key ${feedAesKey.substring(0, 16)}...`);
         const privateKey = await deriveFeedElGamalKey(feedAesKey);
         const publicKey = scalarMul(getGenerator(), privateKey);
         setFeedPublicKey(publicKey);
         setFeedPrivateKey(privateKey);
-        debugLog(`[useFeedReactions] Feed keys derived`);
+        // Track which AES key we derived from (for detecting key rotation)
+        derivedFromAesKeyRef.current = feedAesKey;
+        debugLog(`[useFeedReactions] Feed ElGamal keys derived successfully from AES key ${feedAesKey.substring(0, 16)}...`);
       } catch (err) {
         debugError(`[useFeedReactions] Failed to derive feed key:`, err);
         setError("Failed to derive feed encryption key");
         keyDerivationStartedRef.current = null; // Allow retry on error
+        derivedFromAesKeyRef.current = null;
       } finally {
         setIsDerivingKey(false);
       }
@@ -177,6 +198,7 @@ export function useFeedReactions({
   const handleReactionSelect = useCallback(
     async (messageId: string, emojiIndex: number) => {
       debugLog(`[useFeedReactions] Reaction selected: messageId=${messageId.substring(0, 8)}..., emojiIndex=${emojiIndex}`);
+      debugLog(`[useFeedReactions]   Using AES key (derived from): ${derivedFromAesKeyRef.current?.substring(0, 16) ?? 'NOT SET'}...`);
 
       // Get current reaction for this message
       const currentReaction = getMyReaction(messageId);

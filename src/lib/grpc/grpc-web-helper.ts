@@ -1510,12 +1510,14 @@ export function parseAddMemberToGroupFeedResponse(messageBytes: Uint8Array): Add
  *   string FeedId = 1;
  *   string JoiningUserPublicAddress = 2;
  *   optional string InvitationSignature = 3;
+ *   optional string JoiningUserPublicEncryptKey = 4;
  * }
  */
 export function buildJoinGroupFeedRequest(
   feedId: string,
   joiningUserPublicAddress: string,
-  invitationSignature?: string
+  invitationSignature?: string,
+  joiningUserPublicEncryptKey?: string
 ): Uint8Array {
   const bytes = [
     ...encodeString(1, feedId),
@@ -1523,6 +1525,9 @@ export function buildJoinGroupFeedRequest(
   ];
   if (invitationSignature) {
     bytes.push(...encodeString(3, invitationSignature));
+  }
+  if (joiningUserPublicEncryptKey) {
+    bytes.push(...encodeString(4, joiningUserPublicEncryptKey));
   }
   return new Uint8Array(bytes);
 }

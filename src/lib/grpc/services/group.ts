@@ -86,9 +86,11 @@ export const groupService = {
   /**
    * Join a public group feed
    * Uses API route for proper binary protobuf communication
+   * @param userEncryptKey Optional: The user's public encryption key. When provided,
+   *                       avoids identity lookup timing issues (new user identity not yet in blockchain).
    */
-  async joinGroup(feedId: string, userAddress: string): Promise<GroupOperationResult> {
-    debugLog('[GroupService] joinGroup:', { feedId, userAddress });
+  async joinGroup(feedId: string, userAddress: string, userEncryptKey?: string): Promise<GroupOperationResult> {
+    debugLog('[GroupService] joinGroup:', { feedId, userAddress, hasEncryptKey: !!userEncryptKey });
     try {
       const url = buildApiUrl('/api/groups/join');
       debugLog('[GroupService] joinGroup URL:', url);
@@ -100,6 +102,7 @@ export const groupService = {
         body: JSON.stringify({
           feedId,
           joiningUserPublicAddress: userAddress,
+          joiningUserPublicEncryptKey: userEncryptKey,
         }),
       });
 
@@ -562,13 +565,54 @@ export const groupService = {
         IsPublic: data.isPublic || false,
         MemberCount: data.memberCount || 0,
         CurrentKeyGeneration: data.currentKeyGeneration || 0,
+        InviteCode: data.inviteCode,
       };
 
-      debugLog('[GroupService] getGroupInfo result:', { success: result.Success, title: result.Title });
+      debugLog('[GroupService] getGroupInfo result:', { success: result.Success, title: result.Title, inviteCode: result.InviteCode });
       return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to get group info';
       debugLog('[GroupService] getGroupInfo error:', message);
+      return null;
+    }
+  },
+
+  /**
+   * Get group info by invite code
+   * Uses API route for proper binary protobuf communication
+   */
+  async getGroupByInviteCode(inviteCode: string): Promise<PublicGroupInfo | null> {
+    debugLog('[GroupService] getGroupByInviteCode:', { inviteCode });
+    try {
+      const url = buildApiUrl(`/api/groups/by-code?code=${encodeURIComponent(inviteCode)}`);
+      debugLog('[GroupService] getGroupByInviteCode URL:', url);
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      if (!data.success) {
+        debugLog('[GroupService] getGroupByInviteCode not found:', data.message);
+        return null;
+      }
+
+      // Map API response to PublicGroupInfo type
+      const result: PublicGroupInfo = {
+        feedId: data.feedId,
+        name: data.title,
+        description: data.description || undefined,
+        memberCount: data.memberCount,
+        isPublic: data.isPublic,
+      };
+
+      debugLog('[GroupService] getGroupByInviteCode result:', { feedId: result.feedId, name: result.name });
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to get group by invite code';
+      debugLog('[GroupService] getGroupByInviteCode error:', message);
       return null;
     }
   },

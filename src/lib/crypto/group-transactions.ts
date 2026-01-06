@@ -120,12 +120,13 @@ export async function createGroup(
  */
 export async function joinPublicGroup(
   feedId: string,
-  userAddress: string
+  userAddress: string,
+  userEncryptKey?: string
 ): Promise<GroupOperationResult> {
-  debugLog('[GroupTransactions] joinPublicGroup:', { feedId, userAddress });
+  debugLog('[GroupTransactions] joinPublicGroup:', { feedId, userAddress, hasEncryptKey: !!userEncryptKey });
 
   try {
-    const result = await groupService.joinGroup(feedId, userAddress);
+    const result = await groupService.joinGroup(feedId, userAddress, userEncryptKey);
 
     if (!result.success) {
       return {

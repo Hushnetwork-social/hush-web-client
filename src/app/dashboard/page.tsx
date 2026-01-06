@@ -1,10 +1,17 @@
 "use client";
 
+import { useEffect, useCallback, useRef } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { MessageSquare, Loader2 } from "lucide-react";
 import { useAppStore } from "@/stores";
 import { useFeedsStore } from "@/modules/feeds";
-import { debugLog } from "@/lib/debug-logger";
+import { groupService } from "@/lib/grpc/services/group";
+import { debugLog, debugError } from "@/lib/debug-logger";
+import { ensureCommitmentRegistered, isReactionsInitialized } from "@/modules/reactions/initializeReactions";
+
+// Storage key for pending invite code (used when user needs to authenticate first)
+const PENDING_INVITE_CODE_KEY = "hush_pending_invite_code";
 
 // Dynamic imports to prevent dev mode race condition
 const FeedList = dynamic(
@@ -44,13 +51,108 @@ const NewChatView = dynamic(
 );
 
 export default function DashboardPage() {
-  const { selectedFeedId, selectFeed, selectedNav, setSelectedNav } = useAppStore();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const { selectedFeedId, selectFeed, selectedNav, setSelectedNav, credentials } = useAppStore();
   const feeds = useFeedsStore((state) => state.feeds);
+  const isPendingGroupJoin = useFeedsStore((state) => state.isPendingGroupJoin);
+  const pendingGroupJoinFeedId = useFeedsStore((state) => state.getPendingGroupJoinFeedId);
+
+  // Guard to prevent duplicate invite code processing (React Strict Mode double-invokes effects)
+  const isProcessingInviteRef = useRef(false);
 
   // Find the selected feed
   const selectedFeed = selectedFeedId
     ? feeds.find((f) => f.id === selectedFeedId)
     : null;
+
+  // Check if we're waiting for a pending group join to sync
+  const isWaitingForPendingGroup = isPendingGroupJoin() && selectedFeedId === pendingGroupJoinFeedId();
+
+  // Handle pending invite code from authentication redirect
+  const handlePendingInviteCode = useCallback(async () => {
+    if (!credentials?.signingPublicKey) return;
+
+    // Prevent duplicate processing
+    if (isProcessingInviteRef.current) {
+      debugLog("[DashboardPage] Already processing invite code, skipping");
+      return;
+    }
+
+    const pendingCode = localStorage.getItem(PENDING_INVITE_CODE_KEY);
+    if (!pendingCode) return;
+
+    // Mark as processing and clear immediately to prevent race conditions
+    isProcessingInviteRef.current = true;
+    localStorage.removeItem(PENDING_INVITE_CODE_KEY);
+
+    debugLog("[DashboardPage] Found pending invite code:", pendingCode);
+
+    try {
+      // Look up the group by code
+      const groupInfo = await groupService.getGroupByInviteCode(pendingCode);
+      if (!groupInfo) {
+        debugLog("[DashboardPage] Pending invite code not found");
+        return;
+      }
+
+      // Join the group
+      debugLog("[DashboardPage] Joining group from pending invite:", groupInfo.name);
+      const result = await groupService.joinGroup(
+        groupInfo.feedId,
+        credentials.signingPublicKey,
+        credentials.encryptionPublicKey  // Pass encrypt key to avoid identity lookup timing issue
+      );
+
+      if (result.success) {
+        debugLog("[DashboardPage] Successfully joined group from pending invite");
+        // Set pending group join to trigger full feed resync until feed appears
+        useFeedsStore.getState().setPendingGroupJoin(groupInfo.feedId);
+        // Register reaction commitment for the new group feed
+        // This ensures the user can decrypt reactions from other members
+        if (isReactionsInitialized()) {
+          debugLog("[DashboardPage] Registering reaction commitment for group feed:", groupInfo.feedId);
+          ensureCommitmentRegistered(groupInfo.feedId).then((success) => {
+            if (success) {
+              debugLog("[DashboardPage] Reaction commitment registered for group feed");
+            } else {
+              debugLog("[DashboardPage] Failed to register reaction commitment for group feed (will retry on sync)");
+            }
+          });
+        }
+        // Select the feed (will show loading until it appears)
+        selectFeed(groupInfo.feedId);
+      } else {
+        // Check if user is already a member (not really an error)
+        if (result.error?.includes("already") || result.error?.includes("member")) {
+          debugLog("[DashboardPage] User already a member, selecting feed");
+          selectFeed(groupInfo.feedId);
+        } else {
+          debugError("[DashboardPage] Failed to join from pending invite:", result.error);
+        }
+      }
+    } catch (err) {
+      debugError("[DashboardPage] Error handling pending invite:", err);
+    } finally {
+      isProcessingInviteRef.current = false;
+    }
+  }, [credentials, selectFeed]);
+
+  // Handle feed query parameter (from join redirect)
+  useEffect(() => {
+    const feedId = searchParams.get("feed");
+    if (feedId) {
+      debugLog("[DashboardPage] Selecting feed from URL param:", feedId);
+      selectFeed(feedId);
+      // Clear the query param from URL
+      router.replace("/dashboard", { scroll: false });
+    }
+  }, [searchParams, selectFeed, router]);
+
+  // Handle pending invite code on mount
+  useEffect(() => {
+    handlePendingInviteCode();
+  }, [handlePendingInviteCode]);
 
   const handleSendMessage = (message: string) => {
     // TODO: Implement message sending to blockchain
@@ -85,6 +187,16 @@ export default function DashboardPage() {
             showBackButton={true}
             onBack={() => setSelectedNav("feeds")}
           />
+        ) : isWaitingForPendingGroup ? (
+          <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
+            <Loader2 className="w-10 h-10 animate-spin text-hush-purple mb-4" />
+            <h2 className="text-xl font-semibold text-hush-text-primary mb-2">
+              Joining Group...
+            </h2>
+            <p className="text-hush-text-accent text-sm max-w-md">
+              Please wait while we set up your group membership and encryption keys.
+            </p>
+          </div>
         ) : selectedFeed ? (
           <div className="flex-1 flex flex-col min-h-0">
             <ChatView
@@ -110,6 +222,16 @@ export default function DashboardPage() {
             onFeedCreated={handleFeedCreated}
             onFeedSelected={handleFeedSelected}
           />
+        ) : isWaitingForPendingGroup ? (
+          <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
+            <Loader2 className="w-10 h-10 animate-spin text-hush-purple mb-4" />
+            <h2 className="text-xl font-semibold text-hush-text-primary mb-2">
+              Joining Group...
+            </h2>
+            <p className="text-hush-text-accent text-sm max-w-md">
+              Please wait while we set up your group membership and encryption keys.
+            </p>
+          </div>
         ) : selectedFeed ? (
           <ChatView key={selectedFeed.id} feed={selectedFeed} onSendMessage={handleSendMessage} onCloseFeed={handleBack} />
         ) : (

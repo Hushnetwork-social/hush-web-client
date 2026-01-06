@@ -29,6 +29,8 @@ interface FeedsSyncMetadata {
   isPersonalFeedCreationPending: boolean;
   /** Block index when personal feed creation was initiated (for timeout tracking) */
   personalFeedCreationBlockIndex: number;
+  /** Feed ID that was just joined (triggers full feed resync until feed appears) */
+  pendingGroupJoinFeedId: string | null;
 }
 
 interface FeedsState {
@@ -87,8 +89,8 @@ interface FeedsActions {
   /** Update a feed's display name (after participant identity update) */
   updateFeedName: (feedId: string, name: string) => void;
 
-  /** Update a feed's info (name, description, isPublic) - for group feeds */
-  updateFeedInfo: (feedId: string, info: { name?: string; description?: string; isPublic?: boolean }) => void;
+  /** Update a feed's info (name, description, isPublic, inviteCode) - for group feeds */
+  updateFeedInfo: (feedId: string, info: { name?: string; description?: string; isPublic?: boolean; inviteCode?: string }) => void;
 
   /** Add a settings change record to a feed's history (for group feeds) */
   addSettingsChangeRecord: (feedId: string, record: SettingsChangeRecord) => void;
@@ -119,6 +121,17 @@ interface FeedsActions {
 
   /** Reset store to initial state (on logout) */
   reset: () => void;
+
+  // ============= Group Join Actions =============
+
+  /** Set pending group join - triggers full feed resync until feed appears */
+  setPendingGroupJoin: (feedId: string | null) => void;
+
+  /** Check if we're waiting for a pending group join */
+  isPendingGroupJoin: () => boolean;
+
+  /** Get the pending group join feed ID */
+  getPendingGroupJoinFeedId: () => string | null;
 
   // ============= Unread Count Actions =============
 
@@ -215,6 +228,7 @@ const initialState: FeedsState = {
     lastReactionTallyVersion: 0,
     isPersonalFeedCreationPending: false,
     personalFeedCreationBlockIndex: 0,
+    pendingGroupJoinFeedId: null,
   },
   isSyncing: false,
   isCreatingPersonalFeed: false,
@@ -315,6 +329,7 @@ export const useFeedsStore = create<FeedsStore>()(
                   ...(info.name !== undefined && { name: info.name }),
                   ...(info.description !== undefined && { description: info.description }),
                   ...(info.isPublic !== undefined && { isPublic: info.isPublic }),
+                  ...(info.inviteCode !== undefined && { inviteCode: info.inviteCode }),
                 }
               : f
           ),
@@ -431,6 +446,25 @@ export const useFeedsStore = create<FeedsStore>()(
       setError: (error) => set({ lastError: error }),
 
       reset: () => set(initialState),
+
+      // ============= Group Join Implementations =============
+
+      setPendingGroupJoin: (feedId) => {
+        debugLog(`[FeedsStore] setPendingGroupJoin: ${feedId}`);
+        set((state) => ({
+          syncMetadata: { ...state.syncMetadata, pendingGroupJoinFeedId: feedId },
+        }));
+      },
+
+      isPendingGroupJoin: () => {
+        const feedId = get().syncMetadata.pendingGroupJoinFeedId;
+        if (!feedId) return false;
+        // Check if the feed has appeared in the store
+        const feedExists = get().feeds.some((f) => f.id === feedId);
+        return !feedExists; // Still pending if feed doesn't exist yet
+      },
+
+      getPendingGroupJoinFeedId: () => get().syncMetadata.pendingGroupJoinFeedId,
 
       // ============= Unread Count Implementations =============
 

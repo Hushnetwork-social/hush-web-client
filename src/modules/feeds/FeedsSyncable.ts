@@ -246,6 +246,21 @@ export class FeedsSyncable implements ISyncable {
 
     // Check if any feed is missing its AES key - if so, force a full refresh from block 0
     const currentFeeds = useFeedsStore.getState().feeds;
+
+    // Check for pending group join - force full sync until the feed appears
+    const pendingGroupJoinFeedId = syncMetadata.pendingGroupJoinFeedId;
+    if (pendingGroupJoinFeedId) {
+      const feedExists = currentFeeds.some((f) => f.id === pendingGroupJoinFeedId);
+      if (!feedExists) {
+        debugLog(`[FeedsSyncable] Pending group join: ${pendingGroupJoinFeedId.substring(0, 8)}... - forcing full sync`);
+        forceFullSync = true;
+        blockIndex = 0; // Ensure we sync from block 0 to get the new feed
+      } else {
+        // Feed appeared, clear the pending state
+        debugLog(`[FeedsSyncable] Pending group join resolved - feed ${pendingGroupJoinFeedId.substring(0, 8)}... found`);
+        useFeedsStore.getState().setPendingGroupJoin(null);
+      }
+    }
     const feedsMissingKey = currentFeeds.filter((f) => f.encryptedFeedKey && !f.aesKey);
     const feedsNoEncryptedKey = currentFeeds.filter((f) => !f.encryptedFeedKey && !f.aesKey);
 
@@ -714,7 +729,20 @@ export class FeedsSyncable implements ISyncable {
 
       // Find the feed to get its AES key for decryption
       const feed = feeds.find(f => f.id === feedId);
-      const feedAesKey = feed?.aesKey;
+
+      // Get the effective AES key:
+      // - For group feeds: use the current KeyGeneration's AES key from groupKeyStates
+      // - For other feeds: use the feed's aesKey directly
+      let feedAesKey = feed?.aesKey;
+      if (feed?.type === 'group') {
+        const keyState = useFeedsStore.getState().getGroupKeyState(feedId);
+        if (keyState) {
+          const currentKey = keyState.keyGenerations.find(
+            (kg) => kg.keyGeneration === keyState.currentKeyGeneration
+          );
+          feedAesKey = currentKey?.aesKey;
+        }
+      }
 
       debugLog(`[FeedsSyncable] Processing tally for message ${tally.messageId.substring(0, 8)}..., version=${tally.tallyVersion}, reactionCount=${tally.reactionCount}, feedId=${feedId.substring(0, 8)}..., hasKey=${!!feedAesKey}`);
 

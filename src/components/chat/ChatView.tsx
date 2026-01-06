@@ -14,6 +14,7 @@ import { useFeedsStore, sendMessage } from "@/modules/feeds";
 import { useFeedReactions } from "@/hooks/useFeedReactions";
 import type { Feed, FeedMessage, GroupFeedMember, SettingsChangeRecord } from "@/types";
 import { onVisibilityChange, type SettingsChange } from "@/lib/events";
+import { debugLog } from "@/lib/debug-logger";
 
 // Empty array constants to avoid creating new references
 const EMPTY_MESSAGES: FeedMessage[] = [];
@@ -67,11 +68,25 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
     [groupMembersMap, feed.id, feed.type]
   );
 
-  // Track group key state for system messages
+  // Track group key state for system messages and reactions
   const groupKeyStates = useFeedsStore((state) => state.groupKeyStates);
   const keyState = groupKeyStates[feed.id];
   const currentKeyGeneration = keyState?.currentKeyGeneration ?? 0;
   const previousKeyGenRef = useRef<number>(currentKeyGeneration);
+
+  // Get the effective AES key for reactions:
+  // - For group feeds: use the current KeyGeneration's AES key from groupKeyStates
+  // - For other feeds: use the feed's aesKey directly
+  const effectiveAesKey = useMemo(() => {
+    if (feed.type === 'group' && keyState) {
+      const currentKey = keyState.keyGenerations.find(
+        (kg) => kg.keyGeneration === keyState.currentKeyGeneration
+      );
+      debugLog(`[ChatView] effectiveAesKey calculated: feedId=${feed.id.substring(0, 8)}..., currentKeyGen=${keyState.currentKeyGeneration}, aesKey=${currentKey?.aesKey?.substring(0, 16) ?? 'NOT FOUND'}...`);
+      return currentKey?.aesKey;
+    }
+    return feed.aesKey;
+  }, [feed.type, feed.aesKey, keyState, feed.id]);
 
   // Generate system events for all member joins in the group
   // Shows "X joined the group" for each member based on their joinedAtBlock
@@ -419,7 +434,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
     handleReactionSelect,
   } = useFeedReactions({
     feedId: feed.id,
-    feedAesKey: feed.aesKey,
+    feedAesKey: effectiveAesKey,
   });
 
   // Create stable callback for reactions using ref pattern to avoid re-renders
@@ -822,6 +837,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
           groupName={feed.name}
           groupDescription={feed.description ?? ""}
           isPublic={feed.isPublic ?? false}
+          inviteCode={feed.inviteCode}
           currentUserRole={currentUserRole}
           currentUserAddress={credentials.signingPublicKey}
           isLastAdmin={isLastAdmin}

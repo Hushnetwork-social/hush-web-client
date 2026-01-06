@@ -189,11 +189,11 @@ describe('Group Transaction Functions', () => {
         data: { feedId: 'feed-123', message: 'Joined' },
       });
 
-      const result = await joinPublicGroup('feed-123', 'user-address');
+      const result = await joinPublicGroup('feed-123', 'user-address', 'encrypt-key');
 
       expect(result.success).toBe(true);
       expect(result.data?.feedId).toBe('feed-123');
-      expect(groupService.joinGroup).toHaveBeenCalledWith('feed-123', 'user-address');
+      expect(groupService.joinGroup).toHaveBeenCalledWith('feed-123', 'user-address', 'encrypt-key');
     });
 
     it('should return error when join fails', async () => {

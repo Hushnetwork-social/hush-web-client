@@ -120,10 +120,16 @@ export function NewChatView({ onFeedCreated, onFeedSelected, onBack, showBackBut
     }
   }, [searchQuery]);
 
+  // Check if a string looks like an invite code (6-12 alphanumeric chars)
+  const looksLikeInviteCode = (query: string): boolean => {
+    const normalized = query.trim().toUpperCase();
+    return /^[A-Z0-9]{6,12}$/.test(normalized);
+  };
+
   // Handle public group search
   const handleGroupSearch = useCallback(async () => {
     if (!groupSearchQuery.trim()) {
-      setGroupError("Please enter a group name to search");
+      setGroupError("Please enter a group name or invite code to search");
       return;
     }
 
@@ -133,9 +139,40 @@ export function NewChatView({ onFeedCreated, onFeedSelected, onBack, showBackBut
 
     try {
       debugLog("[NewChatView] Searching public groups:", groupSearchQuery);
-      const results = await groupService.searchPublicGroups(groupSearchQuery);
+      const trimmedQuery = groupSearchQuery.trim();
+
+      // If it looks like an invite code, try searching by code first
+      let inviteCodeResult: PublicGroupInfo | null = null;
+      if (looksLikeInviteCode(trimmedQuery)) {
+        debugLog("[NewChatView] Query looks like invite code, searching by code...");
+        inviteCodeResult = await groupService.getGroupByInviteCode(trimmedQuery);
+        if (inviteCodeResult) {
+          debugLog("[NewChatView] Found group by invite code:", inviteCodeResult.name);
+        }
+      }
+
+      // Also search by name/description
+      const results = await groupService.searchPublicGroups(trimmedQuery);
       debugLog("[NewChatView] Group search results:", results.length);
-      setGroupSearchResults(results);
+
+      // Combine results, putting invite code match first if found
+      let combinedResults = results;
+      if (inviteCodeResult) {
+        // Check if the invite code result is already in the search results
+        const alreadyInResults = results.some(r => r.feedId === inviteCodeResult!.feedId);
+        if (!alreadyInResults) {
+          // Add invite code result at the beginning
+          combinedResults = [inviteCodeResult, ...results];
+        } else {
+          // Move the matching result to the front
+          combinedResults = [
+            inviteCodeResult,
+            ...results.filter(r => r.feedId !== inviteCodeResult!.feedId),
+          ];
+        }
+      }
+
+      setGroupSearchResults(combinedResults);
     } catch (err) {
       debugError("[NewChatView] Group search failed:", err);
       setGroupError("Failed to search groups. Please try again.");
@@ -157,7 +194,11 @@ export function NewChatView({ onFeedCreated, onFeedSelected, onBack, showBackBut
     setCooldownErrors((prev) => ({ ...prev, [group.feedId]: "" }));
 
     try {
-      const result = await groupService.joinGroup(group.feedId, credentials.signingPublicKey);
+      const result = await groupService.joinGroup(
+        group.feedId,
+        credentials.signingPublicKey,
+        credentials.encryptionPublicKey  // Pass encrypt key to avoid identity lookup timing issue
+      );
 
       if (result.success) {
         setJoinedGroupIds((prev) => new Set([...prev, group.feedId]));
@@ -320,7 +361,7 @@ export function NewChatView({ onFeedCreated, onFeedSelected, onBack, showBackBut
               }
               onKeyDown={handleKeyDown}
               placeholder={
-                activeTab === "users" ? "Search by Profile Name" : "Search Public Groups"
+                activeTab === "users" ? "Search by Profile Name" : "Search by name or invite code"
               }
               className="w-full bg-hush-bg-dark border border-hush-bg-hover rounded-xl px-4 py-2.5 pl-10 text-sm text-hush-text-primary placeholder-hush-text-accent focus:outline-none focus:border-hush-purple"
               disabled={isSearching || isCreating || isSearchingGroups}

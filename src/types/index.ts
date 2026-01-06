@@ -81,6 +81,8 @@ export interface Feed {
   description?: string;
   /** Whether the group is public (for group feeds) */
   isPublic?: boolean;
+  /** Unique invite code for public groups (for sharing/joining) */
+  inviteCode?: string;
   /** History of settings changes (for group feeds - used for historical system messages) */
   settingsChangeHistory?: SettingsChangeRecord[];
 }

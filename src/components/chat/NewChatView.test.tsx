@@ -157,7 +157,7 @@ describe("NewChatView", () => {
       const groupsTab = screen.getByRole("tab", { name: /public groups/i });
       fireEvent.click(groupsTab);
 
-      const searchInput = screen.getByPlaceholderText(/search public groups/i);
+      const searchInput = screen.getByPlaceholderText(/search by name or invite code/i);
       expect(searchInput).toBeInTheDocument();
     });
 
@@ -190,7 +190,7 @@ describe("NewChatView", () => {
       const groupsTab = screen.getByRole("tab", { name: /public groups/i });
       fireEvent.click(groupsTab);
 
-      const searchInput = screen.getByPlaceholderText(/search public groups/i);
+      const searchInput = screen.getByPlaceholderText(/search by name or invite code/i);
       fireEvent.change(searchInput, { target: { value: "tech" } });
 
       const buttons = screen.getAllByRole("button");
@@ -205,7 +205,7 @@ describe("NewChatView", () => {
       const groupsTab = screen.getByRole("tab", { name: /public groups/i });
       fireEvent.click(groupsTab);
 
-      const searchInput = screen.getByPlaceholderText(/search public groups/i);
+      const searchInput = screen.getByPlaceholderText(/search by name or invite code/i);
       fireEvent.change(searchInput, { target: { value: "nonexistent" } });
 
       const buttons = screen.getAllByRole("button");
@@ -265,7 +265,7 @@ describe("NewChatView", () => {
       fireEvent.click(groupsTab);
 
       // Enter group search query
-      const searchInput = screen.getByPlaceholderText(/search public groups/i);
+      const searchInput = screen.getByPlaceholderText(/search by name or invite code/i);
       fireEvent.change(searchInput, { target: { value: "tech" } });
 
       // Switch to Users
@@ -276,7 +276,7 @@ describe("NewChatView", () => {
       fireEvent.click(groupsTab);
 
       // Query should be preserved
-      const groupInput = screen.getByPlaceholderText(/search public groups/i);
+      const groupInput = screen.getByPlaceholderText(/search by name or invite code/i);
       expect(groupInput).toHaveValue("tech");
     });
   });

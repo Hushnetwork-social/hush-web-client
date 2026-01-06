@@ -1347,11 +1347,8 @@ describe('Feed Name Updates (FEAT-003)', () => {
       aesKey: 'key1-before-leave-key==',
     };
 
-    const keyGenDuringAbsence = {
-      keyGeneration: 2,
-      validFromBlock: 3000,
-      // User does NOT have this key - they were away
-    };
+    // Note: KeyGen 2 (validFromBlock: 3000) is intentionally missing - user was away during this period
+    // This simulates the gap in key access when a user leaves and later rejoins
 
     const keyGenAfterRejoin = {
       keyGeneration: 3,
