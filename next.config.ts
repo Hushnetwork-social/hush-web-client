@@ -10,8 +10,16 @@ const getOutputMode = (): NextConfig['output'] | undefined => {
   return undefined;
 };
 
+// Use separate build directories for browser and Tauri to avoid conflicts
+// when both dev servers run simultaneously
+const getDistDir = (): string => {
+  if (process.env.TAURI_DEV === 'true') return '.next-tauri';
+  return '.next';
+};
+
 const nextConfig: NextConfig = {
   output: getOutputMode(),
+  distDir: getDistDir(),
   images: {
     unoptimized: true,
   },
