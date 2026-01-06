@@ -33,34 +33,48 @@ export interface SyncResultWithData<T> extends SyncResult {
 }
 
 /**
+ * Result for member sync operations - includes new members for notifications
+ */
+export interface MemberSyncResult extends SyncResult {
+  members?: GroupFeedMember[];
+  newMembers?: GroupFeedMember[];  // Members that were not in the previous list
+}
+
+/**
  * Sync group members for a specific group feed
  *
  * Flow:
- * 1. Fetch member list from server via gRPC
- * 2. Resolve display names for each member via identity service
- * 3. Store members in useFeedsStore.groupMembers
- * 4. Determine and store current user's role
+ * 1. Get existing members from store (for detecting new members)
+ * 2. Fetch member list from server via gRPC
+ * 3. Resolve display names for each member via identity service
+ * 4. Detect new members (for notifications)
+ * 5. Store members in useFeedsStore.groupMembers
+ * 6. Determine and store current user's role
  *
  * @param feedId - Group feed ID to sync members for
  * @param userAddress - Current user's public signing address
- * @returns SyncResult with member list
+ * @returns MemberSyncResult with member list and new members
  */
 export async function syncGroupMembers(
   feedId: string,
   userAddress: string
-): Promise<SyncResultWithData<GroupFeedMember[]>> {
+): Promise<MemberSyncResult> {
   debugLog('[GroupSync] syncGroupMembers:', { feedId: feedId.substring(0, 8) });
 
   try {
-    // Step 1: Fetch members from server
+    // Step 1: Get existing members from store (for detecting new ones)
+    const existingMembers = useFeedsStore.getState().getGroupMembers(feedId);
+    const existingAddresses = new Set(existingMembers.map(m => m.publicAddress));
+
+    // Step 2: Fetch members from server
     const members = await groupService.getGroupMembers(feedId);
 
     if (members.length === 0) {
       debugLog('[GroupSync] No members returned for group');
-      return { success: true, data: [] };
+      return { success: true, members: [], newMembers: [] };
     }
 
-    // Step 2: Resolve display names for each member
+    // Step 3: Resolve display names for each member
     const membersWithNames: GroupFeedMember[] = await Promise.all(
       members.map(async (member) => {
         try {
@@ -79,17 +93,34 @@ export async function syncGroupMembers(
       })
     );
 
-    // Step 3: Store members in store
+    // Step 4: Detect new members (for notifications)
+    // Only detect new members if we had existing members (not first sync)
+    // Also exclude current user from notifications (they don't need to see "You joined")
+    const newMembers = existingAddresses.size > 0
+      ? membersWithNames.filter(m =>
+          !existingAddresses.has(m.publicAddress) &&
+          m.publicAddress !== userAddress
+        )
+      : [];
+
+    if (newMembers.length > 0) {
+      debugLog('[GroupSync] Detected new members:', {
+        count: newMembers.length,
+        names: newMembers.map(m => m.displayName),
+      });
+    }
+
+    // Step 5: Store members in store
     useFeedsStore.getState().setGroupMembers(feedId, membersWithNames);
 
-    // Step 4: Determine current user's role
+    // Step 6: Determine current user's role
     const currentUser = membersWithNames.find((m) => m.publicAddress === userAddress);
     if (currentUser) {
       useFeedsStore.getState().setUserRole(feedId, currentUser.role);
     }
 
     debugLog('[GroupSync] Synced members:', { count: membersWithNames.length });
-    return { success: true, data: membersWithNames };
+    return { success: true, members: membersWithNames, newMembers };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to sync group members';
     debugError('[GroupSync] syncGroupMembers error:', message);

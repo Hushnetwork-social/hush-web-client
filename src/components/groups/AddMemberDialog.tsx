@@ -179,9 +179,9 @@ export const AddMemberDialog = memo(function AddMemberDialog({
         keysSuccess: keysResult.success,
       });
 
-      if (membersResult.success && membersResult.data) {
+      if (membersResult.success && membersResult.members) {
         // Find the newly added member from the synced data
-        const newMember = membersResult.data.find(
+        const newMember = membersResult.members.find(
           m => m.publicAddress === selectedMember.publicSigningAddress
         );
         if (newMember) {

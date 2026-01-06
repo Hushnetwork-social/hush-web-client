@@ -25,6 +25,14 @@ vi.mock("@/lib/crypto/group-transactions", () => ({
   addMemberToGroup: (...args: unknown[]) => mockAddMemberToGroup(...args),
 }));
 
+// Mock group sync
+const mockSyncGroupMembers = vi.fn();
+const mockSyncKeyGenerations = vi.fn();
+vi.mock("@/lib/sync/group-sync", () => ({
+  syncGroupMembers: (...args: unknown[]) => mockSyncGroupMembers(...args),
+  syncKeyGenerations: (...args: unknown[]) => mockSyncKeyGenerations(...args),
+}));
+
 // Mock debug logger
 vi.mock("@/lib/debug-logger", () => ({
   debugLog: vi.fn(),
@@ -67,6 +75,12 @@ describe("AddMemberDialog", () => {
     mockOnMemberAdded.mockClear();
     mockSearchByDisplayName.mockClear();
     mockAddMemberToGroup.mockClear();
+    mockSyncGroupMembers.mockClear();
+    mockSyncKeyGenerations.mockClear();
+
+    // Default mock behavior for sync functions
+    mockSyncGroupMembers.mockResolvedValue({ success: true, members: [], newMembers: [] });
+    mockSyncKeyGenerations.mockResolvedValue({ success: true });
   });
 
   describe("Visibility", () => {
@@ -387,6 +401,14 @@ describe("AddMemberDialog", () => {
     it("should call onMemberAdded callback on success", async () => {
       mockSearchByDisplayName.mockResolvedValue(mockSearchResults);
       mockAddMemberToGroup.mockResolvedValue({ success: true });
+      // Mock syncGroupMembers to return the newly added member
+      mockSyncGroupMembers.mockResolvedValue({
+        success: true,
+        members: [
+          { publicAddress: "new-user-1", displayName: "New User One", role: "Member" },
+        ],
+        newMembers: [],
+      });
 
       render(<AddMemberDialog {...defaultProps} />);
 

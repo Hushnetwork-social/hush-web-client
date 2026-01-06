@@ -28,6 +28,7 @@ import { useFeedsStore } from './useFeedsStore';
 import { useBlockchainStore } from '../blockchain/useBlockchainStore';
 import { useReactionsStore } from '../reactions/useReactionsStore';
 import { syncGroupMembers, syncKeyGenerations } from '@/lib/sync/group-sync';
+import { emitMemberJoin } from '@/lib/events';
 import type { Feed, FeedMessage } from '@/types';
 import { debugLog, debugWarn, debugError } from '@/lib/debug-logger';
 
@@ -373,6 +374,16 @@ export class FeedsSyncable implements ISyncable {
         const membersResult = await syncGroupMembers(feed.id, userAddress);
         if (!membersResult.success) {
           debugWarn(`[FeedsSyncable] Failed to sync members for group ${feed.id.substring(0, 8)}...: ${membersResult.error}`);
+        } else if (membersResult.newMembers && membersResult.newMembers.length > 0) {
+          // Emit member join events for notifications
+          for (const member of membersResult.newMembers) {
+            emitMemberJoin({
+              feedId: feed.id,
+              feedName: feed.name,
+              member,
+              timestamp: Date.now(),
+            });
+          }
         }
 
         // Sync KeyGenerations

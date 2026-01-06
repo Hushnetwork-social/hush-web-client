@@ -49,6 +49,7 @@ const mockSetGroupMembers = vi.fn();
 const mockSetUserRole = vi.fn();
 const mockSetGroupKeyState = vi.fn();
 const mockGetFeed = vi.fn();
+const mockGetGroupMembers = vi.fn().mockReturnValue([]);
 const mockFeeds: Array<{ id: string; type: string; needsSync: boolean }> = [];
 
 vi.mock('@/modules/feeds/useFeedsStore', () => ({
@@ -58,6 +59,7 @@ vi.mock('@/modules/feeds/useFeedsStore', () => ({
       setUserRole: mockSetUserRole,
       setGroupKeyState: mockSetGroupKeyState,
       getFeed: mockGetFeed,
+      getGroupMembers: mockGetGroupMembers,
       feeds: mockFeeds,
     }),
   },
@@ -72,6 +74,8 @@ describe('Group Sync Functions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockFeeds.length = 0;
+    // Reset getGroupMembers to return empty array by default
+    mockGetGroupMembers.mockReturnValue([]);
   });
 
   describe('syncGroupMembers', () => {
@@ -97,9 +101,10 @@ describe('Group Sync Functions', () => {
       const result = await syncGroupMembers(feedId, userAddress);
 
       expect(result.success).toBe(true);
-      expect(result.data).toHaveLength(2);
-      expect(result.data![0].displayName).toBe('Name for addr1');
-      expect(result.data![1].displayName).toBe('Name for addr2');
+      expect(result.members).toHaveLength(2);
+      expect(result.members![0].displayName).toBe('Name for addr1');
+      expect(result.members![1].displayName).toBe('Name for addr2');
+      expect(result.newMembers).toEqual([]); // First sync, no new members detected
       expect(mockSetGroupMembers).toHaveBeenCalledWith(feedId, expect.any(Array));
     });
 
@@ -109,7 +114,8 @@ describe('Group Sync Functions', () => {
       const result = await syncGroupMembers(feedId, userAddress);
 
       expect(result.success).toBe(true);
-      expect(result.data).toEqual([]);
+      expect(result.members).toEqual([]);
+      expect(result.newMembers).toEqual([]);
     });
 
     it('should use truncated address when identity lookup fails', async () => {
@@ -123,7 +129,65 @@ describe('Group Sync Functions', () => {
       const result = await syncGroupMembers(feedId, userAddress);
 
       expect(result.success).toBe(true);
-      expect(result.data![0].displayName).toBe('abcdefghij');
+      expect(result.members![0].displayName).toBe('abcdefghij');
+    });
+
+    it('should detect new members on subsequent syncs', async () => {
+      // Setup: Existing members in store
+      mockGetGroupMembers.mockReturnValue([
+        { publicAddress: 'addr1', displayName: 'Alice', role: 'Admin' },
+      ]);
+
+      // New member list includes addr1 + new member addr2
+      const mockMembers = [
+        { publicAddress: 'addr1', role: 'Admin' as const, joinedAtBlock: 100 },
+        { publicAddress: 'addr2', role: 'Member' as const, joinedAtBlock: 200 },
+      ];
+
+      vi.mocked(groupService.getGroupMembers).mockResolvedValue(mockMembers);
+      vi.mocked(identityService.getIdentity).mockImplementation(async (address: string) => ({
+        Successfull: true,
+        ProfileName: `Name for ${address}`,
+        PublicSigningAddress: address,
+        PublicEncryptAddress: 'encrypt',
+        IsPublic: true,
+        Message: '',
+      }));
+
+      const result = await syncGroupMembers(feedId, userAddress);
+
+      expect(result.success).toBe(true);
+      expect(result.members).toHaveLength(2);
+      expect(result.newMembers).toHaveLength(1);
+      expect(result.newMembers![0].publicAddress).toBe('addr2');
+    });
+
+    it('should not report current user as new member', async () => {
+      // Setup: Existing members in store (just one other member)
+      mockGetGroupMembers.mockReturnValue([
+        { publicAddress: 'other-addr', displayName: 'Other', role: 'Admin' },
+      ]);
+
+      // Current user joins the group
+      const mockMembers = [
+        { publicAddress: 'other-addr', role: 'Admin' as const, joinedAtBlock: 100 },
+        { publicAddress: userAddress, role: 'Member' as const, joinedAtBlock: 200 },
+      ];
+
+      vi.mocked(groupService.getGroupMembers).mockResolvedValue(mockMembers);
+      vi.mocked(identityService.getIdentity).mockImplementation(async (address: string) => ({
+        Successfull: true,
+        ProfileName: `Name for ${address}`,
+        PublicSigningAddress: address,
+        PublicEncryptAddress: 'encrypt',
+        IsPublic: true,
+        Message: '',
+      }));
+
+      const result = await syncGroupMembers(feedId, userAddress);
+
+      expect(result.success).toBe(true);
+      expect(result.newMembers).toHaveLength(0); // Current user excluded from new members
     });
 
     it('should set user role when user is in member list', async () => {

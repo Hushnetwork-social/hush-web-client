@@ -1,10 +1,12 @@
 "use client";
 
+import { useMemo } from "react";
 import { useAppStore } from "@/stores";
 import { useFeedsStore } from "@/modules/feeds";
 import { notificationService } from "@/lib/grpc/services";
 import { ChatListItem } from "./ChatListItem";
 import { MessageSquare, Loader2 } from "lucide-react";
+import type { GroupFeedMember } from "@/types";
 
 interface FeedListProps {
   onFeedSelect?: (feedId: string) => void;
@@ -16,6 +18,7 @@ export function FeedList({ onFeedSelect }: FeedListProps) {
   const messages = useFeedsStore((state) => state.messages);
   const isSyncing = useFeedsStore((state) => state.isSyncing);
   const markFeedAsRead = useFeedsStore((state) => state.markFeedAsRead);
+  const groupMembersMap = useFeedsStore((state) => state.groupMembers);
 
   // UI state from app store
   const { selectedFeedId, selectFeed, isLoading, credentials } = useAppStore();
@@ -64,7 +67,7 @@ export function FeedList({ onFeedSelect }: FeedListProps) {
 
   // Get last message for a feed
   // For group feeds, find the last message the user can actually read (has decryption key for)
-  const getLastMessage = (feedId: string): { content: string; timestamp: number; senderName?: string } | null => {
+  const getLastMessage = (feedId: string): { content: string; timestamp: number; senderPublicKey?: string } | null => {
     const feedMessages = messages[feedId];
     if (!feedMessages || feedMessages.length === 0) return null;
 
@@ -82,9 +85,28 @@ export function FeedList({ onFeedSelect }: FeedListProps) {
     return {
       content: lastMsg.content,
       timestamp: lastMsg.timestamp,
-      // For group feeds, we'd want to show the sender name in the preview
-      // This will be enhanced when identity lookup is integrated
+      senderPublicKey: lastMsg.senderPublicKey,
     };
+  };
+
+  // Create O(1) lookup maps for all group members across all feeds
+  const allMemberLookups = useMemo(() => {
+    const lookups: Record<string, Map<string, GroupFeedMember>> = {};
+    for (const [feedId, members] of Object.entries(groupMembersMap)) {
+      lookups[feedId] = new Map(members.map(m => [m.publicAddress, m]));
+    }
+    return lookups;
+  }, [groupMembersMap]);
+
+  // Get sender display name for a group feed message
+  const getSenderDisplayName = (feedId: string, senderPublicKey: string | undefined): string | undefined => {
+    if (!senderPublicKey) return undefined;
+    // Skip for own messages (don't show "You: message" in preview)
+    if (senderPublicKey === credentials?.signingPublicKey) return undefined;
+    const memberLookup = allMemberLookups[feedId];
+    if (!memberLookup) return undefined;
+    const member = memberLookup.get(senderPublicKey);
+    return member?.displayName ?? senderPublicKey.substring(0, 10) + '...';
   };
 
   // Format message preview for groups (shows sender name)
@@ -125,8 +147,12 @@ export function FeedList({ onFeedSelect }: FeedListProps) {
       {feeds.map((feed) => {
         const lastMessage = getLastMessage(feed.id);
         const isPersonalFeed = feed.type === 'personal';
+        // For group feeds, resolve sender name from group members
+        const senderName = feed.type === 'group'
+          ? getSenderDisplayName(feed.id, lastMessage?.senderPublicKey)
+          : undefined;
         const messagePreview = lastMessage
-          ? formatMessagePreview(lastMessage.content, feed.type, lastMessage.senderName)
+          ? formatMessagePreview(lastMessage.content, feed.type, senderName)
           : "No messages yet";
         return (
           <ChatListItem

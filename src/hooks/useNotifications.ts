@@ -15,6 +15,7 @@ import { fetchMessages } from '@/modules/feeds/FeedsService';
 import { aesDecrypt } from '@/lib/crypto/encryption';
 import { detectPlatform } from '@/lib/platform';
 import { showNotification as showPlatformNotification } from '@/lib/notifications';
+import { onMemberJoin } from '@/lib/events';
 import type { FeedEventResponse } from '@/lib/grpc/grpc-web-helper';
 import { debugLog, debugError } from '@/lib/debug-logger';
 
@@ -86,15 +87,15 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
     setToasts((prev) => prev.filter((t) => t.id !== toastId));
   }, []);
 
-  // Fetch new messages for a specific feed (called when notification arrives for active feed)
+  // Fetch new messages for a specific feed (called when notification arrives)
   const fetchMessagesForFeed = useCallback(
     async (feedId: string) => {
       const currentUserId = userIdRef.current;
       if (!currentUserId) return;
 
       try {
-        debugLog(`[useNotifications] Fetching new messages for active feed ${feedId.substring(0, 8)}...`);
-        const { syncMetadata, feeds, addMessages } = useFeedsStore.getState();
+        debugLog(`[useNotifications] Fetching new messages for feed ${feedId.substring(0, 8)}...`);
+        const { syncMetadata, feeds, addMessages, getGroupKeyState } = useFeedsStore.getState();
 
         // Fetch messages from the last synced block
         const response = await fetchMessages(currentUserId, syncMetadata.lastMessageBlockIndex, syncMetadata.lastReactionTallyVersion);
@@ -105,29 +106,73 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
         if (feedMessages.length > 0) {
           debugLog(`[useNotifications] Found ${feedMessages.length} new message(s) for feed ${feedId.substring(0, 8)}...`);
 
-          // Get feed's AES key for decryption
           const feed = feeds.find(f => f.id === feedId);
-          const feedAesKey = feed?.aesKey;
 
-          if (feedAesKey) {
-            // Decrypt messages
-            const decryptedMessages = await Promise.all(
-              feedMessages.map(async (msg) => {
-                try {
-                  const decryptedContent = await aesDecrypt(msg.content, feedAesKey);
+          // Handle group feeds with multi-key decryption
+          if (feed?.type === 'group') {
+            const keyState = getGroupKeyState(feedId);
+            if (keyState && keyState.keyGenerations.length > 0) {
+              // Get all available AES keys, sorted by keyGeneration descending (try newest first)
+              const keysToTry = [...keyState.keyGenerations]
+                .filter(kg => kg.aesKey)
+                .sort((a, b) => b.keyGeneration - a.keyGeneration);
+
+              const decryptedMessages = await Promise.all(
+                feedMessages.map(async (msg) => {
+                  // Try each key until one works
+                  for (const keyGen of keysToTry) {
+                    try {
+                      const decryptedContent = await aesDecrypt(msg.content, keyGen.aesKey);
+                      return {
+                        ...msg,
+                        content: decryptedContent,
+                        contentEncrypted: msg.content,
+                        keyGeneration: keyGen.keyGeneration,
+                        decryptionFailed: false,
+                      };
+                    } catch {
+                      continue;
+                    }
+                  }
+                  // All keys failed
                   return {
                     ...msg,
-                    content: decryptedContent,
                     contentEncrypted: msg.content,
+                    decryptionFailed: true,
                   };
-                } catch {
-                  return msg;
-                }
-              })
-            );
-            addMessages(feedId, decryptedMessages);
+                })
+              );
+              addMessages(feedId, decryptedMessages);
+            } else {
+              // No keys available for group feed
+              addMessages(feedId, feedMessages.map(msg => ({
+                ...msg,
+                contentEncrypted: msg.content,
+                decryptionFailed: true,
+              })));
+            }
           } else {
-            addMessages(feedId, feedMessages);
+            // Non-group feeds: Use the single AES key
+            const feedAesKey = feed?.aesKey;
+            if (feedAesKey) {
+              const decryptedMessages = await Promise.all(
+                feedMessages.map(async (msg) => {
+                  try {
+                    const decryptedContent = await aesDecrypt(msg.content, feedAesKey);
+                    return {
+                      ...msg,
+                      content: decryptedContent,
+                      contentEncrypted: msg.content,
+                    };
+                  } catch {
+                    return msg;
+                  }
+                })
+              );
+              addMessages(feedId, decryptedMessages);
+            } else {
+              addMessages(feedId, feedMessages);
+            }
           }
 
           // Update sync metadata
@@ -137,17 +182,41 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
           });
         }
       } catch (error) {
-        debugError('[useNotifications] Failed to fetch messages for active feed:', error);
+        debugError('[useNotifications] Failed to fetch messages for feed:', error);
       }
     },
     []
   );
 
-  // Decrypt message preview using feed's AES key
+  // Decrypt message preview using feed's AES key (or group keys for group feeds)
   const decryptMessagePreview = useCallback(
     async (feedId: string, encryptedPreview: string): Promise<string> => {
       try {
         const feed = getFeed(feedId);
+
+        // For group feeds, try all available keys
+        if (feed?.type === 'group') {
+          const keyState = useFeedsStore.getState().getGroupKeyState(feedId);
+          if (keyState && keyState.keyGenerations.length > 0) {
+            // Try keys from newest to oldest
+            const keysToTry = [...keyState.keyGenerations]
+              .filter(kg => kg.aesKey)
+              .sort((a, b) => b.keyGeneration - a.keyGeneration);
+
+            for (const keyGen of keysToTry) {
+              try {
+                const decrypted = await aesDecrypt(encryptedPreview, keyGen.aesKey);
+                return decrypted;
+              } catch {
+                continue;
+              }
+            }
+          }
+          debugLog('[useNotifications] No group key could decrypt preview');
+          return 'New message';
+        }
+
+        // Non-group feeds: use single AES key
         if (!feed?.aesKey) {
           debugLog('[useNotifications] No AES key for feed, showing fallback');
           return 'New message';
@@ -179,6 +248,12 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
             } else {
               incrementUnreadCount(event.feedId);
             }
+
+            // Fetch the new message so the feed list can show the updated preview
+            // This runs in the background - don't block toast display
+            fetchMessagesForFeed(event.feedId).catch((err) => {
+              debugError('[useNotifications] Failed to fetch message for non-active feed:', err);
+            });
 
             // Decrypt message preview for notification
             const decryptedPreview = event.messagePreview
@@ -356,6 +431,45 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, userId]);
+
+  // Subscribe to member join events for toast notifications
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const unsubscribe = onMemberJoin((event) => {
+      debugLog(`[useNotifications] Member join event: ${event.member.displayName} joined ${event.feedName}`);
+
+      // Use current selectedFeedId from ref (not stale closure)
+      const currentSelectedFeedId = selectedFeedIdRef.current;
+
+      // Only show notification if user is not currently viewing this group
+      if (event.feedId !== currentSelectedFeedId) {
+        const platform = detectPlatform();
+
+        if (platform === 'tauri') {
+          // Tauri: Use native OS notification
+          showPlatformNotification({
+            feedId: event.feedId,
+            senderName: event.feedName,
+            messagePreview: `${event.member.displayName} joined the group`,
+            timestamp: event.timestamp,
+          });
+        } else {
+          // Browser: Use in-app toast
+          const toast: NotificationToast = {
+            id: `member-join-${event.feedId}-${event.member.publicAddress}-${event.timestamp}`,
+            feedId: event.feedId,
+            senderName: event.feedName,
+            messagePreview: `${event.member.displayName} joined the group`,
+            timestamp: event.timestamp,
+          };
+          addToast(toast);
+        }
+      }
+    });
+
+    return unsubscribe;
+  }, [isAuthenticated, addToast]);
 
   return {
     isConnected,
