@@ -17,14 +17,23 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useUnreadBadge, UNREAD_BADGE_CONSTANTS, getBadgeIconPath, isBadgingApiSupported } from './useUnreadBadge';
 
-// Mock the feeds store
-const mockGetTotalUnreadCount = vi.fn();
+// Mock unread count - controls what the selector returns
+let mockUnreadCount = 0;
 
 vi.mock('@/modules/feeds', () => ({
-  useFeedsStore: (selector: (state: { getTotalUnreadCount: () => number }) => number) => {
-    return selector({ getTotalUnreadCount: mockGetTotalUnreadCount });
+  useFeedsStore: (selector: (state: { feeds: Array<{ unreadCount?: number }> }) => number) => {
+    // Create mock feeds array that will produce the desired total
+    const mockFeeds = mockUnreadCount > 0 ? [{ unreadCount: mockUnreadCount }] : [];
+    return selector({ feeds: mockFeeds });
   },
 }));
+
+// Helper to set mock unread count (replaces mockGetTotalUnreadCount.mockReturnValue)
+const mockGetTotalUnreadCount = {
+  mockReturnValue: (value: number) => {
+    mockUnreadCount = value;
+  },
+};
 
 // Mock platform detection - default to browser
 vi.mock('@/lib/platform', () => ({

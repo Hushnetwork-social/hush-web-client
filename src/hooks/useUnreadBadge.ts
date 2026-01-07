@@ -124,8 +124,11 @@ async function clearPwaBadge(): Promise<void> {
  * Implements browser tab title flashing, Tauri taskbar overlay, and PWA app badge.
  */
 export function useUnreadBadge(): void {
-  const getTotalUnreadCount = useFeedsStore((state) => state.getTotalUnreadCount);
-  const unreadCount = getTotalUnreadCount();
+  // Subscribe to the computed unread count directly for proper reactivity
+  // We compute the total inside the selector so Zustand re-renders when feeds change
+  const unreadCount = useFeedsStore((state) =>
+    state.feeds.reduce((total, feed) => total + (feed.unreadCount || 0), 0)
+  );
 
   const flashIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const showingCountRef = useRef(true);
