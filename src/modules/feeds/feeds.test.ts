@@ -110,6 +110,24 @@ describe('useFeedsStore', () => {
       expect(feeds).toHaveLength(2);
     });
 
+    it('should preserve unreadCount when merging feeds from server', () => {
+      // Set up a feed with unread count
+      const feedWithUnread = { ...sampleChatFeed, unreadCount: 5 };
+      useFeedsStore.getState().setFeeds([feedWithUnread]);
+
+      // Verify initial unread count
+      expect(useFeedsStore.getState().feeds[0].unreadCount).toBe(5);
+
+      // Simulate server sync - server feed has unreadCount: 0 (server doesn't track this)
+      const serverFeed = { ...sampleChatFeed, unreadCount: 0 };
+      useFeedsStore.getState().addFeeds([serverFeed]);
+
+      // unreadCount should be preserved (not overwritten by server's 0)
+      const feeds = useFeedsStore.getState().feeds;
+      expect(feeds).toHaveLength(1);
+      expect(feeds[0].unreadCount).toBe(5);
+    });
+
     it('should detect personal feed', () => {
       expect(useFeedsStore.getState().hasPersonalFeed()).toBe(false);
 
