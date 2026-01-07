@@ -412,7 +412,25 @@ export const useFeedsStore = create<FeedsStore>()(
           // Sort messages by timestamp to ensure correct order
           updatedMessages.sort((a, b) => a.timestamp - b.timestamp);
 
+          // Update the feed's updatedAt to reflect new activity
+          // This ensures feeds with recent messages appear at the top of the list
+          const latestMessageTimestamp = trulyNewMessages.length > 0
+            ? Math.max(...trulyNewMessages.map((m) => m.timestamp))
+            : null;
+
+          let updatedFeeds = state.feeds;
+          if (latestMessageTimestamp) {
+            updatedFeeds = state.feeds.map((feed) =>
+              feed.id === feedId
+                ? { ...feed, updatedAt: Math.max(feed.updatedAt, latestMessageTimestamp) }
+                : feed
+            );
+            // Re-sort feeds to maintain order (personal first, then by updatedAt)
+            updatedFeeds = sortFeeds(updatedFeeds);
+          }
+
           return {
+            feeds: updatedFeeds,
             messages: {
               ...state.messages,
               [feedId]: updatedMessages,
@@ -423,12 +441,24 @@ export const useFeedsStore = create<FeedsStore>()(
 
       addPendingMessage: (feedId, message) => {
         debugLog(`[FeedsStore] addPendingMessage: feedId=${feedId}, messageId=${message.id}, isConfirmed=${message.isConfirmed}`);
-        set((state) => ({
-          messages: {
-            ...state.messages,
-            [feedId]: [...(state.messages[feedId] || []), message],
-          },
-        }));
+        set((state) => {
+          // Update the feed's updatedAt to reflect the new message activity
+          const updatedFeeds = sortFeeds(
+            state.feeds.map((feed) =>
+              feed.id === feedId
+                ? { ...feed, updatedAt: Math.max(feed.updatedAt, message.timestamp) }
+                : feed
+            )
+          );
+
+          return {
+            feeds: updatedFeeds,
+            messages: {
+              ...state.messages,
+              [feedId]: [...(state.messages[feedId] || []), message],
+            },
+          };
+        });
       },
 
       setSyncMetadata: (metadata) =>
