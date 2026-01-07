@@ -31,6 +31,7 @@ export function getBadgeIconPath(count: number): string | null {
 /**
  * Update Tauri window overlay icon
  * Uses dynamic import to avoid bundling Tauri in browser builds
+ * Fetches icon as bytes since Tauri needs actual image data, not web paths
  */
 async function updateTauriOverlay(count: number): Promise<void> {
   try {
@@ -41,10 +42,16 @@ async function updateTauriOverlay(count: number): Promise<void> {
       // Clear the overlay icon (undefined clears it in Tauri)
       await window.setOverlayIcon(undefined);
     } else {
-      // Set the overlay icon with the appropriate badge
+      // Get the icon path and fetch it as bytes
       const iconPath = getBadgeIconPath(count);
       if (iconPath) {
-        await window.setOverlayIcon(iconPath);
+        // Fetch the icon from the web server and convert to Uint8Array
+        const response = await fetch(iconPath);
+        if (response.ok) {
+          const arrayBuffer = await response.arrayBuffer();
+          const iconBytes = new Uint8Array(arrayBuffer);
+          await window.setOverlayIcon(iconBytes);
+        }
       }
     }
   } catch (error) {
