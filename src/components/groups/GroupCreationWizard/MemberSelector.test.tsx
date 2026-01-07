@@ -369,16 +369,17 @@ describe("MemberSelector", () => {
   });
 
   describe("Next button behavior", () => {
-    it("is disabled when no members selected", () => {
+    it("is enabled even when no members selected (members are optional)", () => {
       render(<MemberSelector {...defaultProps} />);
 
       const nextButton = screen.getByRole("button", {
         name: "Proceed to next step",
       });
-      expect(nextButton).toBeDisabled();
+      // Members are optional for Private groups - button should be enabled
+      expect(nextButton).not.toBeDisabled();
     });
 
-    it("is enabled when at least one member selected", () => {
+    it("is enabled when members are selected", () => {
       const selectedMembers: SelectedMember[] = [
         {
           publicSigningAddress: "alice-address",
@@ -400,7 +401,18 @@ describe("MemberSelector", () => {
       expect(nextButton).not.toBeDisabled();
     });
 
-    it("calls onNext when clicked", () => {
+    it("calls onNext when clicked with no members", () => {
+      render(<MemberSelector {...defaultProps} />);
+
+      const nextButton = screen.getByRole("button", {
+        name: "Proceed to next step",
+      });
+      fireEvent.click(nextButton);
+
+      expect(mockOnNext).toHaveBeenCalled();
+    });
+
+    it("calls onNext when clicked with members selected", () => {
       const selectedMembers: SelectedMember[] = [
         {
           publicSigningAddress: "alice-address",
@@ -422,6 +434,47 @@ describe("MemberSelector", () => {
       fireEvent.click(nextButton);
 
       expect(mockOnNext).toHaveBeenCalled();
+    });
+  });
+
+  describe("Back button behavior", () => {
+    it("does not render back button when onBack is not provided", () => {
+      render(<MemberSelector {...defaultProps} />);
+
+      expect(
+        screen.queryByRole("button", { name: /back/i })
+      ).not.toBeInTheDocument();
+    });
+
+    it("renders back button when onBack is provided", () => {
+      const mockOnBack = vi.fn();
+      render(<MemberSelector {...defaultProps} onBack={mockOnBack} />);
+
+      expect(
+        screen.getByRole("button", { name: /back to type selection/i })
+      ).toBeInTheDocument();
+    });
+
+    it("calls onBack when back button is clicked", () => {
+      const mockOnBack = vi.fn();
+      render(<MemberSelector {...defaultProps} onBack={mockOnBack} />);
+
+      const backButton = screen.getByRole("button", {
+        name: /back to type selection/i,
+      });
+      fireEvent.click(backButton);
+
+      expect(mockOnBack).toHaveBeenCalled();
+    });
+  });
+
+  describe("Optional members indicator", () => {
+    it("shows optional text in footer", () => {
+      render(<MemberSelector {...defaultProps} />);
+
+      expect(
+        screen.getByText("(optional - you can add members later)")
+      ).toBeInTheDocument();
     });
   });
 

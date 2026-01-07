@@ -4,6 +4,8 @@ import { useState, useCallback, useEffect, memo } from "react";
 import { X } from "lucide-react";
 import { MemberSelector, type SelectedMember } from "./MemberSelector";
 import { GroupDetailsForm } from "./GroupDetailsForm";
+import { TypeSelectionStep } from "./TypeSelectionStep";
+import { useCreateGroupFlow, type GroupType } from "./useCreateGroupFlow";
 import { useAppStore } from "@/stores";
 import { useFeedsStore } from "@/modules/feeds";
 import { debugLog, debugError } from "@/lib/debug-logger";
@@ -23,17 +25,19 @@ interface GroupCreationWizardProps {
 /**
  * Group Creation Wizard
  *
- * A 2-step wizard for creating group feeds:
- * - Step 1: Select members to invite
- * - Step 2: Configure group details (name, description, visibility)
+ * A multi-step wizard for creating group feeds:
+ * - Public groups: 2 steps (Type Selection → Group Details)
+ * - Private groups: 3 steps (Type Selection → Member Selection → Group Details)
  */
 export const GroupCreationWizard = memo(function GroupCreationWizard({
   isOpen,
   onClose,
   onGroupCreated,
 }: GroupCreationWizardProps) {
-  const [currentStep, setCurrentStep] = useState<1 | 2>(1);
-  const [selectedMembers, setSelectedMembers] = useState<SelectedMember[]>([]);
+  // Flow state management via custom hook
+  const flow = useCreateGroupFlow();
+
+  // Local UI state
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,12 +48,11 @@ export const GroupCreationWizard = memo(function GroupCreationWizard({
   // Reset state when wizard closes
   useEffect(() => {
     if (!isOpen) {
-      setCurrentStep(1);
-      setSelectedMembers([]);
+      flow.reset();
       setIsCreating(false);
       setError(null);
     }
-  }, [isOpen]);
+  }, [isOpen, flow]);
 
   // Handle escape key
   useEffect(() => {
@@ -63,17 +66,26 @@ export const GroupCreationWizard = memo(function GroupCreationWizard({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, isCreating, onClose]);
 
-  // Proceed to step 2
-  const handleNext = useCallback(() => {
-    setCurrentStep(2);
-    setError(null);
-  }, []);
+  // Handle type selection
+  const handleTypeSelect = useCallback(
+    (type: GroupType) => {
+      flow.setGroupType(type);
+      setError(null);
+    },
+    [flow]
+  );
 
-  // Go back to step 1
-  const handleBack = useCallback(() => {
-    setCurrentStep(1);
+  // Proceed to next step
+  const handleNext = useCallback(() => {
+    flow.goNext();
     setError(null);
-  }, []);
+  }, [flow]);
+
+  // Go back to previous step
+  const handleBack = useCallback(() => {
+    flow.goBack();
+    setError(null);
+  }, [flow]);
 
   // Create the group
   const handleCreate = useCallback(
@@ -88,10 +100,10 @@ export const GroupCreationWizard = memo(function GroupCreationWizard({
 
       try {
         debugLog("[GroupCreationWizard] Creating group:", data.name);
-        debugLog("[GroupCreationWizard] Selected members:", selectedMembers.length);
+        debugLog("[GroupCreationWizard] Selected members:", flow.selectedMembers.length);
 
         // Convert selected members to GroupParticipantInput format
-        const participants: GroupParticipantInput[] = selectedMembers.map((m) => ({
+        const participants: GroupParticipantInput[] = flow.selectedMembers.map((m) => ({
           publicSigningAddress: m.publicSigningAddress,
           publicEncryptAddress: m.publicEncryptAddress,
         }));
@@ -130,7 +142,7 @@ export const GroupCreationWizard = memo(function GroupCreationWizard({
           name: data.name,
           participants: [
             credentials.signingPublicKey,
-            ...selectedMembers.map((m) => m.publicSigningAddress),
+            ...flow.selectedMembers.map((m) => m.publicSigningAddress),
           ],
           unreadCount: 0,
           createdAt: Date.now(),
@@ -150,7 +162,7 @@ export const GroupCreationWizard = memo(function GroupCreationWizard({
             displayName: currentUser.displayName,
             role: "Admin",
           },
-          ...selectedMembers.map((m) => ({
+          ...flow.selectedMembers.map((m) => ({
             publicAddress: m.publicSigningAddress,
             displayName: m.displayName,
             role: "Member" as const,
@@ -169,7 +181,7 @@ export const GroupCreationWizard = memo(function GroupCreationWizard({
         setIsCreating(false);
       }
     },
-    [credentials, currentUser, selectedMembers, onGroupCreated, onClose]
+    [credentials, currentUser, flow.selectedMembers, onGroupCreated, onClose]
   );
 
   // Handle close
@@ -206,10 +218,14 @@ export const GroupCreationWizard = memo(function GroupCreationWizard({
               id="wizard-title"
               className="text-lg font-semibold text-hush-text-primary"
             >
-              Create Group
+              {flow.currentStep === "type"
+                ? "Create Group"
+                : `Create ${flow.groupType === "public" ? "Public" : "Private"} Group`}
             </h2>
             <p className="text-xs text-hush-text-accent mt-0.5">
-              Step {currentStep} of 2
+              {flow.groupType === null
+                ? "Step 1: Choose Type"
+                : `Step ${flow.currentStepNumber} of ${flow.totalSteps}`}
             </p>
           </div>
           <button
@@ -234,18 +250,28 @@ export const GroupCreationWizard = memo(function GroupCreationWizard({
 
         {/* Step Content */}
         <div className="flex-1 min-h-0 overflow-hidden">
-          {currentStep === 1 ? (
-            <MemberSelector
-              selectedMembers={selectedMembers}
-              onMembersChange={setSelectedMembers}
+          {flow.currentStep === "type" && (
+            <TypeSelectionStep
+              selectedType={flow.groupType}
+              onTypeSelect={handleTypeSelect}
               onNext={handleNext}
             />
-          ) : (
+          )}
+          {flow.currentStep === "members" && (
+            <MemberSelector
+              selectedMembers={flow.selectedMembers}
+              onMembersChange={flow.setSelectedMembers}
+              onNext={handleNext}
+              onBack={handleBack}
+            />
+          )}
+          {flow.currentStep === "details" && (
             <GroupDetailsForm
-              selectedMembers={selectedMembers}
+              selectedMembers={flow.selectedMembers}
               onBack={handleBack}
               onCreate={handleCreate}
               isCreating={isCreating}
+              groupType={flow.groupType}
             />
           )}
         </div>
