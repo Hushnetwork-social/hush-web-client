@@ -82,7 +82,7 @@ export const TypeSelectionStep = memo(function TypeSelectionStep({
           aria-label="Group type selection"
           aria-orientation="horizontal"
           onKeyDown={handleKeyDown}
-          className="flex flex-col md:flex-row gap-4"
+          className="flex flex-col md:flex-row gap-4 items-stretch"
         >
           {/* Public Card */}
           <div className="flex-1" ref={publicCardRef}>

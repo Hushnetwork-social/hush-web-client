@@ -57,7 +57,7 @@ export const TypeSelectionCard = memo(function TypeSelectionCard({
       onClick={handleClick}
       onKeyDown={handleKeyDown}
       className={`
-        relative flex flex-col items-center p-6 rounded-xl border-2 cursor-pointer
+        relative flex flex-col items-center p-6 rounded-xl border-2 cursor-pointer h-full
         transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark
         ${
           selected
