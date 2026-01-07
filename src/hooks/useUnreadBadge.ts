@@ -4,7 +4,7 @@
  * Manages visual indicators for unread messages across different platforms:
  * - Browser: Flashing tab title showing unread count
  * - Tauri (Windows): Taskbar overlay icon with numeric badge
- * - iOS PWA: App icon badge (handled in Phase 4)
+ * - iOS PWA: App icon numeric badge using Web App Badging API
  */
 
 'use client';
@@ -68,9 +68,60 @@ async function clearTauriOverlay(): Promise<void> {
 }
 
 /**
+ * TypeScript type for Badging API methods
+ * The Badging API is available on iOS 16.4+ PWAs and some desktop browsers
+ */
+type BadgingNavigator = {
+  setAppBadge?: (count?: number) => Promise<void>;
+  clearAppBadge?: () => Promise<void>;
+};
+
+/**
+ * Check if the Web App Badging API is available
+ */
+export function isBadgingApiSupported(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return 'setAppBadge' in navigator;
+}
+
+/**
+ * Update PWA app badge using the Web App Badging API
+ * Works on iOS 16.4+ when installed as PWA on home screen
+ */
+async function updatePwaBadge(count: number): Promise<void> {
+  try {
+    const nav = navigator as unknown as BadgingNavigator;
+    if (nav.setAppBadge) {
+      if (count === 0) {
+        await nav.clearAppBadge?.();
+      } else {
+        await nav.setAppBadge(count);
+      }
+    }
+  } catch {
+    // Silently fail if Badging API is not available or errors
+    // This can happen if the app is not installed as PWA
+    console.debug('[useUnreadBadge] PWA badge update failed');
+  }
+}
+
+/**
+ * Clear PWA app badge
+ */
+async function clearPwaBadge(): Promise<void> {
+  try {
+    const nav = navigator as unknown as BadgingNavigator;
+    if (nav.clearAppBadge) {
+      await nav.clearAppBadge();
+    }
+  } catch {
+    // Silently fail if not supported
+  }
+}
+
+/**
  * Hook that updates visual badge indicators based on unread message count.
- * Implements browser tab title flashing and Tauri taskbar overlay.
- * PWA badge support will be added in Phase 4.
+ * Implements browser tab title flashing, Tauri taskbar overlay, and PWA app badge.
  */
 export function useUnreadBadge(): void {
   const getTotalUnreadCount = useFeedsStore((state) => state.getTotalUnreadCount);
@@ -123,14 +174,10 @@ export function useUnreadBadge(): void {
         document.title = FULL_TITLE;
         break;
       case 'mobile-pwa':
-        // PWA badge clearing will be implemented in Phase 4
-        if ('clearAppBadge' in navigator) {
-          (navigator as Navigator & { clearAppBadge: () => Promise<void> })
-            .clearAppBadge()
-            .catch(() => {
-              // Silently fail if not supported
-            });
-        }
+        // Clear PWA app badge
+        clearPwaBadge();
+        // Also clear browser title as fallback
+        document.title = FULL_TITLE;
         break;
     }
   }, []);
@@ -161,8 +208,9 @@ export function useUnreadBadge(): void {
         updateBrowserTitle(unreadCount);
         break;
       case 'mobile-pwa':
-        // PWA badge will be implemented in Phase 4
-        // For now, use browser title as fallback
+        // Update PWA app badge (iOS 16.4+)
+        updatePwaBadge(unreadCount);
+        // Also update browser title as fallback for unsupported platforms
         updateBrowserTitle(unreadCount);
         break;
     }

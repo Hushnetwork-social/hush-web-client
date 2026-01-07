@@ -10,11 +10,12 @@
  * 6. Platform detection for browser
  * 7. Badge icon path generation (getBadgeIconPath)
  * 8. Tauri overlay integration
+ * 9. PWA Badging API integration
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useUnreadBadge, UNREAD_BADGE_CONSTANTS, getBadgeIconPath } from './useUnreadBadge';
+import { useUnreadBadge, UNREAD_BADGE_CONSTANTS, getBadgeIconPath, isBadgingApiSupported } from './useUnreadBadge';
 
 // Mock the feeds store
 const mockGetTotalUnreadCount = vi.fn();
@@ -397,6 +398,183 @@ describe('Tauri Platform Integration', () => {
 
   it('should restore title when count becomes 0 on tauri', () => {
     mockDetectPlatform.mockReturnValue('tauri');
+    mockGetTotalUnreadCount.mockReturnValue(5);
+    const { rerender } = renderHook(() => useUnreadBadge());
+
+    expect(document.title).toBe('(5) Hush Feeds');
+
+    mockGetTotalUnreadCount.mockReturnValue(0);
+    rerender();
+
+    expect(document.title).toBe(UNREAD_BADGE_CONSTANTS.FULL_TITLE);
+  });
+});
+
+describe('isBadgingApiSupported', () => {
+  const originalNavigator = global.navigator;
+
+  afterEach(() => {
+    // Restore original navigator
+    Object.defineProperty(global, 'navigator', {
+      value: originalNavigator,
+      writable: true,
+    });
+  });
+
+  it('should return false when navigator is undefined', () => {
+    // Temporarily make navigator undefined
+    Object.defineProperty(global, 'navigator', {
+      value: undefined,
+      writable: true,
+    });
+
+    expect(isBadgingApiSupported()).toBe(false);
+  });
+
+  it('should return false when setAppBadge is not in navigator', () => {
+    // Mock navigator without setAppBadge
+    Object.defineProperty(global, 'navigator', {
+      value: { userAgent: 'test' },
+      writable: true,
+    });
+
+    expect(isBadgingApiSupported()).toBe(false);
+  });
+
+  it('should return true when setAppBadge is in navigator', () => {
+    // Mock navigator with setAppBadge
+    Object.defineProperty(global, 'navigator', {
+      value: {
+        userAgent: 'test',
+        setAppBadge: vi.fn(),
+      },
+      writable: true,
+    });
+
+    expect(isBadgingApiSupported()).toBe(true);
+  });
+});
+
+describe('PWA Badge Integration', () => {
+  let mockSetAppBadge: ReturnType<typeof vi.fn>;
+  let mockClearAppBadge: ReturnType<typeof vi.fn>;
+  const originalNavigator = global.navigator;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    document.title = UNREAD_BADGE_CONSTANTS.FULL_TITLE;
+    mockGetTotalUnreadCount.mockReturnValue(0);
+    mockDetectPlatform.mockReturnValue('mobile-pwa');
+
+    // Setup navigator mock with Badging API
+    mockSetAppBadge = vi.fn().mockResolvedValue(undefined);
+    mockClearAppBadge = vi.fn().mockResolvedValue(undefined);
+
+    Object.defineProperty(global, 'navigator', {
+      value: {
+        ...originalNavigator,
+        setAppBadge: mockSetAppBadge,
+        clearAppBadge: mockClearAppBadge,
+      },
+      writable: true,
+      configurable: true,
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+    document.title = UNREAD_BADGE_CONSTANTS.FULL_TITLE;
+
+    // Restore original navigator
+    Object.defineProperty(global, 'navigator', {
+      value: originalNavigator,
+      writable: true,
+      configurable: true,
+    });
+  });
+
+  it('should call setAppBadge when platform is mobile-pwa and count > 0', async () => {
+    mockGetTotalUnreadCount.mockReturnValue(5);
+
+    renderHook(() => useUnreadBadge());
+
+    // Allow microtasks to complete (async badge update)
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mockSetAppBadge).toHaveBeenCalledWith(5);
+  });
+
+  it('should call setAppBadge with correct count', async () => {
+    mockGetTotalUnreadCount.mockReturnValue(12);
+
+    renderHook(() => useUnreadBadge());
+
+    // Allow microtasks to complete
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mockSetAppBadge).toHaveBeenCalledWith(12);
+  });
+
+  it('should call clearAppBadge when count becomes 0', async () => {
+    mockGetTotalUnreadCount.mockReturnValue(5);
+    const { rerender } = renderHook(() => useUnreadBadge());
+
+    // Allow initial badge to be set
+    await Promise.resolve();
+    await Promise.resolve();
+
+    mockGetTotalUnreadCount.mockReturnValue(0);
+    rerender();
+
+    // Allow clearAppBadge to be called
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mockClearAppBadge).toHaveBeenCalled();
+  });
+
+  it('should still update browser title as fallback on mobile-pwa', () => {
+    mockGetTotalUnreadCount.mockReturnValue(3);
+
+    renderHook(() => useUnreadBadge());
+
+    expect(document.title).toBe('(3) Hush Feeds');
+  });
+
+  it('should not throw when Badging API is not available', () => {
+    // Remove badging API
+    Object.defineProperty(global, 'navigator', {
+      value: { userAgent: 'test' },
+      writable: true,
+      configurable: true,
+    });
+
+    mockGetTotalUnreadCount.mockReturnValue(5);
+
+    // Should not throw
+    expect(() => {
+      renderHook(() => useUnreadBadge());
+    }).not.toThrow();
+  });
+
+  it('should not call setAppBadge when platform is browser', async () => {
+    mockDetectPlatform.mockReturnValue('browser');
+    mockGetTotalUnreadCount.mockReturnValue(5);
+
+    renderHook(() => useUnreadBadge());
+
+    // Allow microtasks to complete
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // setAppBadge should NOT be called for browser platform
+    expect(mockSetAppBadge).not.toHaveBeenCalled();
+  });
+
+  it('should restore title when count becomes 0 on mobile-pwa', () => {
     mockGetTotalUnreadCount.mockReturnValue(5);
     const { rerender } = renderHook(() => useUnreadBadge());
 
