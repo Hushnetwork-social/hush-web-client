@@ -3,7 +3,7 @@
  *
  * Manages visual indicators for unread messages across different platforms:
  * - Browser: Flashing tab title showing unread count
- * - Tauri (Windows): Taskbar overlay icon (handled in Phase 3)
+ * - Tauri (Windows): Taskbar overlay icon with numeric badge
  * - iOS PWA: App icon badge (handled in Phase 4)
  */
 
@@ -19,9 +19,58 @@ const FULL_TITLE = 'Hush Feeds - Decentralized Messaging';
 const FLASH_INTERVAL_MS = 2000;
 
 /**
+ * Get the badge icon path for a given unread count
+ * Returns the appropriate badge icon path (1-9 or 9+)
+ */
+export function getBadgeIconPath(count: number): string | null {
+  if (count <= 0) return null;
+  if (count <= 9) return `/icons/badge-${count}.png`;
+  return '/icons/badge-9plus.png';
+}
+
+/**
+ * Update Tauri window overlay icon
+ * Uses dynamic import to avoid bundling Tauri in browser builds
+ */
+async function updateTauriOverlay(count: number): Promise<void> {
+  try {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    const window = getCurrentWindow();
+
+    if (count === 0) {
+      // Clear the overlay icon (undefined clears it in Tauri)
+      await window.setOverlayIcon(undefined);
+    } else {
+      // Set the overlay icon with the appropriate badge
+      const iconPath = getBadgeIconPath(count);
+      if (iconPath) {
+        await window.setOverlayIcon(iconPath);
+      }
+    }
+  } catch (error) {
+    // Silently fail if Tauri API is not available
+    // This can happen during SSR or in non-Tauri environments
+    console.debug('[useUnreadBadge] Tauri overlay update failed:', error);
+  }
+}
+
+/**
+ * Clear Tauri window overlay icon
+ */
+async function clearTauriOverlay(): Promise<void> {
+  try {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    const window = getCurrentWindow();
+    await window.setOverlayIcon(undefined);
+  } catch {
+    // Silently fail if Tauri API is not available
+  }
+}
+
+/**
  * Hook that updates visual badge indicators based on unread message count.
- * Currently implements browser tab title flashing.
- * Tauri and PWA badge support will be added in later phases.
+ * Implements browser tab title flashing and Tauri taskbar overlay.
+ * PWA badge support will be added in Phase 4.
  */
 export function useUnreadBadge(): void {
   const getTotalUnreadCount = useFeedsStore((state) => state.getTotalUnreadCount);
@@ -68,7 +117,10 @@ export function useUnreadBadge(): void {
         document.title = FULL_TITLE;
         break;
       case 'tauri':
-        // Tauri badge clearing will be implemented in Phase 3
+        // Clear Tauri overlay icon
+        clearTauriOverlay();
+        // Also clear browser title as fallback
+        document.title = FULL_TITLE;
         break;
       case 'mobile-pwa':
         // PWA badge clearing will be implemented in Phase 4
@@ -103,8 +155,9 @@ export function useUnreadBadge(): void {
         updateBrowserTitle(unreadCount);
         break;
       case 'tauri':
-        // Tauri overlay will be implemented in Phase 3
-        // For now, also use browser title as fallback
+        // Update Tauri taskbar overlay icon
+        updateTauriOverlay(unreadCount);
+        // Also update browser title as secondary indicator
         updateBrowserTitle(unreadCount);
         break;
       case 'mobile-pwa':

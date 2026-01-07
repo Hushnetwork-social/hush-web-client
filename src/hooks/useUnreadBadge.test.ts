@@ -8,11 +8,13 @@
  * 4. Title restores when count becomes 0
  * 5. Interval is cleaned up on unmount
  * 6. Platform detection for browser
+ * 7. Badge icon path generation (getBadgeIconPath)
+ * 8. Tauri overlay integration
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useUnreadBadge, UNREAD_BADGE_CONSTANTS } from './useUnreadBadge';
+import { useUnreadBadge, UNREAD_BADGE_CONSTANTS, getBadgeIconPath } from './useUnreadBadge';
 
 // Mock the feeds store
 const mockGetTotalUnreadCount = vi.fn();
@@ -27,6 +29,10 @@ vi.mock('@/modules/feeds', () => ({
 vi.mock('@/lib/platform', () => ({
   detectPlatform: vi.fn(() => 'browser'),
 }));
+
+// Import the mocked module to get a reference to the mock
+import { detectPlatform as mockDetectPlatformImport } from '@/lib/platform';
+const mockDetectPlatform = vi.mocked(mockDetectPlatformImport);
 
 describe('useUnreadBadge', () => {
   const { BASE_TITLE, FULL_TITLE, FLASH_INTERVAL_MS } = UNREAD_BADGE_CONSTANTS;
@@ -297,5 +303,108 @@ describe('useUnreadBadge', () => {
 
       expect(document.title).toBe('(5) Hush Feeds');
     });
+  });
+});
+
+describe('getBadgeIconPath', () => {
+  describe('Valid counts (1-9)', () => {
+    it('should return correct path for count 1', () => {
+      expect(getBadgeIconPath(1)).toBe('/icons/badge-1.png');
+    });
+
+    it('should return correct path for count 5', () => {
+      expect(getBadgeIconPath(5)).toBe('/icons/badge-5.png');
+    });
+
+    it('should return correct path for count 9', () => {
+      expect(getBadgeIconPath(9)).toBe('/icons/badge-9.png');
+    });
+
+    it('should return correct path for each count 1-9', () => {
+      for (let i = 1; i <= 9; i++) {
+        expect(getBadgeIconPath(i)).toBe(`/icons/badge-${i}.png`);
+      }
+    });
+  });
+
+  describe('Count > 9 (9+ badge)', () => {
+    it('should return 9plus path for count 10', () => {
+      expect(getBadgeIconPath(10)).toBe('/icons/badge-9plus.png');
+    });
+
+    it('should return 9plus path for count 15', () => {
+      expect(getBadgeIconPath(15)).toBe('/icons/badge-9plus.png');
+    });
+
+    it('should return 9plus path for count 99', () => {
+      expect(getBadgeIconPath(99)).toBe('/icons/badge-9plus.png');
+    });
+
+    it('should return 9plus path for very large count', () => {
+      expect(getBadgeIconPath(1000)).toBe('/icons/badge-9plus.png');
+    });
+  });
+
+  describe('Zero and negative counts', () => {
+    it('should return null for count 0', () => {
+      expect(getBadgeIconPath(0)).toBeNull();
+    });
+
+    it('should return null for negative count', () => {
+      expect(getBadgeIconPath(-1)).toBeNull();
+    });
+
+    it('should return null for negative large count', () => {
+      expect(getBadgeIconPath(-100)).toBeNull();
+    });
+  });
+});
+
+describe('Tauri Platform Integration', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    document.title = UNREAD_BADGE_CONSTANTS.FULL_TITLE;
+    mockGetTotalUnreadCount.mockReturnValue(0);
+    // Reset to browser by default
+    mockDetectPlatform.mockReturnValue('browser');
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+    document.title = UNREAD_BADGE_CONSTANTS.FULL_TITLE;
+  });
+
+  it('should still update browser title when platform is tauri', () => {
+    mockDetectPlatform.mockReturnValue('tauri');
+    mockGetTotalUnreadCount.mockReturnValue(5);
+
+    renderHook(() => useUnreadBadge());
+
+    // Browser title should be updated as secondary indicator
+    expect(document.title).toBe('(5) Hush Feeds');
+  });
+
+  it('should still update browser title when platform is mobile-pwa', () => {
+    mockDetectPlatform.mockReturnValue('mobile-pwa');
+    mockGetTotalUnreadCount.mockReturnValue(3);
+
+    renderHook(() => useUnreadBadge());
+
+    // Browser title should be updated as fallback
+    expect(document.title).toBe('(3) Hush Feeds');
+  });
+
+  it('should restore title when count becomes 0 on tauri', () => {
+    mockDetectPlatform.mockReturnValue('tauri');
+    mockGetTotalUnreadCount.mockReturnValue(5);
+    const { rerender } = renderHook(() => useUnreadBadge());
+
+    expect(document.title).toBe('(5) Hush Feeds');
+
+    mockGetTotalUnreadCount.mockReturnValue(0);
+    rerender();
+
+    expect(document.title).toBe(UNREAD_BADGE_CONSTANTS.FULL_TITLE);
   });
 });
