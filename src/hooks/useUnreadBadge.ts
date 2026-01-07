@@ -54,10 +54,8 @@ async function updateTauriOverlay(count: number): Promise<void> {
         }
       }
     }
-  } catch (error) {
+  } catch {
     // Silently fail if Tauri API is not available
-    // This can happen during SSR or in non-Tauri environments
-    console.debug('[useUnreadBadge] Tauri overlay update failed:', error);
   }
 }
 
