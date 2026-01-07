@@ -265,12 +265,14 @@ export const useFeedsStore = create<FeedsStore>()(
         const updatedFeeds = currentFeeds.map((existingFeed) => {
           const serverFeed = newFeedsMap.get(existingFeed.id);
           if (serverFeed) {
-            // Merge server data, preserving local-only data like decrypted aesKey
+            // Merge server data, preserving local-only data like decrypted aesKey and unreadCount
             return {
               ...existingFeed,
               ...serverFeed,
               // Keep the decrypted aesKey if we have it
               aesKey: existingFeed.aesKey || serverFeed.aesKey,
+              // Preserve unreadCount - server doesn't track this, it's client-side only
+              unreadCount: existingFeed.unreadCount ?? 0,
             };
           }
           return existingFeed;
