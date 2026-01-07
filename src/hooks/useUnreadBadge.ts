@@ -5,12 +5,18 @@
  * - Browser: Flashing tab title showing unread count
  * - Tauri (Windows): Taskbar overlay icon with numeric badge
  * - iOS PWA: App icon numeric badge using Web App Badging API
+ *
+ * Focus behavior:
+ * - When window/tab is NOT focused: Shows ALL unread messages (including selected feed)
+ * - When window/tab IS focused: Shows unread messages EXCLUDING the selected feed
+ *   (since the user is actively viewing that feed)
  */
 
 'use client';
 
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { useFeedsStore } from '@/modules/feeds';
+import { useAppStore } from '@/stores/useAppStore';
 import { detectPlatform, type Platform } from '@/lib/platform';
 
 // Constants
@@ -127,16 +133,59 @@ async function clearPwaBadge(): Promise<void> {
 /**
  * Hook that updates visual badge indicators based on unread message count.
  * Implements browser tab title flashing, Tauri taskbar overlay, and PWA app badge.
+ *
+ * The badge shows:
+ * - When window is NOT focused: Total unread from ALL feeds
+ * - When window IS focused: Total unread EXCLUDING the selected feed
  */
 export function useUnreadBadge(): void {
-  // Subscribe to the computed unread count directly for proper reactivity
-  // We compute the total inside the selector so Zustand re-renders when feeds change
-  const unreadCount = useFeedsStore((state) =>
-    state.feeds.reduce((total, feed) => total + (feed.unreadCount || 0), 0)
-  );
+  // Track window/document focus state
+  const [isWindowFocused, setIsWindowFocused] = useState(() => {
+    if (typeof document === 'undefined') return true;
+    return document.hasFocus();
+  });
+
+  // Get the currently selected feed ID
+  const selectedFeedId = useAppStore((state) => state.selectedFeedId);
+
+  // Subscribe to feeds for computing unread count
+  const feeds = useFeedsStore((state) => state.feeds);
+
+  // Compute unread count based on focus state
+  // When NOT focused: count ALL unread messages (user should see total)
+  // When focused: exclude selected feed (user is viewing it)
+  const unreadCount = feeds.reduce((total, feed) => {
+    // When focused and this is the selected feed, don't count it
+    if (isWindowFocused && selectedFeedId && feed.id === selectedFeedId) {
+      return total;
+    }
+    return total + (feed.unreadCount || 0);
+  }, 0);
 
   const flashIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const showingCountRef = useRef(true);
+
+  // Set up focus/blur event listeners
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleFocus = () => setIsWindowFocused(true);
+    const handleBlur = () => setIsWindowFocused(false);
+    const handleVisibilityChange = () => {
+      setIsWindowFocused(document.visibilityState === 'visible' && document.hasFocus());
+    };
+
+    // Use both window and document events for better cross-platform support
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('blur', handleBlur);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('blur', handleBlur);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
 
   // Clear any existing flash interval
   const clearFlashInterval = useCallback(() => {

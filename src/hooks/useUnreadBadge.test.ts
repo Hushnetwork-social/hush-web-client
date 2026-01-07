@@ -11,28 +11,46 @@
  * 7. Badge icon path generation (getBadgeIconPath)
  * 8. Tauri overlay integration
  * 9. PWA Badging API integration
+ * 10. Focus-aware behavior (include/exclude selected feed)
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useUnreadBadge, UNREAD_BADGE_CONSTANTS, getBadgeIconPath, isBadgingApiSupported } from './useUnreadBadge';
 
-// Mock unread count - controls what the selector returns
-let mockUnreadCount = 0;
+// Mock feeds data - controls what the selector returns
+let mockFeeds: Array<{ id: string; unreadCount?: number }> = [];
+
+// Mock selected feed ID
+let mockSelectedFeedId: string | null = null;
 
 vi.mock('@/modules/feeds', () => ({
-  useFeedsStore: (selector: (state: { feeds: Array<{ unreadCount?: number }> }) => number) => {
-    // Create mock feeds array that will produce the desired total
-    const mockFeeds = mockUnreadCount > 0 ? [{ unreadCount: mockUnreadCount }] : [];
+  useFeedsStore: (selector: (state: { feeds: Array<{ id: string; unreadCount?: number }> }) => unknown) => {
     return selector({ feeds: mockFeeds });
   },
 }));
 
-// Helper to set mock unread count (replaces mockGetTotalUnreadCount.mockReturnValue)
+vi.mock('@/stores/useAppStore', () => ({
+  useAppStore: (selector: (state: { selectedFeedId: string | null }) => unknown) => {
+    return selector({ selectedFeedId: mockSelectedFeedId });
+  },
+}));
+
+// Helper to set mock feeds (creates feeds with specified unread counts)
+const setMockFeeds = (feedsData: Array<{ id: string; unreadCount: number }>) => {
+  mockFeeds = feedsData;
+};
+
+// Helper to set mock unread count (single feed for backward compatibility)
 const mockGetTotalUnreadCount = {
   mockReturnValue: (value: number) => {
-    mockUnreadCount = value;
+    mockFeeds = value > 0 ? [{ id: 'feed-1', unreadCount: value }] : [];
   },
+};
+
+// Helper to set selected feed
+const setMockSelectedFeedId = (feedId: string | null) => {
+  mockSelectedFeedId = feedId;
 };
 
 // Mock platform detection - default to browser
@@ -51,14 +69,20 @@ describe('useUnreadBadge', () => {
     vi.useFakeTimers();
     // Reset document title
     document.title = FULL_TITLE;
-    // Reset mock to return 0 by default
+    // Reset mocks to default state
     mockGetTotalUnreadCount.mockReturnValue(0);
+    setMockSelectedFeedId(null);
+    // Mock document.hasFocus to return true by default (focused)
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
   });
 
   afterEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
+    vi.restoreAllMocks();
     document.title = FULL_TITLE;
+    mockFeeds = [];
+    mockSelectedFeedId = null;
   });
 
   describe('Initial State', () => {
@@ -312,6 +336,130 @@ describe('useUnreadBadge', () => {
       rerender();
 
       expect(document.title).toBe('(5) Hush Feeds');
+    });
+  });
+
+  describe('Focus-Aware Behavior', () => {
+    it('should show all unread messages when window is NOT focused', () => {
+      // Set up multiple feeds with unread counts
+      setMockFeeds([
+        { id: 'feed-1', unreadCount: 3 },
+        { id: 'feed-2', unreadCount: 5 },
+      ]);
+      // Select feed-1
+      setMockSelectedFeedId('feed-1');
+      // Window is NOT focused
+      vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+
+      renderHook(() => useUnreadBadge());
+
+      // Should show total (3 + 5 = 8) because window is not focused
+      expect(document.title).toBe('(8) Hush Feeds');
+    });
+
+    it('should exclude selected feed unread count when window IS focused', () => {
+      // Set up multiple feeds with unread counts
+      setMockFeeds([
+        { id: 'feed-1', unreadCount: 3 },
+        { id: 'feed-2', unreadCount: 5 },
+      ]);
+      // Select feed-1
+      setMockSelectedFeedId('feed-1');
+      // Window IS focused
+      vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+
+      renderHook(() => useUnreadBadge());
+
+      // Should show only feed-2's count (5) because feed-1 is selected and window is focused
+      expect(document.title).toBe('(5) Hush Feeds');
+    });
+
+    it('should show all unread when no feed is selected (focused)', () => {
+      // Set up multiple feeds with unread counts
+      setMockFeeds([
+        { id: 'feed-1', unreadCount: 3 },
+        { id: 'feed-2', unreadCount: 5 },
+      ]);
+      // No feed selected
+      setMockSelectedFeedId(null);
+      // Window IS focused
+      vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+
+      renderHook(() => useUnreadBadge());
+
+      // Should show total (8) because no feed is selected
+      expect(document.title).toBe('(8) Hush Feeds');
+    });
+
+    it('should update when focus changes from focused to unfocused', () => {
+      // Set up feeds
+      setMockFeeds([
+        { id: 'feed-1', unreadCount: 3 },
+        { id: 'feed-2', unreadCount: 5 },
+      ]);
+      setMockSelectedFeedId('feed-1');
+
+      // Start focused
+      const hasFocusMock = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+
+      const { rerender } = renderHook(() => useUnreadBadge());
+
+      // Initially focused - exclude selected feed
+      expect(document.title).toBe('(5) Hush Feeds');
+
+      // Simulate blur event
+      hasFocusMock.mockReturnValue(false);
+      act(() => {
+        window.dispatchEvent(new Event('blur'));
+      });
+      rerender();
+
+      // After blur - show all unread
+      expect(document.title).toBe('(8) Hush Feeds');
+    });
+
+    it('should update when focus changes from unfocused to focused', () => {
+      // Set up feeds
+      setMockFeeds([
+        { id: 'feed-1', unreadCount: 3 },
+        { id: 'feed-2', unreadCount: 5 },
+      ]);
+      setMockSelectedFeedId('feed-1');
+
+      // Start unfocused
+      const hasFocusMock = vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+
+      const { rerender } = renderHook(() => useUnreadBadge());
+
+      // Initially unfocused - show all
+      expect(document.title).toBe('(8) Hush Feeds');
+
+      // Simulate focus event
+      hasFocusMock.mockReturnValue(true);
+      act(() => {
+        window.dispatchEvent(new Event('focus'));
+      });
+      rerender();
+
+      // After focus - exclude selected feed
+      expect(document.title).toBe('(5) Hush Feeds');
+    });
+
+    it('should show 0 count title when all unread is in selected feed (focused)', () => {
+      // Only one feed with unread
+      setMockFeeds([
+        { id: 'feed-1', unreadCount: 3 },
+        { id: 'feed-2', unreadCount: 0 },
+      ]);
+      // Select the feed with unread
+      setMockSelectedFeedId('feed-1');
+      // Window IS focused
+      vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+
+      renderHook(() => useUnreadBadge());
+
+      // Should show normal title because selected feed's 3 are excluded, leaving 0
+      expect(document.title).toBe(FULL_TITLE);
     });
   });
 });
