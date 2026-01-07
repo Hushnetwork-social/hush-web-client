@@ -29,6 +29,7 @@ describe("GroupDetailsForm", () => {
     onBack: mockOnBack,
     onCreate: mockOnCreate,
     isCreating: false,
+    groupType: "private" as const,
   };
 
   beforeEach(() => {
@@ -48,18 +49,37 @@ describe("GroupDetailsForm", () => {
       expect(screen.getByLabelText(/description/i)).toBeInTheDocument();
     });
 
-    it("renders visibility options", () => {
-      render(<GroupDetailsForm {...defaultProps} />);
+    it("renders group type banner for private group", () => {
+      render(<GroupDetailsForm {...defaultProps} groupType="private" />);
 
-      expect(screen.getByText("Private")).toBeInTheDocument();
-      expect(screen.getByText("Public")).toBeInTheDocument();
+      expect(screen.getByText("Private Group")).toBeInTheDocument();
+      expect(
+        screen.getByText("Only invited members can see and join")
+      ).toBeInTheDocument();
     });
 
-    it("renders back button", () => {
-      render(<GroupDetailsForm {...defaultProps} />);
+    it("renders group type banner for public group", () => {
+      render(<GroupDetailsForm {...defaultProps} groupType="public" />);
+
+      expect(screen.getByText("Public Group")).toBeInTheDocument();
+      expect(
+        screen.getByText("Anyone can discover and join this group")
+      ).toBeInTheDocument();
+    });
+
+    it("renders back button for private group (to members)", () => {
+      render(<GroupDetailsForm {...defaultProps} groupType="private" />);
 
       expect(
-        screen.getByRole("button", { name: "Go back to member selection" })
+        screen.getByRole("button", { name: /back to member selection/i })
+      ).toBeInTheDocument();
+    });
+
+    it("renders back button for public group (to type selection)", () => {
+      render(<GroupDetailsForm {...defaultProps} groupType="public" />);
+
+      expect(
+        screen.getByRole("button", { name: /back to type selection/i })
       ).toBeInTheDocument();
     });
 
@@ -146,45 +166,62 @@ describe("GroupDetailsForm", () => {
     });
   });
 
-  describe("Visibility selection", () => {
-    it("defaults to Private visibility", () => {
-      render(<GroupDetailsForm {...defaultProps} />);
+  describe("Group type handling", () => {
+    it("uses groupType prop to determine isPublic for private group", () => {
+      render(<GroupDetailsForm {...defaultProps} groupType="private" />);
 
-      const privateOption = screen.getByLabelText(/private/i);
-      expect(privateOption).toBeChecked();
+      // Fill in required field
+      const nameInput = screen.getByLabelText(/group name/i);
+      fireEvent.change(nameInput, { target: { value: "Test Group" } });
+
+      // Submit form
+      const createButton = screen.getByRole("button", { name: "Create group" });
+      fireEvent.click(createButton);
+
+      // Should call with isPublic: false
+      expect(mockOnCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ isPublic: false })
+      );
     });
 
-    it("allows selecting Public visibility", () => {
-      render(<GroupDetailsForm {...defaultProps} />);
+    it("uses groupType prop to determine isPublic for public group", () => {
+      render(<GroupDetailsForm {...defaultProps} groupType="public" />);
 
-      const publicLabel = screen.getByText("Public").closest("label");
-      if (publicLabel) {
-        fireEvent.click(publicLabel);
-      }
+      // Fill in required field
+      const nameInput = screen.getByLabelText(/group name/i);
+      fireEvent.change(nameInput, { target: { value: "Test Group" } });
 
-      const publicOption = screen.getByLabelText(/public/i);
-      expect(publicOption).toBeChecked();
+      // Submit form
+      const createButton = screen.getByRole("button", { name: "Create group" });
+      fireEvent.click(createButton);
+
+      // Should call with isPublic: true
+      expect(mockOnCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ isPublic: true })
+      );
     });
 
-    it("allows switching back to Private", () => {
-      render(<GroupDetailsForm {...defaultProps} />);
+    it("defaults to private when groupType is null", () => {
+      render(<GroupDetailsForm {...defaultProps} groupType={null} />);
 
-      // Select public first
-      const publicLabel = screen.getByText("Public").closest("label");
-      if (publicLabel) fireEvent.click(publicLabel);
+      // Fill in required field
+      const nameInput = screen.getByLabelText(/group name/i);
+      fireEvent.change(nameInput, { target: { value: "Test Group" } });
 
-      // Switch back to private
-      const privateLabel = screen.getByText("Private").closest("label");
-      if (privateLabel) fireEvent.click(privateLabel);
+      // Submit form
+      const createButton = screen.getByRole("button", { name: "Create group" });
+      fireEvent.click(createButton);
 
-      const privateOption = screen.getByLabelText(/private/i);
-      expect(privateOption).toBeChecked();
+      // Should default to isPublic: false for safety
+      expect(mockOnCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ isPublic: false })
+      );
     });
   });
 
   describe("Form submission", () => {
-    it("calls onCreate with form data when submitted", () => {
-      render(<GroupDetailsForm {...defaultProps} />);
+    it("calls onCreate with form data when submitted (private group)", () => {
+      render(<GroupDetailsForm {...defaultProps} groupType="private" />);
 
       const nameInput = screen.getByLabelText(/group name/i);
       const descInput = screen.getByLabelText(/description/i);
@@ -202,14 +239,11 @@ describe("GroupDetailsForm", () => {
       });
     });
 
-    it("passes isPublic=true when Public is selected", () => {
-      render(<GroupDetailsForm {...defaultProps} />);
+    it("calls onCreate with form data when submitted (public group)", () => {
+      render(<GroupDetailsForm {...defaultProps} groupType="public" />);
 
       const nameInput = screen.getByLabelText(/group name/i);
       fireEvent.change(nameInput, { target: { value: "Public Group" } });
-
-      const publicLabel = screen.getByText("Public").closest("label");
-      if (publicLabel) fireEvent.click(publicLabel);
 
       const createButton = screen.getByRole("button", { name: "Create group" });
       fireEvent.click(createButton);
@@ -242,11 +276,22 @@ describe("GroupDetailsForm", () => {
   });
 
   describe("Back button", () => {
-    it("calls onBack when clicked", () => {
-      render(<GroupDetailsForm {...defaultProps} />);
+    it("calls onBack when clicked (private group)", () => {
+      render(<GroupDetailsForm {...defaultProps} groupType="private" />);
 
       const backButton = screen.getByRole("button", {
-        name: "Go back to member selection",
+        name: /back to member selection/i,
+      });
+      fireEvent.click(backButton);
+
+      expect(mockOnBack).toHaveBeenCalled();
+    });
+
+    it("calls onBack when clicked (public group)", () => {
+      render(<GroupDetailsForm {...defaultProps} groupType="public" />);
+
+      const backButton = screen.getByRole("button", {
+        name: /back to type selection/i,
       });
       fireEvent.click(backButton);
 
@@ -279,11 +324,13 @@ describe("GroupDetailsForm", () => {
       expect(descInput).toBeDisabled();
     });
 
-    it("disables back button when isCreating is true", () => {
-      render(<GroupDetailsForm {...defaultProps} isCreating={true} />);
+    it("disables back button when isCreating is true (private group)", () => {
+      render(
+        <GroupDetailsForm {...defaultProps} isCreating={true} groupType="private" />
+      );
 
       const backButton = screen.getByRole("button", {
-        name: "Go back to member selection",
+        name: /back to member selection/i,
       });
       expect(backButton).toBeDisabled();
     });

@@ -1,31 +1,47 @@
 "use client";
 
-import { useState, useCallback, memo, useEffect } from "react";
+import { useState, useCallback, memo, useEffect, useMemo } from "react";
 import { Loader2, ArrowLeft, Lock, Globe, Users } from "lucide-react";
 import type { SelectedMember } from "./MemberSelector";
+import type { GroupType } from "./useCreateGroupFlow";
 
 interface GroupDetailsFormProps {
   selectedMembers: SelectedMember[];
   onBack: () => void;
   onCreate: (data: { name: string; description: string; isPublic: boolean }) => void;
   isCreating: boolean;
+  groupType?: GroupType;
 }
 
 /**
- * Step 2 of Group Creation Wizard - Group Details Form
+ * Group Details Form - Final step of Group Creation Wizard
  *
- * Allows users to configure group name, description, and visibility.
+ * Allows users to configure group name and description.
+ * Visibility is determined by the groupType selected in step 1.
  */
 export const GroupDetailsForm = memo(function GroupDetailsForm({
   selectedMembers,
   onBack,
   onCreate,
   isCreating,
+  groupType,
 }: GroupDetailsFormProps) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [isPublic, setIsPublic] = useState(false);
   const [nameError, setNameError] = useState<string | null>(null);
+
+  // Derive isPublic from groupType (null defaults to private for safety)
+  const isPublic = useMemo(() => groupType === "public", [groupType]);
+
+  // Determine back button text based on group type
+  const backButtonText = useMemo(() => {
+    // Public groups skip member selection, go back to type selection
+    if (groupType === "public") {
+      return "Back to Type Selection";
+    }
+    // Private groups go back to member selection
+    return "Back to Members";
+  }, [groupType]);
 
   // Validate name on change
   useEffect(() => {
@@ -67,10 +83,10 @@ export const GroupDetailsForm = memo(function GroupDetailsForm({
           onClick={onBack}
           disabled={isCreating}
           className="flex items-center gap-2 text-hush-text-accent hover:text-hush-text-primary transition-colors disabled:opacity-50"
-          aria-label="Go back to member selection"
+          aria-label={`Go back to ${groupType === "public" ? "type selection" : "member selection"}`}
         >
           <ArrowLeft className="w-4 h-4" />
-          <span className="text-sm">Back to Members</span>
+          <span className="text-sm">{backButtonText}</span>
         </button>
       </div>
 
@@ -139,83 +155,32 @@ export const GroupDetailsForm = memo(function GroupDetailsForm({
           </div>
         </div>
 
-        {/* Visibility */}
-        <div>
-          <span className="block text-sm font-medium text-hush-text-primary mb-2">
-            Visibility
-          </span>
-          <div className="space-y-2">
-            <label
-              className={`flex items-center p-3 rounded-xl border cursor-pointer transition-colors ${
-                !isPublic
-                  ? "border-hush-purple bg-hush-purple/10"
-                  : "border-hush-bg-hover bg-hush-bg-dark hover:bg-hush-bg-hover"
-              } ${isCreating ? "opacity-50 cursor-not-allowed" : ""}`}
-            >
-              <input
-                type="radio"
-                name="visibility"
-                checked={!isPublic}
-                onChange={() => setIsPublic(false)}
-                disabled={isCreating}
-                className="sr-only"
-              />
-              <div
-                className={`w-4 h-4 rounded-full border-2 mr-3 flex items-center justify-center ${
-                  !isPublic ? "border-hush-purple" : "border-hush-text-accent"
-                }`}
-              >
-                {!isPublic && (
-                  <div className="w-2 h-2 rounded-full bg-hush-purple" />
-                )}
-              </div>
-              <Lock className="w-4 h-4 mr-2 text-hush-text-accent" />
-              <div>
-                <span className="text-sm font-medium text-hush-text-primary">
-                  Private
-                </span>
-                <p className="text-xs text-hush-text-accent">
-                  Only invited members can see and join
-                </p>
-              </div>
-            </label>
-
-            <label
-              className={`flex items-center p-3 rounded-xl border cursor-pointer transition-colors ${
-                isPublic
-                  ? "border-hush-purple bg-hush-purple/10"
-                  : "border-hush-bg-hover bg-hush-bg-dark hover:bg-hush-bg-hover"
-              } ${isCreating ? "opacity-50 cursor-not-allowed" : ""}`}
-            >
-              <input
-                type="radio"
-                name="visibility"
-                checked={isPublic}
-                onChange={() => setIsPublic(true)}
-                disabled={isCreating}
-                className="sr-only"
-              />
-              <div
-                className={`w-4 h-4 rounded-full border-2 mr-3 flex items-center justify-center ${
-                  isPublic ? "border-hush-purple" : "border-hush-text-accent"
-                }`}
-              >
-                {isPublic && (
-                  <div className="w-2 h-2 rounded-full bg-hush-purple" />
-                )}
-              </div>
-              <Globe className="w-4 h-4 mr-2 text-hush-text-accent" />
-              <div>
-                <span className="text-sm font-medium text-hush-text-primary">
-                  Public
-                </span>
-                <p className="text-xs text-hush-text-accent">
-                  Anyone can discover and request to join
-                </p>
-              </div>
-            </label>
+        {/* Group Type Banner */}
+        {groupType && (
+          <div
+            className={`flex items-center p-3 rounded-xl border ${
+              isPublic
+                ? "border-green-500/30 bg-green-500/10"
+                : "border-hush-purple/30 bg-hush-purple/10"
+            }`}
+          >
+            {isPublic ? (
+              <Globe className="w-4 h-4 mr-2 text-green-400" />
+            ) : (
+              <Lock className="w-4 h-4 mr-2 text-hush-purple" />
+            )}
+            <div>
+              <span className="text-sm font-medium text-hush-text-primary">
+                {isPublic ? "Public" : "Private"} Group
+              </span>
+              <p className="text-xs text-hush-text-accent">
+                {isPublic
+                  ? "Anyone can discover and join this group"
+                  : "Only invited members can see and join"}
+              </p>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Members Summary */}
         <div className="p-3 bg-hush-bg-dark rounded-xl border border-hush-bg-hover">

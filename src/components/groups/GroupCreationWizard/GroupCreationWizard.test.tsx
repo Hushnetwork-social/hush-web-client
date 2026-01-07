@@ -88,10 +88,10 @@ describe("GroupCreationWizard", () => {
       expect(screen.queryByText("Create Group")).not.toBeInTheDocument();
     });
 
-    it("shows Step 1 of 2 initially", () => {
+    it("shows Step 1: Choose Type initially", () => {
       render(<GroupCreationWizard {...defaultProps} />);
 
-      expect(screen.getByText("Step 1 of 2")).toBeInTheDocument();
+      expect(screen.getByText("Step 1: Choose Type")).toBeInTheDocument();
     });
 
     it("renders close button", () => {
@@ -102,12 +102,14 @@ describe("GroupCreationWizard", () => {
       ).toBeInTheDocument();
     });
 
-    it("renders search input for member selection", () => {
+    it("renders type selection step initially", () => {
       render(<GroupCreationWizard {...defaultProps} />);
 
       expect(
-        screen.getByPlaceholderText("Search by name...")
+        screen.getByText("What kind of group do you want to create?")
       ).toBeInTheDocument();
+      expect(screen.getByText("Public")).toBeInTheDocument();
+      expect(screen.getByText("Private")).toBeInTheDocument();
     });
   });
 
@@ -170,9 +172,11 @@ describe("GroupCreationWizard", () => {
     it("wizard renders without errors", () => {
       render(<GroupCreationWizard {...defaultProps} />);
 
-      // Wizard should render with member selector
+      // Wizard should render with type selection
       expect(screen.getByText("Create Group")).toBeInTheDocument();
-      expect(screen.getByPlaceholderText("Search by name...")).toBeInTheDocument();
+      expect(
+        screen.getByText("What kind of group do you want to create?")
+      ).toBeInTheDocument();
     });
   });
 
@@ -186,8 +190,64 @@ describe("GroupCreationWizard", () => {
       // Reopen
       rerender(<GroupCreationWizard {...defaultProps} isOpen={true} />);
 
-      // Should be back to step 1
+      // Should be back to step 1 (type selection)
+      expect(screen.getByText("Step 1: Choose Type")).toBeInTheDocument();
+    });
+  });
+
+  describe("Flow navigation", () => {
+    it("shows Step 1 of 2 after selecting Public type", () => {
+      render(<GroupCreationWizard {...defaultProps} />);
+
+      // Click on the Public card
+      const publicCard = screen.getByText("Public").closest('[role="option"]');
+      if (publicCard) fireEvent.click(publicCard);
+
+      // Should now show 1 of 2 (public has 2 steps)
       expect(screen.getByText("Step 1 of 2")).toBeInTheDocument();
+    });
+
+    it("shows Step 1 of 3 after selecting Private type", () => {
+      render(<GroupCreationWizard {...defaultProps} />);
+
+      // Click on the Private card
+      const privateCard = screen.getByText("Private").closest('[role="option"]');
+      if (privateCard) fireEvent.click(privateCard);
+
+      // Should now show 1 of 3 (private has 3 steps)
+      expect(screen.getByText("Step 1 of 3")).toBeInTheDocument();
+    });
+
+    it("navigates to details after type selection for public group", () => {
+      render(<GroupCreationWizard {...defaultProps} />);
+
+      // Select Public type
+      const publicCard = screen.getByText("Public").closest('[role="option"]');
+      if (publicCard) fireEvent.click(publicCard);
+
+      // Click Next button
+      const nextButton = screen.getByRole("button", { name: /proceed to next step/i });
+      fireEvent.click(nextButton);
+
+      // Should be on details step
+      expect(screen.getByText("Create Public Group")).toBeInTheDocument();
+      expect(screen.getByLabelText(/group name/i)).toBeInTheDocument();
+    });
+
+    it("navigates to members after type selection for private group", () => {
+      render(<GroupCreationWizard {...defaultProps} />);
+
+      // Select Private type
+      const privateCard = screen.getByText("Private").closest('[role="option"]');
+      if (privateCard) fireEvent.click(privateCard);
+
+      // Click Next button
+      const nextButton = screen.getByRole("button", { name: /proceed to next step/i });
+      fireEvent.click(nextButton);
+
+      // Should be on member selection step
+      expect(screen.getByText("Create Private Group")).toBeInTheDocument();
+      expect(screen.getByPlaceholderText("Search by name...")).toBeInTheDocument();
     });
   });
 });

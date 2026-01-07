@@ -17,17 +17,20 @@ interface MemberSelectorProps {
   selectedMembers: SelectedMember[];
   onMembersChange: (members: SelectedMember[]) => void;
   onNext: () => void;
+  onBack?: () => void;
 }
 
 /**
- * Step 1 of Group Creation Wizard - Member Selection
+ * Member Selection Step of Group Creation Wizard
  *
  * Allows users to search for and select members to add to their new group.
+ * Members are optional - groups can be created with 0 initial members.
  */
 export const MemberSelector = memo(function MemberSelector({
   selectedMembers,
   onMembersChange,
   onNext,
+  onBack,
 }: MemberSelectorProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
@@ -128,10 +131,38 @@ export const MemberSelector = memo(function MemberSelector({
     }
   };
 
-  const canProceed = selectedMembers.length >= 1;
+  // Members are optional - can proceed with 0 members
+  const canProceed = true;
 
   return (
     <div className="flex flex-col h-full">
+      {/* Header with Back Button */}
+      {onBack && (
+        <div className="flex-shrink-0 p-4 border-b border-hush-bg-hover">
+          <button
+            type="button"
+            onClick={onBack}
+            className="flex items-center gap-2 text-hush-text-accent hover:text-hush-text-primary transition-colors"
+            aria-label="Go back to type selection"
+          >
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M15 19l-7-7 7-7"
+              />
+            </svg>
+            <span className="text-sm">Back to Type Selection</span>
+          </button>
+        </div>
+      )}
+
       {/* Search Input */}
       <div className="flex-shrink-0 p-4 border-b border-hush-bg-hover">
         <div className="flex gap-2">
@@ -247,10 +278,15 @@ export const MemberSelector = memo(function MemberSelector({
       {/* Footer with Selected Count and Next Button */}
       <div className="flex-shrink-0 p-4 border-t border-hush-bg-hover">
         <div className="flex items-center justify-between">
-          <span className="text-sm text-hush-text-accent">
-            Selected: {selectedMembers.length} member
-            {selectedMembers.length !== 1 ? "s" : ""}
-          </span>
+          <div>
+            <span className="text-sm text-hush-text-accent block">
+              Selected: {selectedMembers.length} member
+              {selectedMembers.length !== 1 ? "s" : ""}
+            </span>
+            <span className="text-xs text-hush-text-accent">
+              (optional - you can add members later)
+            </span>
+          </div>
           <button
             onClick={onNext}
             disabled={!canProceed}
