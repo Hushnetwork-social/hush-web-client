@@ -347,12 +347,26 @@ export default function AuthPage() {
         mnemonic: portableCredentials.Mnemonic ? portableCredentials.Mnemonic.split(" ") : [],
       };
 
+      // Helper to safely parse JSON response with better error messages
+      const safeJsonParse = async (response: Response, apiName: string) => {
+        const text = await response.text();
+        try {
+          return JSON.parse(text);
+        } catch {
+          // If response is HTML (starts with <!DOCTYPE or <html), show helpful error
+          if (text.trim().startsWith('<')) {
+            throw new Error(`${apiName} returned HTML instead of JSON. Status: ${response.status}. The server may be unavailable.`);
+          }
+          throw new Error(`${apiName} returned invalid JSON: ${text.substring(0, 100)}`);
+        }
+      };
+
       // Check if identity exists
       setCreationStatus("checking_identity");
       const identityCheckResponse = await fetch(
         buildApiUrl(`/api/identity/check?address=${encodeURIComponent(credentials.signingPublicKey)}`)
       );
-      const identityCheck = await identityCheckResponse.json();
+      const identityCheck = await safeJsonParse(identityCheckResponse, "Identity check");
 
       let userDisplayName = portableCredentials.ProfileName || "Restored User";
 
@@ -385,7 +399,7 @@ export default function AuthPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ signedTransaction: identityTx }),
         });
-        const submitResult = await submitResponse.json();
+        const submitResult = await safeJsonParse(submitResponse, "Create identity");
 
         if (!submitResult.successful) {
           throw new Error(submitResult.message || "Failed to create identity");
@@ -403,7 +417,7 @@ export default function AuthPage() {
       const feedCheckResponse = await fetch(
         buildApiUrl(`/api/feeds/has-personal?address=${encodeURIComponent(credentials.signingPublicKey)}`)
       );
-      const feedCheck = await feedCheckResponse.json();
+      const feedCheck = await safeJsonParse(feedCheckResponse, "Check personal feed");
 
       if (!feedCheck.hasPersonalFeed) {
         // Create personal feed with encrypted feed key
@@ -434,7 +448,7 @@ export default function AuthPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ signedTransaction: feedTx }),
         });
-        const feedSubmitResult = await feedSubmitResponse.json();
+        const feedSubmitResult = await safeJsonParse(feedSubmitResponse, "Create personal feed");
 
         if (!feedSubmitResult.successful) {
           throw new Error(feedSubmitResult.message || "Failed to create personal feed");
@@ -446,7 +460,7 @@ export default function AuthPage() {
       const feedsResponse = await fetch(
         buildApiUrl(`/api/feeds/list?address=${encodeURIComponent(credentials.signingPublicKey)}&blockIndex=0`)
       );
-      const feedsData = await feedsResponse.json();
+      const feedsData = await safeJsonParse(feedsResponse, "Load feeds");
 
       if (feedsData.feeds) {
         useFeedsStore.getState().setFeeds(
