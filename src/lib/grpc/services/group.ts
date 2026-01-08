@@ -25,8 +25,6 @@ import type {
   UpdateGroupFeedTitleResponse,
   UpdateGroupFeedDescriptionRequest,
   UpdateGroupFeedDescriptionResponse,
-  DeleteGroupFeedRequest,
-  DeleteGroupFeedResponse,
   GetGroupFeedResponse,
   KeyGenerationProto,
   GroupFeedParticipantProto,
@@ -507,26 +505,39 @@ export const groupService = {
 
   /**
    * Delete a group feed (admin only)
+   * Uses API route for proper binary protobuf communication
    */
   async deleteGroup(feedId: string, adminAddress: string): Promise<GroupOperationResult> {
     debugLog('[GroupService] deleteGroup:', { feedId });
     try {
-      const client = getGrpcClient();
-      const request: DeleteGroupFeedRequest = {
-        FeedId: feedId,
-        AdminPublicAddress: adminAddress,
-      };
+      const url = buildApiUrl('/api/groups/delete');
+      debugLog('[GroupService] deleteGroup URL:', url);
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          feedId,
+          adminPublicAddress: adminAddress,
+        }),
+      });
 
-      const response = await client.unaryCall<DeleteGroupFeedRequest, DeleteGroupFeedResponse>(
-        SERVICE_NAME,
-        'DeleteGroupFeed',
-        request
-      );
-
-      if (response.Success) {
-        return wrapResult(true, { message: response.Message });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
-      return wrapResult(false, undefined, response.Message);
+
+      const data = await response.json();
+      debugLog('[GroupService] deleteGroup result:', data);
+
+      if (data.error && !data.success) {
+        return wrapResult(false, undefined, data.error);
+      }
+
+      if (data.success) {
+        return wrapResult(true, { message: data.message });
+      }
+      return wrapResult(false, undefined, data.message || 'Failed to delete group');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to delete group';
       debugLog('[GroupService] deleteGroup error:', message);

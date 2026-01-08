@@ -1657,3 +1657,76 @@ export function parseLeaveGroupFeedResponse(messageBytes: Uint8Array): LeaveGrou
 
   return result;
 }
+
+// ============= Delete Group Feed Operation =============
+
+/**
+ * Build DeleteGroupFeedRequest for binary gRPC
+ * Proto: message DeleteGroupFeedRequest {
+ *   string FeedId = 1;
+ *   string AdminPublicAddress = 2;
+ * }
+ */
+export function buildDeleteGroupFeedRequest(
+  feedId: string,
+  adminPublicAddress: string
+): Uint8Array {
+  const bytes = [
+    ...encodeString(1, feedId),
+    ...encodeString(2, adminPublicAddress),
+  ];
+  return new Uint8Array(bytes);
+}
+
+/**
+ * Response from DeleteGroupFeed
+ */
+export interface DeleteGroupFeedResult {
+  success: boolean;
+  message: string;
+}
+
+/**
+ * Parse DeleteGroupFeedResponse
+ * Proto: message DeleteGroupFeedResponse {
+ *   bool Success = 1;
+ *   string Message = 2;
+ * }
+ */
+export function parseDeleteGroupFeedResponse(messageBytes: Uint8Array): DeleteGroupFeedResult {
+  const result: DeleteGroupFeedResult = {
+    success: false,
+    message: '',
+  };
+
+  let offset = 0;
+  while (offset < messageBytes.length) {
+    const tagResult = parseVarint(messageBytes, offset);
+    const tag = tagResult.value;
+    offset += tagResult.bytesRead;
+
+    const fieldNumber = tag >> 3;
+    const wireType = tag & 0x07;
+
+    if (wireType === 0 && fieldNumber === 1) {
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+      result.success = valueResult.value === 1;
+    } else if (wireType === 2 && fieldNumber === 2) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead;
+      result.message = parseString(messageBytes, offset, lenResult.value);
+      offset += lenResult.value;
+    } else if (wireType === 0) {
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+    } else if (wireType === 2) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead + lenResult.value;
+    } else {
+      break;
+    }
+  }
+
+  return result;
+}

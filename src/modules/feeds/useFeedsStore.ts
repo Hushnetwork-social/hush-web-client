@@ -80,6 +80,9 @@ interface FeedsActions {
   /** Get a feed by ID */
   getFeed: (feedId: string) => Feed | undefined;
 
+  /** Remove a feed by ID (used when group is deleted) */
+  removeFeed: (feedId: string) => void;
+
   /** Get a message by ID (searches across all feeds) */
   getMessageById: (messageId: string) => FeedMessage | undefined;
 
@@ -295,6 +298,26 @@ export const useFeedsStore = create<FeedsStore>()(
 
       getFeed: (feedId) => {
         return get().feeds.find((f) => f.id === feedId);
+      },
+
+      removeFeed: (feedId) => {
+        debugLog(`[FeedsStore] removeFeed: feedId=${feedId}`);
+        set((state) => ({
+          feeds: state.feeds.filter((f) => f.id !== feedId),
+          // Also remove associated data
+          messages: Object.fromEntries(
+            Object.entries(state.messages).filter(([key]) => key !== feedId)
+          ),
+          groupMembers: Object.fromEntries(
+            Object.entries(state.groupMembers).filter(([key]) => key !== feedId)
+          ),
+          memberRoles: Object.fromEntries(
+            Object.entries(state.memberRoles).filter(([key]) => key !== feedId)
+          ),
+          groupKeyStates: Object.fromEntries(
+            Object.entries(state.groupKeyStates).filter(([key]) => key !== feedId)
+          ),
+        }));
       },
 
       getMessageById: (messageId) => {

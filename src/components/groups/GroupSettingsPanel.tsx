@@ -39,7 +39,7 @@ interface GroupSettingsPanelProps {
 /**
  * Slide-in panel for group settings.
  * Admins can edit name/description, all users can leave.
- * Last admin can delete the group.
+ * Any admin can delete the group.
  */
 export const GroupSettingsPanel = memo(function GroupSettingsPanel({
   isOpen,
@@ -51,7 +51,7 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
   inviteCode,
   currentUserRole,
   currentUserAddress,
-  isLastAdmin,
+  isLastAdmin: _isLastAdmin,
   onLeave,
   onDelete,
   onUpdate,
@@ -128,8 +128,9 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
     }
   }, [inviteCode]);
 
-  // Get store function to remove member after leaving
+  // Get store functions for leave and delete operations
   const removeGroupMember = useFeedsStore((state) => state.removeGroupMember);
+  const removeFeed = useFeedsStore((state) => state.removeFeed);
 
   // Check if there are unsaved changes
   const hasChanges = useMemo(() => {
@@ -227,6 +228,8 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
     try {
       const result = await groupService.deleteGroup(feedId, currentUserAddress);
       if (result.success) {
+        // Remove the feed from the store immediately
+        removeFeed(feedId);
         setShowDeleteConfirm(false);
         onDelete();
         onClose();
@@ -238,7 +241,7 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
     } finally {
       setIsDeleting(false);
     }
-  }, [deleteConfirmText, groupName, feedId, currentUserAddress, onDelete, onClose]);
+  }, [deleteConfirmText, groupName, feedId, currentUserAddress, removeFeed, onDelete, onClose]);
 
   // Open leave confirmation
   const handleLeaveClick = useCallback(() => {
@@ -499,8 +502,8 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
                 </div>
               </button>
 
-              {/* Delete Group (only for last admin) */}
-              {isLastAdmin && (
+              {/* Delete Group (any admin can delete) */}
+              {isAdmin && (
                 <button
                   onClick={handleDeleteClick}
                   disabled={isDeleting}
