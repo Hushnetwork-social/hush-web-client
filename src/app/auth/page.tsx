@@ -17,6 +17,7 @@ import {
 } from "@/lib/crypto";
 import { markIdentityCreatedByAuthPage } from "@/modules/identity";
 import { buildApiUrl } from "@/lib/api-config";
+import { getVersionDisplay } from "@/lib/version";
 
 type Tab = "create" | "import";
 type ImportSubTab = "words" | "file";
@@ -801,9 +802,10 @@ export default function AuthPage() {
                 <div className="flex items-center space-x-2">
                   <Lock className="w-3 h-3 text-hush-purple" />
                   <span className="text-[10px] text-hush-text-accent">Secured by HushNetwork</span>
-                  <span className="text-[10px] text-hush-text-accent">•</span>
-                  <span className="text-[10px] text-hush-purple">Blocks: {blockHeight}</span>
+                  <span className="text-[10px] text-hush-text-accent">-</span>
+                  <span className="text-[10px] text-hush-purple">{getVersionDisplay()}</span>
                 </div>
+                <span className="text-[10px] text-hush-text-accent">Blocks: {blockHeight}</span>
               </div>
             </div>
           )}
