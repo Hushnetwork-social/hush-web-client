@@ -1,5 +1,5 @@
 import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { AdminActionButtons } from "./AdminActionButtons";
 
 describe("AdminActionButtons", () => {
@@ -8,20 +8,17 @@ describe("AdminActionButtons", () => {
   const defaultProps = {
     memberAddress: "member-address-123",
     memberName: "Test Member",
+    memberRole: "Member" as const,
     onAction: mockOnAction,
   };
-
-  beforeEach(() => {
-    mockOnAction.mockClear();
-  });
 
   describe("Member role", () => {
     it("should show Block, Ban, and Promote buttons for regular members", () => {
       render(<AdminActionButtons {...defaultProps} memberRole="Member" />);
 
-      expect(screen.getByRole("button", { name: /block test member/i })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /ban test member/i })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /promote test member to admin/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /block member/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /ban member/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /promote to admin/i })).toBeInTheDocument();
     });
 
     it("should not show Unblock button for regular members", () => {
@@ -30,28 +27,42 @@ describe("AdminActionButtons", () => {
       expect(screen.queryByRole("button", { name: /unblock/i })).not.toBeInTheDocument();
     });
 
-    it("should call onAction with 'block' when Block is clicked", () => {
+    it("should NOT call onAction when buttons are clicked (coming soon)", () => {
       render(<AdminActionButtons {...defaultProps} memberRole="Member" />);
 
-      fireEvent.click(screen.getByRole("button", { name: /block test member/i }));
+      fireEvent.click(screen.getByRole("button", { name: /block member/i }));
+      fireEvent.click(screen.getByRole("button", { name: /ban member/i }));
+      fireEvent.click(screen.getByRole("button", { name: /promote to admin/i }));
 
-      expect(mockOnAction).toHaveBeenCalledWith("block", "member-address-123");
+      // Buttons are disabled/coming soon - no action should be triggered
+      expect(mockOnAction).not.toHaveBeenCalled();
     });
 
-    it("should call onAction with 'ban' when Ban is clicked", () => {
+    it("should display helpful tooltip for Block button", () => {
       render(<AdminActionButtons {...defaultProps} memberRole="Member" />);
 
-      fireEvent.click(screen.getByRole("button", { name: /ban test member/i }));
-
-      expect(mockOnAction).toHaveBeenCalledWith("ban", "member-address-123");
+      const blockButton = screen.getByRole("button", { name: /block member/i });
+      expect(blockButton).toHaveAttribute("title");
+      expect(blockButton.getAttribute("title")).toContain("Coming Soon");
+      expect(blockButton.getAttribute("title")).toContain("cannot send messages");
     });
 
-    it("should call onAction with 'promote' when Promote is clicked", () => {
+    it("should display helpful tooltip for Ban button", () => {
       render(<AdminActionButtons {...defaultProps} memberRole="Member" />);
 
-      fireEvent.click(screen.getByRole("button", { name: /promote test member to admin/i }));
+      const banButton = screen.getByRole("button", { name: /ban member/i });
+      expect(banButton).toHaveAttribute("title");
+      expect(banButton.getAttribute("title")).toContain("Coming Soon");
+      expect(banButton.getAttribute("title")).toContain("Remove this member");
+    });
 
-      expect(mockOnAction).toHaveBeenCalledWith("promote", "member-address-123");
+    it("should display helpful tooltip for Promote button", () => {
+      render(<AdminActionButtons {...defaultProps} memberRole="Member" />);
+
+      const promoteButton = screen.getByRole("button", { name: /promote to admin/i });
+      expect(promoteButton).toHaveAttribute("title");
+      expect(promoteButton.getAttribute("title")).toContain("Coming Soon");
+      expect(promoteButton.getAttribute("title")).toContain("administrative privileges");
     });
   });
 
@@ -59,23 +70,25 @@ describe("AdminActionButtons", () => {
     it("should show Unblock and Ban buttons for blocked members", () => {
       render(<AdminActionButtons {...defaultProps} memberRole="Blocked" />);
 
-      expect(screen.getByRole("button", { name: /unblock test member/i })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /ban test member/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /unblock member/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /ban member/i })).toBeInTheDocument();
     });
 
     it("should not show Block or Promote buttons for blocked members", () => {
       render(<AdminActionButtons {...defaultProps} memberRole="Blocked" />);
 
-      expect(screen.queryByRole("button", { name: /^block test member$/i })).not.toBeInTheDocument();
+      // Use exact match to avoid matching "Unblock member"
+      expect(screen.queryByRole("button", { name: /^block member/i })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /promote/i })).not.toBeInTheDocument();
     });
 
-    it("should call onAction with 'unblock' when Unblock is clicked", () => {
+    it("should display helpful tooltip for Unblock button", () => {
       render(<AdminActionButtons {...defaultProps} memberRole="Blocked" />);
 
-      fireEvent.click(screen.getByRole("button", { name: /unblock test member/i }));
-
-      expect(mockOnAction).toHaveBeenCalledWith("unblock", "member-address-123");
+      const unblockButton = screen.getByRole("button", { name: /unblock member/i });
+      expect(unblockButton).toHaveAttribute("title");
+      expect(unblockButton.getAttribute("title")).toContain("Coming Soon");
+      expect(unblockButton.getAttribute("title")).toContain("Restore");
     });
   });
 
@@ -87,22 +100,13 @@ describe("AdminActionButtons", () => {
     });
   });
 
-  describe("Loading state", () => {
-    it("should disable all buttons when isLoading is true", () => {
-      render(<AdminActionButtons {...defaultProps} memberRole="Member" isLoading />);
+  describe("Button styling", () => {
+    it("should have cursor-help style for coming soon buttons", () => {
+      render(<AdminActionButtons {...defaultProps} memberRole="Member" />);
 
       const buttons = screen.getAllByRole("button");
       buttons.forEach((button) => {
-        expect(button).toBeDisabled();
-      });
-    });
-
-    it("should apply disabled styles when loading", () => {
-      render(<AdminActionButtons {...defaultProps} memberRole="Member" isLoading />);
-
-      const buttons = screen.getAllByRole("button");
-      buttons.forEach((button) => {
-        expect(button).toHaveClass("disabled:opacity-50");
+        expect(button).toHaveClass("cursor-help");
       });
     });
   });

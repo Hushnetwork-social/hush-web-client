@@ -127,8 +127,11 @@ describe("MemberListPanel", () => {
     it("should show action buttons for non-admin members when user is admin", () => {
       render(<MemberListPanel {...defaultProps} />);
 
-      // Should see Block/Ban/Promote buttons for Regular Member
-      expect(screen.getByRole("button", { name: /block regular member/i })).toBeInTheDocument();
+      // Should see Block/Ban/Promote buttons for non-admin members
+      // Note: buttons now have generic aria-labels with "coming soon" since they're disabled
+      // Multiple buttons may exist (one per non-admin member)
+      const blockButtons = screen.getAllByRole("button", { name: /block member.*coming soon/i });
+      expect(blockButtons.length).toBeGreaterThan(0);
     });
 
     it("should not show action buttons when user is not admin", () => {
@@ -168,7 +171,8 @@ describe("MemberListPanel", () => {
     it("should show Unblock instead of Block for blocked members", () => {
       render(<MemberListPanel {...defaultProps} />);
 
-      expect(screen.getByRole("button", { name: /unblock blocked user/i })).toBeInTheDocument();
+      // Note: buttons now have generic aria-labels with "coming soon" since they're disabled
+      expect(screen.getByRole("button", { name: /unblock member.*coming soon/i })).toBeInTheDocument();
     });
   });
 
