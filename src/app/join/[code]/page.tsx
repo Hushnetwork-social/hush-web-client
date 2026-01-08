@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { JoinByCodeClient } from "./JoinByCodeClient";
 
 // Force dynamic rendering for this page (needs to fetch group info)
@@ -20,10 +21,21 @@ async function getGroupInfo(code: string): Promise<{
   isPublic?: boolean;
 } | null> {
   try {
-    // Use internal API URL for server-side fetching
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "https://chat.hushnetwork.social";
+    // Get the host from request headers to construct internal URL
+    const headersList = await headers();
+    const host = headersList.get("host") || "chat.hushnetwork.social";
+    const protocol = headersList.get("x-forwarded-proto") || "https";
+
+    // For server-side fetches, try localhost first (faster), then fall back to host
+    const internalUrl = process.env.INTERNAL_API_URL;
+    const baseUrl = internalUrl || `${protocol}://${host}`;
+
+    console.log(`[JoinPage] Fetching group info from: ${baseUrl}/api/groups/by-code?code=${code}`);
+
     const response = await fetch(`${baseUrl}/api/groups/by-code?code=${encodeURIComponent(code)}`, {
       cache: "no-store", // Always fetch fresh data for OG tags
+      // Add timeout to prevent hanging
+      signal: AbortSignal.timeout(5000),
     });
 
     if (!response.ok) {
@@ -31,7 +43,9 @@ async function getGroupInfo(code: string): Promise<{
       return null;
     }
 
-    return await response.json();
+    const result = await response.json();
+    console.log(`[JoinPage] Group info result: success=${result.success}, title=${result.title}`);
+    return result;
   } catch (error) {
     console.error("[JoinPage] Error fetching group info for metadata:", error);
     return null;
