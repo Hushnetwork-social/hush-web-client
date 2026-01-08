@@ -353,8 +353,91 @@ export default function AuthPage() {
       );
       const identityCheck = await identityCheckResponse.json();
 
+      let userDisplayName = portableCredentials.ProfileName || "Restored User";
+
       if (!identityCheck.exists) {
-        throw new Error("No identity found for this backup file. The account may not exist on this network.");
+        // Identity doesn't exist - create it using the backup credentials
+        setCreationStatus("creating_identity");
+
+        // Helper to convert hex string to Uint8Array
+        const hexToBytes = (hex: string): Uint8Array =>
+          new Uint8Array(hex.match(/.{1,2}/g)?.map((byte: string) => parseInt(byte, 16)) || []);
+
+        // Build keys object for createIdentityTransaction
+        const keys = {
+          signingKey: {
+            publicKey: hexToBytes(credentials.signingPublicKey),
+            publicKeyHex: credentials.signingPublicKey,
+            privateKey: hexToBytes(credentials.signingPrivateKey),
+          },
+          encryptionKey: {
+            publicKey: hexToBytes(credentials.encryptionPublicKey),
+            publicKeyHex: credentials.encryptionPublicKey,
+            privateKey: hexToBytes(credentials.encryptionPrivateKey),
+          },
+        };
+
+        const identityTx = await createIdentityTransaction(userDisplayName, keys, false);
+
+        const submitResponse = await fetch(buildApiUrl("/api/blockchain/submit"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ signedTransaction: identityTx }),
+        });
+        const submitResult = await submitResponse.json();
+
+        if (!submitResult.successful) {
+          throw new Error(submitResult.message || "Failed to create identity");
+        }
+
+        // Mark that we just created identity - prevents IdentitySyncable from duplicating
+        markIdentityCreatedByAuthPage();
+      } else {
+        // Use existing profile name from blockchain
+        userDisplayName = identityCheck.identity?.profileName || userDisplayName;
+      }
+
+      // Check for personal feed
+      setCreationStatus("checking_feed");
+      const feedCheckResponse = await fetch(
+        buildApiUrl(`/api/feeds/has-personal?address=${encodeURIComponent(credentials.signingPublicKey)}`)
+      );
+      const feedCheck = await feedCheckResponse.json();
+
+      if (!feedCheck.hasPersonalFeed) {
+        // Create personal feed with encrypted feed key
+        setCreationStatus("creating_feed");
+
+        // Helper to convert hex string to Uint8Array
+        const hexToBytes = (hex: string): Uint8Array =>
+          new Uint8Array(hex.match(/.{1,2}/g)?.map((byte: string) => parseInt(byte, 16)) || []);
+
+        // Build keys object for createPersonalFeedTransaction
+        const feedKeys = {
+          signingKey: {
+            publicKey: hexToBytes(credentials.signingPublicKey),
+            publicKeyHex: credentials.signingPublicKey,
+            privateKey: hexToBytes(credentials.signingPrivateKey),
+          },
+          encryptionKey: {
+            publicKey: hexToBytes(credentials.encryptionPublicKey),
+            publicKeyHex: credentials.encryptionPublicKey,
+            privateKey: hexToBytes(credentials.encryptionPrivateKey),
+          },
+        };
+
+        const { signedTransaction: feedTx } = await createPersonalFeedTransaction(feedKeys);
+
+        const feedSubmitResponse = await fetch(buildApiUrl("/api/blockchain/submit"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ signedTransaction: feedTx }),
+        });
+        const feedSubmitResult = await feedSubmitResponse.json();
+
+        if (!feedSubmitResult.successful) {
+          throw new Error(feedSubmitResult.message || "Failed to create personal feed");
+        }
       }
 
       // Load user data
@@ -379,11 +462,10 @@ export default function AuthPage() {
       }
 
       // Create user object from identity or portable credentials
-      const displayName = identityCheck.identity?.profileName || portableCredentials.ProfileName || "Restored User";
       const user = {
         publicKey: credentials.signingPublicKey,
-        displayName,
-        initials: displayName
+        displayName: userDisplayName,
+        initials: userDisplayName
           .split(" ")
           .map((n: string) => n[0])
           .join("")
