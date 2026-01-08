@@ -8,6 +8,8 @@
   "permissions": [
     "core:default",
     "core:window:allow-set-overlay-icon",
-    "notification:default"
+    "notification:default",
+    "updater:default",
+    "process:allow-restart"
   ]
 }

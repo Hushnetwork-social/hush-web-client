@@ -2,7 +2,8 @@
 
 import { type ReactNode } from 'react';
 import { SyncProvider } from '@/lib/sync';
-import { useUnreadBadge } from '@/hooks';
+import { useUnreadBadge, useAutoUpdate } from '@/hooks';
+import { UpdateOverlay } from '@/components/updates';
 
 // Sync interval in milliseconds (configurable via environment variable)
 // Default: 3000ms (3 seconds) - matches blockchain block time
@@ -24,11 +25,22 @@ function UnreadBadgeInitializer(): null {
   return null;
 }
 
+/**
+ * Component that initializes the auto-update check (Tauri desktop only).
+ * Checks for updates on app startup and shows overlay when available.
+ */
+function AutoUpdateInitializer(): null {
+  useAutoUpdate();
+  return null;
+}
+
 export function Providers({ children }: ProvidersProps) {
   return (
     <SyncProvider config={{ intervalMs: SYNC_INTERVAL_MS }}>
       <UnreadBadgeInitializer />
+      <AutoUpdateInitializer />
       {children}
+      <UpdateOverlay />
     </SyncProvider>
   );
 }
