@@ -9,8 +9,6 @@ import {
   parseSubmitTransactionResponse,
 } from '@/lib/grpc/grpc-web-helper';
 
-// Mark as dynamic to exclude from static export
-export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {

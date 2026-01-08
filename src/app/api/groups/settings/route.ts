@@ -9,8 +9,6 @@ import {
   encodeBoolField,
 } from '@/lib/grpc/grpc-web-helper';
 
-// Mark as dynamic to exclude from static export
-export const dynamic = 'force-dynamic';
 
 interface UpdateGroupSettingsRequestBody {
   feedId: string;

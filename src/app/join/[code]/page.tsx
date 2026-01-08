@@ -2,8 +2,23 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { JoinByCodeClient } from "./JoinByCodeClient";
 
-// Force dynamic rendering for this page (needs to fetch group info)
-export const dynamic = "force-dynamic";
+// Check if we're doing a static export (Tauri desktop app)
+// In static export mode, we can't use dynamic rendering or server-side fetching
+const isStaticExport = process.env.STATIC_EXPORT === "true";
+
+// For static export, we need to provide generateStaticParams for the dynamic route
+// We return a placeholder path that will be handled by the client component
+// The [[...code]] catch-all pattern is handled differently - for [code] we need at least one param
+export async function generateStaticParams() {
+  if (isStaticExport) {
+    // Return a placeholder - the client component will read the actual code from URL
+    // This is necessary for static export to work with dynamic routes
+    return [{ code: "_placeholder" }];
+  }
+  // In server mode, dynamic rendering handles all codes
+  return [];
+}
+
 
 interface PageProps {
   params: Promise<{ code: string }>;
@@ -11,6 +26,7 @@ interface PageProps {
 
 /**
  * Fetch group info from the API for metadata generation
+ * Only used in web deployment mode (not static export)
  */
 async function getGroupInfo(code: string): Promise<{
   success: boolean;
@@ -20,6 +36,11 @@ async function getGroupInfo(code: string): Promise<{
   memberCount?: number;
   isPublic?: boolean;
 } | null> {
+  // Skip server-side fetching in static export mode
+  if (isStaticExport) {
+    return null;
+  }
+
   try {
     // Get the host from request headers to construct internal URL
     const headersList = await headers();
@@ -55,8 +76,18 @@ async function getGroupInfo(code: string): Promise<{
 /**
  * Generate dynamic metadata for Open Graph previews
  * This allows WhatsApp, Telegram, etc. to show group name and description
+ * Only works in web deployment mode (not static export)
  */
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+  // In static export mode, return default metadata
+  // The actual group info will be fetched client-side
+  if (isStaticExport) {
+    return {
+      title: "Join Group - Hush Feeds",
+      description: "Join a group on Hush Feeds - Secure, decentralized messaging",
+    };
+  }
+
   const { code } = await params;
   const groupInfo = await getGroupInfo(code);
 
@@ -108,6 +139,12 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
  */
 export default async function JoinByCodePage({ params }: PageProps) {
   const { code } = await params;
+
+  // In static export mode, skip server-side fetching
+  // The client component will handle everything
+  if (isStaticExport) {
+    return <JoinByCodeClient initialGroupInfo={null} />;
+  }
 
   // Pre-fetch group info to pass to client (avoids double fetch)
   const groupInfo = await getGroupInfo(code);

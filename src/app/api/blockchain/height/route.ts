@@ -3,8 +3,6 @@
 
 import { NextResponse } from 'next/server';
 
-// Mark as dynamic to exclude from static export
-export const dynamic = 'force-dynamic';
 
 // Helper to get GRPC URL at runtime (not at build time)
 function getGrpcUrl(): string {
