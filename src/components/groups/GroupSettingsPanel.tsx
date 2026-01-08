@@ -502,7 +502,7 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
                     You will no longer receive messages from this group.
                     {isPublic
                       ? " You can rejoin after ~100 blocks (~16 minutes)."
-                      : " You will need a new invitation to rejoin."}
+                      : " You can only be re-invited after ~100 blocks (~16 minutes)."}
                   </p>
                 </div>
               </button>
@@ -553,7 +553,7 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
         message={`Are you sure you want to leave "${groupName}"? You will no longer receive messages from this group.${
           isPublic
             ? " You can rejoin after approximately 100 blocks (~16 minutes)."
-            : " You will need a new invitation to rejoin."
+            : " You can only be re-invited after approximately 100 blocks (~16 minutes)."
         }`}
         confirmLabel={isLeaving ? "Leaving..." : "Leave Group"}
         variant="danger"
