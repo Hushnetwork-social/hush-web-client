@@ -282,29 +282,20 @@ export class FeedsSyncable implements ISyncable {
 
     const { feeds: serverFeeds, maxBlockIndex } = await fetchFeeds(address, blockIndex);
 
-    // When doing a full sync from block 0, validate cached data against server
-    // BUT preserve group feeds where the user has left (they can still view old messages)
+    // When doing a full sync from block 0, validate cached data against server.
+    // Remove feeds that the server no longer returns (deleted groups, banned users, etc.)
     if (forceFullSync && currentFeeds.length > 0) {
       const serverFeedIds = new Set(serverFeeds.map(f => f.id));
-      const { messages } = useFeedsStore.getState();
 
-      // A feed is "stale" only if:
-      // 1. Server doesn't return it AND
-      // 2. It's NOT a group feed with messages (user may have left but should still see history)
+      // A feed is "stale" if the server doesn't return it.
+      // Note: Left groups (where user can still view history) ARE returned by the server
+      // via RetrieveLeftGroupFeedsForAddress. Only deleted groups are not returned.
       const staleFeedIds = currentFeeds.filter(f => {
         if (serverFeedIds.has(f.id)) return false; // Server still returns it, not stale
 
-        // For group feeds, preserve if user has messages in it
-        // This handles the case where user left the group but should still see their message history
-        if (f.type === 'group') {
-          const feedMessages = messages[f.id] ?? [];
-          if (feedMessages.length > 0) {
-            debugLog(`[FeedsSyncable] Preserving group feed "${f.name}" (user left but has ${feedMessages.length} messages)`);
-            return false; // Not stale - preserve it
-          }
-        }
-
-        return true; // Actually stale
+        // Server doesn't return this feed - it's either deleted or user was removed
+        debugLog(`[FeedsSyncable] Feed "${f.name}" (${f.type}) not returned by server - marking as stale`);
+        return true; // Stale - remove it
       });
 
       if (staleFeedIds.length > 0) {
@@ -314,25 +305,10 @@ export class FeedsSyncable implements ISyncable {
         const preservedFeeds = currentFeeds.filter(f => !staleFeedIds.some(s => s.id === f.id));
         useFeedsStore.getState().setFeeds(preservedFeeds);
       } else if (serverFeeds.length === 0 && currentFeeds.length > 0) {
-        // Server has no feeds - check if any should be preserved (groups with messages)
-        const feedsToPreserve = currentFeeds.filter(f => {
-          if (f.type === 'group') {
-            const feedMessages = messages[f.id] ?? [];
-            if (feedMessages.length > 0) {
-              debugLog(`[FeedsSyncable] Preserving group feed "${f.name}" (user left but has ${feedMessages.length} messages)`);
-              return true;
-            }
-          }
-          return false;
-        });
-
-        if (feedsToPreserve.length > 0) {
-          debugLog(`[FeedsSyncable] Preserving ${feedsToPreserve.length} group feed(s) with messages`);
-          useFeedsStore.getState().setFeeds(feedsToPreserve);
-        } else {
-          debugLog('[FeedsSyncable] Server has no feeds but client has cached data - clearing stale cache');
-          useFeedsStore.getState().reset();
-        }
+        // Server returns no feeds but client has cached data - clear stale cache
+        // (Left groups ARE returned by server, so if nothing comes back, all cached feeds are stale)
+        debugLog('[FeedsSyncable] Server has no feeds but client has cached data - clearing stale cache');
+        useFeedsStore.getState().reset();
       }
     }
 
