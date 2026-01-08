@@ -147,16 +147,17 @@ describe("GroupSettingsPanel", () => {
   });
 
   describe("Delete Button Visibility", () => {
-    it("should show Delete button for last admin", () => {
-      render(<GroupSettingsPanel {...defaultProps} isLastAdmin={true} />);
+    it("should show Delete button for any admin", () => {
+      // Any admin can delete, not just last admin
+      render(<GroupSettingsPanel {...defaultProps} isLastAdmin={false} />);
 
       expect(screen.getByText("Delete Group")).toBeInTheDocument();
     });
 
-    it("should not show Delete button for non-last admin", () => {
-      render(<GroupSettingsPanel {...defaultProps} isLastAdmin={false} />);
+    it("should show Delete button for last admin", () => {
+      render(<GroupSettingsPanel {...defaultProps} isLastAdmin={true} />);
 
-      expect(screen.queryByRole("button", { name: /delete group/i })).not.toBeInTheDocument();
+      expect(screen.getByText("Delete Group")).toBeInTheDocument();
     });
 
     it("should not show Delete button for member", () => {
@@ -201,7 +202,7 @@ describe("GroupSettingsPanel", () => {
     });
   });
 
-  describe("Delete Group (Last Admin)", () => {
+  describe("Delete Group (Admin)", () => {
     it("should open strong confirmation dialog for delete", () => {
       render(<GroupSettingsPanel {...defaultProps} isLastAdmin={true} />);
 
