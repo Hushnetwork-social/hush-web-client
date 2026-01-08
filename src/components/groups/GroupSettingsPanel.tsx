@@ -498,7 +498,12 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
                 <LogOut className="w-5 h-5 text-hush-text-accent" aria-hidden="true" />
                 <div className="text-left">
                   <p className="text-sm font-medium">Leave Group</p>
-                  <p className="text-xs text-hush-text-accent">You will no longer receive messages from this group</p>
+                  <p className="text-xs text-hush-text-accent">
+                    You will no longer receive messages from this group.
+                    {isPublic
+                      ? " You can rejoin after ~100 blocks (~16 minutes)."
+                      : " You will need a new invitation to rejoin."}
+                  </p>
                 </div>
               </button>
 
@@ -545,7 +550,11 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
       <ConfirmDialog
         isOpen={showLeaveConfirm}
         title="Leave Group"
-        message={`Are you sure you want to leave "${groupName}"? You will no longer receive messages from this group.`}
+        message={`Are you sure you want to leave "${groupName}"? You will no longer receive messages from this group.${
+          isPublic
+            ? " You can rejoin after approximately 100 blocks (~16 minutes)."
+            : " You will need a new invitation to rejoin."
+        }`}
         confirmLabel={isLeaving ? "Leaving..." : "Leave Group"}
         variant="danger"
         onConfirm={handleLeave}

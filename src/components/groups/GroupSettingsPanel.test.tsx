@@ -186,6 +186,18 @@ describe("GroupSettingsPanel", () => {
       expect(screen.getByText(/are you sure you want to leave/i)).toBeInTheDocument();
     });
 
+    it("should show rejoin cooldown message for public groups", () => {
+      render(<GroupSettingsPanel {...defaultProps} isPublic={true} />);
+
+      expect(screen.getByText(/You can rejoin after ~100 blocks/i)).toBeInTheDocument();
+    });
+
+    it("should show invitation required message for private groups", () => {
+      render(<GroupSettingsPanel {...defaultProps} isPublic={false} />);
+
+      expect(screen.getByText(/You will need a new invitation to rejoin/i)).toBeInTheDocument();
+    });
+
     it("should close confirmation when Cancel is clicked", () => {
       render(<GroupSettingsPanel {...defaultProps} />);
 
