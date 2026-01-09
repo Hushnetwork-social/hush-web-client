@@ -2,14 +2,13 @@
  * useAutoUpdate Hook
  *
  * Checks for app updates on startup when running in Tauri.
- * Shows overlay when update is available and handles installation.
- *
- * Uses dynamic imports to avoid bundling Tauri code in web builds.
+ * Uses GitHub API to check for new releases and shows overlay when available.
+ * User can click to open the download page in their browser.
  */
 
 'use client';
 
-import { useEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback } from 'react';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { isTauri } from '@/lib/platform';
 import { debugLog, debugError } from '@/lib/debug-logger';
@@ -17,20 +16,57 @@ import { debugLog, debugError } from '@/lib/debug-logger';
 // Delay before checking for updates (ms)
 const UPDATE_CHECK_DELAY = 3000;
 
+// GitHub API endpoint for latest release
+const GITHUB_RELEASES_API =
+  'https://api.github.com/repos/aboimpinto/HushNetwork/releases/latest';
+
+// GitHub releases page URL
+const GITHUB_RELEASES_PAGE =
+  'https://github.com/aboimpinto/HushNetwork/releases/latest';
+
+interface GitHubRelease {
+  tag_name: string;
+  name: string;
+  body: string;
+  published_at: string;
+  html_url: string;
+}
+
+/**
+ * Compare two semver version strings
+ * Returns: 1 if v1 > v2, -1 if v1 < v2, 0 if equal
+ */
+function compareVersions(v1: string, v2: string): number {
+  const parts1 = v1.split('.').map(Number);
+  const parts2 = v2.split('.').map(Number);
+
+  for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
+    const p1 = parts1[i] || 0;
+    const p2 = parts2[i] || 0;
+    if (p1 > p2) return 1;
+    if (p1 < p2) return -1;
+  }
+  return 0;
+}
+
+/**
+ * Extract version from tag name (e.g., "TauriDesktop-v0.2.5" -> "0.2.5")
+ */
+function extractVersion(tagName: string): string | null {
+  const match = tagName.match(/TauriDesktop-v(\d+\.\d+\.\d+)/);
+  return match ? match[1] : null;
+}
+
 export function useAutoUpdate(): void {
   const {
     setStatus,
     setUpdateInfo,
-    setProgress,
     setError,
     setShowOverlay,
     reset,
   } = useUpdateStore();
 
-  // Store the update object for later download
-  const updateRef = useRef<unknown>(null);
-
-  // Check for updates
+  // Check for updates via GitHub API
   const checkForUpdates = useCallback(async () => {
     if (!isTauri()) {
       debugLog('[AutoUpdate] Not in Tauri context, skipping update check');
@@ -39,107 +75,71 @@ export function useAutoUpdate(): void {
 
     try {
       setStatus('checking');
-      debugLog('[AutoUpdate] Checking for updates...');
+      debugLog('[AutoUpdate] Checking for updates via GitHub API...');
 
-      // Dynamic import to avoid bundling in web builds
-      const { check } = await import('@tauri-apps/plugin-updater');
+      // Get current version from Tauri
       const { getVersion } = await import('@tauri-apps/api/app');
-
       const currentVersion = await getVersion();
       debugLog('[AutoUpdate] Current version:', currentVersion);
 
-      const update = await check();
+      // Fetch latest release from GitHub
+      const response = await fetch(GITHUB_RELEASES_API, {
+        headers: {
+          Accept: 'application/vnd.github.v3+json',
+        },
+      });
 
-      if (update) {
-        debugLog(`[AutoUpdate] Update available: ${update.version}`);
-        updateRef.current = update;
+      if (!response.ok) {
+        throw new Error(`GitHub API error: ${response.status}`);
+      }
+
+      const release: GitHubRelease = await response.json();
+      debugLog('[AutoUpdate] Latest release:', release.tag_name);
+
+      // Extract version from tag
+      const latestVersion = extractVersion(release.tag_name);
+      if (!latestVersion) {
+        debugLog('[AutoUpdate] Could not parse version from tag:', release.tag_name);
+        setStatus('idle');
+        return;
+      }
+
+      // Compare versions
+      if (compareVersions(latestVersion, currentVersion) > 0) {
+        debugLog(`[AutoUpdate] Update available: ${currentVersion} -> ${latestVersion}`);
         setUpdateInfo({
-          version: update.version,
+          version: latestVersion,
           currentVersion,
-          body: update.body ?? undefined,
-          date: update.date ?? undefined,
+          body: release.body || undefined,
+          date: release.published_at || undefined,
         });
         setStatus('available');
         setShowOverlay(true);
       } else {
-        debugLog('[AutoUpdate] No update available');
+        debugLog('[AutoUpdate] Already on latest version');
         setStatus('idle');
       }
     } catch (error) {
       debugError('[AutoUpdate] Failed to check for updates:', error);
-      setError(error instanceof Error ? error.message : 'Update check failed');
-      setStatus('error');
+      // Don't show error to user - just silently fail
+      setStatus('idle');
     }
   }, [setStatus, setUpdateInfo, setError, setShowOverlay]);
 
-  // Download and install update
-  const downloadAndInstall = useCallback(async () => {
+  // Open download page in browser
+  const openDownloadPage = useCallback(async () => {
     if (!isTauri()) return;
 
     try {
-      setStatus('downloading');
-      setProgress({ downloaded: 0, total: null });
-      debugLog('[AutoUpdate] Downloading update...');
-
-      const { relaunch } = await import('@tauri-apps/plugin-process');
-
-      // Use the stored update reference
-      const update = updateRef.current as {
-        downloadAndInstall: (cb: (event: { event: string; data: { contentLength?: number; chunkLength?: number } }) => void) => Promise<void>;
-      } | null;
-
-      if (!update) {
-        // Re-check if we lost the reference
-        const { check } = await import('@tauri-apps/plugin-updater');
-        const freshUpdate = await check();
-        if (!freshUpdate) {
-          setError('Update no longer available');
-          setStatus('error');
-          return;
-        }
-        updateRef.current = freshUpdate;
-      }
-
-      const updateToInstall = updateRef.current as {
-        downloadAndInstall: (cb: (event: { event: string; data: { contentLength?: number; chunkLength?: number } }) => void) => Promise<void>;
-      };
-
-      let totalBytes = 0;
-      let downloadedBytes = 0;
-
-      // Download with progress tracking
-      await updateToInstall.downloadAndInstall((event) => {
-        switch (event.event) {
-          case 'Started':
-            totalBytes = event.data.contentLength ?? 0;
-            debugLog(`[AutoUpdate] Download started: ${totalBytes} bytes`);
-            setProgress({
-              downloaded: 0,
-              total: totalBytes || null,
-            });
-            break;
-          case 'Progress':
-            downloadedBytes += event.data.chunkLength ?? 0;
-            setProgress({
-              downloaded: downloadedBytes,
-              total: totalBytes || null,
-            });
-            break;
-          case 'Finished':
-            debugLog('[AutoUpdate] Download finished');
-            setStatus('ready');
-            break;
-        }
-      });
-
-      debugLog('[AutoUpdate] Installing and relaunching...');
-      await relaunch();
+      debugLog('[AutoUpdate] Opening download page...');
+      const { open } = await import('@tauri-apps/plugin-shell');
+      await open(GITHUB_RELEASES_PAGE);
     } catch (error) {
-      debugError('[AutoUpdate] Failed to download/install update:', error);
-      setError(error instanceof Error ? error.message : 'Update failed');
-      setStatus('error');
+      // Fallback: try window.open
+      debugError('[AutoUpdate] Failed to open with Tauri shell, trying window.open:', error);
+      window.open(GITHUB_RELEASES_PAGE, '_blank');
     }
-  }, [setStatus, setProgress, setError]);
+  }, []);
 
   // Dismiss the overlay
   const dismiss = useCallback(() => {
@@ -161,8 +161,8 @@ export function useAutoUpdate(): void {
   // Expose functions globally for the overlay to use
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      (window as Window & { __hushUpdateActions?: { downloadAndInstall: () => void; dismiss: () => void } }).__hushUpdateActions = {
-        downloadAndInstall,
+      (window as Window & { __hushUpdateActions?: { openDownloadPage: () => void; dismiss: () => void } }).__hushUpdateActions = {
+        openDownloadPage,
         dismiss,
       };
     }
@@ -172,16 +172,16 @@ export function useAutoUpdate(): void {
         delete (window as Window & { __hushUpdateActions?: unknown }).__hushUpdateActions;
       }
     };
-  }, [downloadAndInstall, dismiss]);
+  }, [openDownloadPage, dismiss]);
 }
 
 /**
- * Trigger update download from overlay component
+ * Open download page from overlay component
  */
 export function triggerUpdateDownload(): void {
-  const win = window as Window & { __hushUpdateActions?: { downloadAndInstall: () => void } };
-  if (win.__hushUpdateActions?.downloadAndInstall) {
-    win.__hushUpdateActions.downloadAndInstall();
+  const win = window as Window & { __hushUpdateActions?: { openDownloadPage: () => void } };
+  if (win.__hushUpdateActions?.openDownloadPage) {
+    win.__hushUpdateActions.openDownloadPage();
   }
 }
 

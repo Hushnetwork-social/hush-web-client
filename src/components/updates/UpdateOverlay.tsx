@@ -152,7 +152,7 @@ export function UpdateOverlay() {
                 className="flex-1 px-4 py-2.5 rounded-lg bg-hush-purple text-white font-semibold hover:bg-hush-purple/90 transition-colors flex items-center justify-center gap-2"
               >
                 <Download className="w-4 h-4" />
-                Update Now
+                Download
               </button>
             </>
           )}

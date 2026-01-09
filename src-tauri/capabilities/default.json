@@ -10,6 +10,7 @@
     "core:window:allow-set-overlay-icon",
     "notification:default",
     "updater:default",
-    "process:allow-restart"
+    "process:allow-restart",
+    "shell:allow-open"
   ]
 }
