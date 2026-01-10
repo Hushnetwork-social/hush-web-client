@@ -5,7 +5,8 @@
  * This module provides a unified interface for FCM (Android) and APNs (iOS) push notifications.
  *
  * Architecture:
- * - Uses Tauri commands to communicate with native Kotlin/Swift code
+ * - On Android: Uses JavaScript bridge (window.HushNative) to communicate with Kotlin
+ * - On iOS: Uses Tauri commands to communicate with Swift (future)
  * - Registers tokens with the server via gRPC
  * - Handles token refresh automatically
  */
@@ -25,14 +26,53 @@ interface PermissionResult {
   can_request: boolean;
 }
 
+/**
+ * HushNative JavaScript bridge interface.
+ * This interface is injected by Kotlin on Android via WebView.addJavascriptInterface().
+ * Methods are synchronous because JavascriptInterface methods are synchronous.
+ */
+interface HushNativeBridge {
+  getFcmToken(): string;
+  getDeviceName(): string;
+  hasNotificationPermission(): boolean;
+  isPushSupported(): boolean;
+  getPlatform(): string;
+  getPendingNavigation(): string;
+  clearPendingNavigation(): void;
+}
+
+// Extend Window interface to include the native bridge
+declare global {
+  interface Window {
+    HushNative?: HushNativeBridge;
+  }
+}
+
+/**
+ * Check if the HushNative JavaScript bridge is available.
+ * This is only available on Android when running in Tauri WebView.
+ */
+function hasNativeBridge(): boolean {
+  return typeof window !== 'undefined' && typeof window.HushNative !== 'undefined';
+}
+
 // Push registration state
 let isInitialized = false;
 let currentToken: string | null = null;
 
 /**
  * Check if push notifications are supported on the current platform.
+ * On Android: Uses the JavaScript bridge.
+ * On iOS: Will use Tauri commands (future).
  */
 export async function isPushSupported(): Promise<boolean> {
+  // First try the JavaScript bridge (Android)
+  if (hasNativeBridge()) {
+    debugLog('[PushManager] Using HushNative bridge for isPushSupported');
+    return window.HushNative!.isPushSupported();
+  }
+
+  // Fall back to platform detection
   const platform = await detectPlatformAsync();
   return platform === 'tauri-android' || platform === 'tauri-ios';
 }
@@ -40,15 +80,25 @@ export async function isPushSupported(): Promise<boolean> {
 /**
  * Get the current notification permission status.
  * On desktop, returns granted: true (no permission needed for local notifications).
- * On mobile, checks native permission status.
+ * On Android: Uses the JavaScript bridge.
+ * On iOS: Will use Tauri commands (future).
  */
 export async function getNotificationPermission(): Promise<PermissionResult> {
+  // First try the JavaScript bridge (Android)
+  if (hasNativeBridge()) {
+    debugLog('[PushManager] Using HushNative bridge for hasNotificationPermission');
+    const granted = window.HushNative!.hasNotificationPermission();
+    return { granted, can_request: !granted };
+  }
+
+  // Fall back to platform check
   const platform = await detectPlatformAsync();
 
   if (platform !== 'tauri-android' && platform !== 'tauri-ios') {
     return { granted: true, can_request: false };
   }
 
+  // iOS fallback - use Tauri commands
   try {
     const { invoke } = await import('@tauri-apps/api/core');
     return await invoke<PermissionResult>('has_notification_permission');
@@ -60,8 +110,17 @@ export async function getNotificationPermission(): Promise<PermissionResult> {
 
 /**
  * Get the device name for token registration.
+ * On Android: Uses the JavaScript bridge.
+ * On iOS: Will use Tauri commands (future).
  */
 async function getDeviceName(): Promise<string> {
+  // First try the JavaScript bridge (Android)
+  if (hasNativeBridge()) {
+    debugLog('[PushManager] Using HushNative bridge for getDeviceName');
+    return window.HushNative!.getDeviceName();
+  }
+
+  // iOS fallback - use Tauri commands
   try {
     const { invoke } = await import('@tauri-apps/api/core');
     return await invoke<string>('get_device_name');
@@ -74,8 +133,24 @@ async function getDeviceName(): Promise<string> {
 /**
  * Get the FCM/APNs token from native code.
  * Returns null if not available (e.g., on desktop or if not initialized).
+ * On Android: Uses the JavaScript bridge to get token from Kotlin.
+ * On iOS: Will use Tauri commands (future).
  */
 async function getNativeToken(): Promise<FcmTokenResult> {
+  // First try the JavaScript bridge (Android)
+  if (hasNativeBridge()) {
+    debugLog('[PushManager] Using HushNative bridge for getFcmToken');
+    const token = window.HushNative!.getFcmToken();
+    if (token && token.length > 0) {
+      debugLog('[PushManager] Got FCM token from bridge:', token.substring(0, 20) + '...');
+      return { token, error: null };
+    } else {
+      debugLog('[PushManager] No FCM token from bridge (empty string)');
+      return { token: null, error: 'FCM token not available yet' };
+    }
+  }
+
+  // iOS fallback - use Tauri commands
   try {
     const { invoke } = await import('@tauri-apps/api/core');
     return await invoke<FcmTokenResult>('get_fcm_token');
@@ -216,6 +291,35 @@ export function getCurrentToken(): string | null {
   return currentToken;
 }
 
+/**
+ * Get pending feed navigation from a notification tap.
+ * When a user taps a push notification, the feedId is stored by native code.
+ * This retrieves that feedId so the app can navigate to the correct feed.
+ *
+ * @returns The feedId to navigate to, or null if none pending
+ */
+export function getPendingNavigation(): string | null {
+  if (hasNativeBridge()) {
+    const feedId = window.HushNative!.getPendingNavigation();
+    if (feedId && feedId.length > 0) {
+      debugLog('[PushManager] Got pending navigation:', feedId.substring(0, 8) + '...');
+      return feedId;
+    }
+  }
+  return null;
+}
+
+/**
+ * Clear pending feed navigation after the app has processed it.
+ * Call this after navigating to the feed to prevent re-navigation on next app open.
+ */
+export function clearPendingNavigation(): void {
+  if (hasNativeBridge()) {
+    debugLog('[PushManager] Clearing pending navigation');
+    window.HushNative!.clearPendingNavigation();
+  }
+}
+
 export const pushManager = {
   isPushSupported,
   getNotificationPermission,
@@ -223,4 +327,6 @@ export const pushManager = {
   handleTokenRefresh,
   cleanupPush,
   getCurrentToken,
+  getPendingNavigation,
+  clearPendingNavigation,
 };
