@@ -4,11 +4,13 @@
  * Platform-agnostic notification handling that routes to the appropriate
  * notification system based on the runtime environment:
  * - Browser: In-app toast notifications
- * - Tauri: Native OS notifications (Windows/Mac/Linux)
+ * - Tauri Desktop: Native OS notifications (Windows/Mac/Linux)
+ * - Tauri Android: No-op (handled by FCM push notifications)
+ * - Tauri iOS: No-op (handled by APNs push notifications)
  * - Mobile PWA: Web Push notifications
  */
 
-import { detectPlatform } from '../platform';
+import { detectPlatform, type Platform } from '../platform';
 import { debugLog, debugError } from '../debug-logger';
 
 export interface NotificationEvent {
@@ -118,6 +120,35 @@ class TauriNotificationHandler implements NotificationHandler {
 }
 
 /**
+ * Tauri Mobile notification handler - for Android (FCM) and iOS (APNs)
+ *
+ * On mobile, push notifications are handled by the OS through FCM/APNs.
+ * When the app is open, we use in-app toasts (like browser).
+ * When the app is closed, FCM/APNs delivers the notification directly.
+ *
+ * This handler is intentionally a no-op for showNotification because:
+ * 1. When app is OPEN: In-app toasts are shown via real-time gRPC events
+ * 2. When app is CLOSED: FCM/APNs delivers the push notification
+ */
+class TauriMobileNotificationHandler implements NotificationHandler {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async showNotification(_event: NotificationEvent): Promise<void> {
+    // On mobile, notifications while app is open are handled by in-app toasts
+    // Push notifications (when app is closed) are delivered by FCM/APNs
+    debugLog('[TauriMobileNotificationHandler] showNotification called (handled by FCM/APNs or in-app toast)');
+  }
+
+  async clearNotification(feedId: string): Promise<void> {
+    debugLog(`[TauriMobileNotificationHandler] clearNotification for feed: ${feedId} (handled by OS)`);
+  }
+
+  isSupported(): boolean {
+    const platform = detectPlatform();
+    return platform === 'tauri-android' || platform === 'tauri-ios';
+  }
+}
+
+/**
  * Mobile PWA notification handler - uses Web Push API
  * (Future implementation for mobile PWA support)
  */
@@ -171,10 +202,14 @@ export function getNotificationHandler(): NotificationHandler {
     return notificationHandler;
   }
 
-  const platform = detectPlatform();
+  const platform: Platform = detectPlatform();
   debugLog(`[NotificationManager] Creating handler for platform: ${platform}`);
 
   switch (platform) {
+    case 'tauri-android':
+    case 'tauri-ios':
+      notificationHandler = new TauriMobileNotificationHandler();
+      break;
     case 'tauri':
       notificationHandler = new TauriNotificationHandler();
       break;
