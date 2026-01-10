@@ -1,3 +1,5 @@
+mod fcm;
+
 #[cfg(desktop)]
 use tauri::{
     tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState},
@@ -11,6 +13,13 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .invoke_handler(tauri::generate_handler![
+            fcm::get_platform,
+            fcm::get_device_name,
+            fcm::has_notification_permission,
+            fcm::get_fcm_token,
+            fcm::is_push_supported,
+        ])
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
