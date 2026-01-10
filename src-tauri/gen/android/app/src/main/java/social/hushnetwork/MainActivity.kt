@@ -35,6 +35,9 @@ class MainActivity : TauriActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
+        // Create notification channel (safe to call multiple times)
+        NotificationHelper.createChannel(this)
+
         // Check and request notification permission
         checkNotificationPermission()
     }
