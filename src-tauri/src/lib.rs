@@ -1,3 +1,4 @@
+#[cfg(desktop)]
 use tauri::{
     tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState},
     Manager,
@@ -19,20 +20,23 @@ pub fn run() {
                 )?;
             }
 
-            // Create system tray icon
-            let _tray = TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
-                .tooltip("Hush Feeds")
-                .on_tray_icon_event(|tray, event| {
-                    // Show/focus main window on tray click
-                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
-                        if let Some(window) = tray.app_handle().get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
+            // Create system tray icon (desktop only)
+            #[cfg(desktop)]
+            {
+                let _tray = TrayIconBuilder::new()
+                    .icon(app.default_window_icon().unwrap().clone())
+                    .tooltip("Hush Feeds")
+                    .on_tray_icon_event(|tray, event| {
+                        // Show/focus main window on tray click
+                        if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+                            if let Some(window) = tray.app_handle().get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
                         }
-                    }
-                })
-                .build(app)?;
+                    })
+                    .build(app)?;
+            }
 
             Ok(())
         })

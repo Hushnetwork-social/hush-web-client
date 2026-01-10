@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Hush Feeds",
   "version": "0.2.6",
-  "identifier": "social.hushnetwork.feeds",
+  "identifier": "social.hushnetwork",
   "build": {
     "frontendDist": "../out",
     "devUrl": "http://localhost:3100",
