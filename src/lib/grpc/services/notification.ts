@@ -12,11 +12,16 @@ import {
   buildSubscribeToEventsRequest,
   buildMarkFeedAsReadRequest,
   buildGetUnreadCountsRequest,
+  buildRegisterDeviceTokenRequest,
   parseFeedEventResponse,
   parseMarkFeedAsReadResponse,
   parseGetUnreadCountsResponse,
+  parseRegisterDeviceTokenResponse,
   parseGrpcResponse,
+  PushPlatform,
   type FeedEventResponse,
+  type PushPlatformType,
+  type RegisterDeviceTokenResult,
 } from '../grpc-web-helper';
 import { debugLog, debugError } from '@/lib/debug-logger';
 
@@ -249,8 +254,44 @@ export async function getUnreadCounts(
   }
 }
 
+/**
+ * Register a device token for push notifications.
+ *
+ * @param userId - The user's public signing address
+ * @param platform - The push platform (ANDROID, IOS, WEB)
+ * @param token - The FCM/APNs token
+ * @param deviceName - Optional device name for user reference
+ * @returns Promise resolving to registration result
+ */
+export async function registerDeviceToken(
+  userId: string,
+  platform: PushPlatformType,
+  token: string,
+  deviceName?: string
+): Promise<RegisterDeviceTokenResult> {
+  try {
+    const requestBytes = buildRegisterDeviceTokenRequest(userId, platform, token, deviceName);
+    const responseBytes = await browserGrpcCall(SERVICE_NAME, 'RegisterDeviceToken', requestBytes);
+    const messageBytes = parseGrpcResponse(responseBytes);
+
+    if (!messageBytes) {
+      return { success: false, message: 'Empty response from server' };
+    }
+
+    const response = parseRegisterDeviceTokenResponse(messageBytes);
+    debugLog(`[NotificationService] RegisterDeviceToken response:`, response);
+    return response;
+  } catch (error) {
+    debugError(`[NotificationService] RegisterDeviceToken error:`, error);
+    return { success: false, message: error instanceof Error ? error.message : 'Unknown error' };
+  }
+}
+
+export { PushPlatform, type PushPlatformType, type RegisterDeviceTokenResult };
+
 export const notificationService = {
   subscribeToEvents,
   markFeedAsRead,
   getUnreadCounts,
+  registerDeviceToken,
 };

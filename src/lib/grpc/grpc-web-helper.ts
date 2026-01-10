@@ -1730,3 +1730,96 @@ export function parseDeleteGroupFeedResponse(messageBytes: Uint8Array): DeleteGr
 
   return result;
 }
+
+// ============= Device Token Registration (Push Notifications) =============
+
+/**
+ * Push platform enum values matching the proto definition
+ */
+export const PushPlatform = {
+  UNSPECIFIED: 0,
+  ANDROID: 1,
+  IOS: 2,
+  WEB: 3,
+} as const;
+
+export type PushPlatformType = (typeof PushPlatform)[keyof typeof PushPlatform];
+
+/**
+ * Build RegisterDeviceTokenRequest for binary gRPC
+ * Proto: message RegisterDeviceTokenRequest {
+ *   string UserId = 1;
+ *   PushPlatform Platform = 2;
+ *   string Token = 3;
+ *   string DeviceName = 4;
+ * }
+ */
+export function buildRegisterDeviceTokenRequest(
+  userId: string,
+  platform: PushPlatformType,
+  token: string,
+  deviceName?: string
+): Uint8Array {
+  const bytes = [
+    ...encodeString(1, userId),
+    ...encodeVarintField(2, platform),
+    ...encodeString(3, token),
+  ];
+  if (deviceName) {
+    bytes.push(...encodeString(4, deviceName));
+  }
+  return new Uint8Array(bytes);
+}
+
+/**
+ * Response from RegisterDeviceToken
+ */
+export interface RegisterDeviceTokenResult {
+  success: boolean;
+  message: string;
+}
+
+/**
+ * Parse RegisterDeviceTokenResponse
+ * Proto: message RegisterDeviceTokenResponse {
+ *   bool Success = 1;
+ *   string Message = 2;
+ * }
+ */
+export function parseRegisterDeviceTokenResponse(messageBytes: Uint8Array): RegisterDeviceTokenResult {
+  const result: RegisterDeviceTokenResult = {
+    success: false,
+    message: '',
+  };
+
+  let offset = 0;
+  while (offset < messageBytes.length) {
+    const tagResult = parseVarint(messageBytes, offset);
+    const tag = tagResult.value;
+    offset += tagResult.bytesRead;
+
+    const fieldNumber = tag >> 3;
+    const wireType = tag & 0x07;
+
+    if (wireType === 0 && fieldNumber === 1) {
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+      result.success = valueResult.value === 1;
+    } else if (wireType === 2 && fieldNumber === 2) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead;
+      result.message = parseString(messageBytes, offset, lenResult.value);
+      offset += lenResult.value;
+    } else if (wireType === 0) {
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+    } else if (wireType === 2) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead + lenResult.value;
+    } else {
+      break;
+    }
+  }
+
+  return result;
+}
