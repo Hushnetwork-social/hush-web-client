@@ -23,6 +23,7 @@ class FcmService : FirebaseMessagingService() {
         private const val PREFS_NAME = "hush_fcm_prefs"
         private const val KEY_FCM_TOKEN = "fcm_token"
         private const val KEY_TOKEN_CHANGED = "token_changed"
+        private const val KEY_PENDING_NAVIGATION = "pending_feed_navigation"
 
         // Default values for missing notification fields
         private const val DEFAULT_TITLE = "Hush Feeds"
@@ -110,6 +111,43 @@ class FcmService : FirebaseMessagingService() {
                 .remove(KEY_TOKEN_CHANGED)
                 .apply()
             Log.d(TAG, "FCM token cleared")
+        }
+
+        /**
+         * Set pending feed navigation from notification tap.
+         * Called by MainActivity when a notification tap intent is received.
+         *
+         * @param context The application context
+         * @param feedId The feed ID to navigate to
+         */
+        fun setPendingNavigation(context: Context, feedId: String) {
+            val prefs = getPrefs(context)
+            prefs.edit().putString(KEY_PENDING_NAVIGATION, feedId).apply()
+            Log.d(TAG, "Pending navigation set: ${feedId.take(8)}...")
+        }
+
+        /**
+         * Get pending feed navigation from notification tap.
+         * Called by Tauri command to retrieve the feedId for navigation.
+         *
+         * @param context The application context
+         * @return The pending feedId, or null if none pending
+         */
+        fun getPendingNavigation(context: Context): String? {
+            val prefs = getPrefs(context)
+            return prefs.getString(KEY_PENDING_NAVIGATION, null)
+        }
+
+        /**
+         * Clear pending feed navigation after TypeScript has processed it.
+         * Called by Tauri command after navigation is complete.
+         *
+         * @param context The application context
+         */
+        fun clearPendingNavigation(context: Context) {
+            val prefs = getPrefs(context)
+            prefs.edit().remove(KEY_PENDING_NAVIGATION).apply()
+            Log.d(TAG, "Pending navigation cleared")
         }
 
         private fun getPrefs(context: Context): SharedPreferences {

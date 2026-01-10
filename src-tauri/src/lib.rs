@@ -19,6 +19,8 @@ pub fn run() {
             fcm::has_notification_permission,
             fcm::get_fcm_token,
             fcm::is_push_supported,
+            fcm::get_pending_navigation,
+            fcm::clear_pending_navigation,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

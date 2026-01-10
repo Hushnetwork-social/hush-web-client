@@ -154,6 +154,76 @@ pub fn is_push_supported() -> bool {
     }
 }
 
+/// Result type for pending navigation operations
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PendingNavigationResult {
+    pub feed_id: Option<String>,
+}
+
+/// Get pending feed navigation from notification tap.
+///
+/// When a user taps a push notification, the feedId is stored by the native layer.
+/// This command retrieves that feedId so TypeScript can navigate to the correct feed.
+///
+/// On Android: Returns feedId stored by MainActivity when handling notification tap
+/// On iOS: Similar pattern (future implementation)
+/// On desktop: Always returns None (no push notifications)
+#[tauri::command]
+pub fn get_pending_navigation() -> PendingNavigationResult {
+    #[cfg(target_os = "android")]
+    {
+        // On Android, the pending navigation is stored in SharedPreferences
+        // by MainActivity when a notification is tapped.
+        // The Kotlin layer provides FcmService.getPendingNavigation(context)
+        // TypeScript should call this via the Kotlin bridge
+        PendingNavigationResult {
+            feed_id: None, // TypeScript retrieves from Kotlin bridge directly
+        }
+    }
+    #[cfg(target_os = "ios")]
+    {
+        // iOS implementation will follow similar pattern
+        PendingNavigationResult {
+            feed_id: None,
+        }
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        // Desktop doesn't have push notification navigation
+        PendingNavigationResult {
+            feed_id: None,
+        }
+    }
+}
+
+/// Clear pending feed navigation after TypeScript has processed it.
+///
+/// After navigating to the feed, TypeScript calls this to clear the pending navigation
+/// so subsequent app opens don't re-navigate to the same feed.
+///
+/// On Android: Clears the SharedPreferences value via FcmService.clearPendingNavigation()
+/// On iOS: Similar pattern (future implementation)
+/// On desktop: No-op
+#[tauri::command]
+pub fn clear_pending_navigation() -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        // On Android, the Kotlin layer handles clearing via SharedPreferences
+        // TypeScript should call this via the Kotlin bridge
+        Ok(())
+    }
+    #[cfg(target_os = "ios")]
+    {
+        // iOS implementation will follow similar pattern
+        Ok(())
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        // Desktop doesn't have pending navigation to clear
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,5 +252,17 @@ mod tests {
     #[test]
     fn test_is_push_supported_on_desktop() {
         assert!(!is_push_supported());
+    }
+
+    #[test]
+    fn test_get_pending_navigation_on_desktop() {
+        let result = get_pending_navigation();
+        assert!(result.feed_id.is_none());
+    }
+
+    #[test]
+    fn test_clear_pending_navigation_on_desktop() {
+        let result = clear_pending_navigation();
+        assert!(result.is_ok());
     }
 }

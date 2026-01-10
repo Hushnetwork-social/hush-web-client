@@ -1,6 +1,8 @@
 package social.hushnetwork
 
 import android.Manifest
+import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -38,8 +40,41 @@ class MainActivity : TauriActivity() {
         // Create notification channel (safe to call multiple times)
         NotificationHelper.createChannel(this)
 
+        // Handle notification tap intent (if launched from notification)
+        handleNotificationIntent(intent)
+
         // Check and request notification permission
         checkNotificationPermission()
+    }
+
+    /**
+     * Handle new intent when app is already running (notification tap while in background)
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleNotificationIntent(intent)
+    }
+
+    /**
+     * Handle notification tap intent extras.
+     * Extracts feedId from the notification PendingIntent and stores it for TypeScript to consume.
+     *
+     * @param intent The intent to check for notification extras
+     */
+    private fun handleNotificationIntent(intent: Intent?) {
+        intent?.let {
+            val fromNotification = it.getBooleanExtra(NotificationHelper.EXTRA_FROM_NOTIFICATION, false)
+            if (fromNotification) {
+                val feedId = it.getStringExtra(NotificationHelper.EXTRA_FEED_ID)
+                if (!feedId.isNullOrEmpty()) {
+                    Log.d(TAG, "Notification tap with feedId: ${feedId.take(8)}...")
+                    // Store for TypeScript to consume via Tauri command
+                    FcmService.setPendingNavigation(this, feedId)
+                } else {
+                    Log.d(TAG, "Notification tap without feedId")
+                }
+            }
+        }
     }
 
     /**
