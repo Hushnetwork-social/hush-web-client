@@ -8,6 +8,7 @@ export * from './useFeedReactions';
 export * from './useCopyToClipboard';
 export * from './useUnreadBadge';
 export * from './useAutoUpdate';
+export * from './usePushInitializer';
 
 // Note: Feed hooks moved to @/modules/feeds (useFeedsStore)
 // Note: Block height polling moved to @/modules/blockchain (useBlockchainStore)

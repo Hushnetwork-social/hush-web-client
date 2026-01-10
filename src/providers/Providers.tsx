@@ -2,7 +2,7 @@
 
 import { type ReactNode } from 'react';
 import { SyncProvider } from '@/lib/sync';
-import { useUnreadBadge, useAutoUpdate } from '@/hooks';
+import { useUnreadBadge, useAutoUpdate, usePushInitializer } from '@/hooks';
 import { UpdateOverlay } from '@/components/updates';
 
 // Sync interval in milliseconds (configurable via environment variable)
@@ -34,11 +34,21 @@ function AutoUpdateInitializer(): null {
   return null;
 }
 
+/**
+ * Component that initializes push notifications (Tauri mobile only).
+ * Registers device token when user is authenticated.
+ */
+function PushInitializer(): null {
+  usePushInitializer();
+  return null;
+}
+
 export function Providers({ children }: ProvidersProps) {
   return (
     <SyncProvider config={{ intervalMs: SYNC_INTERVAL_MS }}>
       <UnreadBadgeInitializer />
       <AutoUpdateInitializer />
+      <PushInitializer />
       {children}
       <UpdateOverlay />
     </SyncProvider>
