@@ -14,6 +14,7 @@ import { downloadCredentialsFile, type PortableCredentials } from "@/lib/crypto"
 import { Loader2 } from "lucide-react";
 import { debugLog, debugError } from "@/lib/debug-logger";
 import { GroupCreationWizard } from "@/components/groups/GroupCreationWizard";
+import { checkPendingNavigation, setupVisibilityChangeListener } from "@/lib/push";
 
 // Dynamic imports to prevent dev mode race condition
 const FeedList = dynamic(
@@ -78,6 +79,17 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     checkMobile();
     window.addEventListener("resize", checkMobile);
     return () => window.removeEventListener("resize", checkMobile);
+  }, []);
+
+  // Handle pending navigation from push notification tap
+  useEffect(() => {
+    // Check on mount (app startup)
+    checkPendingNavigation();
+
+    // Setup visibility change listener (app resume)
+    const cleanup = setupVisibilityChangeListener();
+
+    return cleanup;
   }, []);
 
   // Define all callbacks before any early return

@@ -13,3 +13,9 @@ export {
   cleanupPush,
   getCurrentToken,
 } from './pushManager';
+
+export {
+  pushHandler,
+  checkPendingNavigation,
+  setupVisibilityChangeListener,
+} from './pushHandler';
