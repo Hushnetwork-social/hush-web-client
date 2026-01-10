@@ -3,6 +3,8 @@ package social.hushnetwork
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ProcessLifecycleOwner
 import com.google.firebase.messaging.FirebaseMessaging
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
@@ -21,6 +23,12 @@ class FcmService : FirebaseMessagingService() {
         private const val PREFS_NAME = "hush_fcm_prefs"
         private const val KEY_FCM_TOKEN = "fcm_token"
         private const val KEY_TOKEN_CHANGED = "token_changed"
+
+        // Default values for missing notification fields
+        private const val DEFAULT_TITLE = "Hush Feeds"
+        private const val DEFAULT_BODY = "You have a new message"
+        private const val MAX_BODY_LENGTH = 255
+        private const val MAX_TITLE_LENGTH = 100
 
         /**
          * Get the stored FCM token from SharedPreferences
@@ -136,13 +144,122 @@ class FcmService : FirebaseMessagingService() {
 
     /**
      * Called when a message is received from FCM
-     * Note: Push notification display is handled in FEAT-030
+     * Displays a notification if the app is in the background or killed.
+     * Suppresses notifications when app is in foreground (gRPC handles in-app notifications).
      */
     override fun onMessageReceived(message: RemoteMessage) {
         super.onMessageReceived(message)
         Log.d(TAG, "FCM message received from: ${message.from}")
 
-        // Message handling will be implemented in FEAT-030
-        // For now, just log that we received it
+        // Extract notification data from the FCM message
+        val data = message.data
+        if (data.isEmpty()) {
+            Log.w(TAG, "FCM message has no data payload, skipping")
+            return
+        }
+
+        // Log the received data for debugging
+        Log.d(TAG, "FCM message data: $data")
+
+        // Check if app is in foreground - suppress notification if so
+        if (isAppInForeground()) {
+            Log.i(TAG, "App is in foreground, suppressing notification (gRPC handles in-app)")
+            return
+        }
+
+        // Extract and validate notification fields
+        val notificationData = extractNotificationData(data)
+        if (notificationData == null) {
+            Log.e(TAG, "Failed to extract notification data, skipping")
+            return
+        }
+
+        // Show the notification
+        Log.i(TAG, "App is in background/killed, showing notification for feed: ${notificationData.feedId?.take(8) ?: "unknown"}...")
+        NotificationHelper.showNotification(
+            context = applicationContext,
+            title = notificationData.title,
+            body = notificationData.body,
+            feedId = notificationData.feedId ?: ""
+        )
     }
+
+    /**
+     * Check if the app is currently in the foreground.
+     * Uses ProcessLifecycleOwner which is the recommended approach for Android.
+     *
+     * @return true if app is visible to user, false if background or killed
+     */
+    private fun isAppInForeground(): Boolean {
+        return try {
+            val lifecycle = ProcessLifecycleOwner.get().lifecycle
+            lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+        } catch (e: Exception) {
+            // If lifecycle owner not available, assume background (safe default)
+            Log.w(TAG, "Could not determine foreground state, assuming background", e)
+            false
+        }
+    }
+
+    /**
+     * Extract and validate notification data from FCM message data payload.
+     * Handles missing fields gracefully with defaults.
+     *
+     * @param data The FCM message data map
+     * @return NotificationData if valid, null if completely invalid
+     */
+    private fun extractNotificationData(data: Map<String, String>): NotificationData? {
+        // Extract fields with defaults for missing values
+        var title = data["title"]?.trim()
+        var body = data["body"]?.trim()
+        val feedId = data["feedId"]?.trim()
+        val type = data["type"]?.trim()
+
+        // Log what we extracted
+        Log.d(TAG, "Extracted - title: ${title?.take(20) ?: "null"}, body: ${body?.take(20) ?: "null"}, feedId: ${feedId?.take(8) ?: "null"}, type: $type")
+
+        // Apply defaults for missing required fields
+        if (title.isNullOrEmpty()) {
+            Log.w(TAG, "Missing or empty title, using default")
+            title = DEFAULT_TITLE
+        }
+
+        if (body.isNullOrEmpty()) {
+            Log.w(TAG, "Missing or empty body, using default")
+            body = DEFAULT_BODY
+        }
+
+        // Truncate long text
+        if (body.length > MAX_BODY_LENGTH) {
+            Log.d(TAG, "Body exceeds $MAX_BODY_LENGTH chars, truncating")
+            body = body.take(MAX_BODY_LENGTH - 3) + "..."
+        }
+
+        if (title.length > MAX_TITLE_LENGTH) {
+            Log.d(TAG, "Title exceeds $MAX_TITLE_LENGTH chars, truncating")
+            title = title.take(MAX_TITLE_LENGTH - 3) + "..."
+        }
+
+        // Warn if feedId is missing (notification will work but no navigation)
+        if (feedId.isNullOrEmpty()) {
+            Log.w(TAG, "Missing feedId - notification will not navigate to specific feed")
+        }
+
+        return NotificationData(
+            title = title,
+            body = body,
+            feedId = feedId,
+            type = type
+        )
+    }
+
+    /**
+     * Data class to hold extracted notification data
+     */
+    private data class NotificationData(
+        val title: String,
+        val body: String,
+        val feedId: String?,
+        val type: String?
+    )
 }
