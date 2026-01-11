@@ -213,7 +213,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
       {/* Mobile Layout */}
       {isMobile && (
-        <div className="flex-1 min-h-0 flex flex-col p-2 gap-1">
+        <div className="flex-1 min-h-0 flex flex-col p-2 gap-1 safe-area-top safe-area-bottom">
           <Header
             balance={balance?.available || 0}
             blockHeight={blockHeight}

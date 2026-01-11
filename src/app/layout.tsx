@@ -37,6 +37,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
+  viewportFit: "cover", // Allow content to extend behind notches/system UI
 };
 
 export default function RootLayout({
