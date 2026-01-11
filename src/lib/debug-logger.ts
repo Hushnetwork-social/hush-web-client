@@ -18,17 +18,41 @@ const isDevelopment = process.env.NODE_ENV === 'development';
 const isDebugEnabled = process.env.NEXT_PUBLIC_DEBUG_LOGGING === 'true';
 
 /**
+ * Check if debug logging is enabled at runtime.
+ * Can be enabled via:
+ * - NODE_ENV=development
+ * - NEXT_PUBLIC_DEBUG_LOGGING=true (build-time)
+ * - localStorage.setItem('HUSH_DEBUG', 'true') (runtime override)
+ */
+function checkDebugEnabled(): boolean {
+  if (isDevelopment || isDebugEnabled) return true;
+
+  // Runtime override via localStorage (useful for debugging production)
+  if (typeof window !== 'undefined') {
+    try {
+      return localStorage.getItem('HUSH_DEBUG') === 'true';
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+/**
  * Whether debug logging is currently enabled.
- * True in development mode or when NEXT_PUBLIC_DEBUG_LOGGING=true
+ * True in development mode, when NEXT_PUBLIC_DEBUG_LOGGING=true, or when localStorage HUSH_DEBUG=true
  */
 export const isDebugLoggingEnabled = isDevelopment || isDebugEnabled;
+
+// Use function for runtime checks
+const shouldLog = (): boolean => checkDebugEnabled();
 
 /**
  * Log a debug message to the console.
  * Only outputs when debug logging is enabled.
  */
 export function debugLog(...args: unknown[]): void {
-  if (isDebugLoggingEnabled) {
+  if (shouldLog()) {
     console.log(...args);
   }
 }
@@ -38,7 +62,7 @@ export function debugLog(...args: unknown[]): void {
  * Only outputs when debug logging is enabled.
  */
 export function debugWarn(...args: unknown[]): void {
-  if (isDebugLoggingEnabled) {
+  if (shouldLog()) {
     console.warn(...args);
   }
 }

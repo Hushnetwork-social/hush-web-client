@@ -29,6 +29,11 @@ import { debugLog, debugError } from '@/lib/debug-logger';
 const GRPC_WEB_URL = process.env.NEXT_PUBLIC_GRPC_URL || 'http://localhost:4666';
 const SERVICE_NAME = 'rpcHush.HushNotification';
 
+// Log the gRPC URL on module load (critical for debugging production issues)
+if (typeof window !== 'undefined') {
+  console.log('[NotificationService] gRPC URL:', GRPC_WEB_URL);
+}
+
 /**
  * Browser-compatible gRPC-Web call (doesn't use Node.js Buffer)
  */
@@ -102,7 +107,8 @@ export function subscribeToEvents(
   frame[4] = requestBytes.length & 0xff;
   frame.set(requestBytes, 5);
 
-  debugLog(`[NotificationService] Subscribing to events for user: ${userId.substring(0, 20)}...`);
+  // Always log subscription attempts (critical for debugging)
+  console.log(`[NotificationService] Subscribing to events at ${url}`);
 
   // Use fetch with streaming response
   fetch(url, {
@@ -116,6 +122,7 @@ export function subscribeToEvents(
     signal: abortController.signal,
   })
     .then(async (response) => {
+      console.log(`[NotificationService] Response received: status=${response.status}, ok=${response.ok}`);
       if (!response.ok) {
         throw new Error(`gRPC streaming failed: ${response.status} ${response.statusText}`);
       }
@@ -124,7 +131,7 @@ export function subscribeToEvents(
         throw new Error('Response body is null - streaming not supported');
       }
 
-      debugLog(`[NotificationService] Stream connected, reading events...`);
+      console.log(`[NotificationService] Stream connected, reading events...`);
 
       const reader = response.body.getReader();
       let buffer = new Uint8Array(0);
@@ -134,7 +141,7 @@ export function subscribeToEvents(
           const { done, value } = await reader.read();
 
           if (done) {
-            debugLog(`[NotificationService] Stream ended`);
+            console.log(`[NotificationService] Stream ended`);
             break;
           }
 
@@ -168,15 +175,15 @@ export function subscribeToEvents(
             if (flag === 0 && messageLength > 0) {
               try {
                 const event = parseFeedEventResponse(messageBytes);
-                debugLog(`[NotificationService] Received event: type=${event.type}, feedId=${event.feedId}, unreadCount=${event.unreadCount}, senderName=${event.senderName}`);
+                console.log(`[NotificationService] Received event: type=${event.type}, feedId=${event.feedId?.substring(0, 8)}..., unreadCount=${event.unreadCount}`);
                 onEvent(event);
               } catch (parseError) {
-                debugError(`[NotificationService] Failed to parse event:`, parseError);
+                console.error(`[NotificationService] Failed to parse event:`, parseError);
               }
             }
             // Trailer frame (flag = 128) - contains status
             else if (flag === 128) {
-              debugLog(`[NotificationService] Received trailer frame`);
+              console.log(`[NotificationService] Received trailer frame (end of stream or error)`);
             }
           }
         }
@@ -190,8 +197,10 @@ export function subscribeToEvents(
     })
     .catch((error) => {
       if (!abortController.signal.aborted) {
-        debugError(`[NotificationService] Stream error:`, error);
+        console.error(`[NotificationService] Stream error:`, error);
         onError?.(error);
+      } else {
+        console.log(`[NotificationService] Stream aborted (user navigation or cleanup)`);
       }
     });
 

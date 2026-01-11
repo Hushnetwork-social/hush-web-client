@@ -352,15 +352,20 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
       abortControllerRef.current.abort();
     }
 
-    debugLog('[useNotifications] Connecting to notification stream...');
+    // Always log connection attempts (critical for debugging)
+    console.log('[useNotifications] Connecting to notification stream for user:', userId.substring(0, 20) + '...');
 
     abortControllerRef.current = notificationService.subscribeToEvents(
       userId,
       (event) => {
+        console.log('[useNotifications] Received event:', event.type, 'feedId:', event.feedId);
         setIsConnected(true);
         handleEvent(event);
       },
-      handleError,
+      (error) => {
+        console.error('[useNotifications] Stream error:', error);
+        handleError(error);
+      },
       `browser-${Date.now()}`,
       'browser'
     );
@@ -417,12 +422,14 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
 
   // Connect when authenticated
   useEffect(() => {
+    console.log('[useNotifications] Auth state changed:', { isAuthenticated, hasUserId: !!userId });
     if (isAuthenticated && userId) {
       // Fetch initial unread counts
       fetchUnreadCounts();
       // Connect to event stream
       connect();
     } else {
+      console.log('[useNotifications] Not authenticated or no userId, disconnecting');
       disconnect();
     }
 
