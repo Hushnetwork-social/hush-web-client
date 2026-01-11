@@ -122,4 +122,28 @@ class HushNativeBridge(private val context: Context) {
         Log.d(TAG, "clearPendingNavigation called")
         FcmService.clearPendingNavigation(context)
     }
+
+    /**
+     * Get pending deep link path from App Link URL.
+     * When the app is opened via a deep link (e.g., https://chat.hushnetwork.social/join/ABC123),
+     * the path is stored. This retrieves that path for TypeScript to navigate to.
+     *
+     * @return The URL path to navigate to (e.g., "/join/ABC123"), or empty string if none pending
+     */
+    @JavascriptInterface
+    fun getPendingDeepLink(): String {
+        val path = FcmService.getPendingDeepLink(context)
+        Log.d(TAG, "getPendingDeepLink called: ${path ?: "null"}")
+        return path ?: ""
+    }
+
+    /**
+     * Clear pending deep link after TypeScript has processed it.
+     * Call this after navigating to prevent re-navigation on next app open.
+     */
+    @JavascriptInterface
+    fun clearPendingDeepLink() {
+        Log.d(TAG, "clearPendingDeepLink called")
+        FcmService.clearPendingDeepLink(context)
+    }
 }

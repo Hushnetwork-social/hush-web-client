@@ -24,6 +24,7 @@ class FcmService : FirebaseMessagingService() {
         private const val KEY_FCM_TOKEN = "fcm_token"
         private const val KEY_TOKEN_CHANGED = "token_changed"
         private const val KEY_PENDING_NAVIGATION = "pending_feed_navigation"
+        private const val KEY_PENDING_DEEP_LINK = "pending_deep_link_path"
 
         // Default values for missing notification fields
         private const val DEFAULT_TITLE = "Hush Feeds"
@@ -148,6 +149,43 @@ class FcmService : FirebaseMessagingService() {
             val prefs = getPrefs(context)
             prefs.edit().remove(KEY_PENDING_NAVIGATION).apply()
             Log.d(TAG, "Pending navigation cleared")
+        }
+
+        /**
+         * Set pending deep link path from App Link URL.
+         * Called by MainActivity when the app is launched via a deep link.
+         *
+         * @param context The application context
+         * @param path The URL path to navigate to (e.g., "/join/ABC123")
+         */
+        fun setPendingDeepLink(context: Context, path: String) {
+            val prefs = getPrefs(context)
+            prefs.edit().putString(KEY_PENDING_DEEP_LINK, path).apply()
+            Log.d(TAG, "Pending deep link set: $path")
+        }
+
+        /**
+         * Get pending deep link path from App Link URL.
+         * Called by Tauri command to retrieve the path for navigation.
+         *
+         * @param context The application context
+         * @return The pending path, or null if none pending
+         */
+        fun getPendingDeepLink(context: Context): String? {
+            val prefs = getPrefs(context)
+            return prefs.getString(KEY_PENDING_DEEP_LINK, null)
+        }
+
+        /**
+         * Clear pending deep link after TypeScript has processed it.
+         * Called by Tauri command after navigation is complete.
+         *
+         * @param context The application context
+         */
+        fun clearPendingDeepLink(context: Context) {
+            val prefs = getPrefs(context)
+            prefs.edit().remove(KEY_PENDING_DEEP_LINK).apply()
+            Log.d(TAG, "Pending deep link cleared")
         }
 
         private fun getPrefs(context: Context): SharedPreferences {

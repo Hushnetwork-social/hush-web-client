@@ -24,6 +24,17 @@
                 <!-- AndroidTV support -->
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
+
+            <!-- Deep Link: Handle https://chat.hushnetwork.social/join/* URLs -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="chat.hushnetwork.social"
+                    android:pathPrefix="/join" />
+            </intent-filter>
         </activity>
 
         <provider

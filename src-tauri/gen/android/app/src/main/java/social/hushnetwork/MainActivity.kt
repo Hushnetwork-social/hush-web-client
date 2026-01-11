@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -57,6 +58,9 @@ class MainActivity : TauriActivity() {
         // Handle notification tap intent (if launched from notification)
         handleNotificationIntent(intent)
 
+        // Handle deep link intent (if launched from App Link)
+        handleDeepLinkIntent(intent)
+
         // Check and request notification permission
         checkNotificationPermission()
     }
@@ -67,6 +71,7 @@ class MainActivity : TauriActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleNotificationIntent(intent)
+        handleDeepLinkIntent(intent)
     }
 
     /**
@@ -86,6 +91,34 @@ class MainActivity : TauriActivity() {
                     FcmService.setPendingNavigation(this, feedId)
                 } else {
                     Log.d(TAG, "Notification tap without feedId")
+                }
+            }
+        }
+    }
+
+    /**
+     * Handle deep link intent (App Links).
+     * Extracts the URL path from the intent data and stores it for TypeScript to consume.
+     *
+     * @param intent The intent to check for deep link data
+     */
+    private fun handleDeepLinkIntent(intent: Intent?) {
+        intent?.let {
+            // Only handle VIEW actions with data URI
+            if (it.action == Intent.ACTION_VIEW && it.data != null) {
+                val uri: Uri = it.data!!
+                // Only handle our domain
+                if (uri.host == "chat.hushnetwork.social") {
+                    val path = uri.path
+                    if (!path.isNullOrEmpty()) {
+                        Log.d(TAG, "Deep link received: $path")
+                        // Store for TypeScript to consume via Tauri command
+                        FcmService.setPendingDeepLink(this, path)
+                    } else {
+                        Log.d(TAG, "Deep link with empty path, ignoring")
+                    }
+                } else {
+                    Log.d(TAG, "Deep link from unknown host: ${uri.host}")
                 }
             }
         }

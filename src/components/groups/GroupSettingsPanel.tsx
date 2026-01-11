@@ -5,6 +5,7 @@ import { X, Settings, Globe, Lock, LogOut, Trash2, Loader2, Link, Copy, Check } 
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { groupService } from "@/lib/grpc/services/group";
 import { useFeedsStore } from "@/modules/feeds";
+import { isTauri, getApiBaseUrl } from "@/lib/api-config";
 import type { GroupMemberRole } from "@/types";
 
 interface GroupSettingsPanelProps {
@@ -81,10 +82,12 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
   // Check if current user is admin
   const isAdmin = currentUserRole === "Admin";
 
-  // Generate invite URL based on current window location
+  // Generate invite URL - use API base URL for Tauri, window origin for browser
   const inviteUrl = useMemo(() => {
     if (!inviteCode || typeof window === 'undefined') return '';
-    const baseUrl = window.location.origin;
+    // In Tauri, use the configured API URL (e.g., https://chat.hushnetwork.social)
+    // In browser, use the current origin
+    const baseUrl = isTauri() ? getApiBaseUrl() : window.location.origin;
     return `${baseUrl}/join/${inviteCode}`;
   }, [inviteCode]);
 

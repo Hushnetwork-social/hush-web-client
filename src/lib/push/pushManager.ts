@@ -39,6 +39,8 @@ interface HushNativeBridge {
   getPlatform(): string;
   getPendingNavigation(): string;
   clearPendingNavigation(): void;
+  getPendingDeepLink(): string;
+  clearPendingDeepLink(): void;
 }
 
 // Extend Window interface to include the native bridge
@@ -320,6 +322,36 @@ export function clearPendingNavigation(): void {
   }
 }
 
+/**
+ * Get pending deep link path from an App Link tap.
+ * When a user taps a link like https://chat.hushnetwork.social/join/ABC123,
+ * the path is stored by native code. This retrieves that path so the app
+ * can navigate to the correct page.
+ *
+ * @returns The URL path to navigate to (e.g., "/join/ABC123"), or null if none pending
+ */
+export function getPendingDeepLink(): string | null {
+  if (hasNativeBridge()) {
+    const path = window.HushNative!.getPendingDeepLink();
+    if (path && path.length > 0) {
+      debugLog('[PushManager] Got pending deep link:', path);
+      return path;
+    }
+  }
+  return null;
+}
+
+/**
+ * Clear pending deep link after the app has processed it.
+ * Call this after navigating to the page to prevent re-navigation on next app open.
+ */
+export function clearPendingDeepLink(): void {
+  if (hasNativeBridge()) {
+    debugLog('[PushManager] Clearing pending deep link');
+    window.HushNative!.clearPendingDeepLink();
+  }
+}
+
 export const pushManager = {
   isPushSupported,
   getNotificationPermission,
@@ -329,4 +361,6 @@ export const pushManager = {
   getCurrentToken,
   getPendingNavigation,
   clearPendingNavigation,
+  getPendingDeepLink,
+  clearPendingDeepLink,
 };

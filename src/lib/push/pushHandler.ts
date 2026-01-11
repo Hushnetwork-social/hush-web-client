@@ -1,18 +1,22 @@
 /**
- * Push Notification Handler
+ * Push Notification and Deep Link Handler
  *
- * Handles navigation when user taps a push notification.
+ * Handles navigation when:
+ * 1. User taps a push notification - navigates to specific feed
+ * 2. User taps an App Link (e.g., https://chat.hushnetwork.social/join/ABC123) - navigates to join page
+ *
  * Works in conjunction with native Kotlin code that stores
- * the pending feedId in SharedPreferences.
+ * the pending feedId/path in SharedPreferences.
  *
  * Architecture:
- * - Native code stores pending feedId when notification is tapped
+ * - Native code stores pending feedId/path when notification/App Link is tapped
  * - TypeScript layer checks for pending navigation on app startup/resume
- * - Navigates to the appropriate feed and clears the pending state
+ * - Navigates to the appropriate page and clears the pending state
  */
 
 import { detectPlatformAsync } from '@/lib/platform';
 import { debugLog, debugError } from '@/lib/debug-logger';
+import { getPendingDeepLink, clearPendingDeepLink } from './pushManager';
 
 // Type matching Rust PendingNavigationResult
 interface PendingNavigationResult {
@@ -61,18 +65,61 @@ async function clearPendingNavigation(): Promise<void> {
 }
 
 /**
- * Check for and handle pending navigation from notification tap.
+ * Check for and handle pending deep link navigation.
+ * Called as part of checkPendingNavigation.
+ *
+ * @returns true if navigation occurred, false otherwise
+ */
+async function checkPendingDeepLinkNavigation(): Promise<boolean> {
+  debugLog('[PushHandler] Checking for pending deep link');
+
+  const path = getPendingDeepLink();
+
+  if (!path) {
+    debugLog('[PushHandler] No pending deep link');
+    return false;
+  }
+
+  debugLog(`[PushHandler] Found pending deep link: ${path}`);
+
+  // Clear before navigating to prevent loops
+  clearPendingDeepLink();
+
+  // Navigate to the path
+  try {
+    // Use window.location for simplicity and reliability
+    window.location.href = path;
+    return true;
+  } catch (error) {
+    debugError('[PushHandler] Deep link navigation failed:', error);
+    return false;
+  }
+}
+
+/**
+ * Check for and handle pending navigation from notification tap or deep link.
  * Should be called on app startup and resume (visibility change).
  *
  * Navigation behavior:
- * - If feedId exists: Navigate to /dashboard?feed={feedId}
- * - If no feedId: No navigation occurs
+ * - If feedId exists (from notification): Navigate to /dashboard?feed={feedId}
+ * - If deep link path exists: Navigate to that path (e.g., /join/ABC123)
+ * - If neither: No navigation occurs
+ *
+ * Priority: Deep links are checked first (user explicitly clicked a link),
+ * then notification taps.
  *
  * @returns true if navigation occurred, false otherwise
  */
 export async function checkPendingNavigation(): Promise<boolean> {
   debugLog('[PushHandler] Checking for pending navigation');
 
+  // Check for deep link first (higher priority - user explicitly clicked a link)
+  const deepLinkNavigated = await checkPendingDeepLinkNavigation();
+  if (deepLinkNavigated) {
+    return true;
+  }
+
+  // Check for notification tap navigation
   const feedId = await getPendingNavigation();
 
   if (!feedId) {
