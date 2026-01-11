@@ -1,12 +1,14 @@
 package social.hushnetwork
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
@@ -17,6 +19,18 @@ import kotlinx.coroutines.launch
 class MainActivity : TauriActivity() {
     companion object {
         private const val TAG = "MainActivity"
+        const val JS_BRIDGE_NAME = "HushNative"
+    }
+
+    /**
+     * Called when the WebView is created.
+     * Registers the JavaScript bridge for native function calls.
+     */
+    @SuppressLint("JavascriptInterface")
+    override fun onWebViewCreate(webView: WebView) {
+        super.onWebViewCreate(webView)
+        Log.d(TAG, "Registering HushNativeBridge as '$JS_BRIDGE_NAME'")
+        webView.addJavascriptInterface(HushNativeBridge(this), JS_BRIDGE_NAME)
     }
 
     // Permission request launcher for Android 13+
