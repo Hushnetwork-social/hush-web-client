@@ -1,35 +1,39 @@
 /**
  * useAutoUpdate Hook
  *
- * Checks for app updates on startup when running in Tauri.
- * Uses GitHub API to check for new releases and shows overlay when available.
- * User can click to open the download page in their browser.
+ * Checks for app updates on startup when running in Tauri (Desktop or Android).
+ * Uses releases.json from downloads.hushnetwork.social to check for new versions.
+ * Shows overlay when update is available with download link.
  */
 
 'use client';
 
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useRef } from 'react';
 import { useUpdateStore } from '@/stores/useUpdateStore';
-import { isTauri } from '@/lib/platform';
+import { isTauri, detectPlatformAsync, Platform } from '@/lib/platform';
 import { debugLog, debugError } from '@/lib/debug-logger';
 
 // Delay before checking for updates (ms)
 const UPDATE_CHECK_DELAY = 3000;
 
-// GitHub API endpoint for latest release
-const GITHUB_RELEASES_API =
-  'https://api.github.com/repos/aboimpinto/HushNetwork/releases/latest';
+// Releases JSON endpoint
+const RELEASES_JSON_URL = 'https://downloads.hushnetwork.social/releases.json';
 
-// GitHub releases page URL
-const GITHUB_RELEASES_PAGE =
-  'https://github.com/aboimpinto/HushNetwork/releases/latest';
+// Downloads page fallback
+const DOWNLOADS_PAGE = 'https://downloads.hushnetwork.social';
 
-interface GitHubRelease {
-  tag_name: string;
-  name: string;
-  body: string;
-  published_at: string;
-  html_url: string;
+interface PlatformRelease {
+  version: string;
+  filename: string;
+  url: string;
+  size: string;
+  sha256: string;
+}
+
+interface ReleasesJson {
+  lastUpdated: string;
+  windows?: PlatformRelease;
+  android?: PlatformRelease;
 }
 
 /**
@@ -37,8 +41,12 @@ interface GitHubRelease {
  * Returns: 1 if v1 > v2, -1 if v1 < v2, 0 if equal
  */
 function compareVersions(v1: string, v2: string): number {
-  const parts1 = v1.split('.').map(Number);
-  const parts2 = v2.split('.').map(Number);
+  // Remove 'v' or 'V' prefix if present
+  const clean1 = v1.replace(/^[vV]/, '');
+  const clean2 = v2.replace(/^[vV]/, '');
+
+  const parts1 = clean1.split('.').map(Number);
+  const parts2 = clean2.split('.').map(Number);
 
   for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
     const p1 = parts1[i] || 0;
@@ -50,68 +58,110 @@ function compareVersions(v1: string, v2: string): number {
 }
 
 /**
- * Extract version from tag name (e.g., "TauriDesktop-v0.2.5" -> "0.2.5")
+ * Get the release info for the current platform
  */
-function extractVersion(tagName: string): string | null {
-  const match = tagName.match(/TauriDesktop-v(\d+\.\d+\.\d+)/);
-  return match ? match[1] : null;
+function getReleaseForPlatform(releases: ReleasesJson, platform: Platform): PlatformRelease | null {
+  if (platform === 'tauri-android') {
+    return releases.android || null;
+  }
+  // Desktop (Windows, macOS, Linux) - currently only Windows
+  if (platform === 'tauri') {
+    return releases.windows || null;
+  }
+  return null;
 }
+
+/**
+ * Get current app version
+ */
+async function getCurrentVersion(): Promise<string> {
+  try {
+    const { getVersion } = await import('@tauri-apps/api/app');
+    return await getVersion();
+  } catch {
+    // Fallback to env variable
+    const envVersion = process.env.NEXT_PUBLIC_APP_VERSION;
+    if (envVersion) {
+      return envVersion.replace(/^[vV]/, '');
+    }
+    return '0.0.0';
+  }
+}
+
+// Store download URL globally for the overlay
+let currentDownloadUrl: string | null = null;
 
 export function useAutoUpdate(): void {
   const {
     setStatus,
     setUpdateInfo,
-    setError,
     setShowOverlay,
     reset,
   } = useUpdateStore();
 
-  // Check for updates via GitHub API
+  const hasChecked = useRef(false);
+
+  // Check for updates via releases.json
   const checkForUpdates = useCallback(async () => {
     if (!isTauri()) {
       debugLog('[AutoUpdate] Not in Tauri context, skipping update check');
       return;
     }
 
+    // Only check once per app session
+    if (hasChecked.current) {
+      debugLog('[AutoUpdate] Already checked this session');
+      return;
+    }
+
     try {
       setStatus('checking');
-      debugLog('[AutoUpdate] Checking for updates via GitHub API...');
+      debugLog('[AutoUpdate] Checking for updates via releases.json...');
 
-      // Get current version from Tauri
-      const { getVersion } = await import('@tauri-apps/api/app');
-      const currentVersion = await getVersion();
+      // Detect platform
+      const platform = await detectPlatformAsync();
+      debugLog('[AutoUpdate] Platform:', platform);
+
+      // Get current version
+      const currentVersion = await getCurrentVersion();
       debugLog('[AutoUpdate] Current version:', currentVersion);
 
-      // Fetch latest release from GitHub
-      const response = await fetch(GITHUB_RELEASES_API, {
-        headers: {
-          Accept: 'application/vnd.github.v3+json',
-        },
+      // Fetch releases.json
+      const response = await fetch(RELEASES_JSON_URL, {
+        cache: 'no-store', // Always fetch fresh
       });
 
       if (!response.ok) {
-        throw new Error(`GitHub API error: ${response.status}`);
+        throw new Error(`Failed to fetch releases.json: ${response.status}`);
       }
 
-      const release: GitHubRelease = await response.json();
-      debugLog('[AutoUpdate] Latest release:', release.tag_name);
+      const releases: ReleasesJson = await response.json();
+      debugLog('[AutoUpdate] Releases:', releases);
 
-      // Extract version from tag
-      const latestVersion = extractVersion(release.tag_name);
-      if (!latestVersion) {
-        debugLog('[AutoUpdate] Could not parse version from tag:', release.tag_name);
+      // Get release for current platform
+      const platformRelease = getReleaseForPlatform(releases, platform);
+      if (!platformRelease) {
+        debugLog('[AutoUpdate] No release found for platform:', platform);
         setStatus('idle');
+        hasChecked.current = true;
         return;
       }
+
+      const latestVersion = platformRelease.version;
+      debugLog('[AutoUpdate] Latest version for platform:', latestVersion);
 
       // Compare versions
       if (compareVersions(latestVersion, currentVersion) > 0) {
         debugLog(`[AutoUpdate] Update available: ${currentVersion} -> ${latestVersion}`);
+
+        // Store download URL for the overlay
+        currentDownloadUrl = platformRelease.url;
+
         setUpdateInfo({
           version: latestVersion,
           currentVersion,
-          body: release.body || undefined,
-          date: release.published_at || undefined,
+          body: `Download size: ${platformRelease.size}`,
+          date: releases.lastUpdated,
         });
         setStatus('available');
         setShowOverlay(true);
@@ -119,25 +169,32 @@ export function useAutoUpdate(): void {
         debugLog('[AutoUpdate] Already on latest version');
         setStatus('idle');
       }
+
+      hasChecked.current = true;
     } catch (error) {
       debugError('[AutoUpdate] Failed to check for updates:', error);
       // Don't show error to user - just silently fail
       setStatus('idle');
+      hasChecked.current = true;
     }
-  }, [setStatus, setUpdateInfo, setError, setShowOverlay]);
+  }, [setStatus, setUpdateInfo, setShowOverlay]);
 
-  // Open download page in browser
+  // Open download URL
   const openDownloadPage = useCallback(async () => {
-    if (!isTauri()) return;
+    const url = currentDownloadUrl || DOWNLOADS_PAGE;
+    debugLog('[AutoUpdate] Opening download URL:', url);
 
-    try {
-      debugLog('[AutoUpdate] Opening download page...');
-      const { open } = await import('@tauri-apps/plugin-shell');
-      await open(GITHUB_RELEASES_PAGE);
-    } catch (error) {
-      // Fallback: try window.open
-      debugError('[AutoUpdate] Failed to open with Tauri shell, trying window.open:', error);
-      window.open(GITHUB_RELEASES_PAGE, '_blank');
+    if (isTauri()) {
+      try {
+        const { open } = await import('@tauri-apps/plugin-shell');
+        await open(url);
+      } catch (error) {
+        debugError('[AutoUpdate] Failed to open with Tauri shell:', error);
+        // Fallback: try window.open
+        window.open(url, '_blank');
+      }
+    } else {
+      window.open(url, '_blank');
     }
   }, []);
 
