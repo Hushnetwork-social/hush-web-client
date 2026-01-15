@@ -661,9 +661,8 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
       {/* Chat Header - compact mode when virtual keyboard visible on Android */}
-      {/* When keyboard is visible, header becomes fixed at top so it stays visible when viewport scrolls up */}
       <div className={`flex-shrink-0 border-b border-hush-bg-hover bg-hush-bg-secondary transition-all duration-200 ease-in-out ${
-        isKeyboardVisible ? 'px-2 py-1 fixed top-0 left-0 right-0 z-50' : 'px-4 py-3'
+        isKeyboardVisible ? 'px-2 py-1' : 'px-4 py-3'
       }`}>
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
@@ -740,11 +739,6 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
           )}
         </div>
       </div>
-
-      {/* Spacer for fixed header when keyboard is visible */}
-      {isKeyboardVisible && (
-        <div className="flex-shrink-0 h-10" aria-hidden="true" />
-      )}
 
       {/* Messages Area */}
       <div className="flex-1 min-h-0 flex flex-col">

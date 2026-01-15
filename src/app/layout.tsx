@@ -38,6 +38,7 @@ export const viewport: Viewport = {
   maximumScale: 1,
   userScalable: false,
   viewportFit: "cover", // Allow content to extend behind notches/system UI
+  interactiveWidget: "resizes-content", // Resize viewport when keyboard opens instead of auto-scrolling
 };
 
 export default function RootLayout({
