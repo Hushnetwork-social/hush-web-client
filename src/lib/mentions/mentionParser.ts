@@ -205,3 +205,42 @@ export function hasMentions(content: string): boolean {
   const pattern = new RegExp(MENTION_PATTERN.source);
   return pattern.test(content);
 }
+
+/**
+ * Finds the mention at or adjacent to the cursor position for atomic delete.
+ * Returns the mention if cursor is inside it or immediately after it (for backspace).
+ *
+ * @param content - The message content
+ * @param cursorPosition - The cursor position
+ * @param direction - 'backward' for backspace (check if cursor is at end of mention)
+ *                    'forward' for delete (check if cursor is at start of mention)
+ * @returns The mention to delete, or null if cursor is not at a mention boundary
+ *
+ * @example
+ * // Cursor at end of mention: "Hey @[John](id1)| more"
+ * findMentionAtCursor("Hey @[John](id1) more", 16, 'backward')
+ * // Returns: { startIndex: 4, endIndex: 16, ... }
+ */
+export function findMentionAtCursor(
+  content: string,
+  cursorPosition: number,
+  direction: 'backward' | 'forward'
+): ParsedMention | null {
+  const mentions = parseMentions(content);
+
+  for (const mention of mentions) {
+    if (direction === 'backward') {
+      // For backspace: check if cursor is inside or at the end of mention
+      if (cursorPosition > mention.startIndex && cursorPosition <= mention.endIndex) {
+        return mention;
+      }
+    } else {
+      // For delete: check if cursor is inside or at the start of mention
+      if (cursorPosition >= mention.startIndex && cursorPosition < mention.endIndex) {
+        return mention;
+      }
+    }
+  }
+
+  return null;
+}

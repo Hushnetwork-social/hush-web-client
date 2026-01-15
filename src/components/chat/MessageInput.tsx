@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback, useImperativeHandle, forwardR
 import { Paperclip, Send, Smile } from "lucide-react";
 import { EmojiPicker } from "./EmojiPicker";
 import { MentionOverlay, MentionParticipant } from "./MentionOverlay";
-import { detectMentionTrigger, replaceMentionTrigger } from "@/lib/mentions";
+import { detectMentionTrigger, replaceMentionTrigger, findMentionAtCursor } from "@/lib/mentions";
 
 interface MessageInputProps {
   onSend: (message: string) => void;
@@ -74,6 +74,33 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
         setIsMentionOverlayOpen(false);
         setMentionFilterText("");
         return;
+      }
+    }
+
+    // Atomic delete for mentions: delete entire mention on backspace/delete
+    if (e.key === "Backspace" || e.key === "Delete") {
+      const cursorPos = inputRef.current?.selectionStart ?? 0;
+      const selectionEnd = inputRef.current?.selectionEnd ?? 0;
+
+      // Only handle atomic delete when there's no selection (single cursor)
+      if (cursorPos === selectionEnd) {
+        const direction = e.key === "Backspace" ? "backward" : "forward";
+        const mention = findMentionAtCursor(message, cursorPos, direction);
+
+        if (mention) {
+          e.preventDefault();
+          // Delete the entire mention
+          const newText = message.slice(0, mention.startIndex) + message.slice(mention.endIndex);
+          setMessage(newText);
+
+          // Set cursor to where the mention was
+          requestAnimationFrame(() => {
+            if (inputRef.current) {
+              inputRef.current.setSelectionRange(mention.startIndex, mention.startIndex);
+            }
+          });
+          return;
+        }
       }
     }
 

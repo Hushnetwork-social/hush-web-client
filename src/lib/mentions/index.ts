@@ -7,6 +7,7 @@ export {
   replaceMentionTrigger,
   getMentionDisplayText,
   hasMentions,
+  findMentionAtCursor,
   type ParsedMention,
   type MentionTriggerResult,
   type ReplaceMentionResult,
