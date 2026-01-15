@@ -9,6 +9,7 @@ export * from './useCopyToClipboard';
 export * from './useUnreadBadge';
 export * from './useAutoUpdate';
 export * from './usePushInitializer';
+export * from './useVirtualKeyboard';
 
 // Note: Feed hooks moved to @/modules/feeds (useFeedsStore)
 // Note: Block height polling moved to @/modules/blockchain (useBlockchainStore)
