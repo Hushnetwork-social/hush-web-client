@@ -12,6 +12,7 @@ import { GroupSettingsPanel } from "@/components/groups/GroupSettingsPanel";
 import { useAppStore } from "@/stores";
 import { useFeedsStore, sendMessage } from "@/modules/feeds";
 import { useFeedReactions } from "@/hooks/useFeedReactions";
+import { useVirtualKeyboard } from "@/hooks/useVirtualKeyboard";
 import type { Feed, FeedMessage, GroupFeedMember, SettingsChangeRecord } from "@/types";
 import { onVisibilityChange, type SettingsChange } from "@/lib/events";
 import { debugLog } from "@/lib/debug-logger";
@@ -52,6 +53,9 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const messageInputRef = useRef<MessageInputHandle>(null);
   const { credentials } = useAppStore();
+
+  // Android virtual keyboard detection for compact header mode
+  const { isKeyboardVisible } = useVirtualKeyboard();
   // Subscribe to just this feed's messages for efficient updates
   const feedMessages = useFeedsStore(
     (state) => state.messages[feed.id] ?? EMPTY_MESSAGES
@@ -656,21 +660,27 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-      {/* Chat Header */}
-      <div className="flex-shrink-0 px-4 py-3 border-b border-hush-bg-hover">
+      {/* Chat Header - compact mode when virtual keyboard visible on Android */}
+      <div className={`flex-shrink-0 border-b border-hush-bg-hover transition-all duration-200 ease-in-out ${
+        isKeyboardVisible ? 'px-2 py-1' : 'px-4 py-3'
+      }`}>
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            {/* Back Button - shown on mobile */}
+            {/* Back Button - shown on mobile, smaller in compact mode */}
             {showBackButton && (
               <button
                 onClick={onBack}
-                className="p-2 -ml-2 rounded-lg hover:bg-hush-bg-hover transition-colors"
+                className={`-ml-2 rounded-lg hover:bg-hush-bg-hover transition-all duration-200 ease-in-out ${
+                  isKeyboardVisible ? 'p-1' : 'p-2'
+                }`}
               >
-                <ArrowLeft className="w-5 h-5 text-hush-text-primary" />
+                <ArrowLeft className={`text-hush-text-primary transition-all duration-200 ease-in-out ${
+                  isKeyboardVisible ? 'w-4 h-4' : 'w-5 h-5'
+                }`} />
               </button>
             )}
-            {/* Group icon for group feeds - shows globe for public, users for private */}
-            {isGroupFeed && (
+            {/* Group icon for group feeds - shows globe for public, users for private. Hidden in compact mode. */}
+            {isGroupFeed && !isKeyboardVisible && (
               <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
                 feed.isPublic ? 'bg-green-500/20' : 'bg-hush-purple/20'
               }`}>
@@ -682,10 +692,15 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
               </div>
             )}
             <div>
-              <h2 className="text-lg font-semibold text-hush-text-primary">
+              <h2 className={`font-semibold text-hush-text-primary transition-all duration-200 ease-in-out ${
+                isKeyboardVisible ? 'text-sm max-w-[200px] truncate' : 'text-lg'
+              }`}>
                 {feed.name}
               </h2>
-              <div className="flex items-center space-x-2 text-xs text-hush-text-accent">
+              {/* Meta row - hidden in compact mode */}
+              <div className={`flex items-center space-x-2 text-xs text-hush-text-accent transition-all duration-200 ease-in-out ${
+                isKeyboardVisible ? 'hidden' : ''
+              }`}>
                 {/* Show lock for private, globe for public */}
                 {isGroupFeed && feed.isPublic ? (
                   <Globe className="w-3 h-3 text-green-400" />
@@ -701,8 +716,8 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
               </div>
             </div>
           </div>
-          {/* Action buttons for group feeds */}
-          {isGroupFeed && (
+          {/* Action buttons for group feeds - hidden in compact mode */}
+          {isGroupFeed && !isKeyboardVisible && (
             <div className="flex items-center gap-2">
               <button
                 onClick={handleOpenMemberPanel}
