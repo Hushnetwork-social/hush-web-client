@@ -254,6 +254,7 @@ export const MessageBubble = memo(function MessageBubble({
                     displayName={segment.displayName}
                     identityId={segment.identityId}
                     onClick={handleMentionClick}
+                    isOwn={isOwn}
                   />
                 ) : (
                   <span key={`text-${index}`}>{segment.content}</span>

@@ -23,11 +23,25 @@ describe('MentionText', () => {
       expect(mention).toHaveClass('text-hush-purple');
     });
 
-    it('should have medium font weight class', () => {
+    it('should have semibold font weight class', () => {
       render(<MentionText displayName="Alice" identityId="abc123" />);
 
       const mention = screen.getByText('@Alice');
-      expect(mention).toHaveClass('font-medium');
+      expect(mention).toHaveClass('font-semibold');
+    });
+
+    it('should use dark text color when isOwn is true', () => {
+      render(<MentionText displayName="Alice" identityId="abc123" isOwn={true} />);
+
+      const mention = screen.getByText('@Alice');
+      expect(mention).toHaveClass('text-hush-bg-dark/90');
+    });
+
+    it('should use purple text color when isOwn is false', () => {
+      render(<MentionText displayName="Alice" identityId="abc123" isOwn={false} />);
+
+      const mention = screen.getByText('@Alice');
+      expect(mention).toHaveClass('text-hush-purple');
     });
 
     it('should have cursor pointer class', () => {
