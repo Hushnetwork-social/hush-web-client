@@ -66,6 +66,12 @@ vi.mock('@/modules/feeds', async () => {
   };
 });
 
+// Mock useVirtualKeyboard hook for compact header tests
+const mockUseVirtualKeyboard = vi.fn(() => ({ isKeyboardVisible: false }));
+vi.mock('@/hooks/useVirtualKeyboard', () => ({
+  useVirtualKeyboard: () => mockUseVirtualKeyboard(),
+}));
+
 describe('ChatView', () => {
   const mockFeed: Feed = {
     id: 'feed-123',
@@ -913,6 +919,206 @@ describe('ChatView', () => {
       // Input should be enabled
       expect(screen.queryByText(/no longer a member/i)).not.toBeInTheDocument();
       expect(screen.getByPlaceholderText(/type a message/i)).toBeInTheDocument();
+    });
+  });
+
+  describe('Compact Header Mode (Android Keyboard)', () => {
+    const mockGroupFeed: Feed = {
+      id: 'group-feed-compact',
+      name: 'Compact Test Group',
+      type: 'group',
+      participants: ['user-1', 'user-2'],
+      createdAt: Date.now(),
+      lastMessageAt: Date.now(),
+      isPublic: false,
+    };
+
+    const mockGroupMembers: GroupFeedMember[] = [
+      { publicAddress: 'admin-user', displayName: 'Alice Admin', role: 'Admin' },
+      { publicAddress: 'my-public-key', displayName: 'TestUser', role: 'Member' },
+    ];
+
+    beforeEach(() => {
+      // Reset stores
+      useAppStore.setState({ credentials: mockCredentials });
+      useFeedsStore.getState().reset();
+      useFeedsStore.getState().setGroupMembers('group-feed-compact', mockGroupMembers);
+      // Reset mock to default (keyboard not visible)
+      mockUseVirtualKeyboard.mockReturnValue({ isKeyboardVisible: false });
+    });
+
+    describe('Full Mode (keyboard not visible)', () => {
+      it('should render header in full mode by default', () => {
+        const { container } = render(<ChatView feed={mockGroupFeed} />);
+
+        // Header should have full padding (px-4 py-3)
+        const header = container.querySelector('.px-4.py-3');
+        expect(header).toBeInTheDocument();
+      });
+
+      it('should show group avatar in full mode', () => {
+        const { container } = render(<ChatView feed={mockGroupFeed} />);
+
+        // Group icon container should be visible (w-10 h-10)
+        const groupIcon = container.querySelector('.w-10.h-10');
+        expect(groupIcon).toBeInTheDocument();
+      });
+
+      it('should show meta row in full mode', () => {
+        render(<ChatView feed={mockGroupFeed} />);
+
+        // Meta row content should be visible
+        expect(screen.getByText('Group Chat')).toBeInTheDocument();
+        expect(screen.getByText('• 2 members')).toBeInTheDocument();
+      });
+
+      it('should show Members button in full mode', () => {
+        render(<ChatView feed={mockGroupFeed} />);
+
+        expect(screen.getByRole('button', { name: /view group members/i })).toBeInTheDocument();
+      });
+
+      it('should show Settings button in full mode', () => {
+        render(<ChatView feed={mockGroupFeed} />);
+
+        expect(screen.getByRole('button', { name: /group settings/i })).toBeInTheDocument();
+      });
+
+      it('should show feed name with text-lg in full mode', () => {
+        const { container } = render(<ChatView feed={mockGroupFeed} />);
+
+        const feedNameHeading = container.querySelector('h2.text-lg');
+        expect(feedNameHeading).toBeInTheDocument();
+        expect(feedNameHeading).toHaveTextContent('Compact Test Group');
+      });
+    });
+
+    describe('Compact Mode (keyboard visible)', () => {
+      beforeEach(() => {
+        // Set keyboard as visible
+        mockUseVirtualKeyboard.mockReturnValue({ isKeyboardVisible: true });
+      });
+
+      it('should render header in compact mode when keyboard is visible', () => {
+        const { container } = render(<ChatView feed={mockGroupFeed} />);
+
+        // Header should have compact padding (px-2 py-1)
+        const header = container.querySelector('.px-2.py-1');
+        expect(header).toBeInTheDocument();
+      });
+
+      it('should hide group avatar in compact mode', () => {
+        const { container } = render(<ChatView feed={mockGroupFeed} />);
+
+        // Group icon container should NOT be visible
+        const groupIcon = container.querySelector('.w-10.h-10');
+        expect(groupIcon).not.toBeInTheDocument();
+      });
+
+      it('should hide meta row in compact mode', () => {
+        const { container } = render(<ChatView feed={mockGroupFeed} />);
+
+        // Meta row should have hidden class
+        const metaRow = container.querySelector('.hidden');
+        expect(metaRow).toBeInTheDocument();
+      });
+
+      it('should hide Members button in compact mode', () => {
+        render(<ChatView feed={mockGroupFeed} />);
+
+        expect(screen.queryByRole('button', { name: /view group members/i })).not.toBeInTheDocument();
+      });
+
+      it('should hide Settings button in compact mode', () => {
+        render(<ChatView feed={mockGroupFeed} />);
+
+        expect(screen.queryByRole('button', { name: /group settings/i })).not.toBeInTheDocument();
+      });
+
+      it('should show feed name with text-sm and truncate in compact mode', () => {
+        const { container } = render(<ChatView feed={mockGroupFeed} />);
+
+        const feedNameHeading = container.querySelector('h2.text-sm');
+        expect(feedNameHeading).toBeInTheDocument();
+        expect(feedNameHeading).toHaveClass('truncate');
+        expect(feedNameHeading).toHaveClass('max-w-[200px]');
+      });
+    });
+
+    describe('Back Button in Compact Mode', () => {
+      beforeEach(() => {
+        mockUseVirtualKeyboard.mockReturnValue({ isKeyboardVisible: true });
+      });
+
+      it('should show back button in compact mode when showBackButton is true', () => {
+        const { container } = render(<ChatView feed={mockGroupFeed} showBackButton={true} onBack={vi.fn()} />);
+
+        // Back button should have compact padding (p-1)
+        const backButton = container.querySelector('button.p-1');
+        expect(backButton).toBeInTheDocument();
+      });
+
+      it('should render back button with compact styling when keyboard visible', () => {
+        const { container } = render(<ChatView feed={mockGroupFeed} showBackButton={true} onBack={vi.fn()} />);
+
+        // Back button should have compact padding (p-1)
+        const backButton = container.querySelector('button.p-1');
+        expect(backButton).toBeInTheDocument();
+
+        // Icon should be smaller (w-4 h-4) - the ArrowLeft icon
+        const backIcon = container.querySelector('button.p-1 svg.w-4.h-4');
+        expect(backIcon).toBeInTheDocument();
+      });
+
+      it('should hide back button when showBackButton is false', () => {
+        const { container } = render(<ChatView feed={mockGroupFeed} showBackButton={false} />);
+
+        // No back button with p-1 class should be rendered (compact mode back button)
+        const backButton = container.querySelector('button.p-1.-ml-2');
+        expect(backButton).not.toBeInTheDocument();
+      });
+
+      it('should call onBack when back button is clicked in compact mode', () => {
+        const onBackMock = vi.fn();
+        const { container } = render(<ChatView feed={mockGroupFeed} showBackButton={true} onBack={onBackMock} />);
+
+        // Find the back button by its specific class
+        const backButton = container.querySelector('button.p-1.-ml-2');
+        expect(backButton).toBeInTheDocument();
+        fireEvent.click(backButton!);
+
+        expect(onBackMock).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    describe('Non-Group Feeds in Compact Mode', () => {
+      const chatFeed: Feed = {
+        id: 'chat-feed-compact',
+        name: 'Direct Chat',
+        type: 'chat',
+        participants: ['user-1', 'user-2'],
+        createdAt: Date.now(),
+        lastMessageAt: Date.now(),
+      };
+
+      beforeEach(() => {
+        mockUseVirtualKeyboard.mockReturnValue({ isKeyboardVisible: true });
+      });
+
+      it('should apply compact padding for non-group feeds', () => {
+        const { container } = render(<ChatView feed={chatFeed} />);
+
+        // Header should have compact padding
+        const header = container.querySelector('.px-2.py-1');
+        expect(header).toBeInTheDocument();
+      });
+
+      it('should truncate feed name for non-group feeds in compact mode', () => {
+        const { container } = render(<ChatView feed={chatFeed} />);
+
+        const feedNameHeading = container.querySelector('h2.text-sm.truncate');
+        expect(feedNameHeading).toBeInTheDocument();
+      });
     });
   });
 });
