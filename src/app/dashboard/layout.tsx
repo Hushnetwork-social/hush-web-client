@@ -9,7 +9,7 @@ import { useAppStore } from "@/stores";
 import { useBlockchainStore } from "@/modules/blockchain";
 import { useFeedsStore } from "@/modules/feeds";
 import { resetIdentitySyncState } from "@/modules/identity";
-import { useNotifications, useBackButton } from "@/hooks";
+import { useNotifications, useBackButton, useVisualViewportHeight } from "@/hooks";
 import { downloadCredentialsFile, type PortableCredentials } from "@/lib/crypto";
 import { Loader2 } from "lucide-react";
 import { debugLog, debugError } from "@/lib/debug-logger";
@@ -52,6 +52,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
   // Handle device back button for PWA navigation
   useBackButton();
+
+  // Track visual viewport height for Android keyboard handling
+  // This sets --visual-viewport-height CSS variable that we use for layout height
+  const { height: viewportHeight } = useVisualViewportHeight();
 
   // Redirect to auth page if not authenticated
   useEffect(() => {
@@ -175,7 +179,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   }
 
   return (
-    <div className="fixed inset-0 bg-hush-bg-dark flex flex-col overflow-hidden">
+    <div
+      className="fixed top-0 left-0 right-0 bg-hush-bg-dark flex flex-col overflow-hidden"
+      style={{ height: viewportHeight > 0 ? `${viewportHeight}px` : '100vh' }}
+    >
       {/* Desktop Layout */}
       {!isMobile && (
         <div className="flex-1 min-h-0 flex flex-col p-2 gap-1">

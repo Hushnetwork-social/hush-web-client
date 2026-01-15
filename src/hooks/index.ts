@@ -10,6 +10,7 @@ export * from './useUnreadBadge';
 export * from './useAutoUpdate';
 export * from './usePushInitializer';
 export * from './useVirtualKeyboard';
+export * from './useVisualViewportHeight';
 
 // Note: Feed hooks moved to @/modules/feeds (useFeedsStore)
 // Note: Block height polling moved to @/modules/blockchain (useBlockchainStore)
