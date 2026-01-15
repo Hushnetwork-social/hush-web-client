@@ -11,3 +11,5 @@ export {
   type MentionTriggerResult,
   type ReplaceMentionResult,
 } from './mentionParser';
+
+export { MentionText } from './MentionText';
