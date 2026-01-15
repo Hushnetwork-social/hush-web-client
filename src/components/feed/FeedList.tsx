@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { useAppStore } from "@/stores";
 import { useFeedsStore } from "@/modules/feeds";
 import { notificationService } from "@/lib/grpc/services";
+import { getMentionDisplayText } from "@/lib/mentions";
 import { ChatListItem } from "./ChatListItem";
 import { MessageSquare, Loader2 } from "lucide-react";
 import type { GroupFeedMember } from "@/types";
@@ -110,13 +111,17 @@ export function FeedList({ onFeedSelect }: FeedListProps) {
   };
 
   // Format message preview for groups (shows sender name)
+  // Also converts mention syntax @[name](id) to readable @name
   const formatMessagePreview = (content: string, feedType: string, senderName?: string): string => {
+    // Convert mentions to readable format (@[name](id) -> @name)
+    const readableContent = getMentionDisplayText(content);
+
     if (feedType === 'group' && senderName) {
       // Truncate sender name if too long
       const truncatedName = senderName.length > 10 ? senderName.slice(0, 10) + '…' : senderName;
-      return `${truncatedName}: ${content}`;
+      return `${truncatedName}: ${readableContent}`;
     }
-    return content;
+    return readableContent;
   };
 
   // Show loading only on initial load (no feeds yet and syncing)
