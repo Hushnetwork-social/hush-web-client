@@ -279,4 +279,29 @@ describe('MentionOverlay', () => {
       expect(listbox).toHaveClass('overscroll-contain');
     });
   });
+
+  describe('Accessibility', () => {
+    it('should have id on listbox for ARIA controls', () => {
+      render(<MentionOverlay {...defaultProps} />);
+
+      const listbox = screen.getByRole('listbox');
+      expect(listbox).toHaveAttribute('id', 'mention-listbox');
+    });
+
+    it('should have unique ids on each option', () => {
+      render(<MentionOverlay {...defaultProps} />);
+
+      const options = screen.getAllByRole('option');
+      expect(options[0]).toHaveAttribute('id', 'mention-option-id1');
+      expect(options[1]).toHaveAttribute('id', 'mention-option-id2');
+      expect(options[2]).toHaveAttribute('id', 'mention-option-id3');
+    });
+
+    it('should have aria-label on listbox', () => {
+      render(<MentionOverlay {...defaultProps} />);
+
+      const listbox = screen.getByRole('listbox');
+      expect(listbox).toHaveAttribute('aria-label', 'Participants');
+    });
+  });
 });

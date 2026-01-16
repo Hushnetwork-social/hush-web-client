@@ -76,7 +76,7 @@ export const MentionOverlay = memo(function MentionOverlay({
   useEffect(() => {
     if (!isOpen || filteredParticipants.length === 0) return;
 
-    const listContainer = containerRef.current?.querySelector('[role="listbox"]');
+    const listContainer = containerRef.current?.querySelector('#mention-listbox');
     const highlightedItem = listContainer?.children[highlightedIndex] as HTMLElement;
 
     if (highlightedItem) {
@@ -178,14 +178,14 @@ export const MentionOverlay = memo(function MentionOverlay({
           </div>
         ) : (
           <div
-            role="listbox"
+            id="mention-listbox" role="listbox"
             aria-label="Participants"
             className="overflow-y-auto overscroll-contain"
             style={{ maxHeight: `${maxHeight}px` }}
           >
             {filteredParticipants.map((participant, index) => (
               <div
-                key={participant.identityId}
+                key={participant.identityId} id={`mention-option-${participant.identityId}`}
                 role="option"
                 aria-selected={index === highlightedIndex}
                 className={`

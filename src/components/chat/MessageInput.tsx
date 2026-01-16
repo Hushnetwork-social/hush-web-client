@@ -231,7 +231,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
           value={message}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
-          placeholder="Type a message..."
+          placeholder="Type a message..." role="combobox" aria-haspopup="listbox" aria-expanded={isMentionOverlayOpen} aria-controls={isMentionOverlayOpen ? "mention-listbox" : undefined}
           disabled={disabled}
           className="flex-1 bg-transparent border-none outline-none text-hush-text-primary placeholder-hush-text-accent text-sm px-2 disabled:opacity-50"
         />
