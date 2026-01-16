@@ -52,6 +52,11 @@ interface FeedsState {
   /** Last sync error, if any */
   lastError: string | null;
 
+  // ============= Mention Tracking State =============
+
+  /** Version counter that increments when mentions change (triggers re-renders) */
+  mentionVersion: number;
+
   // ============= Group Feed State =============
 
   /** Group members indexed by feed ID */
@@ -124,6 +129,11 @@ interface FeedsActions {
 
   /** Reset store to initial state (on logout) */
   reset: () => void;
+
+  // ============= Mention Tracking Actions =============
+
+  /** Increment mention version to trigger re-renders when mentions change */
+  incrementMentionVersion: () => void;
 
   // ============= Group Join Actions =============
 
@@ -236,6 +246,7 @@ const initialState: FeedsState = {
   isSyncing: false,
   isCreatingPersonalFeed: false,
   lastError: null,
+  mentionVersion: 0,
   groupMembers: {},
   memberRoles: {},
   groupKeyStates: {},
@@ -501,6 +512,12 @@ export const useFeedsStore = create<FeedsStore>()(
       setError: (error) => set({ lastError: error }),
 
       reset: () => set(initialState),
+
+      // ============= Mention Tracking Implementations =============
+
+      incrementMentionVersion: () => {
+        set((state) => ({ mentionVersion: state.mentionVersion + 1 }));
+      },
 
       // ============= Group Join Implementations =============
 

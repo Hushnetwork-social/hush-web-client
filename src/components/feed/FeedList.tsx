@@ -20,6 +20,9 @@ export function FeedList({ onFeedSelect }: FeedListProps) {
   const isSyncing = useFeedsStore((state) => state.isSyncing);
   const markFeedAsRead = useFeedsStore((state) => state.markFeedAsRead);
   const groupMembersMap = useFeedsStore((state) => state.groupMembers);
+  // Subscribe to mentionVersion to trigger re-renders when mentions change
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const mentionVersion = useFeedsStore((state) => state.mentionVersion);
 
   // UI state from app store
   const { selectedFeedId, selectFeed, isLoading, credentials } = useAppStore();

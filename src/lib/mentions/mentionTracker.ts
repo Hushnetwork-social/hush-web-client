@@ -5,6 +5,8 @@
  * Enables the UI to show "@" indicators in FeedList and navigation buttons in chat.
  */
 
+import { useFeedsStore } from '@/modules/feeds';
+
 // Storage key for mention tracking data
 const STORAGE_KEY = 'hush_mention_tracking';
 
@@ -108,6 +110,12 @@ export function trackMention(feedId: string, messageId: string): void {
     data[feedId].messageIds.push(messageId);
     data[feedId].lastUpdated = Date.now();
     saveTrackingData(data);
+    // Trigger React re-render by incrementing version in Zustand store
+    try {
+      useFeedsStore.getState().incrementMentionVersion();
+    } catch {
+      // Store may not be available in tests or edge cases
+    }
   }
 }
 
@@ -129,6 +137,12 @@ export function markMentionRead(feedId: string, messageId: string): void {
     data[feedId].messageIds.splice(index, 1);
     data[feedId].lastUpdated = Date.now();
     saveTrackingData(data);
+    // Trigger React re-render by incrementing version in Zustand store
+    try {
+      useFeedsStore.getState().incrementMentionVersion();
+    } catch {
+      // Store may not be available in tests or edge cases
+    }
   }
 }
 
@@ -175,6 +189,12 @@ export function clearMentions(feedId: string): void {
   if (data[feedId]) {
     delete data[feedId];
     saveTrackingData(data);
+    // Trigger React re-render by incrementing version in Zustand store
+    try {
+      useFeedsStore.getState().incrementMentionVersion();
+    } catch {
+      // Store may not be available in tests or edge cases
+    }
   }
 }
 
