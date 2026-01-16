@@ -74,9 +74,16 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
   const userIdRef = useRef(userId);
   userIdRef.current = userId;
 
-  // Add a toast notification
+  // Add a toast notification (with deduplication)
   const addToast = useCallback((toast: NotificationToast) => {
-    setToasts((prev) => [...prev, toast]);
+    setToasts((prev) => {
+      // Prevent duplicate toasts for the same feed within a short time window
+      const isDuplicate = prev.some(
+        (t) => t.feedId === toast.feedId && Math.abs(t.timestamp - toast.timestamp) < 1000
+      );
+      if (isDuplicate) return prev;
+      return [...prev, toast];
+    });
 
     // Auto-dismiss after 5 seconds
     setTimeout(() => {
@@ -320,7 +327,7 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
             } else {
               // Browser: Use in-app toast
               const toast: NotificationToast = {
-                id: `${event.feedId}-${event.timestampUnixMs}`,
+                id: `${event.feedId}-${event.timestampUnixMs}-${Date.now()}`,
                 feedId: event.feedId,
                 senderName: event.senderName || 'Unknown',
                 messagePreview: decryptedPreview,
