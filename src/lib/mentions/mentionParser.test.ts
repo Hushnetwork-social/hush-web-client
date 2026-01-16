@@ -12,6 +12,7 @@ import {
   replaceMentionTrigger,
   getMentionDisplayText,
   hasMentions,
+  findMentionAtCursor,
 } from './mentionParser';
 
 describe('mentionParser', () => {
@@ -292,6 +293,206 @@ describe('mentionParser', () => {
 
     it('returns false for empty string', () => {
       expect(hasMentions('')).toBe(false);
+    });
+  });
+
+  describe('findMentionAtCursor', () => {
+    describe('backward (backspace)', () => {
+      it('finds mention when cursor is at end of mention', () => {
+        const content = 'Hey @[John](id1) there';
+        const result = findMentionAtCursor(content, 16, 'backward'); // cursor right after )
+
+        expect(result).not.toBeNull();
+        expect(result?.displayName).toBe('John');
+        expect(result?.startIndex).toBe(4);
+        expect(result?.endIndex).toBe(16);
+      });
+
+      it('finds mention when cursor is inside mention', () => {
+        const content = 'Hey @[John](id1) there';
+        const result = findMentionAtCursor(content, 10, 'backward'); // cursor inside
+
+        expect(result).not.toBeNull();
+        expect(result?.displayName).toBe('John');
+      });
+
+      it('returns null when cursor is before mention', () => {
+        const content = 'Hey @[John](id1) there';
+        const result = findMentionAtCursor(content, 4, 'backward'); // cursor at @
+
+        expect(result).toBeNull();
+      });
+
+      it('returns null when cursor is after mention with space', () => {
+        const content = 'Hey @[John](id1) there';
+        const result = findMentionAtCursor(content, 17, 'backward'); // cursor after space
+
+        expect(result).toBeNull();
+      });
+
+      it('returns null when no mentions exist', () => {
+        const content = 'Hello world';
+        const result = findMentionAtCursor(content, 5, 'backward');
+
+        expect(result).toBeNull();
+      });
+    });
+
+    describe('forward (delete)', () => {
+      it('finds mention when cursor is at start of mention', () => {
+        const content = 'Hey @[John](id1) there';
+        const result = findMentionAtCursor(content, 4, 'forward'); // cursor at @
+
+        expect(result).not.toBeNull();
+        expect(result?.displayName).toBe('John');
+      });
+
+      it('finds mention when cursor is inside mention', () => {
+        const content = 'Hey @[John](id1) there';
+        const result = findMentionAtCursor(content, 10, 'forward'); // cursor inside
+
+        expect(result).not.toBeNull();
+        expect(result?.displayName).toBe('John');
+      });
+
+      it('returns null when cursor is at end of mention', () => {
+        const content = 'Hey @[John](id1) there';
+        const result = findMentionAtCursor(content, 16, 'forward'); // cursor right after )
+
+        expect(result).toBeNull();
+      });
+
+      it('returns null when cursor is before mention', () => {
+        const content = 'Hey @[John](id1) there';
+        const result = findMentionAtCursor(content, 3, 'forward'); // cursor before @
+
+        expect(result).toBeNull();
+      });
+    });
+
+    describe('multiple mentions', () => {
+      it('finds correct mention among multiple', () => {
+        const content = '@[Alice](id1) and @[Bob](id2) test';
+        const result = findMentionAtCursor(content, 25, 'backward'); // inside Bob
+
+        expect(result).not.toBeNull();
+        expect(result?.displayName).toBe('Bob');
+      });
+
+      it('finds first mention when cursor is at its end', () => {
+        const content = '@[Alice](id1) and @[Bob](id2)';
+        const result = findMentionAtCursor(content, 13, 'backward'); // end of Alice
+
+        expect(result).not.toBeNull();
+        expect(result?.displayName).toBe('Alice');
+      });
+    });
+  });
+
+  describe('Edge Cases', () => {
+    describe('@ after punctuation', () => {
+      it('detects trigger after period', () => {
+        const text = 'Hello. @';
+        const result = detectMentionTrigger(text, 8);
+
+        expect(result).not.toBeNull();
+        expect(result?.filterText).toBe('');
+      });
+
+      it('detects trigger after comma', () => {
+        const text = 'Hey, @john';
+        const result = detectMentionTrigger(text, 10);
+
+        expect(result).not.toBeNull();
+        expect(result?.filterText).toBe('john');
+      });
+
+      it('detects trigger after question mark', () => {
+        const text = 'Really? @';
+        const result = detectMentionTrigger(text, 9);
+
+        expect(result).not.toBeNull();
+      });
+
+      it('detects trigger after exclamation', () => {
+        const text = 'Wow! @test';
+        const result = detectMentionTrigger(text, 10);
+
+        expect(result).not.toBeNull();
+        expect(result?.filterText).toBe('test');
+      });
+    });
+
+    describe('Unicode in display names', () => {
+      it('parses mention with unicode characters', () => {
+        const content = 'Hey @[Müller](id1)!';
+        const result = parseMentions(content);
+
+        expect(result).toHaveLength(1);
+        expect(result[0].displayName).toBe('Müller');
+      });
+
+      it('parses mention with emoji in name', () => {
+        const content = 'Hi @[John 🚀](id1)';
+        const result = parseMentions(content);
+
+        expect(result).toHaveLength(1);
+        expect(result[0].displayName).toBe('John 🚀');
+      });
+
+      it('parses mention with accented characters', () => {
+        const content = '@[José García](id1) and @[François](id2)';
+        const result = parseMentions(content);
+
+        expect(result).toHaveLength(2);
+        expect(result[0].displayName).toBe('José García');
+        expect(result[1].displayName).toBe('François');
+      });
+
+      it('converts unicode mention to display format', () => {
+        const content = 'Hey @[Müller](id1)!';
+        const result = getMentionDisplayText(content);
+
+        expect(result).toBe('Hey @Müller!');
+      });
+    });
+
+    describe('Multiple mentions of same person', () => {
+      it('finds both mentions of same person', () => {
+        const content = '@[John](id1) said hi to @[John](id1)';
+        const result = parseMentions(content);
+
+        expect(result).toHaveLength(2);
+        expect(result[0].displayName).toBe('John');
+        expect(result[1].displayName).toBe('John');
+        expect(result[0].startIndex).toBe(0);
+        expect(result[1].startIndex).toBe(24);
+      });
+
+      it('converts both to display format', () => {
+        const content = '@[John](id1) and @[John](id1) again';
+        const result = getMentionDisplayText(content);
+
+        expect(result).toBe('@John and @John again');
+      });
+    });
+
+    describe('Very long display names', () => {
+      it('parses mention with very long name', () => {
+        const longName = 'Alexander the Great of Macedonia and Persia';
+        const content = `Hey @[${longName}](id1)!`;
+        const result = parseMentions(content);
+
+        expect(result).toHaveLength(1);
+        expect(result[0].displayName).toBe(longName);
+      });
+
+      it('formats very long name correctly', () => {
+        const longName = 'Alexander the Great of Macedonia';
+        const result = formatMention(longName, 'id1');
+
+        expect(result).toBe(`@[${longName}](id1)`);
+      });
     });
   });
 });

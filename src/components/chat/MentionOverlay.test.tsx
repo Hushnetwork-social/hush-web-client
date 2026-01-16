@@ -216,4 +216,40 @@ describe('MentionOverlay', () => {
       expect(emptyMessage).toHaveTextContent('No participants match');
     });
   });
+
+  describe('Edge Cases', () => {
+    it('should have title attribute for full name on hover', () => {
+      const longNameParticipant: MentionParticipant = {
+        identityId: 'id-long',
+        displayName: 'Alexander the Great of Macedonia and Persia',
+        publicAddress: 'addr-long',
+      };
+      render(
+        <MentionOverlay
+          {...defaultProps}
+          participants={[longNameParticipant]}
+        />
+      );
+
+      const nameSpan = screen.getByText('Alexander the Great of Macedonia and Persia');
+      expect(nameSpan).toHaveAttribute('title', 'Alexander the Great of Macedonia and Persia');
+    });
+
+    it('should display unicode names correctly', () => {
+      const unicodeParticipant: MentionParticipant = {
+        identityId: 'id-unicode',
+        displayName: 'José García Müller',
+        publicAddress: 'addr-unicode',
+      };
+      render(
+        <MentionOverlay
+          {...defaultProps}
+          participants={[unicodeParticipant]}
+        />
+      );
+
+      expect(screen.getByText('José García Müller')).toBeInTheDocument();
+      expect(screen.getByText('JG')).toBeInTheDocument(); // initials
+    });
+  });
 });

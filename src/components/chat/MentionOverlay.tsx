@@ -205,8 +205,8 @@ export const MentionOverlay = memo(function MentionOverlay({
                   </span>
                 </div>
 
-                {/* Display name */}
-                <span className="text-sm text-white truncate">
+                {/* Display name - title shows full name on hover when truncated */}
+                <span className="text-sm text-white truncate" title={participant.displayName}>
                   {participant.displayName}
                 </span>
               </div>
