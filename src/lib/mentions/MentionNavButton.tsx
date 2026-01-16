@@ -43,17 +43,17 @@ export const MentionNavButton = memo(function MentionNavButton({
     <button
       type="button"
       onClick={handleClick}
-      className="relative flex items-center justify-center w-10 h-10 bg-hush-purple hover:bg-hush-purple-hover rounded-full shadow-lg transition-colors focus:outline-none focus:ring-2 focus:ring-hush-purple focus:ring-offset-2 focus:ring-offset-hush-bg-dark"
+      className="relative flex items-center justify-center w-8 h-8 bg-hush-purple hover:bg-hush-purple-hover rounded-full shadow-lg transition-colors focus:outline-none focus:ring-2 focus:ring-hush-purple focus:ring-offset-2 focus:ring-offset-hush-bg-dark"
       aria-label={`Navigate to mentions, ${count} unread`}
     >
       {/* @ Icon */}
-      <span className="text-white text-lg font-bold" aria-hidden="true">
+      <span className="text-white text-sm font-bold" aria-hidden="true">
         @
       </span>
 
       {/* Count Badge - positioned at top-right corner using transform */}
       <span
-        className="absolute top-0 right-0 translate-x-1/3 -translate-y-1/3 z-10 flex items-center justify-center min-w-[18px] h-[18px] px-1 bg-red-500 text-white text-[10px] font-bold rounded-full border-2 border-hush-bg-dark"
+        className="absolute top-0 right-0 translate-x-1/3 -translate-y-1/3 z-10 flex items-center justify-center min-w-[16px] h-[16px] px-0.5 bg-red-500 text-white text-[9px] font-bold rounded-full border border-hush-bg-dark"
         aria-hidden="true"
       >
         {displayCount}
