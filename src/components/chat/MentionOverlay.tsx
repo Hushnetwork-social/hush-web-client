@@ -165,7 +165,7 @@ export const MentionOverlay = memo(function MentionOverlay({
       aria-label="Select participant to mention"
     >
       <div
-        className="bg-hush-bg-element border border-white/10 rounded-lg shadow-lg overflow-hidden"
+        className="bg-hush-bg-element border border-white/10 rounded-lg shadow-lg overflow-hidden transition-all duration-150 ease-out motion-reduce:transition-none"
         style={{ maxHeight: `${maxHeight}px` }}
       >
         {filteredParticipants.length === 0 ? (
@@ -189,7 +189,7 @@ export const MentionOverlay = memo(function MentionOverlay({
                 role="option"
                 aria-selected={index === highlightedIndex}
                 className={`
-                  flex items-center gap-3 px-3 py-3 min-h-[48px] cursor-pointer transition-colors touch-manipulation
+                  flex items-center gap-3 px-3 py-3 min-h-[48px] cursor-pointer transition-colors duration-100 touch-manipulation motion-reduce:transition-none
                   ${
                     index === highlightedIndex
                       ? "bg-hush-purple/20 border-l-2 border-hush-purple"
