@@ -18,6 +18,8 @@ import { showNotification as showPlatformNotification } from '@/lib/notification
 import { onMemberJoin, onVisibilityChange } from '@/lib/events';
 import type { FeedEventResponse } from '@/lib/grpc/grpc-web-helper';
 import { debugLog, debugError } from '@/lib/debug-logger';
+import { parseMentions, trackMention } from '@/lib/mentions';
+import type { FeedMessage } from '@/types';
 
 // Event types matching proto enum
 const EventType = {
@@ -87,6 +89,47 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
     setToasts((prev) => prev.filter((t) => t.id !== toastId));
   }, []);
 
+  /**
+   * Track mentions in newly fetched messages.
+   * Checks each decrypted message for mentions of the current user
+   * and tracks them in localStorage for the mention badge.
+   */
+  const trackMentionsInMessages = useCallback(
+    (feedId: string, messages: FeedMessage[]) => {
+      const currentUserId = userIdRef.current;
+      const currentSelectedFeedId = selectedFeedIdRef.current;
+
+      if (!currentUserId) return;
+
+      // Skip if this is the currently active feed (user is already viewing it)
+      if (feedId === currentSelectedFeedId) return;
+
+      let mentionsTracked = 0;
+
+      for (const msg of messages) {
+        // Skip messages that failed decryption
+        if (msg.decryptionFailed) continue;
+        // Skip own messages
+        if (msg.senderPublicKey === currentUserId) continue;
+
+        const mentions = parseMentions(msg.content);
+        const hasMentionOfCurrentUser = mentions.some(
+          (m) => m.identityId === currentUserId
+        );
+
+        if (hasMentionOfCurrentUser) {
+          trackMention(feedId, msg.id);
+          mentionsTracked++;
+        }
+      }
+
+      if (mentionsTracked > 0) {
+        debugLog(`[useNotifications] Tracked ${mentionsTracked} mention(s) in feed ${feedId.substring(0, 8)}...`);
+      }
+    },
+    []
+  );
+
   // Fetch new messages for a specific feed (called when notification arrives)
   const fetchMessagesForFeed = useCallback(
     async (feedId: string) => {
@@ -143,6 +186,8 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
                 })
               );
               addMessages(feedId, decryptedMessages);
+              // Track mentions in decrypted messages
+              trackMentionsInMessages(feedId, decryptedMessages);
             } else {
               // No keys available for group feed
               addMessages(feedId, feedMessages.map(msg => ({
@@ -170,6 +215,8 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
                 })
               );
               addMessages(feedId, decryptedMessages);
+              // Track mentions in decrypted messages
+              trackMentionsInMessages(feedId, decryptedMessages);
             } else {
               addMessages(feedId, feedMessages);
             }
@@ -185,7 +232,7 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
         debugError('[useNotifications] Failed to fetch messages for feed:', error);
       }
     },
-    []
+    [trackMentionsInMessages]
   );
 
   // Decrypt message preview using feed's AES key (or group keys for group feeds)
