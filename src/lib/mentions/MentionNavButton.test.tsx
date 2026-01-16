@@ -99,12 +99,12 @@ describe('MentionNavButton', () => {
   });
 
   describe('Styling', () => {
-    it('should have 48px size classes (w-12 h-12)', () => {
+    it('should have 32px size classes (w-8 h-8)', () => {
       render(<MentionNavButton count={3} onNavigate={() => {}} />);
 
       const button = screen.getByRole('button');
-      expect(button).toHaveClass('w-12');
-      expect(button).toHaveClass('h-12');
+      expect(button).toHaveClass('w-8');
+      expect(button).toHaveClass('h-8');
     });
 
     it('should have purple background', () => {
