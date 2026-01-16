@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useEffect, useState } from "react";
 
 /**
  * useMessageHighlight - Hook for applying temporary highlight animation to message elements
@@ -11,12 +11,34 @@ import { useCallback, useRef } from "react";
  * - Calling highlight on a new element automatically clears the previous highlight
  * - Scrolls the element into view when highlighting
  * - No memory leaks (cleanup handled automatically)
+ * - Respects prefers-reduced-motion for accessibility
  *
  * @returns Object with highlightMessage function and clearHighlight function
  */
 export function useMessageHighlight() {
   const currentHighlightRef = useRef<HTMLElement | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Track reduced motion preference
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+
+  useEffect(() => {
+    // Check if matchMedia is available (may not be in tests)
+    if (typeof window === 'undefined' || !window.matchMedia) {
+      return;
+    }
+
+    // Check initial preference
+    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    setPrefersReducedMotion(mediaQuery.matches);
+
+    // Listen for changes
+    const handler = (e: MediaQueryListEvent) => {
+      setPrefersReducedMotion(e.matches);
+    };
+    mediaQuery.addEventListener('change', handler);
+    return () => mediaQuery.removeEventListener('change', handler);
+  }, []);
 
   /**
    * Clears any existing highlight
@@ -46,24 +68,29 @@ export function useMessageHighlight() {
       // Store reference to current highlighted element
       currentHighlightRef.current = element;
 
-      // Scroll element into view smoothly
+      // Scroll element into view (instant for reduced motion, smooth otherwise)
       element.scrollIntoView({
-        behavior: "smooth",
+        behavior: prefersReducedMotion ? "auto" : "smooth",
         block: "center",
       });
 
-      // Apply highlight animation class
-      element.classList.add("animate-highlight-fade");
+      // Apply highlight animation class (use reduced motion variant if needed)
+      const animationClass = prefersReducedMotion
+        ? "animate-highlight-fade-reduced"
+        : "animate-highlight-fade";
+      element.classList.add(animationClass);
 
-      // Set timeout to clean up after animation completes (4 seconds)
+      // Set timeout to clean up after animation completes
+      // Shorter duration for reduced motion (0.5s vs 4s)
+      const cleanupDelay = prefersReducedMotion ? 500 : 4000;
       timeoutRef.current = setTimeout(() => {
         if (currentHighlightRef.current === element) {
-          element.classList.remove("animate-highlight-fade");
+          element.classList.remove(animationClass);
           currentHighlightRef.current = null;
         }
-      }, 4000);
+      }, cleanupDelay);
     },
-    [clearHighlight]
+    [clearHighlight, prefersReducedMotion]
   );
 
   return {

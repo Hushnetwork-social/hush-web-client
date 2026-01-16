@@ -28,6 +28,10 @@ export default {
         'fade-out': 'fadeOut 0.3s ease-in forwards',
         'mention-pulse': 'mentionPulse 1.5s ease-in-out infinite',
         'highlight-fade': 'highlightFade 4s ease-out forwards',
+        // Reduced motion variants (instant state changes)
+        'slide-in-reduced': 'slideInReduced 0s forwards',
+        'mention-pulse-reduced': 'none',
+        'highlight-fade-reduced': 'highlightFadeReduced 0.5s ease-out forwards',
       },
       keyframes: {
         slideIn: {
@@ -45,6 +49,15 @@ export default {
         highlightFade: {
           '0%': { backgroundColor: 'rgba(167, 139, 250, 0.3)' },
           '75%': { backgroundColor: 'rgba(167, 139, 250, 0.3)' },
+          '100%': { backgroundColor: 'transparent' },
+        },
+        // Reduced motion: instant appear
+        slideInReduced: {
+          '0%, 100%': { transform: 'translateX(0)', opacity: '1' },
+        },
+        // Reduced motion: shorter highlight with no animation
+        highlightFadeReduced: {
+          '0%': { backgroundColor: 'rgba(167, 139, 250, 0.3)' },
           '100%': { backgroundColor: 'transparent' },
         },
       },

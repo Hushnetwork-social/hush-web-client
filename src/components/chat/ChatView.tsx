@@ -10,7 +10,7 @@ import { ReplyContextBar } from "./ReplyContextBar";
 import type { MentionParticipant } from "./MentionOverlay";
 import { MemberListPanel } from "@/components/groups/MemberListPanel";
 import { GroupSettingsPanel } from "@/components/groups/GroupSettingsPanel";
-import { MentionNavButton, getUnreadCount, getUnreadMentions, markMentionRead } from "@/lib/mentions";
+import { MentionNavButton, getUnreadCount, getUnreadMentions, markMentionRead, useMessageHighlight } from "@/lib/mentions";
 import { useAppStore } from "@/stores";
 import { useFeedsStore, sendMessage } from "@/modules/feeds";
 import { useFeedReactions } from "@/hooks/useFeedReactions";
@@ -18,6 +18,7 @@ import { useVirtualKeyboard } from "@/hooks/useVirtualKeyboard";
 import type { Feed, FeedMessage, GroupFeedMember, SettingsChangeRecord } from "@/types";
 import { onVisibilityChange, type SettingsChange } from "@/lib/events";
 import { debugLog } from "@/lib/debug-logger";
+import { announceMentionNavigation } from "@/lib/a11y";
 
 // Empty array constants to avoid creating new references
 const EMPTY_MESSAGES: FeedMessage[] = [];
@@ -385,6 +386,9 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   // State for unread mentions count (for MentionNavButton)
   const [unreadMentionCount, setUnreadMentionCount] = useState(() => getUnreadCount(feed.id));
 
+  // Message highlight hook for mention navigation
+  const { highlightMessage } = useMessageHighlight();
+
   // Update unread mention count when feed changes or messages change
   // This allows the button to react to new mentions being tracked or marked as read
   useEffect(() => {
@@ -577,12 +581,40 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
     );
 
     if (messageIndex !== -1 && virtuosoRef.current) {
+      // Get sender name for screen reader announcement
+      const targetItem = chatItems[messageIndex];
+      let senderName: string | undefined;
+      if (targetItem.type === 'message') {
+        // Resolve sender name using memberLookup (for groups) or feed name (for chats)
+        const senderKey = targetItem.senderPublicKey;
+        if (senderKey === credentials?.signingPublicKey) {
+          senderName = 'You';
+        } else if (feed.type === 'chat' && senderKey === feed.otherParticipantPublicSigningAddress) {
+          senderName = feed.name;
+        } else if (feed.type === 'group') {
+          const member = memberLookup.get(senderKey);
+          senderName = member?.displayName ?? targetItem.senderName;
+        }
+      }
+
       // Scroll to the message
       virtuosoRef.current.scrollToIndex({
         index: messageIndex,
         behavior: 'smooth',
         align: 'center',
       });
+
+      // After scroll completes, highlight the message element
+      // Use a delay to allow Virtuoso to render the element
+      setTimeout(() => {
+        const element = document.querySelector(`[data-message-id="${targetMessageId}"]`);
+        if (element instanceof HTMLElement) {
+          highlightMessage(element);
+        }
+      }, 500);
+
+      // Announce to screen reader
+      announceMentionNavigation(currentIndex, unreadMentionIds.length, senderName);
 
       // Mark this mention as read
       markMentionRead(feed.id, targetMessageId);
@@ -593,7 +625,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
       // Move to next mention for next click
       mentionNavIndexRef.current = currentIndex + 1;
     }
-  }, [feed.id, chatItems]);
+  }, [feed.id, feed.type, feed.name, feed.otherParticipantPublicSigningAddress, chatItems, highlightMessage, credentials?.signingPublicKey, memberLookup]);
 
   // Reset mention navigation index when feed changes
   useEffect(() => {

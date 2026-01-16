@@ -147,6 +147,7 @@ export const MessageBubble = memo(function MessageBubble({
     <div
       className={`flex flex-col ${isOwn ? "items-end" : "items-start"}`}
       style={{ marginBottom: hasActiveReactions ? '16px' : undefined }}
+      data-message-id={messageId}
     >
       {/* Sender name header - only shown for group messages from others */}
       {showSender && senderName && !isOwn && (

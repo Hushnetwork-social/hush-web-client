@@ -25,7 +25,7 @@ export const MentionBadge = memo(function MentionBadge({
 
   return (
     <span
-      className="inline-flex items-center justify-center px-1.5 py-0.5 bg-hush-purple text-white text-xs font-bold rounded-full animate-mention-pulse"
+      className="inline-flex items-center justify-center px-1.5 py-0.5 bg-hush-purple text-white text-xs font-bold rounded-full animate-mention-pulse motion-reduce:animate-none"
       role="status"
       aria-label="Unread mentions"
     >

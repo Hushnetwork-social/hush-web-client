@@ -4,12 +4,12 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { Header, Footer, Sidebar, BottomNav } from "@/components/layout";
-import { InAppToastContainer } from "@/components/notifications";
+import { InAppToastContainer, SystemToastContainer } from "@/components/notifications";
 import { useAppStore } from "@/stores";
 import { useBlockchainStore } from "@/modules/blockchain";
 import { useFeedsStore } from "@/modules/feeds";
 import { resetIdentitySyncState } from "@/modules/identity";
-import { useNotifications, useBackButton, useVisualViewportHeight } from "@/hooks";
+import { useNotifications, useBackButton, useVisualViewportHeight, useMentionDataLossCheck } from "@/hooks";
 import { downloadCredentialsFile, type PortableCredentials } from "@/lib/crypto";
 import { Loader2 } from "lucide-react";
 import { debugLog, debugError } from "@/lib/debug-logger";
@@ -49,6 +49,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
   // Initialize notification system
   const { toasts, dismissToast, markAsRead } = useNotifications();
+
+  // Check for mention data loss and show notification if detected
+  const { toasts: systemToasts, dismissToast: dismissSystemToast } = useMentionDataLossCheck();
 
   // Handle device back button for PWA navigation
   useBackButton();
@@ -259,6 +262,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         toasts={toasts}
         onDismiss={dismissToast}
         onNavigate={handleToastNavigate}
+      />
+
+      {/* System Toast Notifications (data loss, etc.) */}
+      <SystemToastContainer
+        toasts={systemToasts}
+        onDismiss={dismissSystemToast}
       />
 
       {/* Group Creation Wizard Modal */}
