@@ -14,3 +14,17 @@ export {
 } from './mentionParser';
 
 export { MentionText } from './MentionText';
+
+export {
+  trackMention,
+  markMentionRead,
+  getUnreadMentions,
+  getUnreadCount,
+  hasUnreadMentions,
+  clearMentions,
+  getAllFeedsWithMentions,
+  checkForDataLoss,
+  clearDataLossFlag,
+  type MentionTrackingEntry,
+  type MentionTrackingData,
+} from './mentionTracker';
