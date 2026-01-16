@@ -10,6 +10,7 @@ import { ReplyContextBar } from "./ReplyContextBar";
 import type { MentionParticipant } from "./MentionOverlay";
 import { MemberListPanel } from "@/components/groups/MemberListPanel";
 import { GroupSettingsPanel } from "@/components/groups/GroupSettingsPanel";
+import { MentionNavButton, getUnreadCount, getUnreadMentions, markMentionRead } from "@/lib/mentions";
 import { useAppStore } from "@/stores";
 import { useFeedsStore, sendMessage } from "@/modules/feeds";
 import { useFeedReactions } from "@/hooks/useFeedReactions";
@@ -381,6 +382,16 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   // State for settings panel visibility
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
 
+  // State for unread mentions count (for MentionNavButton)
+  const [unreadMentionCount, setUnreadMentionCount] = useState(() => getUnreadCount(feed.id));
+
+  // Update unread mention count when feed changes or messages change
+  // This allows the button to react to new mentions being tracked or marked as read
+  useEffect(() => {
+    const count = getUnreadCount(feed.id);
+    setUnreadMentionCount(count);
+  }, [feed.id, feedMessages]);
+
   // Get current user's membership info in the group
   const currentUserMember = useMemo(() => {
     if (!isGroupFeed || !credentials?.signingPublicKey) return null;
@@ -544,6 +555,50 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
       onBack();
     }
   }, [onBack]);
+
+  // Mention Navigation: Handler for navigating to unread mentions
+  // Cycles through unread mentions in order, scrolling to each and marking as read
+  const mentionNavIndexRef = useRef(0);
+
+  const handleNavigateToMention = useCallback(() => {
+    const unreadMentionIds = getUnreadMentions(feed.id);
+
+    if (unreadMentionIds.length === 0) {
+      return;
+    }
+
+    // Get the current index (wrap around if needed)
+    const currentIndex = mentionNavIndexRef.current % unreadMentionIds.length;
+    const targetMessageId = unreadMentionIds[currentIndex];
+
+    // Find the message index in chatItems
+    const messageIndex = chatItems.findIndex(
+      (item) => item.type === 'message' && item.id === targetMessageId
+    );
+
+    if (messageIndex !== -1 && virtuosoRef.current) {
+      // Scroll to the message
+      virtuosoRef.current.scrollToIndex({
+        index: messageIndex,
+        behavior: 'smooth',
+        align: 'center',
+      });
+
+      // Mark this mention as read
+      markMentionRead(feed.id, targetMessageId);
+
+      // Update the count
+      setUnreadMentionCount(getUnreadCount(feed.id));
+
+      // Move to next mention for next click
+      mentionNavIndexRef.current = currentIndex + 1;
+    }
+  }, [feed.id, chatItems]);
+
+  // Reset mention navigation index when feed changes
+  useEffect(() => {
+    mentionNavIndexRef.current = 0;
+  }, [feed.id]);
 
   // Settings Panel: Handler for settings update (name, description, visibility)
   const handleUpdateSettings = useCallback((name: string, description: string, isPublic: boolean) => {
@@ -782,7 +837,15 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
       </div>
 
       {/* Messages Area */}
-      <div className="flex-1 min-h-0 flex flex-col">
+      <div className="flex-1 min-h-0 flex flex-col relative">
+        {/* Floating Mention Navigation Button */}
+        <div className="absolute bottom-4 left-4 z-10">
+          <MentionNavButton
+            count={unreadMentionCount}
+            onNavigate={handleNavigateToMention}
+          />
+        </div>
+
         {chatItems.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center p-4">
             <div className="w-16 h-16 rounded-full bg-hush-bg-dark flex items-center justify-center mb-4">

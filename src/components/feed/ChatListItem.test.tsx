@@ -219,4 +219,44 @@ describe("ChatListItem", () => {
       expect(svg).toHaveAttribute("aria-hidden", "true");
     });
   });
+
+  describe("Mention Badge", () => {
+    it("shows mention badge when hasUnreadMentions is true", () => {
+      render(<ChatListItem {...defaultProps} hasUnreadMentions={true} />);
+
+      // MentionBadge renders with role="status"
+      expect(screen.getByRole("status")).toBeInTheDocument();
+      expect(screen.getByText("@")).toBeInTheDocument();
+    });
+
+    it("does not show mention badge when hasUnreadMentions is false", () => {
+      render(<ChatListItem {...defaultProps} hasUnreadMentions={false} />);
+
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    });
+
+    it("does not show mention badge by default", () => {
+      render(<ChatListItem {...defaultProps} />);
+
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    });
+
+    it("shows both unread count and mention badge together", () => {
+      render(<ChatListItem {...defaultProps} unreadCount={3} hasUnreadMentions={true} />);
+
+      expect(screen.getByText("3")).toBeInTheDocument();
+      expect(screen.getByRole("status")).toBeInTheDocument();
+    });
+
+    it("mention badge appears after unread count (format: N @)", () => {
+      render(<ChatListItem {...defaultProps} unreadCount={5} hasUnreadMentions={true} />);
+
+      // Find the badges container
+      const unreadBadge = screen.getByText("5").parentElement;
+      const mentionBadge = screen.getByRole("status");
+
+      // Both should be in the same flex container
+      expect(unreadBadge?.parentElement).toBe(mentionBadge.parentElement);
+    });
+  });
 });

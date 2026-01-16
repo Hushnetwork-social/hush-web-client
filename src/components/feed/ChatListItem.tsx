@@ -2,6 +2,7 @@
 
 import { Users, Globe } from "lucide-react";
 import { memo } from "react";
+import { MentionBadge } from "@/lib/mentions";
 
 interface ChatListItemProps {
   name: string;
@@ -15,6 +16,8 @@ interface ChatListItemProps {
   feedType?: 'personal' | 'chat' | 'group' | 'broadcast';
   /** Whether the group is public (only for group feeds) */
   isPublic?: boolean;
+  /** Whether this feed has unread mentions for the current user */
+  hasUnreadMentions?: boolean;
   onClick?: () => void;
 }
 
@@ -28,6 +31,7 @@ export const ChatListItem = memo(function ChatListItem({
   isPersonalFeed = false,
   feedType = 'chat',
   isPublic = false,
+  hasUnreadMentions = false,
   onClick,
 }: ChatListItemProps) {
   const isGroup = feedType === 'group';
@@ -85,13 +89,17 @@ export const ChatListItem = memo(function ChatListItem({
           <span className="text-xs text-hush-text-accent truncate max-w-[180px]">
             {lastMessage}
           </span>
-          {unreadCount > 0 && (
-            <span className="ml-2 min-w-[20px] h-5 px-1.5 rounded-full bg-hush-purple flex items-center justify-center flex-shrink-0">
-              <span className="text-[10px] font-bold text-hush-bg-dark">
-                {unreadCount}
+          {/* Badges container: unread count + mention indicator */}
+          <div className="flex items-center gap-1 ml-2 flex-shrink-0">
+            {unreadCount > 0 && (
+              <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-hush-purple flex items-center justify-center">
+                <span className="text-[10px] font-bold text-hush-bg-dark">
+                  {unreadCount}
+                </span>
               </span>
-            </span>
-          )}
+            )}
+            <MentionBadge isVisible={hasUnreadMentions} />
+          </div>
         </div>
       </div>
     </button>

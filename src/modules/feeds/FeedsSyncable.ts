@@ -29,6 +29,7 @@ import { useBlockchainStore } from '../blockchain/useBlockchainStore';
 import { useReactionsStore } from '../reactions/useReactionsStore';
 import { syncGroupMembers, syncKeyGenerations, syncGroupFeedInfo, type PreviousGroupSettings } from '@/lib/sync/group-sync';
 import { emitMemberJoin, emitSettingsChange, type SettingsChange } from '@/lib/events';
+import { parseMentions, trackMention } from '@/lib/mentions';
 import type { Feed, FeedMessage, SettingsChangeRecord } from '@/types';
 import { debugLog, debugWarn, debugError } from '@/lib/debug-logger';
 
@@ -629,6 +630,8 @@ export class FeedsSyncable implements ISyncable {
         if (feed?.type === 'group') {
           const decryptedMessages = await this.decryptGroupMessages(feedId, messages);
           useFeedsStore.getState().addMessages(feedId, decryptedMessages);
+          // Track mentions for non-active feeds
+          this.trackMentionsInNewMessages(feedId, decryptedMessages);
         } else {
           // Non-group feeds: Use the single AES key
           const feedAesKey = feed?.aesKey;
@@ -649,9 +652,12 @@ export class FeedsSyncable implements ISyncable {
               })
             );
             useFeedsStore.getState().addMessages(feedId, decryptedMessages);
+            // Track mentions for non-active feeds
+            this.trackMentionsInNewMessages(feedId, decryptedMessages);
           } else {
             debugWarn(`[FeedsSyncable] No AES key for feed ${feedId}, storing encrypted messages`);
             useFeedsStore.getState().addMessages(feedId, messages);
+            // Cannot track mentions for encrypted messages
           }
         }
       }
@@ -1076,6 +1082,8 @@ export class FeedsSyncable implements ISyncable {
       if (feed.type === 'group') {
         const decryptedMessages = await this.decryptGroupMessages(feed.id, feedMessages);
         useFeedsStore.getState().addMessages(feed.id, decryptedMessages);
+        // Track mentions for non-active feeds
+        this.trackMentionsInNewMessages(feed.id, decryptedMessages);
       } else {
         // Non-group feeds: Use the single AES key
         const feedAesKey = feed.aesKey;
@@ -1096,9 +1104,12 @@ export class FeedsSyncable implements ISyncable {
             })
           );
           useFeedsStore.getState().addMessages(feed.id, decryptedMessages);
+          // Track mentions for non-active feeds
+          this.trackMentionsInNewMessages(feed.id, decryptedMessages);
         } else {
           debugWarn(`[FeedsSyncable] No AES key for feed ${feed.id}, storing encrypted messages`);
           useFeedsStore.getState().addMessages(feed.id, feedMessages);
+          // Cannot track mentions for encrypted messages
         }
       }
     }
@@ -1124,6 +1135,61 @@ export class FeedsSyncable implements ISyncable {
       lastMessageBlockIndex: maxBlockIndex,
       lastReactionTallyVersion: maxReactionTallyVersion,
     });
+  }
+
+  /**
+   * Track mentions of the current user in newly synced messages.
+   *
+   * For each message in a non-active feed, parses the content for mentions
+   * and tracks any that match the current user's public key.
+   *
+   * @param feedId - The feed ID these messages belong to
+   * @param messages - Decrypted messages to check for mentions
+   */
+  private trackMentionsInNewMessages(feedId: string, messages: FeedMessage[]): void {
+    const credentials = useAppStore.getState().credentials;
+    const selectedFeedId = useAppStore.getState().selectedFeedId;
+
+    if (!credentials?.signingPublicKey) {
+      return;
+    }
+
+    // Skip if this is the currently active feed (user is already viewing it)
+    if (feedId === selectedFeedId) {
+      return;
+    }
+
+    const currentUserPublicKey = credentials.signingPublicKey;
+    let mentionsTracked = 0;
+
+    for (const msg of messages) {
+      // Skip messages that failed decryption
+      if (msg.decryptionFailed) {
+        continue;
+      }
+
+      // Skip messages from the current user (don't track your own mentions)
+      if (msg.senderPublicKey === currentUserPublicKey) {
+        continue;
+      }
+
+      // Parse mentions from message content
+      const mentions = parseMentions(msg.content);
+
+      // Check if any mention matches the current user's public key
+      const hasMentionOfCurrentUser = mentions.some(
+        (m) => m.identityId === currentUserPublicKey
+      );
+
+      if (hasMentionOfCurrentUser) {
+        trackMention(feedId, msg.id);
+        mentionsTracked++;
+      }
+    }
+
+    if (mentionsTracked > 0) {
+      debugLog(`[FeedsSyncable] Tracked ${mentionsTracked} mention(s) in feed ${feedId.substring(0, 8)}...`);
+    }
   }
 
   /**

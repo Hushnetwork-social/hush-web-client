@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { useAppStore } from "@/stores";
 import { useFeedsStore } from "@/modules/feeds";
 import { notificationService } from "@/lib/grpc/services";
-import { getMentionDisplayText } from "@/lib/mentions";
+import { getMentionDisplayText, hasUnreadMentions } from "@/lib/mentions";
 import { ChatListItem } from "./ChatListItem";
 import { MessageSquare, Loader2 } from "lucide-react";
 import type { GroupFeedMember } from "@/types";
@@ -171,6 +171,7 @@ export function FeedList({ onFeedSelect }: FeedListProps) {
             isPersonalFeed={isPersonalFeed}
             feedType={feed.type}
             isPublic={feed.isPublic}
+            hasUnreadMentions={hasUnreadMentions(feed.id)}
             onClick={() => handleFeedClick(feed.id)}
           />
         );
