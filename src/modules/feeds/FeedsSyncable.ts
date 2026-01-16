@@ -1149,6 +1149,7 @@ export class FeedsSyncable implements ISyncable {
   private trackMentionsInNewMessages(feedId: string, messages: FeedMessage[]): void {
     const credentials = useAppStore.getState().credentials;
     const selectedFeedId = useAppStore.getState().selectedFeedId;
+    const { feeds, messages: allMessages } = useFeedsStore.getState();
 
     if (!credentials?.signingPublicKey) {
       return;
@@ -1159,10 +1160,35 @@ export class FeedsSyncable implements ISyncable {
       return;
     }
 
+    // Get the feed's unread count to determine which messages are unread
+    const feed = feeds.find(f => f.id === feedId);
+    const unreadCount = feed?.unreadCount ?? 0;
+
+    // If no unread messages, nothing to track
+    if (unreadCount === 0) {
+      return;
+    }
+
+    // Get all messages for this feed (sorted by timestamp, oldest first)
+    const feedMessages = allMessages[feedId] ?? [];
+
+    // The last unreadCount messages are the unread ones
+    // Create a Set of unread message IDs for O(1) lookup
+    const unreadMessageIds = new Set<string>();
+    const startIndex = Math.max(0, feedMessages.length - unreadCount);
+    for (let i = startIndex; i < feedMessages.length; i++) {
+      unreadMessageIds.add(feedMessages[i].id);
+    }
+
     const currentUserPublicKey = credentials.signingPublicKey;
     let mentionsTracked = 0;
 
     for (const msg of messages) {
+      // Skip messages that are not in the unread set
+      if (!unreadMessageIds.has(msg.id)) {
+        continue;
+      }
+
       // Skip messages that failed decryption
       if (msg.decryptionFailed) {
         continue;
@@ -1188,7 +1214,7 @@ export class FeedsSyncable implements ISyncable {
     }
 
     if (mentionsTracked > 0) {
-      debugLog(`[FeedsSyncable] Tracked ${mentionsTracked} mention(s) in feed ${feedId.substring(0, 8)}...`);
+      debugLog(`[FeedsSyncable] Tracked ${mentionsTracked} mention(s) in ${unreadCount} unread message(s) for feed ${feedId.substring(0, 8)}...`);
     }
   }
 
