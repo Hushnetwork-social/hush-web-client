@@ -9,10 +9,14 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { MessageBubble } from './MessageBubble';
 import type { EmojiCounts } from '@/modules/reactions/useReactionsStore';
 
-// Mock the crypto constants
-vi.mock('@/lib/crypto/reactions/constants', () => ({
-  EMOJIS: ['👍', '❤️', '😂', '😮', '😢', '😡'] as const,
-}));
+// Mock the crypto constants - use importOriginal to include all exports
+vi.mock('@/lib/crypto/reactions/constants', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/crypto/reactions/constants')>();
+  return {
+    ...actual,
+    EMOJIS: ['👍', '❤️', '😂', '😮', '😢', '😡'] as const,
+  };
+});
 
 describe('MessageBubble', () => {
   const defaultProps = {
