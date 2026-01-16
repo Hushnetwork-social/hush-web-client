@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useRef, useEffect, memo } from "react";
+import { useState, useRef, useEffect, memo, useMemo, useCallback } from "react";
 import { Check, SmilePlus, Reply } from "lucide-react";
 import { ReactionPicker } from "./ReactionPicker";
 import { ReactionBar } from "./ReactionBar";
 import { ReplyPreview } from "./ReplyPreview";
 import { RoleBadge } from "@/components/shared/RoleBadge";
+import { parseMentions, MentionText } from "@/lib/mentions";
 import type { EmojiCounts } from "@/modules/reactions/useReactionsStore";
 import type { FeedMessage, GroupMemberRole } from "@/types";
 
@@ -36,6 +37,8 @@ interface MessageBubbleProps {
   senderName?: string;
   /** Group Feed: Role of the sender in the group */
   senderRole?: GroupMemberRole;
+  /** Mention: Handler for when a mention is clicked */
+  onMentionClick?: (identityId: string) => void;
 }
 
 export const MessageBubble = memo(function MessageBubble({
@@ -56,10 +59,56 @@ export const MessageBubble = memo(function MessageBubble({
   showSender = false,
   senderName,
   senderRole,
+  onMentionClick,
 }: MessageBubbleProps) {
   const [showPicker, setShowPicker] = useState(false);
   const [isHovering, setIsHovering] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
+
+  // Parse mentions from content
+  const contentWithMentions = useMemo(() => {
+    const mentions = parseMentions(content);
+    if (mentions.length === 0) {
+      return [{ type: 'text' as const, content }];
+    }
+
+    // Build segments array alternating between text and mentions
+    const segments: Array<{ type: 'text' | 'mention'; content: string; identityId?: string; displayName?: string }> = [];
+    let lastIndex = 0;
+
+    for (const mention of mentions) {
+      // Add text before this mention
+      if (mention.startIndex > lastIndex) {
+        segments.push({
+          type: 'text',
+          content: content.slice(lastIndex, mention.startIndex),
+        });
+      }
+      // Add the mention
+      segments.push({
+        type: 'mention',
+        content: mention.raw,
+        identityId: mention.identityId,
+        displayName: mention.displayName,
+      });
+      lastIndex = mention.endIndex;
+    }
+
+    // Add remaining text after last mention
+    if (lastIndex < content.length) {
+      segments.push({
+        type: 'text',
+        content: content.slice(lastIndex),
+      });
+    }
+
+    return segments;
+  }, [content]);
+
+  // Handle mention click
+  const handleMentionClick = useCallback((identityId: string) => {
+    onMentionClick?.(identityId);
+  }, [onMentionClick]);
 
   // Close picker when clicking outside
   useEffect(() => {
@@ -197,7 +246,21 @@ export const MessageBubble = memo(function MessageBubble({
                 resolveDisplayName={resolveDisplayName}
               />
             )}
-            <p className="text-sm break-words">{content}</p>
+            <p className="text-sm break-words">
+              {contentWithMentions.map((segment, index) =>
+                segment.type === 'mention' && segment.identityId && segment.displayName ? (
+                  <MentionText
+                    key={`mention-${index}`}
+                    displayName={segment.displayName}
+                    identityId={segment.identityId}
+                    onClick={handleMentionClick}
+                    isOwn={isOwn}
+                  />
+                ) : (
+                  <span key={`text-${index}`}>{segment.content}</span>
+                )
+              )}
+            </p>
             {/* Only show timestamp and checkmark when confirmed */}
             {isConfirmed && (
               <div

@@ -7,6 +7,7 @@ import { MessageBubble } from "./MessageBubble";
 import { SystemMessage } from "./SystemMessage";
 import { MessageInput, type MessageInputHandle } from "./MessageInput";
 import { ReplyContextBar } from "./ReplyContextBar";
+import type { MentionParticipant } from "./MentionOverlay";
 import { MemberListPanel } from "@/components/groups/MemberListPanel";
 import { GroupSettingsPanel } from "@/components/groups/GroupSettingsPanel";
 import { useAppStore } from "@/stores";
@@ -52,7 +53,7 @@ interface ChatViewProps {
 export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackButton = false }: ChatViewProps) {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const messageInputRef = useRef<MessageInputHandle>(null);
-  const { credentials } = useAppStore();
+  const { credentials, currentUser } = useAppStore();
 
   // Android virtual keyboard detection for compact header mode
   const { isKeyboardVisible } = useVirtualKeyboard();
@@ -429,6 +430,46 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
     // Priority: active member name > server-provided name > truncated key
     return member?.displayName ?? messageSenderName ?? publicKey.substring(0, TRUNCATED_KEY_LENGTH) + TRUNCATION_SUFFIX;
   }, [isGroupFeed, memberLookup, credentials?.signingPublicKey]);
+
+  // Build participant list for @mentions
+  // For group feeds: all active members
+  // For chat feeds: self and the other participant
+  const mentionParticipants: MentionParticipant[] = useMemo(() => {
+    if (feed.type === 'group') {
+      // Group feed: use all active members (not left)
+      return groupMembers
+        .filter(m => !m.leftAtBlock)
+        .map(m => ({
+          identityId: m.publicAddress,
+          displayName: m.displayName,
+          publicAddress: m.publicAddress,
+        }));
+    } else if (feed.type === 'chat' && credentials?.signingPublicKey) {
+      // Chat feed: include self and other participant
+      const participants: MentionParticipant[] = [];
+
+      // Add current user
+      const userDisplayName = currentUser?.displayName ?? 'You';
+      participants.push({
+        identityId: credentials.signingPublicKey,
+        displayName: userDisplayName,
+        publicAddress: credentials.signingPublicKey,
+      });
+
+      // Add other participant (from feed)
+      if (feed.otherParticipantPublicSigningAddress) {
+        participants.push({
+          identityId: feed.otherParticipantPublicSigningAddress,
+          displayName: feed.name, // The feed name is the other participant's name
+          publicAddress: feed.otherParticipantPublicSigningAddress,
+        });
+      }
+
+      return participants;
+    }
+
+    return [];
+  }, [feed.type, feed.name, feed.otherParticipantPublicSigningAddress, groupMembers, credentials?.signingPublicKey, currentUser?.displayName]);
 
   // Use the feed reactions hook for optimistic updates
   const {
@@ -828,7 +869,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
           </div>
         </div>
       ) : (
-        <MessageInput ref={messageInputRef} onSend={handleSend} onEscapeEmpty={onCloseFeed} />
+        <MessageInput ref={messageInputRef} onSend={handleSend} onEscapeEmpty={onCloseFeed} participants={mentionParticipants} />
       )}
 
       {/* Member List Panel (Group feeds only) */}
