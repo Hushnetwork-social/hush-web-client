@@ -15,6 +15,12 @@ export {
 
 export { MentionText } from './MentionText';
 
+export { MentionBadge } from './MentionBadge';
+
+export { MentionNavButton } from './MentionNavButton';
+
+export { useMessageHighlight } from './useMessageHighlight';
+
 export {
   trackMention,
   markMentionRead,

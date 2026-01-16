@@ -26,6 +26,8 @@ export default {
       animation: {
         'slide-in': 'slideIn 0.3s ease-out',
         'fade-out': 'fadeOut 0.3s ease-in forwards',
+        'mention-pulse': 'mentionPulse 1.5s ease-in-out infinite',
+        'highlight-fade': 'highlightFade 4s ease-out forwards',
       },
       keyframes: {
         slideIn: {
@@ -35,6 +37,15 @@ export default {
         fadeOut: {
           '0%': { opacity: '1' },
           '100%': { opacity: '0' },
+        },
+        mentionPulse: {
+          '0%, 100%': { opacity: '1' },
+          '50%': { opacity: '0.7' },
+        },
+        highlightFade: {
+          '0%': { backgroundColor: 'rgba(167, 139, 250, 0.3)' },
+          '75%': { backgroundColor: 'rgba(167, 139, 250, 0.3)' },
+          '100%': { backgroundColor: 'transparent' },
         },
       },
     },
