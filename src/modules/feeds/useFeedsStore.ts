@@ -11,6 +11,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Feed, FeedMessage, GroupFeedMember, GroupMemberRole, GroupKeyGeneration, GroupKeyState, SettingsChangeRecord } from '@/types';
 import { debugLog } from '@/lib/debug-logger';
+import { clearMentions } from '@/lib/mentions';
 
 // Feed type mapping from server (FeedType enum)
 // Server: Personal=0, Chat=1, Broadcast=2, Group=3
@@ -568,9 +569,19 @@ export const useFeedsStore = create<FeedsStore>()(
             f.id === feedId ? { ...f, unreadCount: 0 } : f
           ),
         }));
+        // Clear any tracked mentions for this feed since all messages are now read
+        clearMentions(feedId);
       },
 
       syncUnreadCounts: (counts) => {
+        const { feeds } = get();
+        // Clear mentions for feeds that become fully read (unreadCount = 0)
+        for (const feed of feeds) {
+          const newCount = counts[feed.id] ?? feed.unreadCount ?? 0;
+          if (newCount === 0 && (feed.unreadCount ?? 0) > 0) {
+            clearMentions(feed.id);
+          }
+        }
         set((state) => ({
           feeds: state.feeds.map((f) => ({
             ...f,

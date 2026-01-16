@@ -51,9 +51,9 @@ export const MentionNavButton = memo(function MentionNavButton({
         @
       </span>
 
-      {/* Count Badge - positioned at top-right corner of circle */}
+      {/* Count Badge - positioned at top-right corner, overlapping circle edge */}
       <span
-        className="absolute -top-1.5 -right-1.5 flex items-center justify-center min-w-[20px] h-[20px] px-1 bg-red-500 text-white text-xs font-bold rounded-full border-2 border-hush-bg-dark"
+        className="absolute -top-2 -right-2 flex items-center justify-center min-w-[20px] h-[20px] px-1 bg-red-500 text-white text-xs font-bold rounded-full border-2 border-hush-bg-dark"
         aria-hidden="true"
       >
         {displayCount}
