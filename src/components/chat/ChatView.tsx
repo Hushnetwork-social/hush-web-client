@@ -870,8 +870,8 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
 
       {/* Messages Area */}
       <div className="flex-1 min-h-0 flex flex-col relative">
-        {/* Floating Mention Navigation Button - bottom-left, overlapping input area slightly */}
-        <div className="absolute -bottom-2 left-4 z-10">
+        {/* Floating Mention Navigation Button - bottom-left, overlapping input area */}
+        <div className="absolute -bottom-4 left-2 z-10">
           <MentionNavButton
             count={unreadMentionCount}
             onNavigate={handleNavigateToMention}
