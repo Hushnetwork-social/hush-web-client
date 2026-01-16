@@ -25,8 +25,9 @@ interface MentionOverlayProps {
 }
 
 // Maximum visible items before scrolling
+// Mobile uses larger touch targets (48px min)
 const MAX_VISIBLE_ITEMS = 5;
-const ITEM_HEIGHT = 40;
+const ITEM_HEIGHT = 48; // 48px meets mobile touch target requirements
 
 /**
  * Get initials from a display name for avatar
@@ -159,7 +160,7 @@ export const MentionOverlay = memo(function MentionOverlay({
   return (
     <div
       ref={containerRef}
-      className="absolute bottom-full left-0 mb-2 z-50 w-[250px]"
+      className="absolute bottom-full left-0 right-0 sm:right-auto mb-2 z-50 w-full sm:w-[280px]"
       role="dialog"
       aria-label="Select participant to mention"
     >
@@ -179,7 +180,7 @@ export const MentionOverlay = memo(function MentionOverlay({
           <div
             role="listbox"
             aria-label="Participants"
-            className="overflow-y-auto"
+            className="overflow-y-auto overscroll-contain"
             style={{ maxHeight: `${maxHeight}px` }}
           >
             {filteredParticipants.map((participant, index) => (
@@ -188,7 +189,7 @@ export const MentionOverlay = memo(function MentionOverlay({
                 role="option"
                 aria-selected={index === highlightedIndex}
                 className={`
-                  flex items-center gap-3 px-3 py-2 cursor-pointer transition-colors
+                  flex items-center gap-3 px-3 py-3 min-h-[48px] cursor-pointer transition-colors touch-manipulation
                   ${
                     index === highlightedIndex
                       ? "bg-hush-purple/20 border-l-2 border-hush-purple"

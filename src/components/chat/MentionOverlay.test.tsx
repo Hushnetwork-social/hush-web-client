@@ -252,4 +252,31 @@ describe('MentionOverlay', () => {
       expect(screen.getByText('JG')).toBeInTheDocument(); // initials
     });
   });
+
+  describe('Mobile Responsiveness', () => {
+    it('should have min-height for touch targets', () => {
+      render(<MentionOverlay {...defaultProps} />);
+
+      const options = screen.getAllByRole('option');
+      options.forEach((option) => {
+        expect(option).toHaveClass('min-h-[48px]');
+      });
+    });
+
+    it('should have touch-manipulation for better touch handling', () => {
+      render(<MentionOverlay {...defaultProps} />);
+
+      const options = screen.getAllByRole('option');
+      options.forEach((option) => {
+        expect(option).toHaveClass('touch-manipulation');
+      });
+    });
+
+    it('should have overscroll-contain to prevent page scroll', () => {
+      render(<MentionOverlay {...defaultProps} />);
+
+      const listbox = screen.getByRole('listbox');
+      expect(listbox).toHaveClass('overscroll-contain');
+    });
+  });
 });
