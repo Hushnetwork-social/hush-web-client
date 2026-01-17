@@ -5,7 +5,10 @@
  * Coordinates gRPC calls and localStorage cache.
  */
 
-import { urlMetadataService } from '@/lib/grpc/services/urlMetadata';
+import {
+  getUrlMetadataBatch as grpcGetUrlMetadataBatch,
+  getUrlMetadata as grpcGetUrlMetadata,
+} from '@/lib/grpc/services/urlMetadata-binary';
 import {
   getCachedMetadata,
   setCachedMetadata,
@@ -55,32 +58,30 @@ export async function fetchUrlMetadataBatch(
 
     // Fetch all batches in parallel
     const batchResponses = await Promise.all(
-      batches.map((batch) => urlMetadataService.getUrlMetadataBatch(batch))
+      batches.map((batch) => grpcGetUrlMetadataBatch(batch))
     );
 
     // Process responses
-    for (const response of batchResponses) {
-      if (!response.Results) {
-        continue;
-      }
-
-      for (const result of response.Results) {
+    for (const batchResults of batchResponses) {
+      for (const result of batchResults) {
         const metadata: UrlMetadata = {
-          url: result.Url,
-          domain: result.Domain,
-          title: result.Title || null,
-          description: result.Description || null,
-          imageUrl: result.ImageUrl || null,
-          imageBase64: result.ImageBase64 || null,
-          success: result.Success,
-          errorMessage: result.ErrorMessage || null,
+          url: result.url,
+          domain: result.domain,
+          title: result.title || null,
+          description: result.description || null,
+          imageUrl: result.imageUrl || null,
+          imageBase64: result.imageBase64 || null,
+          success: result.success,
+          errorMessage: result.errorMessage || null,
         };
 
         // Store in results
-        results.set(result.Url, metadata);
+        results.set(result.url, metadata);
 
-        // Cache the result (even failures, to avoid repeated requests)
-        setCachedMetadata(result.Url, metadata);
+        // Only cache successful results - don't cache failures so they can be retried
+        if (metadata.success) {
+          setCachedMetadata(result.url, metadata);
+        }
       }
     }
   } catch (error) {
@@ -115,21 +116,23 @@ export async function fetchUrlMetadata(
 
   // Fetch from server
   try {
-    const response = await urlMetadataService.getUrlMetadata(normalizedUrl);
+    const response = await grpcGetUrlMetadata(normalizedUrl);
 
     const metadata: UrlMetadata = {
       url: normalizedUrl,
-      domain: response.Domain,
-      title: response.Title || null,
-      description: response.Description || null,
-      imageUrl: response.ImageUrl || null,
-      imageBase64: response.ImageBase64 || null,
-      success: response.Success,
-      errorMessage: response.ErrorMessage || null,
+      domain: response.domain,
+      title: response.title || null,
+      description: response.description || null,
+      imageUrl: response.imageUrl || null,
+      imageBase64: response.imageBase64 || null,
+      success: response.success,
+      errorMessage: response.errorMessage || null,
     };
 
-    // Cache the result
-    setCachedMetadata(normalizedUrl, metadata);
+    // Only cache successful results - don't cache failures so they can be retried
+    if (metadata.success) {
+      setCachedMetadata(normalizedUrl, metadata);
+    }
 
     return metadata;
   } catch (error) {

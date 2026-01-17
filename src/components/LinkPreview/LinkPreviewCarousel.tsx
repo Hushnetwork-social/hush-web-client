@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useState, useCallback, useRef, useEffect } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { Play } from "lucide-react";
 import { LinkPreviewCard } from "./LinkPreviewCard";
 import { LinkPreviewSkeleton } from "./LinkPreviewSkeleton";
 import type { UrlMetadata } from "@/lib/urlDetector/urlMetadataCache";
@@ -109,7 +109,7 @@ export const LinkPreviewCarousel = memo(function LinkPreviewCarousel({
   return (
     <div
       ref={containerRef}
-      className="relative w-full"
+      className={`relative w-full ${hasMultiple ? "mb-3" : ""}`}
       onKeyDown={handleKeyDown}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
@@ -141,62 +141,60 @@ export const LinkPreviewCarousel = memo(function LinkPreviewCarousel({
       {/* Navigation controls (only for multiple URLs) */}
       {hasMultiple && (
         <>
-          {/* Previous button */}
+          {/* Previous button - positioned on top of left border */}
           <button
             onClick={goToPrevious}
             disabled={!canGoPrevious}
             className={`
-              absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2
-              w-11 h-11
+              absolute -left-2.5 top-1/2 -translate-y-1/2
+              w-5 h-5
               flex items-center justify-center
               rounded-full
-              bg-hush-bg-primary border border-hush-border
-              shadow-sm
+              bg-hush-purple
               transition-all duration-150
               ${
                 canGoPrevious
-                  ? "hover:bg-hush-bg-hover cursor-pointer opacity-100"
+                  ? "hover:bg-hush-purple-light hover:scale-110 cursor-pointer"
                   : "opacity-40 cursor-not-allowed"
               }
-              focus:outline-none focus:ring-2 focus:ring-hush-purple/50
+              focus:outline-none focus:ring-1 focus:ring-hush-purple/50
             `}
             aria-label="Previous link preview"
             type="button"
           >
-            <ChevronLeft size={18} className="text-hush-text-primary" />
+            <Play size={10} className="text-white rotate-180 -mr-px" fill="currentColor" />
           </button>
 
-          {/* Next button */}
+          {/* Next button - positioned on top of right border */}
           <button
             onClick={goToNext}
             disabled={!canGoNext}
             className={`
-              absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2
-              w-11 h-11
+              absolute -right-2.5 top-1/2 -translate-y-1/2
+              w-5 h-5
               flex items-center justify-center
               rounded-full
-              bg-hush-bg-primary border border-hush-border
-              shadow-sm
+              bg-hush-purple
               transition-all duration-150
               ${
                 canGoNext
-                  ? "hover:bg-hush-bg-hover cursor-pointer opacity-100"
+                  ? "hover:bg-hush-purple-light hover:scale-110 cursor-pointer"
                   : "opacity-40 cursor-not-allowed"
               }
-              focus:outline-none focus:ring-2 focus:ring-hush-purple/50
+              focus:outline-none focus:ring-1 focus:ring-hush-purple/50
             `}
             aria-label="Next link preview"
             type="button"
           >
-            <ChevronRight size={18} className="text-hush-text-primary" />
+            <Play size={10} className="text-white ml-px" fill="currentColor" />
           </button>
 
-          {/* Page indicator */}
+          {/* Page indicator - positioned on top of bottom border */}
           <div
             className="
-              absolute -bottom-6 left-1/2 -translate-x-1/2
-              text-xs text-hush-text-accent
-              bg-hush-bg-primary/80
+              absolute -bottom-2.5 left-1/2 -translate-x-1/2
+              text-[10px] text-white
+              bg-hush-purple
               px-2 py-0.5
               rounded-full
             "
