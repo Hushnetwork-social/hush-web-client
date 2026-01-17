@@ -7,3 +7,4 @@ export { reactionsService } from './reactions';
 export { membershipService } from './membership';
 export { membershipServiceBinary } from './membership-binary';
 export { groupService } from './group';
+export { urlMetadataService } from './urlMetadata';

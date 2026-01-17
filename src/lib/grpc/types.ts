@@ -372,6 +372,43 @@ export interface IsCommitmentRegisteredResponse {
   IsRegistered: boolean;
 }
 
+// ============= URL Metadata Service Types =============
+
+// Get single URL metadata
+export interface GetUrlMetadataRequest {
+  Url: string;
+}
+
+export interface GetUrlMetadataResponse {
+  Success: boolean;
+  Title: string;
+  Description: string;
+  ImageUrl: string;
+  ImageBase64: string;
+  Domain: string;
+  ErrorMessage: string;
+}
+
+// Get batch URL metadata
+export interface GetUrlMetadataBatchRequest {
+  Urls: string[];
+}
+
+export interface UrlMetadataResult {
+  Url: string;
+  Success: boolean;
+  Title: string;
+  Description: string;
+  ImageUrl: string;
+  ImageBase64: string;
+  Domain: string;
+  ErrorMessage: string;
+}
+
+export interface GetUrlMetadataBatchResponse {
+  Results: UrlMetadataResult[];
+}
+
 // ============= Group Feed Service Types =============
 
 // Participant in a group feed creation request
