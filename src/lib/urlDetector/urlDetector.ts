@@ -48,26 +48,48 @@ const TRAILING_PUNCTUATION = /[.,;:!?>\]}"']+$/;
 
 /**
  * Normalizes a URL for use as a cache key.
- * Converts to lowercase and removes trailing slashes.
+ * Only lowercases the protocol and domain (not the path/query).
+ * This preserves case-sensitive parts like YouTube video IDs.
  *
  * @param url - The URL to normalize
  * @returns The normalized URL
  *
  * @example
  * normalizeUrl("https://Example.Com/Page/")
- * // Returns: "https://example.com/page"
+ * // Returns: "https://example.com/Page"
+ * normalizeUrl("https://www.youtube.com/watch?v=ABCdef123")
+ * // Returns: "https://www.youtube.com/watch?v=ABCdef123" (preserves video ID case)
  */
 export function normalizeUrl(url: string): string {
-  let normalized = url.toLowerCase();
+  let normalized = url;
 
   // Add https:// protocol if URL starts with www.
-  if (normalized.startsWith('www.')) {
+  if (normalized.toLowerCase().startsWith('www.')) {
     normalized = 'https://' + normalized;
   }
 
-  // Remove trailing slash
-  while (normalized.endsWith('/')) {
-    normalized = normalized.slice(0, -1);
+  // Only lowercase the protocol and domain, preserve path/query case
+  try {
+    const urlObj = new URL(normalized);
+    // Protocol and host are case-insensitive, lowercase them
+    const lowercaseOrigin = urlObj.origin.toLowerCase();
+    // Keep path, search, and hash with original case
+    // Remove trailing slash from pathname if it's just "/"
+    let pathname = urlObj.pathname;
+    if (pathname === '/') {
+      pathname = '';
+    } else {
+      // Remove trailing slashes from path
+      while (pathname.endsWith('/')) {
+        pathname = pathname.slice(0, -1);
+      }
+    }
+    normalized = lowercaseOrigin + pathname + urlObj.search + urlObj.hash;
+  } catch {
+    // If URL parsing fails, just remove trailing slashes manually
+    while (normalized.endsWith('/')) {
+      normalized = normalized.slice(0, -1);
+    }
   }
 
   return normalized;

@@ -172,9 +172,14 @@ describe('urlDetector', () => {
   });
 
   describe('normalizeUrl', () => {
-    it('should convert to lowercase', () => {
+    it('should lowercase domain but preserve path case', () => {
       const result = normalizeUrl('https://EXAMPLE.COM/Path');
-      expect(result).toBe('https://example.com/path');
+      expect(result).toBe('https://example.com/Path');
+    });
+
+    it('should preserve case-sensitive query parameters like YouTube video IDs', () => {
+      const result = normalizeUrl('https://www.youtube.com/watch?v=ABCdef123XYZ');
+      expect(result).toBe('https://www.youtube.com/watch?v=ABCdef123XYZ');
     });
 
     it('should remove trailing slash', () => {
