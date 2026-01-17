@@ -147,7 +147,7 @@ export const LinkPreviewCarousel = memo(function LinkPreviewCarousel({
             disabled={!canGoPrevious}
             className={`
               absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2
-              w-8 h-8
+              w-11 h-11
               flex items-center justify-center
               rounded-full
               bg-hush-bg-primary border border-hush-border
@@ -163,7 +163,7 @@ export const LinkPreviewCarousel = memo(function LinkPreviewCarousel({
             aria-label="Previous link preview"
             type="button"
           >
-            <ChevronLeft size={16} className="text-hush-text-primary" />
+            <ChevronLeft size={18} className="text-hush-text-primary" />
           </button>
 
           {/* Next button */}
@@ -172,7 +172,7 @@ export const LinkPreviewCarousel = memo(function LinkPreviewCarousel({
             disabled={!canGoNext}
             className={`
               absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2
-              w-8 h-8
+              w-11 h-11
               flex items-center justify-center
               rounded-full
               bg-hush-bg-primary border border-hush-border
@@ -188,7 +188,7 @@ export const LinkPreviewCarousel = memo(function LinkPreviewCarousel({
             aria-label="Next link preview"
             type="button"
           >
-            <ChevronRight size={16} className="text-hush-text-primary" />
+            <ChevronRight size={18} className="text-hush-text-primary" />
           </button>
 
           {/* Page indicator */}
