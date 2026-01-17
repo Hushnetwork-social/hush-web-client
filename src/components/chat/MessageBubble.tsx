@@ -6,7 +6,9 @@ import { ReactionPicker } from "./ReactionPicker";
 import { ReactionBar } from "./ReactionBar";
 import { ReplyPreview } from "./ReplyPreview";
 import { RoleBadge } from "@/components/shared/RoleBadge";
+import { LinkPreviewCarousel } from "@/components/LinkPreview";
 import { parseMentions, MentionText } from "@/lib/mentions";
+import { useLinkPreviews } from "@/hooks/useLinkPreviews";
 import type { EmojiCounts } from "@/modules/reactions/useReactionsStore";
 import type { FeedMessage, GroupMemberRole } from "@/types";
 
@@ -64,6 +66,9 @@ export const MessageBubble = memo(function MessageBubble({
   const [showPicker, setShowPicker] = useState(false);
   const [isHovering, setIsHovering] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
+
+  // Link preview hook - detects URLs and fetches metadata
+  const { urls, metadataMap, loadingUrls, hasUrls } = useLinkPreviews(content);
 
   // Parse mentions from content
   const contentWithMentions = useMemo(() => {
@@ -275,6 +280,17 @@ export const MessageBubble = memo(function MessageBubble({
               </div>
             )}
           </div>
+
+          {/* Link previews - shown below message content */}
+          {hasUrls && (
+            <div className="mt-2 pb-1">
+              <LinkPreviewCarousel
+                urls={urls}
+                metadataMap={metadataMap}
+                loadingUrls={loadingUrls}
+              />
+            </div>
+          )}
 
           {/* Reaction bar - slightly overlapping the message bubble (WhatsApp style) */}
           {reactionCounts && (
