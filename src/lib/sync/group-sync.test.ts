@@ -16,6 +16,7 @@ import {
   syncGroupFeedData,
   isGroupFeed,
   getGroupFeedsNeedingSync,
+  invalidateAllGroupCaches,
 } from './group-sync';
 
 // Mock the gRPC services
@@ -26,6 +27,8 @@ vi.mock('@/lib/grpc/services/group', () => ({
   },
 }));
 
+// identityService mock kept for potential future use, but no longer needed
+// since server now returns display names via cache-aside pattern
 vi.mock('@/lib/grpc/services/identity', () => ({
   identityService: {
     getIdentity: vi.fn(),
@@ -86,6 +89,8 @@ describe('Group Sync Functions', () => {
     mockHasDecryptedKey.mockReturnValue(false);
     // Reset getGroupKeyState to return undefined by default
     mockGetGroupKeyState.mockReturnValue(undefined);
+    // Clear all sync caches to prevent cooldown interference between tests
+    invalidateAllGroupCaches();
   });
 
   describe('syncGroupMembers', () => {
@@ -93,20 +98,13 @@ describe('Group Sync Functions', () => {
     const userAddress = 'user-address';
 
     it('should sync members and resolve display names', async () => {
+      // Server now returns display names via cache-aside pattern
       const mockMembers = [
-        { publicAddress: 'addr1', role: 'Admin' as const, joinedAtBlock: 100 },
-        { publicAddress: 'addr2', role: 'Member' as const, joinedAtBlock: 200 },
+        { publicAddress: 'addr1', role: 'Admin' as const, joinedAtBlock: 100, displayName: 'Name for addr1' },
+        { publicAddress: 'addr2', role: 'Member' as const, joinedAtBlock: 200, displayName: 'Name for addr2' },
       ];
 
       vi.mocked(groupService.getGroupMembers).mockResolvedValue(mockMembers);
-      vi.mocked(identityService.getIdentity).mockImplementation(async (address: string) => ({
-        Successfull: true,
-        ProfileName: `Name for ${address}`,
-        PublicSigningAddress: address,
-        PublicEncryptAddress: 'encrypt',
-        IsPublic: true,
-        Message: '',
-      }));
 
       const result = await syncGroupMembers(feedId, userAddress);
 
@@ -149,20 +147,13 @@ describe('Group Sync Functions', () => {
       ]);
 
       // New member list includes addr1 + new member addr2
+      // Server now returns display names via cache-aside pattern
       const mockMembers = [
-        { publicAddress: 'addr1', role: 'Admin' as const, joinedAtBlock: 100 },
-        { publicAddress: 'addr2', role: 'Member' as const, joinedAtBlock: 200 },
+        { publicAddress: 'addr1', role: 'Admin' as const, joinedAtBlock: 100, displayName: 'Alice' },
+        { publicAddress: 'addr2', role: 'Member' as const, joinedAtBlock: 200, displayName: 'Bob' },
       ];
 
       vi.mocked(groupService.getGroupMembers).mockResolvedValue(mockMembers);
-      vi.mocked(identityService.getIdentity).mockImplementation(async (address: string) => ({
-        Successfull: true,
-        ProfileName: `Name for ${address}`,
-        PublicSigningAddress: address,
-        PublicEncryptAddress: 'encrypt',
-        IsPublic: true,
-        Message: '',
-      }));
 
       const result = await syncGroupMembers(feedId, userAddress);
 
@@ -179,20 +170,13 @@ describe('Group Sync Functions', () => {
       ]);
 
       // Current user joins the group
+      // Server now returns display names via cache-aside pattern
       const mockMembers = [
-        { publicAddress: 'other-addr', role: 'Admin' as const, joinedAtBlock: 100 },
-        { publicAddress: userAddress, role: 'Member' as const, joinedAtBlock: 200 },
+        { publicAddress: 'other-addr', role: 'Admin' as const, joinedAtBlock: 100, displayName: 'Other' },
+        { publicAddress: userAddress, role: 'Member' as const, joinedAtBlock: 200, displayName: 'Current User' },
       ];
 
       vi.mocked(groupService.getGroupMembers).mockResolvedValue(mockMembers);
-      vi.mocked(identityService.getIdentity).mockImplementation(async (address: string) => ({
-        Successfull: true,
-        ProfileName: `Name for ${address}`,
-        PublicSigningAddress: address,
-        PublicEncryptAddress: 'encrypt',
-        IsPublic: true,
-        Message: '',
-      }));
 
       const result = await syncGroupMembers(feedId, userAddress);
 
@@ -201,19 +185,12 @@ describe('Group Sync Functions', () => {
     });
 
     it('should set user role when user is in member list', async () => {
+      // Server now returns display names via cache-aside pattern
       const mockMembers = [
-        { publicAddress: userAddress, role: 'Admin' as const, joinedAtBlock: 100 },
+        { publicAddress: userAddress, role: 'Admin' as const, joinedAtBlock: 100, displayName: 'User' },
       ];
 
       vi.mocked(groupService.getGroupMembers).mockResolvedValue(mockMembers);
-      vi.mocked(identityService.getIdentity).mockResolvedValue({
-        Successfull: true,
-        ProfileName: 'User',
-        PublicSigningAddress: userAddress,
-        PublicEncryptAddress: 'encrypt',
-        IsPublic: true,
-        Message: '',
-      });
 
       await syncGroupMembers(feedId, userAddress);
 
@@ -528,17 +505,10 @@ describe('Group Sync Functions', () => {
     const privateKeyHex = '0123456789abcdef';
 
     it('should sync members and keys in parallel', async () => {
+      // Server now returns display names via cache-aside pattern
       vi.mocked(groupService.getGroupMembers).mockResolvedValue([
-        { publicAddress: 'addr1', role: 'Admin' as const, joinedAtBlock: 100 },
+        { publicAddress: 'addr1', role: 'Admin' as const, joinedAtBlock: 100, displayName: 'User' },
       ]);
-      vi.mocked(identityService.getIdentity).mockResolvedValue({
-        Successfull: true,
-        ProfileName: 'User',
-        PublicSigningAddress: 'addr1',
-        PublicEncryptAddress: 'encrypt',
-        IsPublic: true,
-        Message: '',
-      });
       vi.mocked(groupService.getKeyGenerations).mockResolvedValue([
         { KeyGeneration: 0, EncryptedKey: 'enc0', ValidFromBlock: 100 },
       ]);
