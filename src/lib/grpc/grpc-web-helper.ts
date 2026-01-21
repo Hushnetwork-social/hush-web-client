@@ -410,6 +410,7 @@ export interface FeedMessage {
   blockIndex: number;
   authorCommitment?: Uint8Array;  // Protocol Omega: Poseidon(author_secret)
   replyToMessageId?: string;  // Reply to Message: parent message reference
+  keyGeneration?: number;  // Group Feeds: Key generation used to encrypt this message
 }
 
 // Protocol Omega: EC Point for reaction tallies
@@ -518,6 +519,7 @@ function parseSingleMessage(bytes: Uint8Array): FeedMessage {
       const valueResult = parseVarint(bytes, offset);
       offset += valueResult.bytesRead;
       if (fieldNumber === 7) msg.blockIndex = valueResult.value;
+      if (fieldNumber === 10) msg.keyGeneration = valueResult.value;  // Group Feeds: Key generation
     } else if (wireType === 2) {
       const lenResult = parseVarint(bytes, offset);
       offset += lenResult.bytesRead;
@@ -972,14 +974,15 @@ export function parseMarkFeedAsReadResponse(messageBytes: Uint8Array): MarkFeedA
   return result;
 }
 
-// ============= FEAT-051: Feeds Service MarkFeedAsRead =============
+// ============= FEAT-051: Notification Service MarkFeedAsRead =============
 
 /**
- * Build MarkFeedAsReadRequest for the Feeds gRPC service (FEAT-051)
- * Proto: message MarkFeedAsReadRequest {
- *   string FeedId = 1;
- *   int64 UpToBlockIndex = 2;
- *   string UserPublicAddress = 3;
+ * Build MarkFeedAsReadRequest for the HushNotification gRPC service (FEAT-051)
+ * Proto (hushNotification.proto):
+ * message MarkFeedAsReadRequest {
+ *   string UserId = 1;
+ *   string FeedId = 2;
+ *   int64 UpToBlockIndex = 3;
  * }
  */
 export function buildFeedMarkAsReadRequest(
@@ -988,9 +991,9 @@ export function buildFeedMarkAsReadRequest(
   userPublicAddress: string
 ): Uint8Array {
   const bytes = [
-    ...encodeString(1, feedId),
-    ...encodeVarintField(2, upToBlockIndex),
-    ...encodeString(3, userPublicAddress),
+    ...encodeString(1, userPublicAddress),   // UserId = 1
+    ...encodeString(2, feedId),              // FeedId = 2
+    ...encodeVarintField(3, upToBlockIndex), // UpToBlockIndex = 3
   ];
   return new Uint8Array(bytes);
 }

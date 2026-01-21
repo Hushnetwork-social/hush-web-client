@@ -229,6 +229,25 @@ interface FeedsActions {
   /** Get the GroupKeyState for a feed */
   getGroupKeyState: (feedId: string) => GroupKeyState | undefined;
 
+  /**
+   * Merge new KeyGenerations with existing ones, preserving already-decrypted keys.
+   * This is the preferred method for syncing - only decrypts keys we don't already have.
+   * @param feedId - The group feed ID
+   * @param newKeyGens - New KeyGenerations to merge (only adds keys not already present)
+   * @param missingKeyGens - Optional list of missing KeyGeneration numbers (unban gaps)
+   */
+  mergeKeyGenerations: (
+    feedId: string,
+    newKeyGens: GroupKeyGeneration[],
+    missingKeyGens?: number[]
+  ) => void;
+
+  /**
+   * Check if a specific KeyGeneration is already decrypted and cached.
+   * Used by sync to skip re-decryption of existing keys.
+   */
+  hasDecryptedKey: (feedId: string, keyGeneration: number) => boolean;
+
   // ============= FEAT-051: Read Watermarks Actions =============
 
   /** Update lastReadBlockIndex for a feed (after marking as read) */
@@ -851,6 +870,74 @@ export const useFeedsStore = create<FeedsStore>()(
 
       getGroupKeyState: (feedId) => {
         return get().groupKeyStates[feedId];
+      },
+
+      mergeKeyGenerations: (feedId, newKeyGens, missingKeyGens) => {
+        if (newKeyGens.length === 0 && !missingKeyGens) {
+          return; // Nothing to merge
+        }
+
+        set((state) => {
+          const currentState = state.groupKeyStates[feedId] || {
+            currentKeyGeneration: 0,
+            keyGenerations: [],
+            missingKeyGenerations: [],
+          };
+
+          // Create a map of existing keys by keyGeneration number for O(1) lookup
+          const existingKeysMap = new Map(
+            currentState.keyGenerations.map((k) => [k.keyGeneration, k])
+          );
+
+          // Only add keys that don't already exist
+          let addedCount = 0;
+          for (const newKey of newKeyGens) {
+            if (!existingKeysMap.has(newKey.keyGeneration)) {
+              existingKeysMap.set(newKey.keyGeneration, newKey);
+              addedCount++;
+            }
+          }
+
+          // Convert back to sorted array
+          const mergedKeyGens = Array.from(existingKeysMap.values()).sort(
+            (a, b) => a.keyGeneration - b.keyGeneration
+          );
+
+          // Calculate new currentKeyGeneration (highest key number)
+          const newCurrentKeyGen = mergedKeyGens.length > 0
+            ? Math.max(...mergedKeyGens.map((k) => k.keyGeneration))
+            : 0;
+
+          // Update missing key generations if provided
+          const updatedMissing = missingKeyGens !== undefined
+            ? missingKeyGens.filter((n) => !existingKeysMap.has(n))
+            : currentState.missingKeyGenerations;
+
+          debugLog(
+            `[FeedsStore] mergeKeyGenerations: feedId=${feedId.substring(0, 8)}..., ` +
+            `existing=${currentState.keyGenerations.length}, new=${newKeyGens.length}, ` +
+            `added=${addedCount}, total=${mergedKeyGens.length}`
+          );
+
+          return {
+            groupKeyStates: {
+              ...state.groupKeyStates,
+              [feedId]: {
+                currentKeyGeneration: newCurrentKeyGen,
+                keyGenerations: mergedKeyGens,
+                missingKeyGenerations: updatedMissing,
+              },
+            },
+          };
+        });
+      },
+
+      hasDecryptedKey: (feedId, keyGeneration) => {
+        const keyState = get().groupKeyStates[feedId];
+        if (!keyState) return false;
+        return keyState.keyGenerations.some(
+          (k) => k.keyGeneration === keyGeneration && k.aesKey !== undefined
+        );
       },
 
       // ============= FEAT-051: Read Watermarks Implementations =============

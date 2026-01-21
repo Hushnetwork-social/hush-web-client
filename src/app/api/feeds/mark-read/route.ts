@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
     }
 
     const requestBytes = buildFeedMarkAsReadRequest(feedId, upToBlockIndex, userPublicAddress);
-    const responseBytes = await grpcCall('rpcHush.HushFeed', 'MarkFeedAsRead', requestBytes);
+    const responseBytes = await grpcCall('rpcHush.HushNotification', 'MarkFeedAsRead', requestBytes);
     const messageBytes = parseGrpcResponse(responseBytes);
 
     if (!messageBytes) {

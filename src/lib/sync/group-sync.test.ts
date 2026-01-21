@@ -50,6 +50,9 @@ const mockSetUserRole = vi.fn();
 const mockSetGroupKeyState = vi.fn();
 const mockGetFeed = vi.fn();
 const mockGetGroupMembers = vi.fn().mockReturnValue([]);
+const mockHasDecryptedKey = vi.fn().mockReturnValue(false);
+const mockMergeKeyGenerations = vi.fn();
+const mockGetGroupKeyState = vi.fn();
 const mockFeeds: Array<{ id: string; type: string; needsSync: boolean }> = [];
 
 vi.mock('@/modules/feeds/useFeedsStore', () => ({
@@ -60,6 +63,9 @@ vi.mock('@/modules/feeds/useFeedsStore', () => ({
       setGroupKeyState: mockSetGroupKeyState,
       getFeed: mockGetFeed,
       getGroupMembers: mockGetGroupMembers,
+      hasDecryptedKey: mockHasDecryptedKey,
+      mergeKeyGenerations: mockMergeKeyGenerations,
+      getGroupKeyState: mockGetGroupKeyState,
       feeds: mockFeeds,
     }),
   },
@@ -76,6 +82,10 @@ describe('Group Sync Functions', () => {
     mockFeeds.length = 0;
     // Reset getGroupMembers to return empty array by default
     mockGetGroupMembers.mockReturnValue([]);
+    // Reset hasDecryptedKey to return false by default (no cached keys)
+    mockHasDecryptedKey.mockReturnValue(false);
+    // Reset getGroupKeyState to return undefined by default
+    mockGetGroupKeyState.mockReturnValue(undefined);
   });
 
   describe('syncGroupMembers', () => {
@@ -237,13 +247,23 @@ describe('Group Sync Functions', () => {
         data: `decrypted-${encKey}`,
       }));
 
+      // After merge, return the final state
+      mockGetGroupKeyState.mockReturnValue({
+        currentKeyGeneration: 1,
+        keyGenerations: [
+          { keyGeneration: 0, aesKey: 'decrypted-enc0', validFromBlock: 100 },
+          { keyGeneration: 1, aesKey: 'decrypted-enc1', validFromBlock: 200 },
+        ],
+        missingKeyGenerations: [],
+      });
+
       const result = await syncKeyGenerations(feedId, userAddress, privateKeyHex);
 
       expect(result.success).toBe(true);
       expect(result.data?.keyGenerations).toHaveLength(2);
       expect(result.data?.currentKeyGeneration).toBe(1);
       expect(result.data?.missingKeyGenerations).toEqual([]);
-      expect(mockSetGroupKeyState).toHaveBeenCalled();
+      expect(mockMergeKeyGenerations).toHaveBeenCalled();
     });
 
     it('should handle empty KeyGenerations response', async () => {
@@ -266,6 +286,17 @@ describe('Group Sync Functions', () => {
       vi.mocked(groupService.getKeyGenerations).mockResolvedValue(mockKeyGens);
       vi.mocked(decryptKeyGeneration).mockResolvedValue({ success: true, data: 'decrypted' });
 
+      // After merge, return the final state with missing keys
+      mockGetGroupKeyState.mockReturnValue({
+        currentKeyGeneration: 4,
+        keyGenerations: [
+          { keyGeneration: 0, aesKey: 'decrypted', validFromBlock: 100 },
+          { keyGeneration: 1, aesKey: 'decrypted', validFromBlock: 200 },
+          { keyGeneration: 4, aesKey: 'decrypted', validFromBlock: 500 },
+        ],
+        missingKeyGenerations: [2, 3],
+      });
+
       const result = await syncKeyGenerations(feedId, userAddress, privateKeyHex);
 
       expect(result.success).toBe(true);
@@ -287,11 +318,24 @@ describe('Group Sync Functions', () => {
         return { success: true, data: 'decrypted' };
       });
 
+      // After merge, only key 1 was decrypted
+      mockGetGroupKeyState.mockReturnValue({
+        currentKeyGeneration: 1,
+        keyGenerations: [{ keyGeneration: 1, aesKey: 'decrypted', validFromBlock: 200 }],
+        missingKeyGenerations: [],
+      });
+
       const result = await syncKeyGenerations(feedId, userAddress, privateKeyHex);
 
       expect(result.success).toBe(true);
-      expect(result.data?.keyGenerations).toHaveLength(1);
-      expect(result.data?.keyGenerations[0].keyGeneration).toBe(1);
+      // Only key 1 was decrypted (key 0 failed)
+      expect(mockMergeKeyGenerations).toHaveBeenCalledWith(
+        feedId,
+        expect.arrayContaining([
+          expect.objectContaining({ keyGeneration: 1 }),
+        ]),
+        expect.any(Array)
+      );
     });
 
     it('should return error on service failure', async () => {
@@ -301,6 +345,180 @@ describe('Group Sync Functions', () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toBe('Network error');
+    });
+
+    // ============= Key Caching Tests =============
+
+    describe('Key Caching (Performance Optimization)', () => {
+      it('should skip decryption for already-cached keys', async () => {
+        const mockKeyGens = [
+          { KeyGeneration: 0, EncryptedKey: 'enc0', ValidFromBlock: 100 },
+          { KeyGeneration: 1, EncryptedKey: 'enc1', ValidFromBlock: 200 },
+          { KeyGeneration: 2, EncryptedKey: 'enc2', ValidFromBlock: 300 },
+        ];
+
+        // Key 0 and 1 are already cached, only key 2 is new
+        mockHasDecryptedKey.mockImplementation((fId: string, keyGen: number) => {
+          return keyGen === 0 || keyGen === 1;
+        });
+
+        vi.mocked(groupService.getKeyGenerations).mockResolvedValue(mockKeyGens);
+        vi.mocked(decryptKeyGeneration).mockResolvedValue({ success: true, data: 'decrypted' });
+
+        mockGetGroupKeyState.mockReturnValue({
+          currentKeyGeneration: 2,
+          keyGenerations: [
+            { keyGeneration: 0, aesKey: 'cached-key0', validFromBlock: 100 },
+            { keyGeneration: 1, aesKey: 'cached-key1', validFromBlock: 200 },
+            { keyGeneration: 2, aesKey: 'decrypted', validFromBlock: 300 },
+          ],
+          missingKeyGenerations: [],
+        });
+
+        const result = await syncKeyGenerations(feedId, userAddress, privateKeyHex);
+
+        expect(result.success).toBe(true);
+        // decryptKeyGeneration should only be called ONCE for key 2 (the new key)
+        expect(decryptKeyGeneration).toHaveBeenCalledTimes(1);
+        expect(decryptKeyGeneration).toHaveBeenCalledWith('enc2', privateKeyHex);
+      });
+
+      it('should not call decryption when all keys are already cached', async () => {
+        const mockKeyGens = [
+          { KeyGeneration: 0, EncryptedKey: 'enc0', ValidFromBlock: 100 },
+          { KeyGeneration: 1, EncryptedKey: 'enc1', ValidFromBlock: 200 },
+        ];
+
+        // All keys are already cached
+        mockHasDecryptedKey.mockReturnValue(true);
+
+        vi.mocked(groupService.getKeyGenerations).mockResolvedValue(mockKeyGens);
+
+        mockGetGroupKeyState.mockReturnValue({
+          currentKeyGeneration: 1,
+          keyGenerations: [
+            { keyGeneration: 0, aesKey: 'cached-key0', validFromBlock: 100 },
+            { keyGeneration: 1, aesKey: 'cached-key1', validFromBlock: 200 },
+          ],
+          missingKeyGenerations: [],
+        });
+
+        const result = await syncKeyGenerations(feedId, userAddress, privateKeyHex);
+
+        expect(result.success).toBe(true);
+        // decryptKeyGeneration should NOT be called at all
+        expect(decryptKeyGeneration).not.toHaveBeenCalled();
+        // State should still be returned (from getGroupKeyState)
+        expect(result.data?.keyGenerations).toHaveLength(2);
+      });
+
+      it('should only decrypt new keys when some are cached', async () => {
+        // Simulate 10 keys on server, 8 already cached, 2 new
+        const mockKeyGens = Array.from({ length: 10 }, (_, i) => ({
+          KeyGeneration: i,
+          EncryptedKey: `enc${i}`,
+          ValidFromBlock: (i + 1) * 100,
+        }));
+
+        // Keys 0-7 are cached, keys 8-9 are new
+        mockHasDecryptedKey.mockImplementation((fId: string, keyGen: number) => {
+          return keyGen < 8;
+        });
+
+        vi.mocked(groupService.getKeyGenerations).mockResolvedValue(mockKeyGens);
+        vi.mocked(decryptKeyGeneration).mockResolvedValue({ success: true, data: 'decrypted' });
+
+        mockGetGroupKeyState.mockReturnValue({
+          currentKeyGeneration: 9,
+          keyGenerations: Array.from({ length: 10 }, (_, i) => ({
+            keyGeneration: i,
+            aesKey: i < 8 ? `cached-key${i}` : 'decrypted',
+            validFromBlock: (i + 1) * 100,
+          })),
+          missingKeyGenerations: [],
+        });
+
+        const result = await syncKeyGenerations(feedId, userAddress, privateKeyHex);
+
+        expect(result.success).toBe(true);
+        // Only 2 new keys should be decrypted
+        expect(decryptKeyGeneration).toHaveBeenCalledTimes(2);
+        expect(decryptKeyGeneration).toHaveBeenCalledWith('enc8', privateKeyHex);
+        expect(decryptKeyGeneration).toHaveBeenCalledWith('enc9', privateKeyHex);
+      });
+
+      it('should call mergeKeyGenerations with only newly decrypted keys', async () => {
+        const mockKeyGens = [
+          { KeyGeneration: 0, EncryptedKey: 'enc0', ValidFromBlock: 100 },
+          { KeyGeneration: 1, EncryptedKey: 'enc1', ValidFromBlock: 200 },
+          { KeyGeneration: 2, EncryptedKey: 'enc2', ValidFromBlock: 300 },
+        ];
+
+        // Key 0 is cached, keys 1 and 2 are new
+        mockHasDecryptedKey.mockImplementation((fId: string, keyGen: number) => {
+          return keyGen === 0;
+        });
+
+        vi.mocked(groupService.getKeyGenerations).mockResolvedValue(mockKeyGens);
+        vi.mocked(decryptKeyGeneration).mockResolvedValue({ success: true, data: 'decrypted-new' });
+
+        mockGetGroupKeyState.mockReturnValue({
+          currentKeyGeneration: 2,
+          keyGenerations: [
+            { keyGeneration: 0, aesKey: 'cached-key0', validFromBlock: 100 },
+            { keyGeneration: 1, aesKey: 'decrypted-new', validFromBlock: 200 },
+            { keyGeneration: 2, aesKey: 'decrypted-new', validFromBlock: 300 },
+          ],
+          missingKeyGenerations: [],
+        });
+
+        await syncKeyGenerations(feedId, userAddress, privateKeyHex);
+
+        // mergeKeyGenerations should be called with only the NEW keys (1 and 2)
+        expect(mockMergeKeyGenerations).toHaveBeenCalledWith(
+          feedId,
+          expect.arrayContaining([
+            expect.objectContaining({ keyGeneration: 1, aesKey: 'decrypted-new' }),
+            expect.objectContaining({ keyGeneration: 2, aesKey: 'decrypted-new' }),
+          ]),
+          expect.any(Array)
+        );
+
+        // The array should have exactly 2 keys (not 3 including the cached one)
+        const mergeCall = mockMergeKeyGenerations.mock.calls[0];
+        expect(mergeCall[1]).toHaveLength(2);
+      });
+
+      it('should still update missing keys when all keys are cached', async () => {
+        const mockKeyGens = [
+          { KeyGeneration: 0, EncryptedKey: 'enc0', ValidFromBlock: 100 },
+          { KeyGeneration: 2, EncryptedKey: 'enc2', ValidFromBlock: 300 }, // KeyGen 1 is missing (unban gap)
+        ];
+
+        // All returned keys are cached
+        mockHasDecryptedKey.mockReturnValue(true);
+
+        vi.mocked(groupService.getKeyGenerations).mockResolvedValue(mockKeyGens);
+
+        mockGetGroupKeyState.mockReturnValue({
+          currentKeyGeneration: 2,
+          keyGenerations: [
+            { keyGeneration: 0, aesKey: 'cached-key0', validFromBlock: 100 },
+            { keyGeneration: 2, aesKey: 'cached-key2', validFromBlock: 300 },
+          ],
+          missingKeyGenerations: [1],
+        });
+
+        const result = await syncKeyGenerations(feedId, userAddress, privateKeyHex);
+
+        expect(result.success).toBe(true);
+        // Missing keys should still be detected and stored
+        expect(mockMergeKeyGenerations).toHaveBeenCalledWith(
+          feedId,
+          [], // No new keys to add
+          [1] // Missing key 1
+        );
+      });
     });
   });
 

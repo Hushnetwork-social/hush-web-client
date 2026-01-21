@@ -1312,6 +1312,188 @@ describe('Feed Name Updates (FEAT-003)', () => {
       });
     });
 
+    describe('hasDecryptedKey', () => {
+      it('should return true for existing decrypted key', () => {
+        const { setGroupKeyState, hasDecryptedKey } = useFeedsStore.getState();
+
+        setGroupKeyState('group-1', {
+          currentKeyGeneration: 1,
+          keyGenerations: [sampleKeyGen0, sampleKeyGen1],
+          missingKeyGenerations: [],
+        });
+
+        expect(hasDecryptedKey('group-1', 0)).toBe(true);
+        expect(hasDecryptedKey('group-1', 1)).toBe(true);
+      });
+
+      it('should return false for missing key generation', () => {
+        const { setGroupKeyState, hasDecryptedKey } = useFeedsStore.getState();
+
+        setGroupKeyState('group-1', {
+          currentKeyGeneration: 1,
+          keyGenerations: [sampleKeyGen0, sampleKeyGen1],
+          missingKeyGenerations: [2],
+        });
+
+        expect(hasDecryptedKey('group-1', 2)).toBe(false);
+        expect(hasDecryptedKey('group-1', 99)).toBe(false);
+      });
+
+      it('should return false for unknown feed', () => {
+        expect(useFeedsStore.getState().hasDecryptedKey('unknown-feed', 0)).toBe(false);
+      });
+
+      it('should return false for key without aesKey', () => {
+        const { setGroupKeyState, hasDecryptedKey } = useFeedsStore.getState();
+
+        // Simulate a key that's been recorded but not yet decrypted
+        setGroupKeyState('group-1', {
+          currentKeyGeneration: 0,
+          keyGenerations: [
+            { keyGeneration: 0, validFromBlock: 1000, aesKey: undefined as unknown as string },
+          ],
+          missingKeyGenerations: [],
+        });
+
+        expect(hasDecryptedKey('group-1', 0)).toBe(false);
+      });
+    });
+
+    describe('mergeKeyGenerations', () => {
+      it('should add new keys to empty state', () => {
+        const { mergeKeyGenerations, getGroupKeyState } = useFeedsStore.getState();
+
+        mergeKeyGenerations('group-1', [sampleKeyGen0, sampleKeyGen1]);
+
+        const result = getGroupKeyState('group-1');
+        expect(result?.keyGenerations).toHaveLength(2);
+        expect(result?.currentKeyGeneration).toBe(1);
+      });
+
+      it('should preserve existing keys when merging new ones', () => {
+        const { setGroupKeyState, mergeKeyGenerations, getGroupKeyState } = useFeedsStore.getState();
+
+        // Pre-populate with existing keys
+        setGroupKeyState('group-1', {
+          currentKeyGeneration: 1,
+          keyGenerations: [sampleKeyGen0, sampleKeyGen1],
+          missingKeyGenerations: [],
+        });
+
+        // Merge a new key (keyGen 2)
+        mergeKeyGenerations('group-1', [sampleKeyGen2]);
+
+        const result = getGroupKeyState('group-1');
+        expect(result?.keyGenerations).toHaveLength(3);
+        expect(result?.keyGenerations[0].aesKey).toBe('key0-aes-base64=='); // Original preserved
+        expect(result?.keyGenerations[1].aesKey).toBe('key1-aes-base64=='); // Original preserved
+        expect(result?.keyGenerations[2].aesKey).toBe('key2-aes-base64=='); // New key added
+        expect(result?.currentKeyGeneration).toBe(2);
+      });
+
+      it('should NOT overwrite existing keys with same keyGeneration', () => {
+        const { setGroupKeyState, mergeKeyGenerations, getGroupKeyState } = useFeedsStore.getState();
+
+        // Pre-populate with existing key
+        setGroupKeyState('group-1', {
+          currentKeyGeneration: 0,
+          keyGenerations: [{ ...sampleKeyGen0, aesKey: 'original-key==' }],
+          missingKeyGenerations: [],
+        });
+
+        // Try to merge the same keyGeneration with different aesKey
+        mergeKeyGenerations('group-1', [{ ...sampleKeyGen0, aesKey: 'new-key==' }]);
+
+        const result = getGroupKeyState('group-1');
+        expect(result?.keyGenerations).toHaveLength(1);
+        expect(result?.keyGenerations[0].aesKey).toBe('original-key=='); // Original preserved!
+      });
+
+      it('should update missingKeyGenerations when provided', () => {
+        const { setGroupKeyState, mergeKeyGenerations, getGroupKeyState } = useFeedsStore.getState();
+
+        setGroupKeyState('group-1', {
+          currentKeyGeneration: 0,
+          keyGenerations: [sampleKeyGen0],
+          missingKeyGenerations: [],
+        });
+
+        mergeKeyGenerations('group-1', [], [2, 3]);
+
+        const result = getGroupKeyState('group-1');
+        expect(result?.missingKeyGenerations).toEqual([2, 3]);
+      });
+
+      it('should filter out keys we have from missingKeyGenerations', () => {
+        const { setGroupKeyState, mergeKeyGenerations, getGroupKeyState } = useFeedsStore.getState();
+
+        setGroupKeyState('group-1', {
+          currentKeyGeneration: 1,
+          keyGenerations: [sampleKeyGen0, sampleKeyGen1],
+          missingKeyGenerations: [],
+        });
+
+        // Mark keyGen 0, 1, 2 as potentially missing - but we have 0 and 1
+        mergeKeyGenerations('group-1', [], [0, 1, 2]);
+
+        const result = getGroupKeyState('group-1');
+        expect(result?.missingKeyGenerations).toEqual([2]); // Only 2 is actually missing
+      });
+
+      it('should handle adding keys out of order and sort them', () => {
+        const { mergeKeyGenerations, getGroupKeyState } = useFeedsStore.getState();
+
+        // Add keys out of order
+        mergeKeyGenerations('group-1', [sampleKeyGen2, sampleKeyGen0, sampleKeyGen1]);
+
+        const result = getGroupKeyState('group-1');
+        expect(result?.keyGenerations[0].keyGeneration).toBe(0);
+        expect(result?.keyGenerations[1].keyGeneration).toBe(1);
+        expect(result?.keyGenerations[2].keyGeneration).toBe(2);
+      });
+
+      it('should do nothing when given empty arrays and no existing state', () => {
+        const { mergeKeyGenerations, getGroupKeyState } = useFeedsStore.getState();
+
+        mergeKeyGenerations('group-1', []);
+
+        const result = getGroupKeyState('group-1');
+        expect(result).toBeUndefined();
+      });
+
+      it('should preserve existing state when merging empty array', () => {
+        const { setGroupKeyState, mergeKeyGenerations, getGroupKeyState } = useFeedsStore.getState();
+
+        setGroupKeyState('group-1', {
+          currentKeyGeneration: 1,
+          keyGenerations: [sampleKeyGen0, sampleKeyGen1],
+          missingKeyGenerations: [2],
+        });
+
+        mergeKeyGenerations('group-1', []);
+
+        const result = getGroupKeyState('group-1');
+        expect(result?.keyGenerations).toHaveLength(2);
+        expect(result?.missingKeyGenerations).toEqual([2]);
+      });
+
+      it('should correctly calculate currentKeyGeneration as max of all keys', () => {
+        const { mergeKeyGenerations, getGroupKeyState } = useFeedsStore.getState();
+
+        // Add key 0 first
+        mergeKeyGenerations('group-1', [sampleKeyGen0]);
+        expect(getGroupKeyState('group-1')?.currentKeyGeneration).toBe(0);
+
+        // Add key 2 (skipping 1)
+        mergeKeyGenerations('group-1', [sampleKeyGen2]);
+        expect(getGroupKeyState('group-1')?.currentKeyGeneration).toBe(2);
+
+        // Add key 1 - currentKeyGeneration should still be 2
+        mergeKeyGenerations('group-1', [sampleKeyGen1]);
+        expect(getGroupKeyState('group-1')?.currentKeyGeneration).toBe(2);
+      });
+    });
+
     describe('reset clears key state', () => {
       it('should clear groupKeyStates on reset', () => {
         const state = useFeedsStore.getState();

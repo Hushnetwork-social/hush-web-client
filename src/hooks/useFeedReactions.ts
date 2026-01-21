@@ -22,6 +22,11 @@ import {
 import { debugLog, debugWarn, debugError } from "@/lib/debug-logger";
 import { useFeedsStore } from "@/modules/feeds/useFeedsStore";
 
+// Module-level guards to prevent duplicate operations across React Strict Mode remounts
+// These persist across component unmount/remount cycles
+const activeKeyDerivations = new Set<string>();
+const activeTallyFetches = new Set<string>();
+
 interface UseFeedReactionsOptions {
   /** Feed ID */
   feedId: string;
@@ -45,6 +50,9 @@ interface UseFeedReactionsResult {
 
   /** Handle reaction selection for a message */
   handleReactionSelect: (messageId: string, emojiIndex: number) => Promise<void>;
+
+  /** Fetch tallies for specific message IDs (call when messages become visible) */
+  fetchTalliesForMessages: (messageIds: string[]) => Promise<void>;
 
   /** Current error, if any */
   error: string | null;
@@ -99,26 +107,33 @@ export function useFeedReactions({
     if (feedPublicKey && derivedFromAesKeyRef.current === feedAesKey) return;
 
     // Prevent duplicate derivation for the same feed+key (React Strict Mode protection)
+    // Use both ref (component-level) and Set (module-level) for robust protection
     const derivationKey = `${feedId}:${feedAesKey.substring(0, 16)}`;
-    if (keyDerivationStartedRef.current === derivationKey) return;
+    if (keyDerivationStartedRef.current === derivationKey || activeKeyDerivations.has(derivationKey)) {
+      return;
+    }
     keyDerivationStartedRef.current = derivationKey;
+    activeKeyDerivations.add(derivationKey);
 
     const deriveKey = async () => {
       setIsDerivingKey(true);
+      const startTime = performance.now();
       try {
         debugLog(`[useFeedReactions] Deriving ElGamal key for feed ${feedId.substring(0, 8)}... from AES key ${feedAesKey.substring(0, 16)}...`);
         const privateKey = await deriveFeedElGamalKey(feedAesKey);
+        const deriveTime = performance.now() - startTime;
         const publicKey = scalarMul(getGenerator(), privateKey);
+        const scalarMulTime = performance.now() - startTime - deriveTime;
         setFeedPublicKey(publicKey);
         setFeedPrivateKey(privateKey);
         // Track which AES key we derived from (for detecting key rotation)
         derivedFromAesKeyRef.current = feedAesKey;
-        debugLog(`[useFeedReactions] Feed ElGamal keys derived successfully from AES key ${feedAesKey.substring(0, 16)}...`);
       } catch (err) {
         debugError(`[useFeedReactions] Failed to derive feed key:`, err);
         setError("Failed to derive feed encryption key");
         keyDerivationStartedRef.current = null; // Allow retry on error
         derivedFromAesKeyRef.current = null;
+        activeKeyDerivations.delete(derivationKey); // Allow retry on error
       } finally {
         setIsDerivingKey(false);
       }
@@ -127,12 +142,49 @@ export function useFeedReactions({
     deriveKey();
   }, [feedAesKey, feedId, feedPublicKey, isDerivingKey]);
 
-  // Fetch reaction tallies ONCE when feed is first viewed
-  // No periodic polling - reactions are synced via:
-  // 1. FeedsSyncable initial load (server sends tallies with messages)
-  // 2. After user submits a reaction (refreshTallies called below)
-  const hasFetchedTalliesRef = useRef<string | null>(null);
+  // Track which message IDs have already had tallies fetched (to avoid duplicate decryption)
+  const fetchedTallyMessageIds = useRef<Set<string>>(new Set());
+  // Guard against concurrent tally fetches
+  const isFetchingTalliesRef = useRef(false);
 
+  // Reset fetched tallies tracking when feedId changes
+  useEffect(() => {
+    fetchedTallyMessageIds.current = new Set();
+    isFetchingTalliesRef.current = false;
+  }, [feedId]);
+
+  // Fetch tallies for specific message IDs (lazy loading for visible messages)
+  const fetchTalliesForMessages = useCallback(async (messageIds: string[]) => {
+    if (!feedPrivateKey || messageIds.length === 0) return;
+
+    // Filter out message IDs that have already been fetched
+    const newMessageIds = messageIds.filter(id => !fetchedTallyMessageIds.current.has(id));
+    if (newMessageIds.length === 0) return;
+
+    // Prevent concurrent fetches
+    if (isFetchingTalliesRef.current || activeTallyFetches.has(feedId)) {
+      return;
+    }
+    isFetchingTalliesRef.current = true;
+    activeTallyFetches.add(feedId);
+
+    // Mark these IDs as being fetched (optimistic, to prevent duplicate requests)
+    newMessageIds.forEach(id => fetchedTallyMessageIds.current.add(id));
+
+    try {
+      await bsgsManager.ensureLoaded();
+      await reactionsServiceInstance.getTallies(feedId, newMessageIds, feedPrivateKey);
+    } catch (err) {
+      // On error, remove IDs from fetched set so they can be retried
+      newMessageIds.forEach(id => fetchedTallyMessageIds.current.delete(id));
+      console.error(`[useFeedReactions] Failed to fetch tallies:`, err);
+    } finally {
+      isFetchingTalliesRef.current = false;
+      activeTallyFetches.delete(feedId);
+    }
+  }, [feedId, feedPrivateKey]);
+
+  // Legacy refreshTallies for after reaction submission (refreshes last 20 messages)
   const refreshTallies = useCallback(async () => {
     if (!feedPrivateKey) return;
 
@@ -140,30 +192,12 @@ export function useFeedReactions({
     const confirmedMessageIds = messages
       .filter((m) => m.isConfirmed && m.id)
       .map((m) => m.id)
-      .slice(-20); // Last 20 messages
+      .slice(-20);
 
-    if (confirmedMessageIds.length === 0) return;
-
-    try {
-      await bsgsManager.ensureLoaded();
-      debugLog(`[useFeedReactions] Fetching tallies for ${confirmedMessageIds.length} messages in feed ${feedId.substring(0, 8)}...`);
-      await reactionsServiceInstance.getTallies(feedId, confirmedMessageIds, feedPrivateKey);
-      debugLog(`[useFeedReactions] Tallies updated`);
-    } catch (err) {
-      debugError(`[useFeedReactions] Failed to fetch tallies:`, err);
-    }
-  }, [feedId, feedPrivateKey]);
-
-  // Fetch tallies once when feed is first opened (not on every render)
-  useEffect(() => {
-    if (!feedPrivateKey) return;
-    if (hasFetchedTalliesRef.current === feedId) return; // Already fetched for this feed
-
-    hasFetchedTalliesRef.current = feedId;
-    // Small delay to avoid duplicate from strict mode
-    const timeout = setTimeout(refreshTallies, 100);
-    return () => clearTimeout(timeout);
-  }, [feedId, feedPrivateKey, refreshTallies]);
+    // Clear the fetched set for these IDs to force refresh
+    confirmedMessageIds.forEach(id => fetchedTallyMessageIds.current.delete(id));
+    await fetchTalliesForMessages(confirmedMessageIds);
+  }, [feedId, feedPrivateKey, fetchTalliesForMessages]);
 
   // Get reaction counts for a message
   const getReactionCounts = useCallback(
@@ -310,6 +344,7 @@ export function useFeedReactions({
     isPending,
     isReady,
     handleReactionSelect,
+    fetchTalliesForMessages,
     error,
   };
 }

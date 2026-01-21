@@ -23,6 +23,10 @@ import {
 import { BSGS } from './constants';
 import { buildAssetUrl } from '@/lib/api-config';
 
+// Size of the small-value fast lookup table
+// Covers most reaction counts (typically 0-100)
+const SMALL_VALUE_TABLE_SIZE = 256;
+
 /**
  * BSGS Manager - handles table loading and discrete log solving
  */
@@ -31,6 +35,14 @@ class BSGSManager {
   private giantStep: Point | null = null;
   private tableSize: number = BSGS.tableSize;
   private loadPromise: Promise<void> | null = null;
+
+  // Fast lookup table for small values (0 to SMALL_VALUE_TABLE_SIZE-1)
+  // Most reaction counts fall in this range, making lookup O(1)
+  private smallValueTable: Map<string, number> | null = null;
+
+  // Diagnostic counters for optimization tracking
+  private smallTableHits = 0;
+  private fullBsgsHits = 0;
 
   /**
    * Ensure the BSGS table is loaded
@@ -60,21 +72,18 @@ class BSGSManager {
     const cached = await this.loadFromCache();
     if (cached) {
       this.initializeFromBuffer(cached);
-      console.log('[BSGS] Loaded from cache');
       return;
     }
 
     // Try fetching precomputed table
     try {
       const tableUrl = buildAssetUrl(BSGS.tableUrl);
-      console.log('[BSGS] Fetching table from server:', tableUrl);
       const response = await fetch(tableUrl);
       if (response.ok) {
         const buffer = await response.arrayBuffer();
         this.initializeFromBuffer(new Uint8Array(buffer));
         // Cache for next time
         this.saveToCache(buffer).catch(console.warn);
-        console.log('[BSGS] Loaded from server');
         return;
       }
     } catch (err) {
@@ -82,9 +91,7 @@ class BSGSManager {
     }
 
     // Fallback: compute table locally
-    console.log('[BSGS] Computing table locally...');
     this.computeTable();
-    console.log('[BSGS] Table computed');
   }
 
   /**
@@ -105,6 +112,26 @@ class BSGSManager {
 
     // Giant step: n * G
     this.giantStep = scalarMul(G, BigInt(this.tableSize));
+
+    // Build small-value table for fast O(1) lookup of common reaction counts
+    this.buildSmallValueTable();
+  }
+
+  /**
+   * Build a fast lookup table for small values (0 to SMALL_VALUE_TABLE_SIZE-1)
+   * This covers most reaction counts and provides O(1) lookup
+   */
+  private buildSmallValueTable(): void {
+    const G = getGenerator();
+    this.smallValueTable = new Map();
+
+    let current: Point = { x: 0n, y: 1n }; // Identity = 0
+    for (let i = 0; i < SMALL_VALUE_TABLE_SIZE; i++) {
+      const key = pointToKey(current);
+      this.smallValueTable.set(key, i);
+      current = addPoints(current, G);
+    }
+
   }
 
   /**
@@ -136,7 +163,8 @@ class BSGSManager {
     const G = getGenerator();
     this.giantStep = scalarMul(G, BigInt(count));
 
-    console.log(`[BSGS] Initialized with ${count} entries`);
+    // Build small-value table for fast O(1) lookup of common reaction counts
+    this.buildSmallValueTable();
   }
 
   /**
@@ -153,6 +181,10 @@ class BSGSManager {
   /**
    * Solve discrete log: find k such that target = k * G
    *
+   * Uses a two-phase approach:
+   * 1. Fast O(1) lookup for small values (0-255) - covers most reaction counts
+   * 2. Full BSGS algorithm for larger values
+   *
    * @param target - The point to solve
    * @returns The discrete log k, or null if not found
    */
@@ -166,6 +198,18 @@ class BSGSManager {
       return 0;
     }
 
+    // Fast path: check small-value table first (O(1) lookup)
+    // Most reaction counts are small (< 256), so this handles the common case
+    if (this.smallValueTable) {
+      const key = pointToKey(target);
+      const smallValue = this.smallValueTable.get(key);
+      if (smallValue !== undefined) {
+        this.smallTableHits++;
+        return smallValue;
+      }
+    }
+
+    // Slow path: full BSGS algorithm for larger values
     const n = this.tableSize;
     let current = target;
 
@@ -175,6 +219,7 @@ class BSGSManager {
 
       if (this.table.has(key)) {
         const i = this.table.get(key)!;
+        this.fullBsgsHits++;
         return j * n + i;
       }
 
@@ -249,6 +294,19 @@ class BSGSManager {
   }
 
   /**
+   * Get and reset diagnostic stats
+   */
+  getAndResetStats(): { smallTableHits: number; fullBsgsHits: number } {
+    const stats = {
+      smallTableHits: this.smallTableHits,
+      fullBsgsHits: this.fullBsgsHits,
+    };
+    this.smallTableHits = 0;
+    this.fullBsgsHits = 0;
+    return stats;
+  }
+
+  /**
    * Clear the cached table (for testing)
    */
   async clearCache(): Promise<void> {
@@ -268,6 +326,7 @@ class BSGSManager {
     this.table = null;
     this.giantStep = null;
     this.loadPromise = null;
+    this.smallValueTable = null;
   }
 }
 

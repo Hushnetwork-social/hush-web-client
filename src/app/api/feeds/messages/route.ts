@@ -55,6 +55,7 @@ export async function GET(request: NextRequest) {
         timestamp: msg.timestamp?.toISOString() || null,
         blockIndex: msg.blockIndex,
         replyToMessageId: msg.replyToMessageId || undefined,  // Reply to Message: include parent reference
+        keyGeneration: msg.keyGeneration,  // Group Feeds: key generation for O(1) decryption
       })),
       // Protocol Omega: Include reaction tallies
       reactionTallies: response.reactionTallies.map(tally => ({

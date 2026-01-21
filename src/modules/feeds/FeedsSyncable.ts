@@ -608,6 +608,7 @@ export class FeedsSyncable implements ISyncable {
       debugLog(`[FeedsSyncable] Resetting lastReactionTallyVersion from ${syncMetadata.lastReactionTallyVersion} to 0 for full tally sync`);
     }
 
+    debugLog(`[FeedsSyncable] syncMessages: fetching from blockIndex ${blockIndex}`);
     const response = await fetchMessages(address, blockIndex, lastReactionTallyVersion);
     const { messages: newMessages, maxBlockIndex, reactionTallies, maxReactionTallyVersion } = response;
 
@@ -1070,7 +1071,6 @@ export class FeedsSyncable implements ISyncable {
     debugLog(`[FeedsSyncable] syncMessagesForFeed: blockIndex=${blockIndex}, lastReactionTallyVersion=${syncMetadata.lastReactionTallyVersion}, processMessages=${processMessages}`);
     const response = await fetchMessages(address, blockIndex, syncMetadata.lastReactionTallyVersion);
     const { messages: newMessages, maxBlockIndex, reactionTallies, maxReactionTallyVersion } = response;
-    debugLog(`[FeedsSyncable] syncMessagesForFeed response: messages=${newMessages.length}, reactionTallies=${reactionTallies.length}, maxReactionTallyVersion=${maxReactionTallyVersion}`);
 
     // Process messages if the server returned any for this feed
     // (Always process, regardless of processMessages flag - server returned them for a reason)
@@ -1247,7 +1247,13 @@ export class FeedsSyncable implements ISyncable {
       .filter(kg => kg.aesKey) // Only try keys we have
       .sort((a, b) => b.keyGeneration - a.keyGeneration); // Newest first
 
-    debugLog(`[FeedsSyncable] Decrypting ${messages.length} group messages, ${keysToTry.length} keys available`);
+    // Count messages with/without keyGeneration for performance analysis
+    const withKeyGen = messages.filter(m => m.keyGeneration !== undefined).length;
+    const withoutKeyGen = messages.length - withKeyGen;
+    debugLog(`[FeedsSyncable] Decrypting ${messages.length} group messages (${withKeyGen} with keyGen, ${withoutKeyGen} without), ${keysToTry.length} keys available`);
+
+    let directDecryptCount = 0;
+    let keySearchCount = 0;
 
     const decryptedMessages = await Promise.all(
       messages.map(async (msg) => {
@@ -1260,6 +1266,7 @@ export class FeedsSyncable implements ISyncable {
           if (specificKey?.aesKey) {
             try {
               const decryptedContent = await aesDecrypt(msg.content, specificKey.aesKey);
+              directDecryptCount++;
               return {
                 ...msg,
                 content: decryptedContent,
@@ -1288,11 +1295,14 @@ export class FeedsSyncable implements ISyncable {
         }
 
         // No KeyGeneration in message - try all keys until one works
+        keySearchCount++;
+        let attempts = 0;
         for (const keyGen of keysToTry) {
+          attempts++;
           try {
             const decryptedContent = await aesDecrypt(msg.content, keyGen.aesKey);
             // Success! Record which key worked
-            debugLog(`[FeedsSyncable] Decrypted msg ${msg.id.substring(0, 8)}... with keyGen=${keyGen.keyGeneration}`);
+            debugLog(`[FeedsSyncable] Decrypted msg ${msg.id.substring(0, 8)}... with keyGen=${keyGen.keyGeneration} (attempt ${attempts})`);
             return {
               ...msg,
               content: decryptedContent,
@@ -1316,11 +1326,14 @@ export class FeedsSyncable implements ISyncable {
       })
     );
 
-    // Log summary
     const failedCount = decryptedMessages.filter(m => m.decryptionFailed).length;
+
+    // Log summary only if there are failures or debug logging is enabled
     if (failedCount > 0) {
       debugWarn(`[FeedsSyncable] ${failedCount}/${messages.length} messages could not be decrypted`);
     }
+
+    debugLog(`[FeedsSyncable] Decrypted ${messages.length} messages: ${directDecryptCount} direct (O(1)), ${keySearchCount} key-search`);
 
     return decryptedMessages;
   }

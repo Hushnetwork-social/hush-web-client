@@ -492,6 +492,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
     getMyReaction,
     isPending,
     handleReactionSelect,
+    fetchTalliesForMessages,
   } = useFeedReactions({
     feedId: feed.id,
     feedAesKey: effectiveAesKey,
@@ -507,6 +508,45 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
     },
     []
   );
+
+  // Lazy load reaction tallies for visible messages
+  // Virtuoso calls rangeChanged when the visible range changes
+  // Use a ref to debounce rapid scroll events
+  const rangeChangedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleRangeChanged = useCallback((range: { startIndex: number; endIndex: number }) => {
+    // Debounce: wait 150ms after scrolling stops before fetching
+    if (rangeChangedTimeoutRef.current) {
+      clearTimeout(rangeChangedTimeoutRef.current);
+    }
+
+    rangeChangedTimeoutRef.current = setTimeout(() => {
+      // Get message IDs for visible items (with buffer of 5 items above/below)
+      const startIdx = Math.max(0, range.startIndex - 5);
+      const endIdx = Math.min(chatItems.length - 1, range.endIndex + 5);
+
+      const visibleMessageIds: string[] = [];
+      for (let i = startIdx; i <= endIdx; i++) {
+        const item = chatItems[i];
+        if (item?.type === 'message' && item.isConfirmed && item.id) {
+          visibleMessageIds.push(item.id);
+        }
+      }
+
+      if (visibleMessageIds.length > 0) {
+        fetchTalliesForMessages(visibleMessageIds);
+      }
+    }, 150);
+  }, [chatItems, fetchTalliesForMessages]);
+
+  // Cleanup debounce timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (rangeChangedTimeoutRef.current) {
+        clearTimeout(rangeChangedTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Reply to Message: State for tracking which message is being replied to
   const [replyingTo, setReplyingTo] = useState<FeedMessage | null>(null);
@@ -634,7 +674,12 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
 
   // FEAT-051: Mark feed as read when viewing
   // This effect runs when the feed is opened and when new messages arrive while viewing
-  const lastMarkedBlockIndexRef = useRef<number>(0);
+  // Uses both lastMarkedBlockIndex and feedId tracking to prevent duplicate calls
+  const markAsReadStateRef = useRef<{ feedId: string; blockIndex: number; inFlight: boolean }>({
+    feedId: '',
+    blockIndex: 0,
+    inFlight: false,
+  });
 
   useEffect(() => {
     // Skip if no credentials
@@ -646,32 +691,37 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
     // Skip if no messages or blockIndex is 0
     if (maxBlockIndex <= 0) return;
 
-    // Skip if we already marked this blockIndex (avoid redundant calls)
-    if (maxBlockIndex <= lastMarkedBlockIndexRef.current) return;
+    // Skip if we already marked this exact feedId + blockIndex combo
+    const state = markAsReadStateRef.current;
+    if (state.feedId === feed.id && maxBlockIndex <= state.blockIndex) return;
+
+    // Skip if a call is already in flight for this feed
+    if (state.feedId === feed.id && state.inFlight) return;
 
     // Skip if feed's lastReadBlockIndex already covers this (already read on another device)
     if (feed.lastReadBlockIndex && maxBlockIndex <= feed.lastReadBlockIndex) {
-      lastMarkedBlockIndexRef.current = maxBlockIndex;
+      markAsReadStateRef.current = { feedId: feed.id, blockIndex: maxBlockIndex, inFlight: false };
       return;
     }
+
+    // Update state IMMEDIATELY to prevent concurrent calls
+    markAsReadStateRef.current = { feedId: feed.id, blockIndex: maxBlockIndex, inFlight: true };
 
     // Mark as read
     debugLog(`[ChatView] Marking feed ${feed.id.substring(0, 8)}... as read up to block ${maxBlockIndex}`);
 
     markFeedAsRead(feed.id, maxBlockIndex, credentials.signingPublicKey).then((success) => {
+      // Clear in-flight flag
+      if (markAsReadStateRef.current.feedId === feed.id) {
+        markAsReadStateRef.current.inFlight = false;
+      }
       if (success) {
-        // Update local store immediately
+        // Update local store
         useFeedsStore.getState().updateLastReadBlockIndex(feed.id, maxBlockIndex);
-        lastMarkedBlockIndexRef.current = maxBlockIndex;
         debugLog(`[ChatView] Successfully marked feed as read`);
       }
     });
   }, [feed.id, feed.lastReadBlockIndex, feedMessages.length, credentials?.signingPublicKey]);
-
-  // Reset lastMarkedBlockIndexRef when feed changes
-  useEffect(() => {
-    lastMarkedBlockIndexRef.current = 0;
-  }, [feed.id]);
 
   // Settings Panel: Handler for settings update (name, description, visibility)
   const handleUpdateSettings = useCallback((name: string, description: string, isPublic: boolean) => {
@@ -941,6 +991,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
             initialTopMostItemIndex={chatItems.length - 1}
             className="flex-1"
             computeItemKey={(index, item) => item.id}
+            rangeChanged={handleRangeChanged}
             itemContent={(index, item) => (
               <div className="px-4 py-1">
                 {item.type === 'system' ? (
