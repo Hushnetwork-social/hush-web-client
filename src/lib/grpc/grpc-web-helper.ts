@@ -933,6 +933,7 @@ function parseMapEntry(bytes: Uint8Array): { key: string; value: number } | null
 
 export interface MarkFeedAsReadResponse {
   success: boolean;
+  message?: string;  // FEAT-051: Optional message field for error details
 }
 
 export function parseMarkFeedAsReadResponse(messageBytes: Uint8Array): MarkFeedAsReadResponse {
@@ -949,8 +950,14 @@ export function parseMarkFeedAsReadResponse(messageBytes: Uint8Array): MarkFeedA
 
     if (wireType === 0 && fieldNumber === 1) {
       const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
       result.success = valueResult.value === 1;
-      break;
+    } else if (wireType === 2 && fieldNumber === 2) {
+      // FEAT-051: Parse message field
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead;
+      result.message = parseString(messageBytes, offset, lenResult.value);
+      offset += lenResult.value;
     } else if (wireType === 0) {
       const valueResult = parseVarint(messageBytes, offset);
       offset += valueResult.bytesRead;
@@ -963,6 +970,29 @@ export function parseMarkFeedAsReadResponse(messageBytes: Uint8Array): MarkFeedA
   }
 
   return result;
+}
+
+// ============= FEAT-051: Feeds Service MarkFeedAsRead =============
+
+/**
+ * Build MarkFeedAsReadRequest for the Feeds gRPC service (FEAT-051)
+ * Proto: message MarkFeedAsReadRequest {
+ *   string FeedId = 1;
+ *   int64 UpToBlockIndex = 2;
+ *   string UserPublicAddress = 3;
+ * }
+ */
+export function buildFeedMarkAsReadRequest(
+  feedId: string,
+  upToBlockIndex: number,
+  userPublicAddress: string
+): Uint8Array {
+  const bytes = [
+    ...encodeString(1, feedId),
+    ...encodeVarintField(2, upToBlockIndex),
+    ...encodeString(3, userPublicAddress),
+  ];
+  return new Uint8Array(bytes);
 }
 
 export interface GetUnreadCountsResponse {

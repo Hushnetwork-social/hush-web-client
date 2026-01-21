@@ -23,6 +23,7 @@ export {
   sendMessage,
   findExistingChatFeed,
   createChatFeed,
+  markFeedAsRead,  // FEAT-051: Cross-device read sync
 } from './FeedsService';
 
 /**

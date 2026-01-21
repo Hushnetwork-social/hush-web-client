@@ -85,6 +85,8 @@ export interface Feed {
   inviteCode?: string;
   /** History of settings changes (for group feeds - used for historical system messages) */
   settingsChangeHistory?: SettingsChangeRecord[];
+  /** FEAT-051: Last read block index for cross-device read sync (0 = not read) */
+  lastReadBlockIndex?: number;
 }
 
 // Profile search result type

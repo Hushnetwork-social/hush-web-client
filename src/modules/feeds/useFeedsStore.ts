@@ -228,6 +228,14 @@ interface FeedsActions {
 
   /** Get the GroupKeyState for a feed */
   getGroupKeyState: (feedId: string) => GroupKeyState | undefined;
+
+  // ============= FEAT-051: Read Watermarks Actions =============
+
+  /** Update lastReadBlockIndex for a feed (after marking as read) */
+  updateLastReadBlockIndex: (feedId: string, blockIndex: number) => void;
+
+  /** Get the max block index from messages in a feed (for marking as read) */
+  getMaxMessageBlockIndex: (feedId: string) => number;
 }
 
 type FeedsStore = FeedsState & FeedsActions;
@@ -843,6 +851,25 @@ export const useFeedsStore = create<FeedsStore>()(
 
       getGroupKeyState: (feedId) => {
         return get().groupKeyStates[feedId];
+      },
+
+      // ============= FEAT-051: Read Watermarks Implementations =============
+
+      updateLastReadBlockIndex: (feedId, blockIndex) => {
+        debugLog(`[FeedsStore] updateLastReadBlockIndex: feedId=${feedId}, blockIndex=${blockIndex}`);
+        set((state) => ({
+          feeds: state.feeds.map((f) =>
+            f.id === feedId
+              ? { ...f, lastReadBlockIndex: Math.max(f.lastReadBlockIndex ?? 0, blockIndex) }
+              : f
+          ),
+        }));
+      },
+
+      getMaxMessageBlockIndex: (feedId) => {
+        const messages = get().messages[feedId] || [];
+        if (messages.length === 0) return 0;
+        return Math.max(...messages.map((m) => m.blockHeight ?? 0));
       },
     }),
     {

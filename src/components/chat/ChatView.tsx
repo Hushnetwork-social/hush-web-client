@@ -12,7 +12,7 @@ import { MemberListPanel } from "@/components/groups/MemberListPanel";
 import { GroupSettingsPanel } from "@/components/groups/GroupSettingsPanel";
 import { MentionNavButton, getUnreadCount, getUnreadMentions, markMentionRead, useMessageHighlight } from "@/lib/mentions";
 import { useAppStore } from "@/stores";
-import { useFeedsStore, sendMessage } from "@/modules/feeds";
+import { useFeedsStore, sendMessage, markFeedAsRead } from "@/modules/feeds";
 import { useFeedReactions } from "@/hooks/useFeedReactions";
 import { useVirtualKeyboard } from "@/hooks/useVirtualKeyboard";
 import type { Feed, FeedMessage, GroupFeedMember, SettingsChangeRecord } from "@/types";
@@ -630,6 +630,47 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   // Reset mention navigation index when feed changes
   useEffect(() => {
     mentionNavIndexRef.current = 0;
+  }, [feed.id]);
+
+  // FEAT-051: Mark feed as read when viewing
+  // This effect runs when the feed is opened and when new messages arrive while viewing
+  const lastMarkedBlockIndexRef = useRef<number>(0);
+
+  useEffect(() => {
+    // Skip if no credentials
+    if (!credentials?.signingPublicKey) return;
+
+    // Get max block index from messages in this feed
+    const maxBlockIndex = useFeedsStore.getState().getMaxMessageBlockIndex(feed.id);
+
+    // Skip if no messages or blockIndex is 0
+    if (maxBlockIndex <= 0) return;
+
+    // Skip if we already marked this blockIndex (avoid redundant calls)
+    if (maxBlockIndex <= lastMarkedBlockIndexRef.current) return;
+
+    // Skip if feed's lastReadBlockIndex already covers this (already read on another device)
+    if (feed.lastReadBlockIndex && maxBlockIndex <= feed.lastReadBlockIndex) {
+      lastMarkedBlockIndexRef.current = maxBlockIndex;
+      return;
+    }
+
+    // Mark as read
+    debugLog(`[ChatView] Marking feed ${feed.id.substring(0, 8)}... as read up to block ${maxBlockIndex}`);
+
+    markFeedAsRead(feed.id, maxBlockIndex, credentials.signingPublicKey).then((success) => {
+      if (success) {
+        // Update local store immediately
+        useFeedsStore.getState().updateLastReadBlockIndex(feed.id, maxBlockIndex);
+        lastMarkedBlockIndexRef.current = maxBlockIndex;
+        debugLog(`[ChatView] Successfully marked feed as read`);
+      }
+    });
+  }, [feed.id, feed.lastReadBlockIndex, feedMessages.length, credentials?.signingPublicKey]);
+
+  // Reset lastMarkedBlockIndexRef when feed changes
+  useEffect(() => {
+    lastMarkedBlockIndexRef.current = 0;
   }, [feed.id]);
 
   // Settings Panel: Handler for settings update (name, description, visibility)

@@ -21,6 +21,7 @@ interface ServerFeed {
   feedType: number;
   blockIndex: number;
   participants: { participantPublicAddress: string; encryptedFeedKey?: string }[];
+  lastReadBlockIndex: number;  // FEAT-051: User's last read position in this feed
 }
 
 // Server message response type
@@ -100,6 +101,8 @@ export async function fetchFeeds(
       encryptedFeedKey: userParticipant?.encryptedFeedKey || undefined,
       // Store other participant's address for detecting existing feeds
       otherParticipantPublicSigningAddress: otherParticipant?.participantPublicAddress,
+      // FEAT-051: Last read block index from server (default to 0 if not present for backward compatibility)
+      lastReadBlockIndex: feed.lastReadBlockIndex || 0,
     };
   });
 
@@ -420,5 +423,56 @@ export async function createChatFeed(
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     debugError(`[FeedsService] Create chat feed failed:`, error);
     return { success: false, error: errorMessage };
+  }
+}
+
+/**
+ * FEAT-051: Marks a feed as read up to a specific block index.
+ * This is a fire-and-forget operation - errors are logged but not thrown.
+ *
+ * @param feedId The feed to mark as read
+ * @param upToBlockIndex The block index up to which the user has read
+ * @param userPublicAddress The user's public signing address
+ * @returns true if successful, false otherwise
+ */
+export async function markFeedAsRead(
+  feedId: string,
+  upToBlockIndex: number,
+  userPublicAddress: string
+): Promise<boolean> {
+  // Skip if block index is 0 or negative (nothing to mark)
+  if (upToBlockIndex <= 0) {
+    return true;
+  }
+
+  try {
+    const response = await fetch(buildApiUrl('/api/feeds/mark-read'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        feedId,
+        upToBlockIndex,
+        userPublicAddress,
+      }),
+    });
+
+    if (!response.ok) {
+      debugError(`[FeedsService] markFeedAsRead failed: HTTP ${response.status}`);
+      return false;
+    }
+
+    const data = await response.json();
+
+    if (!data.success) {
+      debugError(`[FeedsService] markFeedAsRead failed: ${data.message || 'Unknown error'}`);
+      return false;
+    }
+
+    debugLog(`[FeedsService] Marked feed ${feedId} as read up to block ${upToBlockIndex}`);
+    return true;
+  } catch (error) {
+    // Log but don't throw - this is non-critical functionality
+    debugError(`[FeedsService] markFeedAsRead error:`, error);
+    return false;
   }
 }
