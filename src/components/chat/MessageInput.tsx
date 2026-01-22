@@ -233,6 +233,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
           onKeyDown={handleKeyDown}
           placeholder="Type a message..." role="combobox" aria-haspopup="listbox" aria-expanded={isMentionOverlayOpen} aria-controls={isMentionOverlayOpen ? "mention-listbox" : undefined}
           disabled={disabled}
+          data-testid="message-input"
           className="flex-1 bg-transparent border-none outline-none text-hush-text-primary placeholder-hush-text-accent text-sm px-2 disabled:opacity-50"
         />
 
@@ -240,6 +241,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
         <button
           type="submit"
           disabled={disabled || !message.trim()}
+          data-testid="send-button"
           className={`p-2 rounded-full transition-all disabled:opacity-50 ${
             message.trim()
               ? "bg-hush-purple hover:bg-hush-purple-hover"

@@ -551,6 +551,7 @@ export default function AuthPage() {
                   value={profileName}
                   onChange={(e) => setProfileName(e.target.value)}
                   placeholder="E.g., Satoshi Nakamoto"
+                  data-testid="display-name-input"
                   className="w-full px-3 py-2.5 bg-hush-bg-element border border-hush-purple/50 rounded-lg text-hush-text-primary placeholder-hush-text-accent/50 focus:border-hush-purple outline-none text-sm"
                 />
               </div>
@@ -623,6 +624,7 @@ export default function AuthPage() {
                 ) : (
                   <button
                     onClick={handleGenerateKeys}
+                    data-testid="create-identity-button"
                     className="w-full py-3 bg-hush-bg-element border border-hush-purple/50 rounded-lg text-hush-purple hover:bg-hush-bg-hover transition-colors"
                   >
                     Generate Recovery Words
@@ -641,6 +643,7 @@ export default function AuthPage() {
               <button
                 onClick={handleCreateAccount}
                 disabled={!canCreateAccount || isCreatingAccount}
+                data-testid="submit-identity-button"
                 className="w-full py-3 bg-hush-purple hover:bg-hush-purple-hover disabled:bg-hush-text-accent disabled:opacity-50 rounded-lg text-hush-bg-dark font-semibold transition-colors flex items-center justify-center space-x-2"
               >
                 {isCreatingAccount ? (

@@ -153,6 +153,7 @@ export const MessageBubble = memo(function MessageBubble({
       className={`flex flex-col ${isOwn ? "items-end" : "items-start"}`}
       style={{ marginBottom: hasActiveReactions ? '16px' : undefined }}
       data-message-id={messageId}
+      data-testid="message"
     >
       {/* Sender name header - only shown for group messages from others */}
       {showSender && senderName && !isOwn && (
@@ -202,6 +203,7 @@ export const MessageBubble = memo(function MessageBubble({
               <div className="relative">
                 <button
                   onClick={() => setShowPicker(!showPicker)}
+                  data-testid="add-reaction-button"
                   className={`
                     p-1 rounded-full
                     bg-hush-bg-light/80 hover:bg-hush-bg-light
@@ -252,7 +254,7 @@ export const MessageBubble = memo(function MessageBubble({
                 resolveDisplayName={resolveDisplayName}
               />
             )}
-            <p className="text-sm break-words">
+            <p className="text-sm break-words" data-testid="message-content">
               {contentWithMentions.map((segment, index) =>
                 segment.type === 'mention' && segment.identityId && segment.displayName ? (
                   <MentionText
@@ -335,6 +337,7 @@ export const MessageBubble = memo(function MessageBubble({
               <div className="relative">
                 <button
                   onClick={() => setShowPicker(!showPicker)}
+                  data-testid="add-reaction-button"
                   className={`
                     p-1 rounded-full
                     bg-hush-bg-light/80 hover:bg-hush-bg-light

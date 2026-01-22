@@ -40,6 +40,7 @@ export const ChatListItem = memo(function ChatListItem({
   return (
     <button
       onClick={onClick}
+      data-testid="feed-item"
       className={`
         w-full max-w-full box-border flex items-center p-3 rounded-lg transition-colors cursor-pointer
         ${isSelected

@@ -63,6 +63,7 @@ export function ReactionBar({
             key={emoji}
             onClick={() => onReactionClick?.(index)}
             disabled={!onReactionClick}
+            data-testid={`reaction-badge-${emoji}`}
             className={`
               inline-flex items-center gap-0.5
               text-xs px-1.5 py-0.5 rounded-full

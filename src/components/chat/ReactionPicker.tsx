@@ -47,6 +47,7 @@ export function ReactionPicker({
           disabled={disabled}
           role="option"
           aria-selected={selectedEmoji === index}
+          data-testid={`emoji-${emoji}`}
           className={`
             p-2 rounded-md transition-all duration-150
             text-xl leading-none
