@@ -210,7 +210,10 @@ export const GroupCreationWizard = memo(function GroupCreationWizard({
       />
 
       {/* Modal */}
-      <div className="relative w-full max-w-lg h-[80vh] max-h-[600px] mx-4 bg-hush-bg-element rounded-2xl shadow-2xl flex flex-col overflow-hidden md:mx-auto">
+      <div
+        data-testid="group-creation-wizard"
+        className="relative w-full max-w-lg h-[80vh] max-h-[600px] mx-4 bg-hush-bg-element rounded-2xl shadow-2xl flex flex-col overflow-hidden md:mx-auto"
+      >
         {/* Header */}
         <div className="flex-shrink-0 flex items-center justify-between px-4 py-3 border-b border-hush-bg-hover">
           <div>

@@ -20,6 +20,7 @@ export function FeedList({ onFeedSelect }: FeedListProps) {
   const isSyncing = useFeedsStore((state) => state.isSyncing);
   const markFeedAsRead = useFeedsStore((state) => state.markFeedAsRead);
   const groupMembersMap = useFeedsStore((state) => state.groupMembers);
+  const groupKeyStates = useFeedsStore((state) => state.groupKeyStates);
   // Subscribe to mentionVersion to trigger re-renders when mentions change
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const mentionVersion = useFeedsStore((state) => state.mentionVersion);
@@ -151,7 +152,7 @@ export function FeedList({ onFeedSelect }: FeedListProps) {
   }
 
   return (
-    <div className="space-y-2 w-full max-w-full" data-testid="feed-list">
+    <div className="space-y-2 w-full max-w-full" data-testid="feed-list" data-feed-count={feeds.length}>
       {feeds.map((feed) => {
         const lastMessage = getLastMessage(feed.id);
         const isPersonalFeed = feed.type === 'personal';
@@ -162,9 +163,18 @@ export function FeedList({ onFeedSelect }: FeedListProps) {
         const messagePreview = lastMessage
           ? formatMessagePreview(lastMessage.content, feed.type, senderName)
           : "No messages yet";
+        // Determine if feed has encryption key available:
+        // - Non-group feeds: check feed.aesKey directly
+        // - Group feeds: check if groupKeyStates has any key generations with a decrypted aesKey
+        const hasEncryptionKey = feed.type === 'group'
+          ? (groupKeyStates[feed.id]?.keyGenerations.some(kg => !!kg.aesKey) ?? false)
+          : !!feed.aesKey;
+        // [E2E] Debug logging for feed readiness
+        console.log(`[E2E FeedList] Feed ${feed.id?.substring(0, 8)}... (${feed.name}, type=${feed.type}): aesKey=${!!feed.aesKey}, hasEncryptionKey=${hasEncryptionKey}`);
         return (
           <ChatListItem
             key={feed.id}
+            feedId={feed.id}
             name={feed.name}
             initials={isPersonalFeed ? "YOU" : getInitials(feed.name)}
             lastMessage={messagePreview}
@@ -175,6 +185,7 @@ export function FeedList({ onFeedSelect }: FeedListProps) {
             feedType={feed.type}
             isPublic={feed.isPublic}
             hasUnreadMentions={hasUnreadMentions(feed.id)}
+            hasEncryptionKey={hasEncryptionKey}
             onClick={() => handleFeedClick(feed.id)}
           />
         );

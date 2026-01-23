@@ -6,6 +6,10 @@ import { JoinByCodeClient } from "./JoinByCodeClient";
 // In static export mode, we can't use dynamic rendering or server-side fetching
 const isStaticExport = process.env.STATIC_EXPORT === "true";
 
+// Skip SSR fetch in Docker E2E tests - Next.js can't reliably self-fetch in production mode
+// This avoids the self-referencing fetch issue where server tries to call its own API
+const skipSsrFetch = process.env.NODE_ENV === "production" && process.env.GRPC_SERVER_URL?.includes("docker");
+
 // For static export, we need to provide generateStaticParams for the dynamic route
 // We return a placeholder path that will be handled by the client component
 // The [[...code]] catch-all pattern is handled differently - for [code] we need at least one param
@@ -36,8 +40,8 @@ async function getGroupInfo(code: string): Promise<{
   memberCount?: number;
   isPublic?: boolean;
 } | null> {
-  // Skip server-side fetching in static export mode
-  if (isStaticExport) {
+  // Skip server-side fetching in static export mode or Docker E2E tests
+  if (isStaticExport || skipSsrFetch) {
     return null;
   }
 
@@ -79,9 +83,9 @@ async function getGroupInfo(code: string): Promise<{
  * Only works in web deployment mode (not static export)
  */
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
-  // In static export mode, return default metadata
+  // In static export mode or Docker E2E, return default metadata
   // The actual group info will be fetched client-side
-  if (isStaticExport) {
+  if (isStaticExport || skipSsrFetch) {
     return {
       title: "Join Group - Hush Feeds",
       description: "Join a group on Hush Feeds - Secure, decentralized messaging",
@@ -140,9 +144,9 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 export default async function JoinByCodePage({ params }: PageProps) {
   const { code } = await params;
 
-  // In static export mode, skip server-side fetching
+  // In static export mode or Docker E2E, skip server-side fetching
   // The client component will handle everything
-  if (isStaticExport) {
+  if (isStaticExport || skipSsrFetch) {
     return <JoinByCodeClient initialGroupInfo={null} />;
   }
 

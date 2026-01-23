@@ -306,12 +306,18 @@ export const useFeedsStore = create<FeedsStore>()(
         const updatedFeeds = currentFeeds.map((existingFeed) => {
           const serverFeed = newFeedsMap.get(existingFeed.id);
           if (serverFeed) {
+            // Check if encryptedFeedKey changed (key rotation) - if so, clear aesKey to force re-decrypt
+            const keyChanged = serverFeed.encryptedFeedKey !== existingFeed.encryptedFeedKey;
+            if (keyChanged && existingFeed.encryptedFeedKey) {
+              console.log(`[E2E FeedsStore] KEY CHANGED for feed ${existingFeed.name}: old=${existingFeed.encryptedFeedKey?.substring(0, 20)}..., new=${serverFeed.encryptedFeedKey?.substring(0, 20)}...`);
+            }
             // Merge server data, preserving local-only data like decrypted aesKey and unreadCount
             return {
               ...existingFeed,
               ...serverFeed,
-              // Keep the decrypted aesKey if we have it
-              aesKey: existingFeed.aesKey || serverFeed.aesKey,
+              // Keep the decrypted aesKey if we have it AND the encryptedFeedKey hasn't changed
+              // If encryptedFeedKey changed (key rotation), clear aesKey to force re-decrypt
+              aesKey: keyChanged ? undefined : (existingFeed.aesKey || serverFeed.aesKey),
               // Preserve unreadCount - server doesn't track this, it's client-side only
               unreadCount: existingFeed.unreadCount ?? 0,
             };
@@ -422,8 +428,10 @@ export const useFeedsStore = create<FeedsStore>()(
         })),
 
       addMessages: (feedId, newMessages) => {
+        debugLog(`[FeedsStore] addMessages START: feedId=${feedId.substring(0, 8)}..., incoming=${newMessages.length}, msgIds=[${newMessages.map(m => m.id.substring(0, 8)).join(', ')}]`);
         const currentMessages = get().messages[feedId] || [];
         const existingIds = new Set(currentMessages.map((m) => m.id));
+        debugLog(`[FeedsStore] addMessages: currentCount=${currentMessages.length}`);
 
         // Separate messages that need to confirm existing pending messages
         const messagesToConfirm: FeedMessage[] = [];
@@ -490,6 +498,7 @@ export const useFeedsStore = create<FeedsStore>()(
             updatedFeeds = sortFeeds(updatedFeeds);
           }
 
+          debugLog(`[FeedsStore] addMessages COMMIT: feedId=${feedId.substring(0, 8)}..., finalCount=${updatedMessages.length}, msgIds=[${updatedMessages.map(m => m.id.substring(0, 8)).join(', ')}]`);
           return {
             feeds: updatedFeeds,
             messages: {
@@ -889,12 +898,31 @@ export const useFeedsStore = create<FeedsStore>()(
             currentState.keyGenerations.map((k) => [k.keyGeneration, k])
           );
 
-          // Only add keys that don't already exist
+          // Merge keys: add new ones, update validity of existing ones
+          // Keys are immutable (AES key never changes), but validity can change
+          // when new members join (existing key gets a ValidToBlock set)
           let addedCount = 0;
+          let updatedCount = 0;
           for (const newKey of newKeyGens) {
-            if (!existingKeysMap.has(newKey.keyGeneration)) {
+            const existingKey = existingKeysMap.get(newKey.keyGeneration);
+            if (!existingKey) {
+              // New key - add it
               existingKeysMap.set(newKey.keyGeneration, newKey);
               addedCount++;
+            } else {
+              // Existing key - update validity if changed
+              // (AES key is immutable, only validity changes)
+              if (
+                existingKey.validFromBlock !== newKey.validFromBlock ||
+                existingKey.validToBlock !== newKey.validToBlock
+              ) {
+                existingKeysMap.set(newKey.keyGeneration, {
+                  ...existingKey,
+                  validFromBlock: newKey.validFromBlock,
+                  validToBlock: newKey.validToBlock,
+                });
+                updatedCount++;
+              }
             }
           }
 
@@ -915,8 +943,8 @@ export const useFeedsStore = create<FeedsStore>()(
 
           debugLog(
             `[FeedsStore] mergeKeyGenerations: feedId=${feedId.substring(0, 8)}..., ` +
-            `existing=${currentState.keyGenerations.length}, new=${newKeyGens.length}, ` +
-            `added=${addedCount}, total=${mergedKeyGens.length}`
+            `existing=${currentState.keyGenerations.length}, incoming=${newKeyGens.length}, ` +
+            `added=${addedCount}, validityUpdated=${updatedCount}, total=${mergedKeyGens.length}`
           );
 
           return {

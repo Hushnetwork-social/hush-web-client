@@ -51,6 +51,7 @@ export const TypeSelectionCard = memo(function TypeSelectionCard({
   return (
     <div
       role="option"
+      data-testid={`group-type-${title.toLowerCase()}`}
       aria-selected={selected}
       aria-disabled={disabled}
       tabIndex={disabled ? -1 : 0}

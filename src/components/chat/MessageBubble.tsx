@@ -278,7 +278,7 @@ export const MessageBubble = memo(function MessageBubble({
                 `}
               >
                 <span className="text-[10px]">{timestamp}</span>
-                {isOwn && <Check className="w-3.5 h-3.5 opacity-20" />}
+                {isOwn && <Check className="w-3.5 h-3.5 opacity-20" data-testid="message-confirmed" />}
               </div>
             )}
           </div>

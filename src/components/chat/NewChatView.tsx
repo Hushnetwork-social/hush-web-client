@@ -5,6 +5,9 @@ import { Search, Loader2, MessageSquare, UserCheck, User, ArrowLeft, Users } fro
 import { searchByDisplayName } from "@/modules/identity";
 import { findExistingChatFeed, createChatFeed, useFeedsStore } from "@/modules/feeds";
 import { groupService } from "@/lib/grpc/services/group";
+import { joinPublicGroup } from "@/lib/crypto/group-transactions";
+import { hexToBytes } from "@/lib/crypto/keys";
+import { invalidateGroupCaches } from "@/lib/sync/group-sync";
 import { useAppStore } from "@/stores";
 import { GroupCard } from "@/components/groups/GroupCard";
 import type { ProfileSearchResult, PublicGroupInfo } from "@/types";
@@ -185,7 +188,7 @@ export function NewChatView({ onFeedCreated, onFeedSelected, onBack, showBackBut
   // Handle joining a group
   const handleJoinGroup = useCallback(async (group: PublicGroupInfo) => {
     const credentials = useAppStore.getState().credentials;
-    if (!credentials?.signingPublicKey) {
+    if (!credentials?.signingPublicKey || !credentials?.signingPrivateKey) {
       setGroupError("Please log in to join groups");
       return;
     }
@@ -194,14 +197,19 @@ export function NewChatView({ onFeedCreated, onFeedSelected, onBack, showBackBut
     setCooldownErrors((prev) => ({ ...prev, [group.feedId]: "" }));
 
     try {
-      const result = await groupService.joinGroup(
+      // Join via signed transaction
+      const signingPrivateKeyBytes = hexToBytes(credentials.signingPrivateKey);
+      const result = await joinPublicGroup(
         group.feedId,
         credentials.signingPublicKey,
-        credentials.encryptionPublicKey  // Pass encrypt key to avoid identity lookup timing issue
+        signingPrivateKeyBytes
       );
 
       if (result.success) {
         setJoinedGroupIds((prev) => new Set([...prev, group.feedId]));
+        // Invalidate client-side caches so next sync fetches fresh data
+        // This ensures the user appears in members list and gets KeyGenerations
+        invalidateGroupCaches(group.feedId);
         // Navigate to the joined group
         onFeedSelected?.(group.feedId);
       } else {

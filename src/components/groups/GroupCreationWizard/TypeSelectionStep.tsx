@@ -108,6 +108,7 @@ export const TypeSelectionStep = memo(function TypeSelectionStep({
       <div className="flex-shrink-0 p-4 border-t border-hush-bg-hover">
         <button
           type="button"
+          data-testid="type-selection-next-button"
           onClick={onNext}
           disabled={!canProceed}
           className="w-full px-6 py-2.5 bg-hush-purple text-hush-bg-dark rounded-xl font-medium text-sm hover:bg-hush-purple-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"

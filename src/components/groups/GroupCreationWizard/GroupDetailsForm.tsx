@@ -102,6 +102,7 @@ export const GroupDetailsForm = memo(function GroupDetailsForm({
           </label>
           <input
             id="group-name"
+            data-testid="group-name-input"
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -140,6 +141,7 @@ export const GroupDetailsForm = memo(function GroupDetailsForm({
           </label>
           <textarea
             id="group-description"
+            data-testid="group-description-input"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="What is this group about?"
@@ -213,6 +215,7 @@ export const GroupDetailsForm = memo(function GroupDetailsForm({
       <div className="flex-shrink-0 p-4 border-t border-hush-bg-hover">
         <button
           type="submit"
+          data-testid="confirm-create-group-button"
           disabled={!canCreate}
           className="w-full px-6 py-2.5 bg-hush-purple text-hush-bg-dark rounded-xl font-medium text-sm hover:bg-hush-purple-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
           aria-label="Create group"

@@ -18,7 +18,36 @@ interface ChatListItemProps {
   isPublic?: boolean;
   /** Whether this feed has unread mentions for the current user */
   hasUnreadMentions?: boolean;
+  /** Whether the feed's encryption key is available (used for E2E testing) */
+  hasEncryptionKey?: boolean;
+  /** Feed ID for E2E testing (stored as data-feed-id attribute) */
+  feedId?: string;
   onClick?: () => void;
+}
+
+/**
+ * Generate a test ID for the feed item based on type and name.
+ * Format:
+ * - Personal feed: "feed-item:personal"
+ * - Chat feed: "feed-item:chat:{participantName}"
+ * - Group feed: "feed-item:group:{groupName}"
+ * - Broadcast feed: "feed-item:broadcast:{name}"
+ *
+ * Names are sanitized: lowercase, spaces replaced with hyphens.
+ */
+function generateFeedTestId(feedType: string, name: string, isPersonalFeed: boolean): string {
+  if (isPersonalFeed || feedType === 'personal') {
+    return 'feed-item:personal';
+  }
+
+  // Sanitize name: lowercase, replace spaces and special chars with hyphens
+  const sanitizedName = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+
+  return `feed-item:${feedType}:${sanitizedName}`;
 }
 
 export const ChatListItem = memo(function ChatListItem({
@@ -32,15 +61,20 @@ export const ChatListItem = memo(function ChatListItem({
   feedType = 'chat',
   isPublic = false,
   hasUnreadMentions = false,
+  hasEncryptionKey = false,
+  feedId,
   onClick,
 }: ChatListItemProps) {
   const isGroup = feedType === 'group';
   const isPublicGroup = isGroup && isPublic;
+  const testId = generateFeedTestId(feedType, name, isPersonalFeed);
 
   return (
     <button
       onClick={onClick}
-      data-testid="feed-item"
+      data-testid={testId}
+      data-feed-id={feedId}
+      data-feed-ready={hasEncryptionKey ? "true" : "false"}
       className={`
         w-full max-w-full box-border flex items-center p-3 rounded-lg transition-colors cursor-pointer
         ${isSelected

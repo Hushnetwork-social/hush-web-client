@@ -48,6 +48,7 @@ export function Sidebar({
         {navItems.map((item) => (
           <button
             key={item.id}
+            data-testid={`nav-${item.id}`}
             onClick={() => !item.comingSoon && onNavSelect(item.id)}
             disabled={item.comingSoon}
             className={`

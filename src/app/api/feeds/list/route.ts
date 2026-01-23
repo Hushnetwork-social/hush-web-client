@@ -24,11 +24,17 @@ export async function GET(request: NextRequest) {
 
   try {
     const requestBytes = buildGetFeedsForAddressRequest(address, blockIndex);
+    console.log(`[API] Calling GetFeedsForAddress with address=${address?.substring(0, 20)}, blockIndex=${blockIndex}`);
+
     const responseBytes = await grpcCall('rpcHush.HushFeed', 'GetFeedsForAddress', requestBytes);
+    console.log(`[API] Response received, bytes length: ${responseBytes?.length || 0}`);
+
     const messageBytes = parseGrpcResponse(responseBytes);
+    console.log(`[API] Message bytes length: ${messageBytes?.length || 0}`);
 
     if (!messageBytes) {
       // Empty response is valid - user might have no feeds yet
+      console.log('[API] No message bytes - returning empty feeds');
       return NextResponse.json({ feeds: [] });
     }
 
@@ -36,7 +42,12 @@ export async function GET(request: NextRequest) {
 
     console.log(`[API] Found ${feeds.length} feed(s) for address: ${address}`);
     if (feeds.length > 0) {
-      console.log('[API] Feed types:', feeds.map(f => `${f.feedTitle}(type=${f.feedType})`).join(', '));
+      console.log('[API] Feeds:', JSON.stringify(feeds.map(f => ({ id: f.feedId, title: f.feedTitle, type: f.feedType, blockIndex: f.blockIndex })), null, 2));
+      // [E2E] Log encryptedFeedKey presence for debugging key decryption issues
+      feeds.forEach(f => {
+        const userParticipant = f.participants?.find(p => p.participantPublicAddress === address);
+        console.log(`[E2E Feed API] Feed ${f.feedId?.substring(0, 8)}... (${f.feedTitle}): encryptedFeedKey present = ${!!userParticipant?.encryptedFeedKey}, length = ${userParticipant?.encryptedFeedKey?.length || 0}`);
+      });
     }
 
     return NextResponse.json({

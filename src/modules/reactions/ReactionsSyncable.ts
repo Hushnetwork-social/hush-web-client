@@ -46,6 +46,7 @@ class ReactionsSyncableClass implements ISyncable {
     // Step 1: Initialize reactions system if not done yet
     if (!isReactionsInitialized() && !this.isInitializing && !this.initializationAttempted) {
       const mnemonic = appStore.credentials?.mnemonic;
+      console.log(`[E2E Reaction] ReactionsSyncable.syncTask: isReactionsInitialized=${isReactionsInitialized()}, hasMnemonic=${!!mnemonic}, mnemonicLength=${mnemonic?.length ?? 0}`);
       debugLog('[ReactionsSyncable] Checking mnemonic:', mnemonic ? `${mnemonic.length} words` : 'null');
       if (mnemonic && mnemonic.length > 0) {
         this.isInitializing = true;
@@ -53,18 +54,23 @@ class ReactionsSyncableClass implements ISyncable {
         debugLog('[ReactionsSyncable] Initializing reactions system...');
 
         try {
+          console.log('[E2E Reaction] ReactionsSyncable: Calling initializeReactionsSystem...');
           const success = await initializeReactionsSystem(mnemonic);
           if (success) {
+            console.log('[E2E Reaction] ReactionsSyncable: Reactions system initialized SUCCESSFULLY');
             debugLog('[ReactionsSyncable] Reactions system initialized');
           } else {
+            console.log('[E2E Reaction] ReactionsSyncable: Reactions system initialization FAILED');
             debugError('[ReactionsSyncable] Failed to initialize reactions system');
           }
         } catch (error) {
+          console.log('[E2E Reaction] ReactionsSyncable: Reactions system initialization ERROR:', error);
           debugError('[ReactionsSyncable] Error initializing reactions system:', error);
         } finally {
           this.isInitializing = false;
         }
       } else {
+        console.log('[E2E Reaction] ReactionsSyncable: No mnemonic available, skipping initialization');
         debugLog('[ReactionsSyncable] No mnemonic available, skipping initialization');
         return;
       }

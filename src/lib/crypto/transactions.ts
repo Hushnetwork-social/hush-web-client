@@ -16,6 +16,7 @@ export const PAYLOAD_GUIDS = {
   NEW_PERSONAL_FEED: '70c718a9-14d0-4b70-ad37-fd8bfe184386',
   NEW_CHAT_FEED: '033c61f5-c6e3-4e43-9eb0-ac9c615110e3',
   NEW_GROUP_FEED: 'a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d',
+  JOIN_GROUP_FEED: 'b2c3d4e5-f6a7-5b6c-9d0e-1f2a3b4c5d6e',
   NEW_FEED_MESSAGE: '3309d79b-92e9-4435-9b23-0de0b3d24264',
   NEW_REACTION: 'a7b3c2d1-e4f5-6789-abcd-ef0123456789',
 };
@@ -130,6 +131,13 @@ export interface NewGroupFeedPayload {
   Description: string;
   IsPublic: boolean;
   Participants: GroupFeedParticipant[];
+}
+
+// JoinGroupFeedPayload - matches server's JoinGroupFeedPayload record
+export interface JoinGroupFeedPayload {
+  FeedId: string;
+  JoiningUserPublicAddress: string;
+  InvitationSignature?: string;  // Required for private groups (future)
 }
 
 // =============================================================================
@@ -549,6 +557,43 @@ export async function createGroupFeedTransaction(
     signedTransaction: JSON.stringify(signedTx),
     feedId,
     feedAesKey,
+  };
+}
+
+/**
+ * Creates and signs a JoinGroupFeed transaction
+ * Allows a user to join a public group
+ *
+ * @param feedId - The group feed ID to join
+ * @param joiningUserPublicAddress - The joining user's public signing address
+ * @param signingPrivateKey - The joining user's private signing key
+ * @param invitationSignature - Optional invitation signature (for private groups - future)
+ * @returns Signed transaction JSON string
+ */
+export async function createJoinGroupFeedTransaction(
+  feedId: string,
+  joiningUserPublicAddress: string,
+  signingPrivateKey: Uint8Array,
+  invitationSignature?: string
+): Promise<{ signedTransaction: string }> {
+  // Create payload
+  const payload: JoinGroupFeedPayload = {
+    FeedId: feedId,
+    JoiningUserPublicAddress: joiningUserPublicAddress,
+    ...(invitationSignature && { InvitationSignature: invitationSignature }),
+  };
+
+  // Create unsigned transaction
+  const unsignedTx = createUnsignedTransaction(PAYLOAD_GUIDS.JOIN_GROUP_FEED, payload);
+
+  // Sign transaction - the joining user signs to prove they requested to join
+  const signedTx = await signByUser(unsignedTx, {
+    privateKey: signingPrivateKey,
+    publicSigningAddress: joiningUserPublicAddress,
+  });
+
+  return {
+    signedTransaction: JSON.stringify(signedTx),
   };
 }
 
