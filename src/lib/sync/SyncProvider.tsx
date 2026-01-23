@@ -271,6 +271,60 @@ export function SyncProvider({ children, config }: SyncProviderProps) {
   }, []);
 
   // =============================================================================
+  // E2E Testing Support - Manual Sync Trigger
+  // =============================================================================
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    // Expose sync trigger for E2E tests
+    // This allows tests to manually trigger sync instead of waiting for interval
+    (window as unknown as Record<string, unknown>).__e2e_triggerSync = async (): Promise<boolean> => {
+      console.log('[E2E] Manual sync triggered');
+
+      const alwaysSyncables = syncablesRef.current.filter((s) => !s.requiresAuth);
+      const authSyncables = syncablesRef.current.filter((s) => s.requiresAuth);
+
+      // Run always-running syncables
+      if (alwaysSyncables.length > 0) {
+        await runSyncTasks(alwaysSyncables, 'E2E-Manual');
+      }
+
+      // Run auth-dependent syncables if authenticated
+      if (isAuthenticated && authSyncables.length > 0) {
+        await runSyncTasks(authSyncables, 'E2E-Manual');
+      }
+
+      // Wait for React to process state updates and re-render
+      // This prevents race conditions where the test checks the DOM before
+      // React has finished rendering the new state
+      // Multiple wait cycles ensure all microtasks and renders complete
+      for (let i = 0; i < 5; i++) {
+        await new Promise<void>((resolve) => {
+          // requestAnimationFrame ensures we wait for the next paint
+          requestAnimationFrame(() => {
+            // setTimeout(0) pushes to the end of the macrotask queue
+            setTimeout(resolve, 0);
+          });
+        });
+      }
+
+      // Additional wait for Virtuoso (react-virtuoso) to complete scroll animation
+      // ChatView uses followOutput="smooth" which triggers animated scroll to new messages
+      // Virtuoso only renders items that are in/near the viewport, so we need to wait
+      // for the scroll animation to complete before the new message is visible
+      await new Promise<void>((resolve) => setTimeout(resolve, 150));
+
+      console.log('[E2E] Manual sync completed');
+      return true;
+    };
+
+    return () => {
+      delete (window as unknown as Record<string, unknown>).__e2e_triggerSync;
+    };
+  }, [isAuthenticated, runSyncTasks]);
+
+  // =============================================================================
   // Context Value
   // =============================================================================
 

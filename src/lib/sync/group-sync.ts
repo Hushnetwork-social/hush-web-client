@@ -32,21 +32,8 @@ const membersSyncCache = new Map<string, { lastSyncTime: number; memberCount: nu
  */
 const groupInfoSyncCache = new Map<string, { lastSyncTime: number }>();
 
-/**
- * Cooldown period for KeyGeneration syncs (in milliseconds).
- * If we've synced within this period and key count matches, skip the API call.
- */
-const KEY_GEN_SYNC_COOLDOWN_MS = 30_000; // 30 seconds
-
-/**
- * Cooldown period for group members syncs (in milliseconds).
- */
-const MEMBERS_SYNC_COOLDOWN_MS = 15_000; // 15 seconds
-
-/**
- * Cooldown period for group info syncs (in milliseconds).
- */
-const GROUP_INFO_SYNC_COOLDOWN_MS = 15_000; // 15 seconds
+// Note: Cooldowns removed - sync happens on every 3s cycle.
+// When a member joins, the block is confirmed and the next sync should detect it.
 
 /**
  * Invalidate the KeyGeneration sync cache for a specific feed.
@@ -187,24 +174,6 @@ export async function syncGroupMembers(
     const existingMembers = useFeedsStore.getState().getGroupMembers(feedId);
     const existingAddresses = new Set(existingMembers.map(m => m.publicAddress));
 
-    // Performance optimization: Check cooldown to avoid redundant API calls
-    const cacheEntry = membersSyncCache.get(feedId);
-    const now = Date.now();
-
-    if (
-      cacheEntry &&
-      existingMembers.length > 0 &&
-      now - cacheEntry.lastSyncTime < MEMBERS_SYNC_COOLDOWN_MS &&
-      cacheEntry.memberCount === existingMembers.length
-    ) {
-      debugLog('[GroupSync] Skipping members API call - recently synced:', {
-        feedId: feedId.substring(0, 8),
-        cachedMembers: existingMembers.length,
-        lastSyncMs: now - cacheEntry.lastSyncTime,
-      });
-      return { success: true, members: existingMembers, newMembers: [] };
-    }
-
     // Step 2: Fetch members from server (includes display names from server-side cache)
     const members = await groupService.getGroupMembers(feedId);
 
@@ -240,9 +209,6 @@ export async function syncGroupMembers(
 
     // Step 5: Store members in store
     useFeedsStore.getState().setGroupMembers(feedId, membersWithNames);
-
-    // Update cache entry with latest sync info
-    membersSyncCache.set(feedId, { lastSyncTime: Date.now(), memberCount: membersWithNames.length });
 
     // Step 6: Determine current user's role
     const currentUser = membersWithNames.find((m) => m.publicAddress === userAddress);
@@ -289,26 +255,6 @@ export async function syncKeyGenerations(
     const store = useFeedsStore.getState();
     const existingState = store.getGroupKeyState(feedId);
 
-    // Performance optimization: Check if we can skip the API call
-    // If we have keys cached AND we synced recently, return cached data
-    const cacheEntry = keyGenSyncCache.get(feedId);
-    const now = Date.now();
-
-    if (
-      cacheEntry &&
-      existingState &&
-      existingState.keyGenerations.length > 0 &&
-      now - cacheEntry.lastSyncTime < KEY_GEN_SYNC_COOLDOWN_MS &&
-      cacheEntry.keyCount === existingState.keyGenerations.length
-    ) {
-      debugLog('[GroupSync] Skipping API call - recently synced:', {
-        feedId: feedId.substring(0, 8),
-        cachedKeys: existingState.keyGenerations.length,
-        lastSyncMs: now - cacheEntry.lastSyncTime,
-      });
-      return { success: true, data: existingState };
-    }
-
     // Step 1: Fetch KeyGenerations from server
     // The server only returns KeyGenerations the user has access to
     const serverKeyGens = await groupService.getKeyGenerations(feedId, userAddress);
@@ -318,9 +264,6 @@ export async function syncKeyGenerations(
       return { success: true, data: undefined };
     }
 
-    // Update cache entry with latest sync info
-    keyGenSyncCache.set(feedId, { lastSyncTime: now, keyCount: serverKeyGens.length });
-
     // Step 2: Check which keys we already have decrypted
     const keysToDecrypt = serverKeyGens.filter(
       (serverKey) => !store.hasDecryptedKey(feedId, serverKey.KeyGeneration)
@@ -328,8 +271,39 @@ export async function syncKeyGenerations(
 
     const alreadyCachedCount = serverKeyGens.length - keysToDecrypt.length;
 
-    if (keysToDecrypt.length === 0) {
-      debugLog('[GroupSync] All keys already cached:', {
+    // Step 2b: Check for validity updates on existing keys
+    // Keys are immutable (AES key never changes), but validity can change
+    // when new members join (existing key gets a ValidToBlock set)
+    const existingKeysMap = new Map(
+      existingState?.keyGenerations.map((k) => [k.keyGeneration, k]) ?? []
+    );
+
+    const keysWithValidityUpdates: GroupKeyGeneration[] = [];
+    for (const serverKey of serverKeyGens) {
+      const existingKey = existingKeysMap.get(serverKey.KeyGeneration);
+      if (existingKey) {
+        // Check if validity changed
+        if (
+          existingKey.validFromBlock !== serverKey.ValidFromBlock ||
+          existingKey.validToBlock !== serverKey.ValidToBlock
+        ) {
+          keysWithValidityUpdates.push({
+            keyGeneration: serverKey.KeyGeneration,
+            aesKey: existingKey.aesKey, // Preserve existing AES key
+            validFromBlock: serverKey.ValidFromBlock,
+            validToBlock: serverKey.ValidToBlock,
+          });
+          debugLog('[GroupSync] Detected validity update for KeyGeneration:', {
+            keyGen: serverKey.KeyGeneration,
+            oldValidTo: existingKey.validToBlock,
+            newValidTo: serverKey.ValidToBlock,
+          });
+        }
+      }
+    }
+
+    if (keysToDecrypt.length === 0 && keysWithValidityUpdates.length === 0) {
+      debugLog('[GroupSync] All keys already cached, no validity changes:', {
         total: serverKeyGens.length,
         cached: alreadyCachedCount,
       });
@@ -339,6 +313,17 @@ export async function syncKeyGenerations(
       if (missingKeyGens.length > 0) {
         store.mergeKeyGenerations(feedId, [], missingKeyGens);
       }
+      return { success: true, data: store.getGroupKeyState(feedId) };
+    }
+
+    if (keysToDecrypt.length === 0 && keysWithValidityUpdates.length > 0) {
+      debugLog('[GroupSync] Only validity updates needed:', {
+        total: serverKeyGens.length,
+        validityUpdates: keysWithValidityUpdates.length,
+      });
+      const maxKeyGeneration = Math.max(...serverKeyGens.map((k) => k.KeyGeneration));
+      const missingKeyGens = detectMissingKeyGenerations(serverKeyGens, maxKeyGeneration);
+      store.mergeKeyGenerations(feedId, keysWithValidityUpdates, missingKeyGens);
       return { success: true, data: store.getGroupKeyState(feedId) };
     }
 
@@ -391,13 +376,16 @@ export async function syncKeyGenerations(
     // Step 4: Detect gaps (missing KeyGenerations)
     const missingKeyGens = detectMissingKeyGenerations(serverKeyGens, maxKeyGeneration);
 
-    // Step 5: Merge new keys with existing ones (preserves cached keys)
-    store.mergeKeyGenerations(feedId, newlyDecryptedKeyGens, missingKeyGens);
+    // Step 5: Merge new keys AND validity updates with existing ones
+    // Combine newly decrypted keys with keys that have validity updates
+    const allKeysToMerge = [...newlyDecryptedKeyGens, ...keysWithValidityUpdates];
+    store.mergeKeyGenerations(feedId, allKeysToMerge, missingKeyGens);
 
     const finalState = store.getGroupKeyState(feedId);
 
     debugLog('[GroupSync] KeyGenerations synced:', {
       newlyDecrypted: newlyDecryptedKeyGens.length,
+      validityUpdates: keysWithValidityUpdates.length,
       totalCached: finalState?.keyGenerations.length ?? 0,
       currentKeyGen: finalState?.currentKeyGeneration ?? 0,
       missingCount: missingKeyGens.length,
@@ -481,22 +469,6 @@ export async function syncGroupFeedInfo(
     const previousDescription = previousSettings?.description ?? currentFeed?.description;
     const previousIsPublic = previousSettings?.isPublic ?? currentFeed?.isPublic;
 
-    // Performance optimization: Check cooldown to avoid redundant API calls
-    const cacheEntry = groupInfoSyncCache.get(feedId);
-    const now = Date.now();
-
-    if (
-      cacheEntry &&
-      currentFeed &&
-      now - cacheEntry.lastSyncTime < GROUP_INFO_SYNC_COOLDOWN_MS
-    ) {
-      debugLog('[GroupSync] Skipping group info API call - recently synced:', {
-        feedId: feedId.substring(0, 8),
-        lastSyncMs: now - cacheEntry.lastSyncTime,
-      });
-      return { success: true };
-    }
-
     const groupInfo = await groupService.getGroupInfo(feedId);
 
     if (!groupInfo) {
@@ -526,9 +498,6 @@ export async function syncGroupFeedInfo(
       isPublic: groupInfo.IsPublic,
       inviteCode: groupInfo.InviteCode,
     });
-
-    // Update cache entry with latest sync time
-    groupInfoSyncCache.set(feedId, { lastSyncTime: Date.now() });
 
     debugLog('[GroupSync] Group info synced:', {
       title: groupInfo.Title,

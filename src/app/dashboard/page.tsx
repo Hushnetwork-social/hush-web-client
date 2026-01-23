@@ -7,6 +7,9 @@ import { MessageSquare, Loader2 } from "lucide-react";
 import { useAppStore } from "@/stores";
 import { useFeedsStore } from "@/modules/feeds";
 import { groupService } from "@/lib/grpc/services/group";
+import { joinPublicGroup } from "@/lib/crypto/group-transactions";
+import { hexToBytes } from "@/lib/crypto/keys";
+import { invalidateGroupCaches } from "@/lib/sync/group-sync";
 import { debugLog, debugError } from "@/lib/debug-logger";
 import { ensureCommitmentRegistered, isReactionsInitialized } from "@/modules/reactions/initializeReactions";
 
@@ -71,7 +74,7 @@ export default function DashboardPage() {
 
   // Handle pending invite code from authentication redirect
   const handlePendingInviteCode = useCallback(async () => {
-    if (!credentials?.signingPublicKey) return;
+    if (!credentials?.signingPublicKey || !credentials?.signingPrivateKey) return;
 
     // Prevent duplicate processing
     if (isProcessingInviteRef.current) {
@@ -96,16 +99,19 @@ export default function DashboardPage() {
         return;
       }
 
-      // Join the group
+      // Join the group via signed transaction
       debugLog("[DashboardPage] Joining group from pending invite:", groupInfo.name);
-      const result = await groupService.joinGroup(
+      const signingPrivateKeyBytes = hexToBytes(credentials.signingPrivateKey);
+      const result = await joinPublicGroup(
         groupInfo.feedId,
         credentials.signingPublicKey,
-        credentials.encryptionPublicKey  // Pass encrypt key to avoid identity lookup timing issue
+        signingPrivateKeyBytes
       );
 
       if (result.success) {
         debugLog("[DashboardPage] Successfully joined group from pending invite");
+        // Invalidate client-side caches so next sync fetches fresh data
+        invalidateGroupCaches(groupInfo.feedId);
         // Set pending group join to trigger full feed resync until feed appears
         useFeedsStore.getState().setPendingGroupJoin(groupInfo.feedId);
         // Register reaction commitment for the new group feed

@@ -365,24 +365,41 @@ export class FeedsSyncable implements ISyncable {
    * Decrypt feed AES keys using ECIES with user's private encryption key
    */
   private async decryptFeedKeys(feeds: Feed[]): Promise<void> {
+    console.log(`[E2E Feed Decrypt] decryptFeedKeys called with ${feeds.length} feed(s)`);
+
     const credentials = useAppStore.getState().credentials;
     if (!credentials?.encryptionPrivateKey) {
+      console.log('[E2E Feed Decrypt] Cannot decrypt - no encryption private key available');
       debugLog('[FeedsSyncable] Cannot decrypt feed keys - no encryption private key');
       return;
     }
 
+    console.log(`[E2E Feed Decrypt] Encryption private key available: ${credentials.encryptionPrivateKey.substring(0, 16)}...`);
+
     for (const feed of feeds) {
+      console.log(`[E2E Feed Decrypt] Feed ${feed.id?.substring(0, 8)}... (${feed.name}): encryptedFeedKey=${!!feed.encryptedFeedKey}, aesKey=${!!feed.aesKey}`);
+
       if (feed.encryptedFeedKey && !feed.aesKey) {
+        console.log(`[E2E Feed Decrypt] Attempting to decrypt feed key for: ${feed.name}`);
         try {
           // Pass hex string directly - eciesDecrypt expects a hex string
           const decryptedKey = await eciesDecrypt(feed.encryptedFeedKey, credentials.encryptionPrivateKey);
+          console.log(`[E2E Feed Decrypt] Decryption successful for ${feed.name}, key length: ${decryptedKey.length}`);
           useFeedsStore.getState().updateFeedAesKey(feed.id, decryptedKey);
+          console.log(`[E2E Feed Decrypt] Updated store with AES key for feed: ${feed.name}`);
           debugLog(`[FeedsSyncable] Decrypted AES key for feed: ${feed.name}`);
         } catch (error) {
+          console.error(`[E2E Feed Decrypt] FAILED to decrypt feed key for ${feed.name}:`, error);
           debugError(`[FeedsSyncable] Failed to decrypt feed key for ${feed.name}:`, error);
         }
+      } else if (!feed.encryptedFeedKey) {
+        console.log(`[E2E Feed Decrypt] Feed ${feed.name} has NO encryptedFeedKey - cannot decrypt`);
+      } else if (feed.aesKey) {
+        console.log(`[E2E Feed Decrypt] Feed ${feed.name} already has aesKey - skipping`);
       }
     }
+
+    console.log('[E2E Feed Decrypt] decryptFeedKeys completed');
   }
 
   /**
@@ -1037,13 +1054,25 @@ export class FeedsSyncable implements ISyncable {
     // Reactions don't update blockIndex, so we need to poll for them
     // We pass hasNewMessages to determine if we should process messages or just reactions
     debugLog(`[FeedsSyncable] syncActiveFeedMessages: feedId=${selectedFeedId.substring(0, 8)}..., hasNewMessages=${hasNewMessages}`);
-    await this.syncMessagesForFeed(address, activeFeed, hasNewMessages);
 
-    // For group feeds, also sync members and KeyGenerations periodically
-    // This ensures system messages for new members appear without page refresh
+    // CRITICAL: For group feeds, sync KeyGenerations BEFORE syncing messages
+    // This ensures we have the latest encryption keys to decrypt any new messages
+    // Without this, messages encrypted with new keys would fail decryption
     if (activeFeed.type === 'group') {
+      debugLog(`[FeedsSyncable] Syncing group data BEFORE messages for ${selectedFeedId.substring(0, 8)}...`);
+
+      // CRITICAL: ALWAYS invalidate group caches when syncing a group feed
+      // The 15-second cooldown in syncGroupMembers compares cached member count
+      // with local store count, which doesn't detect server-side changes.
+      // Without this, Alice wouldn't see that Bob joined until the cooldown expires.
+      const { invalidateGroupCaches } = await import('@/lib/sync/group-sync');
+      debugLog(`[FeedsSyncable] Invalidating group caches before sync for ${selectedFeedId.substring(0, 8)}...`);
+      invalidateGroupCaches(selectedFeedId);
+
       await this.syncGroupFeedData([activeFeed], address);
     }
+
+    await this.syncMessagesForFeed(address, activeFeed, hasNewMessages);
 
     // Clear the needsSync flag if it was set
     if (activeFeed.needsSync) {
@@ -1061,6 +1090,24 @@ export class FeedsSyncable implements ISyncable {
 
     // On new session, reset to fetch all messages from block 0
     if (this.shouldResetReactionTallyVersion) {
+      blockIndex = 0;
+    }
+
+    // CRITICAL FIX: When syncing a GROUP feed, ALWAYS query from block 0.
+    //
+    // Problem: The global lastMessageBlockIndex might be higher than when this
+    // specific group was last synced. This happens when:
+    // 1. Alice syncs other feeds, advancing lastMessageBlockIndex to 10
+    // 2. Bob joins and sends message at blocks 8 and 9
+    // 3. When Alice opens the group, the server-side delta query (LastUpdatedAtBlock >= 10)
+    //    doesn't return the group because 9 < 10
+    // 4. Without the group in the response, needsSync isn't set
+    // 5. Without needsSync, the message query uses blockIndex 10, missing Bob's message
+    //
+    // Solution: For group feeds, always query from block 0. The server uses
+    // per-feed caching so this is efficient.
+    if (feed.type === 'group' || feed.needsSync) {
+      debugLog(`[FeedsSyncable] Feed ${feed.id.substring(0, 8)}... (type=${feed.type}, needsSync=${feed.needsSync}) - resetting blockIndex from ${blockIndex} to 0`);
       blockIndex = 0;
     }
 

@@ -22,12 +22,18 @@ export function ReactionPicker({
   onClose,
 }: ReactionPickerProps) {
   const handleSelect = (index: number) => {
-    if (disabled) return;
+    console.log(`[E2E Reaction] ReactionPicker.handleSelect called: index=${index}, disabled=${disabled}, selectedEmoji=${selectedEmoji}`);
+    if (disabled) {
+      console.log('[E2E Reaction] ReactionPicker: disabled, returning early');
+      return;
+    }
 
     // If clicking the already selected emoji, remove the reaction
     if (selectedEmoji === index) {
+      console.log('[E2E Reaction] ReactionPicker: Same emoji clicked, sending removal (6)');
       onSelect(6); // 6 = removal
     } else {
+      console.log(`[E2E Reaction] ReactionPicker: Calling onSelect(${index})`);
       onSelect(index);
     }
 
@@ -39,6 +45,7 @@ export function ReactionPicker({
       className="flex gap-1 p-1.5 bg-hush-bg-dark rounded-lg shadow-xl border border-hush-border"
       role="listbox"
       aria-label="Select reaction"
+      data-testid="reaction-picker"
     >
       {EMOJIS.map((emoji, index) => (
         <button
@@ -47,6 +54,7 @@ export function ReactionPicker({
           disabled={disabled}
           role="option"
           aria-selected={selectedEmoji === index}
+          data-testid={`emoji-${emoji}`}
           className={`
             p-2 rounded-md transition-all duration-150
             text-xl leading-none

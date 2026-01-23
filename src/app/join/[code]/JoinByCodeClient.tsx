@@ -4,6 +4,9 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Loader2, Users, AlertCircle, CheckCircle, LogIn } from "lucide-react";
 import { groupService } from "@/lib/grpc/services/group";
+import { joinPublicGroup } from "@/lib/crypto/group-transactions";
+import { hexToBytes } from "@/lib/crypto/keys";
+import { invalidateGroupCaches } from "@/lib/sync/group-sync";
 import { useAppStore } from "@/stores";
 import { useFeedsStore } from "@/modules/feeds";
 import type { PublicGroupInfo } from "@/types";
@@ -74,24 +77,30 @@ export function JoinByCodeClient({ initialGroupInfo }: JoinByCodeClientProps) {
 
   // Auto-join the group
   const joinGroup = useCallback(async () => {
-    if (!groupInfo || !credentials?.signingPublicKey) return;
+    if (!groupInfo || !credentials?.signingPublicKey || !credentials?.signingPrivateKey) return;
 
     debugLog("[JoinByCode] Joining group:", groupInfo.feedId);
     setStatus("joining");
     setError(null);
 
     try {
-      const result = await groupService.joinGroup(
+      // Convert hex private key to bytes for signing
+      const signingPrivateKeyBytes = hexToBytes(credentials.signingPrivateKey);
+
+      // Create and submit JoinGroupFeed transaction via SubmitSignedTransaction
+      const result = await joinPublicGroup(
         groupInfo.feedId,
         credentials.signingPublicKey,
-        credentials.encryptionPublicKey  // Pass encrypt key to avoid identity lookup timing issue
+        signingPrivateKeyBytes
       );
 
       if (result.success) {
-        debugLog("[JoinByCode] Successfully joined group");
+        debugLog("[JoinByCode] Successfully submitted join transaction");
         setStatus("joined");
         // Clear any pending invite code
         localStorage.removeItem(PENDING_INVITE_CODE_KEY);
+        // Invalidate client-side caches so next sync fetches fresh data
+        invalidateGroupCaches(groupInfo.feedId);
         // Set pending group join to trigger full feed resync until feed appears
         useFeedsStore.getState().setPendingGroupJoin(groupInfo.feedId);
         // Register reaction commitment for the new group feed
@@ -177,11 +186,17 @@ export function JoinByCodeClient({ initialGroupInfo }: JoinByCodeClientProps) {
             <div className="w-16 h-16 rounded-full bg-hush-purple/20 flex items-center justify-center mb-4">
               <Users className="w-8 h-8 text-hush-purple" />
             </div>
-            <h2 className="text-xl font-bold text-hush-text-primary mb-1">
+            <h2
+              data-testid="group-info-name"
+              className="text-xl font-bold text-hush-text-primary mb-1"
+            >
               {groupInfo.name}
             </h2>
             {groupInfo.description && (
-              <p className="text-sm text-hush-text-accent text-center mb-4 max-w-xs">
+              <p
+                data-testid="group-info-description"
+                className="text-sm text-hush-text-accent text-center mb-4 max-w-xs"
+              >
                 {groupInfo.description}
               </p>
             )}
@@ -190,6 +205,7 @@ export function JoinByCodeClient({ initialGroupInfo }: JoinByCodeClientProps) {
             </p>
             <button
               onClick={handleJoin}
+              data-testid="join-group-button"
               className="w-full px-6 py-3 bg-hush-purple text-white font-medium rounded-xl hover:bg-hush-purple/90 transition-colors"
             >
               Join Group
@@ -229,11 +245,17 @@ export function JoinByCodeClient({ initialGroupInfo }: JoinByCodeClientProps) {
             <div className="w-16 h-16 rounded-full bg-hush-purple/20 flex items-center justify-center mb-4">
               <Users className="w-8 h-8 text-hush-purple" />
             </div>
-            <h2 className="text-xl font-bold text-hush-text-primary mb-1">
+            <h2
+              data-testid="group-info-name"
+              className="text-xl font-bold text-hush-text-primary mb-1"
+            >
               {groupInfo.name}
             </h2>
             {groupInfo.description && (
-              <p className="text-sm text-hush-text-accent text-center mb-4 max-w-xs">
+              <p
+                data-testid="group-info-description"
+                className="text-sm text-hush-text-accent text-center mb-4 max-w-xs"
+              >
                 {groupInfo.description}
               </p>
             )}
@@ -251,6 +273,7 @@ export function JoinByCodeClient({ initialGroupInfo }: JoinByCodeClientProps) {
             </div>
             <button
               onClick={handleLogin}
+              data-testid="sign-in-to-join-button"
               className="w-full px-6 py-3 bg-hush-purple text-white font-medium rounded-xl hover:bg-hush-purple/90 transition-colors"
             >
               Sign In to Join

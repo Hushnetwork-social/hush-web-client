@@ -285,6 +285,7 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-panel-title"
+        data-feed-id={feedId}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-hush-bg-element">
@@ -443,6 +444,7 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
                       type="text"
                       value={inviteUrl}
                       readOnly
+                      data-testid="invite-link"
                       className="flex-1 px-3 py-2 bg-hush-bg-element border border-hush-bg-hover rounded-lg text-hush-text-primary text-sm font-mono truncate"
                     />
                     <button
@@ -464,7 +466,10 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
                 <div>
                   <label className="block text-xs text-hush-text-accent mb-1">Invite Code (for manual entry)</label>
                   <div className="flex items-center gap-2">
-                    <div className="flex-1 px-3 py-2 bg-hush-bg-element border border-hush-bg-hover rounded-lg text-hush-text-primary text-lg font-mono tracking-widest text-center">
+                    <div
+                      className="flex-1 px-3 py-2 bg-hush-bg-element border border-hush-bg-hover rounded-lg text-hush-text-primary text-lg font-mono tracking-widest text-center"
+                      data-testid="invite-code"
+                    >
                       {inviteCode}
                     </div>
                     <button

@@ -49,6 +49,12 @@ vi.mock('@/lib/grpc/services/group', () => ({
   },
 }));
 
+vi.mock('@/lib/grpc/services/blockchain', () => ({
+  blockchainService: {
+    submitSignedTransaction: vi.fn(),
+  },
+}));
+
 vi.mock('@/lib/grpc/services/identity', () => ({
   identityService: {
     getIdentity: vi.fn(),
@@ -58,6 +64,7 @@ vi.mock('@/lib/grpc/services/identity', () => ({
 // Mock the crypto functions
 vi.mock('./transactions', () => ({
   createGroupFeedTransaction: vi.fn(),
+  createJoinGroupFeedTransaction: vi.fn(),
 }));
 
 vi.mock('./group-crypto', () => ({
@@ -72,8 +79,9 @@ vi.mock('@/lib/debug-logger', () => ({
 
 // Import mocked modules
 import { groupService } from '@/lib/grpc/services/group';
+import { blockchainService } from '@/lib/grpc/services/blockchain';
 import { identityService } from '@/lib/grpc/services/identity';
-import { createGroupFeedTransaction } from './transactions';
+import { createGroupFeedTransaction, createJoinGroupFeedTransaction } from './transactions';
 import { decryptKeyGeneration } from './group-crypto';
 
 describe('Group Transaction Functions', () => {
@@ -96,7 +104,7 @@ describe('Group Transaction Functions', () => {
     ];
     const mockSigningKey = new Uint8Array(32);
 
-    it('should create a group successfully', async () => {
+    it('should create a group successfully via signed transaction', async () => {
       const mockFeedId = 'test-feed-id';
       const mockAesKey = 'mock-aes-key-base64';
       const mockSignedTx = JSON.stringify({
@@ -113,9 +121,9 @@ describe('Group Transaction Functions', () => {
         feedAesKey: mockAesKey,
       });
 
-      vi.mocked(groupService.createGroup).mockResolvedValue({
-        success: true,
-        data: { feedId: mockFeedId, message: 'Created' },
+      vi.mocked(blockchainService.submitSignedTransaction).mockResolvedValue({
+        Successfull: true,
+        Message: 'Transaction accepted',
       });
 
       const result = await createGroup(
@@ -138,18 +146,19 @@ describe('Group Transaction Functions', () => {
         mockParticipants,
         mockSigningKey
       );
+      expect(blockchainService.submitSignedTransaction).toHaveBeenCalledWith(mockSignedTx);
     });
 
-    it('should return error when gRPC call fails', async () => {
+    it('should return error when transaction is rejected', async () => {
       vi.mocked(createGroupFeedTransaction).mockResolvedValue({
         signedTransaction: JSON.stringify({ Payload: { Participants: [] } }),
         feedId: 'test-id',
         feedAesKey: 'test-key',
       });
 
-      vi.mocked(groupService.createGroup).mockResolvedValue({
-        success: false,
-        error: 'Server error',
+      vi.mocked(blockchainService.submitSignedTransaction).mockResolvedValue({
+        Successfull: false,
+        Message: 'Server error',
       });
 
       const result = await createGroup(
@@ -183,29 +192,59 @@ describe('Group Transaction Functions', () => {
   });
 
   describe('joinPublicGroup', () => {
-    it('should join group successfully', async () => {
-      vi.mocked(groupService.joinGroup).mockResolvedValue({
-        success: true,
-        data: { feedId: 'feed-123', message: 'Joined' },
+    const mockSigningKey = new Uint8Array(32);
+
+    it('should join group successfully via signed transaction', async () => {
+      const mockSignedTx = '{"Payload":{"FeedId":"feed-123"}}';
+
+      vi.mocked(createJoinGroupFeedTransaction).mockResolvedValue({
+        signedTransaction: mockSignedTx,
       });
 
-      const result = await joinPublicGroup('feed-123', 'user-address', 'encrypt-key');
+      vi.mocked(blockchainService.submitSignedTransaction).mockResolvedValue({
+        Successfull: true,
+        Message: 'Transaction accepted',
+      });
+
+      const result = await joinPublicGroup('feed-123', 'user-address', mockSigningKey);
 
       expect(result.success).toBe(true);
       expect(result.data?.feedId).toBe('feed-123');
-      expect(groupService.joinGroup).toHaveBeenCalledWith('feed-123', 'user-address', 'encrypt-key');
+      expect(createJoinGroupFeedTransaction).toHaveBeenCalledWith(
+        'feed-123',
+        'user-address',
+        mockSigningKey
+      );
+      expect(blockchainService.submitSignedTransaction).toHaveBeenCalledWith(mockSignedTx);
     });
 
-    it('should return error when join fails', async () => {
-      vi.mocked(groupService.joinGroup).mockResolvedValue({
-        success: false,
-        error: 'Group not found',
+    it('should return error when transaction is rejected', async () => {
+      const mockSignedTx = '{"Payload":{"FeedId":"invalid-feed"}}';
+
+      vi.mocked(createJoinGroupFeedTransaction).mockResolvedValue({
+        signedTransaction: mockSignedTx,
       });
 
-      const result = await joinPublicGroup('invalid-feed', 'user-address');
+      vi.mocked(blockchainService.submitSignedTransaction).mockResolvedValue({
+        Successfull: false,
+        Message: 'Group not found',
+      });
+
+      const result = await joinPublicGroup('invalid-feed', 'user-address', mockSigningKey);
 
       expect(result.success).toBe(false);
       expect(result.error).toBe('Group not found');
+    });
+
+    it('should return error when transaction creation fails', async () => {
+      vi.mocked(createJoinGroupFeedTransaction).mockRejectedValue(
+        new Error('Failed to sign transaction')
+      );
+
+      const result = await joinPublicGroup('feed-123', 'user-address', mockSigningKey);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Failed to sign transaction');
     });
   });
 
@@ -505,9 +544,15 @@ describe('Group Transaction Functions', () => {
 
   describe('Error handling', () => {
     it('should handle network errors gracefully', async () => {
-      vi.mocked(groupService.joinGroup).mockRejectedValue(new Error('Network error'));
+      const mockSigningKey = new Uint8Array(32);
 
-      const result = await joinPublicGroup('feed-123', 'user-address');
+      vi.mocked(createJoinGroupFeedTransaction).mockResolvedValue({
+        signedTransaction: '{}',
+      });
+
+      vi.mocked(blockchainService.submitSignedTransaction).mockRejectedValue(new Error('Network error'));
+
+      const result = await joinPublicGroup('feed-123', 'user-address', mockSigningKey);
 
       expect(result.success).toBe(false);
       expect(result.error).toBe('Network error');

@@ -70,6 +70,7 @@ export const GroupCard = memo(function GroupCard({
         ) : (
           <button
             onClick={onJoin}
+            data-testid="join-group-button"
             disabled={isJoining || !!cooldownError}
             className="flex items-center gap-1.5 px-4 py-2 bg-hush-purple text-white rounded-lg text-sm font-medium hover:bg-hush-purple/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             aria-label={`Join ${group.name}`}

@@ -92,6 +92,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
       debugLog(`[ChatView] effectiveAesKey calculated: feedId=${feed.id.substring(0, 8)}..., currentKeyGen=${keyState.currentKeyGeneration}, aesKey=${currentKey?.aesKey?.substring(0, 16) ?? 'NOT FOUND'}...`);
       return currentKey?.aesKey;
     }
+    console.log(`[E2E Reaction] ChatView.effectiveAesKey: feedId=${feed.id.substring(0, 8)}..., type=${feed.type}, feed.aesKey=${feed.aesKey?.substring(0, 16) ?? 'NOT SET'}...`);
     return feed.aesKey;
   }, [feed.type, feed.aesKey, keyState, feed.id]);
 
@@ -878,7 +879,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   }, [feed.id, onSendMessage, replyingTo?.id]);
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+    <div className="flex-1 flex flex-col min-h-0 overflow-hidden" data-feed-id={feed.id}>
       {/* Chat Header - compact mode when virtual keyboard visible on Android */}
       <div className={`flex-shrink-0 border-b border-hush-bg-hover bg-hush-bg-secondary transition-all duration-200 ease-in-out ${
         isKeyboardVisible ? 'px-2 py-1' : 'px-4 py-3'

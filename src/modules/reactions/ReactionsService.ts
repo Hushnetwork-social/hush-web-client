@@ -185,17 +185,28 @@ class ReactionsServiceClass {
     emojiIndex: number,
     feedPublicKey: Point
   ): Promise<string> {
+    console.log(`[E2E Reaction] ReactionsService.submitReactionDevMode ENTRY`);
+    console.log(`[E2E Reaction]   feedId: ${feedId.substring(0, 8)}...`);
+    console.log(`[E2E Reaction]   messageId: ${messageId.substring(0, 8)}...`);
+    console.log(`[E2E Reaction]   emojiIndex: ${emojiIndex}`);
+    console.log(`[E2E Reaction]   feedPublicKey: x=${feedPublicKey.x.toString().substring(0, 20)}...`);
+
     const store = useReactionsStore.getState();
     const credentials = useAppStore.getState().credentials;
 
     // Get user secret
     const userSecret = store.getUserSecret();
+    console.log(`[E2E Reaction]   userSecret available: ${!!userSecret}`);
     if (!userSecret) {
+      console.log(`[E2E Reaction] ERROR: User secret not set`);
       throw new Error('User secret not set. Please log in.');
     }
 
     // Check signing credentials
+    console.log(`[E2E Reaction]   signingPrivateKey available: ${!!credentials?.signingPrivateKey}`);
+    console.log(`[E2E Reaction]   signingPublicKey available: ${!!credentials?.signingPublicKey}`);
     if (!credentials?.signingPrivateKey || !credentials?.signingPublicKey) {
+      console.log(`[E2E Reaction] ERROR: Signing credentials not available`);
       throw new Error('Signing credentials not available. Please log in.');
     }
 
@@ -237,9 +248,13 @@ class ReactionsServiceClass {
       );
 
       // 7. Submit to blockchain
+      console.log(`[E2E Reaction] Submitting transaction to blockchain...`);
+      console.log(`[E2E Reaction]   transactionId: ${transactionId}`);
       const result = await submitTransaction(signedTransaction);
 
+      console.log(`[E2E Reaction] submitTransaction result: successful=${result.successful}, message=${result.message}`);
       if (!result.successful) {
+        console.log(`[E2E Reaction] ERROR: Transaction submission failed - ${result.message}`);
         throw new Error(result.message || 'Failed to submit reaction transaction');
       }
 

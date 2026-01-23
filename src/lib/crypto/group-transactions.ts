@@ -14,7 +14,8 @@
 
 import { groupService } from '@/lib/grpc/services/group';
 import { identityService } from '@/lib/grpc/services/identity';
-import { createGroupFeedTransaction, type GroupParticipantInput } from './transactions';
+import { blockchainService } from '@/lib/grpc/services/blockchain';
+import { createGroupFeedTransaction, createJoinGroupFeedTransaction, type GroupParticipantInput } from './transactions';
 import { decryptKeyGeneration } from './group-crypto';
 import type { GroupOperationResult, GroupCreationData } from '@/types';
 import type { GroupFeedParticipantProto } from '@/lib/grpc/types';
@@ -40,8 +41,10 @@ export interface GroupTransactionResult extends GroupOperationResult {
  * 1. Generate AES key for the group
  * 2. ECIES encrypt the key for each participant
  * 3. Create and sign the transaction
- * 4. Submit to blockchain via gRPC
- * 5. Return feedId and feedAesKey for local storage
+ * 4. Submit via SubmitSignedTransaction gRPC
+ * 5. Transaction goes to mempool, then to blockchain
+ * 6. NewGroupFeedTransactionHandler processes it during indexing
+ * 7. Return feedId and feedAesKey for local storage
  *
  * @param data - Group creation data (name, description, isPublic, memberAddresses)
  * @param creatorSigningAddress - Creator's public signing address
@@ -71,19 +74,20 @@ export async function createGroup(
       signingPrivateKey
     );
 
-    // Parse the signed transaction to extract participants for gRPC
-    const txData = JSON.parse(signedTransaction);
-    const participants: GroupFeedParticipantProto[] = txData.Payload.Participants;
+    debugLog('[GroupTransactions] createGroup: transaction created, submitting...');
 
-    // Step 4: Submit to blockchain
-    const result = await groupService.createGroup(data, feedId, participants);
+    // Step 4: Submit via SubmitSignedTransaction
+    const result = await blockchainService.submitSignedTransaction(signedTransaction);
 
-    if (!result.success) {
+    if (!result.Successfull) {
+      debugError('[GroupTransactions] createGroup: transaction rejected:', result.Message);
       return {
         success: false,
-        error: result.error || 'Failed to create group',
+        error: result.Message || 'Transaction rejected by server',
       };
     }
+
+    debugLog('[GroupTransactions] createGroup: transaction submitted successfully');
 
     // Step 5: Return success with crypto data
     return {
@@ -91,7 +95,7 @@ export async function createGroup(
       feedId,
       feedAesKey,
       signedTransaction,
-      data: { feedId, message: result.data?.message },
+      data: { feedId, message: 'Group creation transaction submitted - will be processed in next block' },
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to create group';
@@ -107,38 +111,55 @@ export async function createGroup(
  * Join a public group feed
  *
  * Flow:
- * 1. Submit join request via gRPC
- * 2. Server triggers key rotation and returns success
- * 3. The new KeyGeneration will be received during next sync
+ * 1. Create and sign a JoinGroupFeed transaction
+ * 2. Submit via SubmitSignedTransaction gRPC
+ * 3. Transaction goes to mempool, then to blockchain
+ * 4. JoinGroupFeedTransactionHandler processes it during indexing
+ * 5. Server triggers key rotation
+ * 6. The new KeyGeneration will be received during next sync
  *
  * Note: The encrypted key is not immediately available.
  * The FeedsSyncable will pick up the new feed and key during sync.
  *
  * @param feedId - Group feed ID to join
  * @param userAddress - User's public signing address
+ * @param signingPrivateKey - User's private signing key for transaction signing
  * @returns GroupOperationResult
  */
 export async function joinPublicGroup(
   feedId: string,
   userAddress: string,
-  userEncryptKey?: string
+  signingPrivateKey: Uint8Array
 ): Promise<GroupOperationResult> {
-  debugLog('[GroupTransactions] joinPublicGroup:', { feedId, userAddress, hasEncryptKey: !!userEncryptKey });
+  debugLog('[GroupTransactions] joinPublicGroup:', { feedId, userAddress });
 
   try {
-    const result = await groupService.joinGroup(feedId, userAddress, userEncryptKey);
+    // Step 1: Create and sign the JoinGroupFeed transaction
+    const { signedTransaction } = await createJoinGroupFeedTransaction(
+      feedId,
+      userAddress,
+      signingPrivateKey
+    );
 
-    if (!result.success) {
+    debugLog('[GroupTransactions] joinPublicGroup: transaction created, submitting...');
+
+    // Step 2: Submit via SubmitSignedTransaction
+    const result = await blockchainService.submitSignedTransaction(signedTransaction);
+
+    if (!result.Successfull) {
+      debugError('[GroupTransactions] joinPublicGroup: transaction rejected:', result.Message);
       return {
         success: false,
-        error: result.error || 'Failed to join group',
+        error: result.Message || 'Transaction rejected by server',
       };
     }
 
-    // Key will be received during sync - return success
+    debugLog('[GroupTransactions] joinPublicGroup: transaction submitted successfully');
+
+    // Key will be received during sync after block is indexed
     return {
       success: true,
-      data: { feedId, message: result.data?.message || 'Join request submitted' },
+      data: { feedId, message: 'Join transaction submitted - will be processed in next block' },
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to join group';
