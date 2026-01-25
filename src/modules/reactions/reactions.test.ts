@@ -275,3 +275,152 @@ describe('Feeds Sync Metadata with Reactions', () => {
     expect(true).toBe(true);
   });
 });
+
+/**
+ * FEAT-053: removeReactionsForMessages Tests
+ *
+ * Tests for bulk removal of reactions when messages are trimmed.
+ */
+describe('FEAT-053: removeReactionsForMessages', () => {
+  beforeEach(() => {
+    useReactionsStore.getState().reset();
+  });
+
+  describe('Edge Cases', () => {
+    it('should handle empty array without error', () => {
+      // Set up some existing reactions
+      useReactionsStore.getState().setTallies({
+        'msg-1': { '👍': 5, '❤️': 0, '😂': 0, '😮': 0, '😢': 0, '😡': 0 },
+      });
+
+      // Call with empty array
+      useReactionsStore.getState().removeReactionsForMessages([]);
+
+      // Reactions should be unchanged
+      expect(useReactionsStore.getState().reactions['msg-1']).toBeDefined();
+      expect(useReactionsStore.getState().reactions['msg-1'].counts['👍']).toBe(5);
+    });
+
+    it('should handle array with non-existent message IDs without error', () => {
+      // Set up some existing reactions
+      useReactionsStore.getState().setTallies({
+        'msg-1': { '👍': 5, '❤️': 0, '😂': 0, '😮': 0, '😢': 0, '😡': 0 },
+      });
+
+      // Call with non-existent IDs
+      useReactionsStore.getState().removeReactionsForMessages(['non-existent-1', 'non-existent-2']);
+
+      // Existing reactions should be unchanged
+      expect(useReactionsStore.getState().reactions['msg-1']).toBeDefined();
+    });
+
+    it('should handle mixed existing and non-existing IDs', () => {
+      // Set up reactions for msg-1 and msg-2
+      useReactionsStore.getState().setTallies({
+        'msg-1': { '👍': 5, '❤️': 0, '😂': 0, '😮': 0, '😢': 0, '😡': 0 },
+        'msg-2': { '👍': 3, '❤️': 2, '😂': 0, '😮': 0, '😢': 0, '😡': 0 },
+      });
+
+      // Remove msg-1 and a non-existent message
+      useReactionsStore.getState().removeReactionsForMessages(['msg-1', 'non-existent']);
+
+      // msg-1 should be removed
+      expect(useReactionsStore.getState().reactions['msg-1']).toBeUndefined();
+      // msg-2 should be preserved
+      expect(useReactionsStore.getState().reactions['msg-2']).toBeDefined();
+    });
+  });
+
+  describe('Bulk Removal', () => {
+    it('should remove reactions for multiple messages at once', () => {
+      // Set up reactions for multiple messages
+      useReactionsStore.getState().setTallies({
+        'msg-1': { '👍': 1, '❤️': 0, '😂': 0, '😮': 0, '😢': 0, '😡': 0 },
+        'msg-2': { '👍': 2, '❤️': 0, '😂': 0, '😮': 0, '😢': 0, '😡': 0 },
+        'msg-3': { '👍': 3, '❤️': 0, '😂': 0, '😮': 0, '😢': 0, '😡': 0 },
+        'msg-4': { '👍': 4, '❤️': 0, '😂': 0, '😮': 0, '😢': 0, '😡': 0 },
+      });
+
+      // Remove msg-1 and msg-3
+      useReactionsStore.getState().removeReactionsForMessages(['msg-1', 'msg-3']);
+
+      // msg-1 and msg-3 should be removed
+      expect(useReactionsStore.getState().reactions['msg-1']).toBeUndefined();
+      expect(useReactionsStore.getState().reactions['msg-3']).toBeUndefined();
+
+      // msg-2 and msg-4 should be preserved
+      expect(useReactionsStore.getState().reactions['msg-2']).toBeDefined();
+      expect(useReactionsStore.getState().reactions['msg-4']).toBeDefined();
+    });
+
+    it('should remove from reactions, pendingReactions, and pendingTallies', () => {
+      // Set up reactions
+      useReactionsStore.getState().setTallies({
+        'msg-1': { '👍': 5, '❤️': 0, '😂': 0, '😮': 0, '😢': 0, '😡': 0 },
+      });
+
+      // Set up pending reaction
+      useReactionsStore.getState().setPendingReaction('msg-1', 2);
+
+      // Set up pending tally
+      useReactionsStore.getState().setTallyFromServer('msg-1', {
+        tallyC1: [{ x: 'a', y: 'b' }],
+        tallyC2: [{ x: 'c', y: 'd' }],
+        tallyVersion: 999,
+        reactionCount: 10,
+        feedId: 'feed-1',
+      });
+
+      // Verify all are set
+      expect(useReactionsStore.getState().reactions['msg-1']).toBeDefined();
+      expect(useReactionsStore.getState().pendingReactions['msg-1']).toBeDefined();
+      expect(useReactionsStore.getState().pendingTallies['msg-1']).toBeDefined();
+
+      // Remove
+      useReactionsStore.getState().removeReactionsForMessages(['msg-1']);
+
+      // All should be removed
+      expect(useReactionsStore.getState().reactions['msg-1']).toBeUndefined();
+      expect(useReactionsStore.getState().pendingReactions['msg-1']).toBeUndefined();
+      expect(useReactionsStore.getState().pendingTallies['msg-1']).toBeUndefined();
+    });
+  });
+
+  describe('Data Integrity', () => {
+    it('should not affect other message reactions when removing specific IDs', () => {
+      // Set up reactions with different counts
+      useReactionsStore.getState().setTallies({
+        'keep-1': { '👍': 10, '❤️': 5, '😂': 3, '😮': 0, '😢': 0, '😡': 0 },
+        'remove-1': { '👍': 1, '❤️': 0, '😂': 0, '😮': 0, '😢': 0, '😡': 0 },
+        'keep-2': { '👍': 20, '❤️': 15, '😂': 0, '😮': 1, '😢': 0, '😡': 0 },
+      });
+      useReactionsStore.getState().setMyReaction('keep-1', 0);
+
+      // Remove only remove-1
+      useReactionsStore.getState().removeReactionsForMessages(['remove-1']);
+
+      // Check keep-1 is fully preserved
+      const keep1 = useReactionsStore.getState().reactions['keep-1'];
+      expect(keep1.counts['👍']).toBe(10);
+      expect(keep1.counts['❤️']).toBe(5);
+      expect(keep1.counts['😂']).toBe(3);
+      expect(keep1.myReaction).toBe(0);
+
+      // Check keep-2 is fully preserved
+      const keep2 = useReactionsStore.getState().reactions['keep-2'];
+      expect(keep2.counts['👍']).toBe(20);
+      expect(keep2.counts['😮']).toBe(1);
+    });
+
+    it('should handle removing all reactions', () => {
+      useReactionsStore.getState().setTallies({
+        'msg-1': { '👍': 1, '❤️': 0, '😂': 0, '😮': 0, '😢': 0, '😡': 0 },
+        'msg-2': { '👍': 2, '❤️': 0, '😂': 0, '😮': 0, '😢': 0, '😡': 0 },
+      });
+
+      useReactionsStore.getState().removeReactionsForMessages(['msg-1', 'msg-2']);
+
+      expect(Object.keys(useReactionsStore.getState().reactions)).toHaveLength(0);
+    });
+  });
+});
