@@ -320,6 +320,72 @@ function sortFeeds(feeds: Feed[]): Feed[] {
   });
 }
 
+/**
+ * Custom storage adapter for Zustand persist that handles QuotaExceededError (FEAT-053)
+ * When localStorage quota is exceeded, it triggers LRU eviction of oldest read messages.
+ */
+const createQuotaHandlingStorage = (): {
+  getItem: (name: string) => { state: unknown } | null;
+  setItem: (name: string, value: { state: unknown }) => void;
+  removeItem: (name: string) => void;
+} => {
+  return {
+    getItem: (name: string) => {
+      if (typeof window === 'undefined') return null;
+      const value = localStorage.getItem(name);
+      if (!value) return null;
+      try {
+        return JSON.parse(value);
+      } catch {
+        return null;
+      }
+    },
+    setItem: (name: string, value: { state: unknown }) => {
+      if (typeof window === 'undefined') return;
+
+      const trySetItem = (retryCount: number): void => {
+        try {
+          localStorage.setItem(name, JSON.stringify(value));
+        } catch (error) {
+          // Check if it's a QuotaExceededError
+          if (
+            error instanceof DOMException &&
+            (error.name === 'QuotaExceededError' || error.code === 22)
+          ) {
+            if (retryCount >= 5) {
+              console.warn('[FeedsStore] Storage quota exceeded, max retries reached');
+              return;
+            }
+
+            debugLog(`[FeedsStore] Storage quota exceeded, attempting LRU eviction (retry ${retryCount + 1})`);
+
+            // Trigger LRU eviction - need to call it on the store instance
+            // Since we're in the storage adapter, we access the store directly
+            const evictedIds = useFeedsStore.getState().handleStorageQuotaExceeded();
+
+            if (evictedIds.length === 0) {
+              console.warn('[FeedsStore] Storage quota exceeded, no read messages to evict');
+              return;
+            }
+
+            // Retry after eviction
+            trySetItem(retryCount + 1);
+          } else {
+            // Re-throw non-quota errors
+            throw error;
+          }
+        }
+      };
+
+      trySetItem(0);
+    },
+    removeItem: (name: string) => {
+      if (typeof window === 'undefined') return;
+      localStorage.removeItem(name);
+    },
+  };
+};
+
 export const useFeedsStore = create<FeedsStore>()(
   persist(
     (set, get) => ({
@@ -1183,6 +1249,7 @@ export const useFeedsStore = create<FeedsStore>()(
     }),
     {
       name: 'hush-feeds-storage',
+      storage: createQuotaHandlingStorage(),
       partialize: (state) => ({
         // Persist feeds, messages, sync metadata, group data, and cache metadata
         feeds: state.feeds,
