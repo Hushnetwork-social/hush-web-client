@@ -9,7 +9,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { Feed, FeedMessage, GroupFeedMember, GroupMemberRole, GroupKeyGeneration, GroupKeyState, SettingsChangeRecord } from '@/types';
+import type { Feed, FeedMessage, FeedCacheMetadata, GroupFeedMember, GroupMemberRole, GroupKeyGeneration, GroupKeyState, SettingsChangeRecord } from '@/types';
 import { debugLog } from '@/lib/debug-logger';
 
 // Feed type mapping from server (FeedType enum)
@@ -67,6 +67,11 @@ interface FeedsState {
 
   /** KeyGeneration state indexed by group feed ID */
   groupKeyStates: Record<string, GroupKeyState>;
+
+  // ============= Message Cache Metadata (FEAT-053) =============
+
+  /** Per-feed cache metadata for message virtualization */
+  feedCacheMetadata: Record<string, FeedCacheMetadata>;
 }
 
 interface FeedsActions {
@@ -277,6 +282,7 @@ const initialState: FeedsState = {
   groupMembers: {},
   memberRoles: {},
   groupKeyStates: {},
+  feedCacheMetadata: {},
 };
 
 /**
@@ -990,13 +996,14 @@ export const useFeedsStore = create<FeedsStore>()(
     {
       name: 'hush-feeds-storage',
       partialize: (state) => ({
-        // Persist feeds, messages, sync metadata, and group data
+        // Persist feeds, messages, sync metadata, group data, and cache metadata
         feeds: state.feeds,
         messages: state.messages,
         syncMetadata: state.syncMetadata,
         groupMembers: state.groupMembers,
         memberRoles: state.memberRoles,
         groupKeyStates: state.groupKeyStates,
+        feedCacheMetadata: state.feedCacheMetadata,
       }),
     }
   )

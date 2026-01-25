@@ -111,6 +111,19 @@ export interface FeedMessage {
   replyToMessageId?: string;  // Reply to Message: parent message reference
   keyGeneration?: number;     // Group Feeds: Key generation used to encrypt this message
   decryptionFailed?: boolean; // True if message could not be decrypted (user lacks key)
+  /** Whether user has read this message (based on lastReadBlockIndex) - undefined treated as unread */
+  isRead?: boolean;
+}
+
+/**
+ * Per-feed cache metadata for message virtualization (FEAT-053)
+ * Tracks cache state to enable "Load More" pagination
+ */
+export interface FeedCacheMetadata {
+  /** Whether server has messages older than the current cache */
+  hasOlderMessages: boolean;
+  /** Block index of the oldest message in the local cache */
+  oldestCachedBlockIndex: number;
 }
 
 // Blockchain types
