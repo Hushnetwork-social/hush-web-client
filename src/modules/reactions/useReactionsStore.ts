@@ -177,6 +177,14 @@ interface ReactionsActions {
 
   /** Reset store to initial state (on logout) */
   reset(): void;
+
+  // ============= FEAT-053: Message Cache Cleanup =============
+
+  /**
+   * Bulk remove reactions for trimmed messages.
+   * Called by FEAT-055 house-cleaning after message trimming.
+   */
+  removeReactionsForMessages(messageIds: string[]): void;
 }
 
 type ReactionsStore = ReactionsState & ReactionsActions;
@@ -409,6 +417,38 @@ export const useReactionsStore = create<ReactionsStore>()(
 
       reset: () => {
         set(initialState);
+      },
+
+      // ============= FEAT-053: Message Cache Cleanup =============
+
+      removeReactionsForMessages: (messageIds) => {
+        if (messageIds.length === 0) return;
+
+        set((state) => {
+          // Remove from reactions
+          const newReactions = { ...state.reactions };
+          for (const id of messageIds) {
+            delete newReactions[id];
+          }
+
+          // Remove from pendingReactions
+          const newPendingReactions = { ...state.pendingReactions };
+          for (const id of messageIds) {
+            delete newPendingReactions[id];
+          }
+
+          // Remove from pendingTallies
+          const newPendingTallies = { ...state.pendingTallies };
+          for (const id of messageIds) {
+            delete newPendingTallies[id];
+          }
+
+          return {
+            reactions: newReactions,
+            pendingReactions: newPendingReactions,
+            pendingTallies: newPendingTallies,
+          };
+        });
       },
     }),
     {

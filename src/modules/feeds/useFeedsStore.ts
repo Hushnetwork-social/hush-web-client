@@ -260,6 +260,30 @@ interface FeedsActions {
 
   /** Get the max block index from messages in a feed (for marking as read) */
   getMaxMessageBlockIndex: (feedId: string) => number;
+
+  // ============= FEAT-053: Message Cache Limits Actions =============
+
+  /**
+   * Trim messages to limit, keeping all UNREAD + latest N READ messages.
+   * Returns array of removed message IDs (for reaction cleanup by FEAT-055).
+   */
+  trimMessagesToLimit: (feedId: string, limit?: number) => string[];
+
+  /**
+   * Update cache metadata for a feed (hasOlderMessages, oldestCachedBlockIndex).
+   */
+  updateFeedCacheMetadata: (feedId: string, metadata: Partial<FeedCacheMetadata>) => void;
+
+  /**
+   * Get cache metadata for a feed.
+   */
+  getFeedCacheMetadata: (feedId: string) => FeedCacheMetadata | undefined;
+
+  /**
+   * Handle localStorage quota exceeded - evicts oldest 20% of read messages globally.
+   * Returns array of removed message IDs across all feeds.
+   */
+  handleStorageQuotaExceeded: () => string[];
 }
 
 type FeedsStore = FeedsState & FeedsActions;
@@ -456,6 +480,18 @@ export const useFeedsStore = create<FeedsStore>()(
         set((state) => {
           let updatedMessages = state.messages[feedId] || [];
 
+          // Get feed's lastReadBlockIndex for isRead calculation (FEAT-053)
+          const feed = state.feeds.find((f) => f.id === feedId);
+          const lastReadBlockIndex = feed?.lastReadBlockIndex ?? 0;
+
+          // Helper to calculate isRead based on lastReadBlockIndex
+          // Messages with blockHeight <= lastReadBlockIndex are read
+          // Messages without blockHeight (optimistic) are unread (never trim pending)
+          const calculateIsRead = (blockHeight: number | undefined): boolean => {
+            if (blockHeight === undefined) return false; // Optimistic messages are unread
+            return blockHeight <= lastReadBlockIndex;
+          };
+
           // Confirm pending messages by updating their isConfirmed status and metadata
           // Also merge any fields that may have been missing from cached data (e.g., replyToMessageId)
           if (messagesToConfirm.length > 0) {
@@ -473,15 +509,21 @@ export const useFeedsStore = create<FeedsStore>()(
                   // Merge replyToMessageId from server if local message is missing it
                   // This handles cached messages from before the Reply feature was added
                   replyToMessageId: msg.replyToMessageId || confirmedMsg.replyToMessageId,
+                  // Calculate isRead now that blockHeight is known (FEAT-053)
+                  isRead: calculateIsRead(confirmedMsg.blockHeight),
                 };
               }
               return msg;
             });
           }
 
-          // Add truly new messages
+          // Add truly new messages with isRead calculated (FEAT-053)
           if (trulyNewMessages.length > 0) {
-            updatedMessages = [...updatedMessages, ...trulyNewMessages];
+            const messagesWithReadState = trulyNewMessages.map((msg) => ({
+              ...msg,
+              isRead: calculateIsRead(msg.blockHeight),
+            }));
+            updatedMessages = [...updatedMessages, ...messagesWithReadState];
           }
 
           // Sort messages by timestamp to ensure correct order
@@ -991,6 +1033,152 @@ export const useFeedsStore = create<FeedsStore>()(
         const messages = get().messages[feedId] || [];
         if (messages.length === 0) return 0;
         return Math.max(...messages.map((m) => m.blockHeight ?? 0));
+      },
+
+      // ============= FEAT-053: Message Cache Limits Implementations =============
+
+      trimMessagesToLimit: (feedId, limit = 100) => {
+        const currentMessages = get().messages[feedId] || [];
+
+        // Separate read and unread messages
+        // Messages without isRead or with isRead=undefined are treated as unread (safety)
+        const unreadMessages = currentMessages.filter((m) => !m.isRead);
+        const readMessages = currentMessages.filter((m) => m.isRead === true);
+
+        debugLog(`[FeedsStore] trimMessagesToLimit: feedId=${feedId.substring(0, 8)}..., total=${currentMessages.length}, read=${readMessages.length}, unread=${unreadMessages.length}, limit=${limit}`);
+
+        // If read messages are under limit, no trimming needed
+        if (readMessages.length <= limit) {
+          debugLog(`[FeedsStore] trimMessagesToLimit: under limit, no trimming needed`);
+          return [];
+        }
+
+        // Sort read messages by timestamp (newest first)
+        const sortedReadMessages = [...readMessages].sort((a, b) => b.timestamp - a.timestamp);
+
+        // Keep the latest N read messages
+        const messagesToKeep = sortedReadMessages.slice(0, limit);
+        const messagesToRemove = sortedReadMessages.slice(limit);
+        const removedIds = messagesToRemove.map((m) => m.id);
+
+        debugLog(`[FeedsStore] trimMessagesToLimit: removing ${removedIds.length} oldest read messages`);
+
+        // Combine kept read messages with all unread messages
+        const finalMessages = [...messagesToKeep, ...unreadMessages].sort(
+          (a, b) => a.timestamp - b.timestamp
+        );
+
+        // Calculate new metadata
+        const oldestBlockIndex = finalMessages.length > 0
+          ? Math.min(...finalMessages.filter((m) => m.blockHeight !== undefined).map((m) => m.blockHeight!))
+          : 0;
+
+        set((state) => ({
+          messages: {
+            ...state.messages,
+            [feedId]: finalMessages,
+          },
+          feedCacheMetadata: {
+            ...state.feedCacheMetadata,
+            [feedId]: {
+              hasOlderMessages: true, // We trimmed, so server has older messages
+              oldestCachedBlockIndex: oldestBlockIndex,
+            },
+          },
+        }));
+
+        return removedIds;
+      },
+
+      updateFeedCacheMetadata: (feedId, metadata) => {
+        set((state) => ({
+          feedCacheMetadata: {
+            ...state.feedCacheMetadata,
+            [feedId]: {
+              ...state.feedCacheMetadata[feedId],
+              ...metadata,
+            } as FeedCacheMetadata,
+          },
+        }));
+      },
+
+      getFeedCacheMetadata: (feedId) => {
+        return get().feedCacheMetadata[feedId];
+      },
+
+      handleStorageQuotaExceeded: () => {
+        debugLog(`[FeedsStore] handleStorageQuotaExceeded: starting LRU eviction`);
+        const state = get();
+
+        // Collect all read messages globally with their feed context
+        const allReadMessages: { feedId: string; messageId: string; timestamp: number }[] = [];
+
+        for (const feedId of Object.keys(state.messages)) {
+          const messages = state.messages[feedId] || [];
+          for (const msg of messages) {
+            if (msg.isRead === true) {
+              allReadMessages.push({
+                feedId,
+                messageId: msg.id,
+                timestamp: msg.timestamp,
+              });
+            }
+          }
+        }
+
+        if (allReadMessages.length === 0) {
+          console.warn('[FeedsStore] handleStorageQuotaExceeded: no read messages to evict');
+          return [];
+        }
+
+        // Sort by timestamp ascending (oldest first)
+        allReadMessages.sort((a, b) => a.timestamp - b.timestamp);
+
+        // Evict oldest 20%
+        const evictCount = Math.max(1, Math.ceil(allReadMessages.length * 0.2));
+        const toEvict = allReadMessages.slice(0, evictCount);
+        const evictedIds = toEvict.map((m) => m.messageId);
+
+        debugLog(`[FeedsStore] handleStorageQuotaExceeded: evicting ${evictCount} oldest read messages`);
+
+        // Group evictions by feed for efficient update
+        const evictByFeed = new Map<string, Set<string>>();
+        for (const { feedId, messageId } of toEvict) {
+          if (!evictByFeed.has(feedId)) {
+            evictByFeed.set(feedId, new Set());
+          }
+          evictByFeed.get(feedId)!.add(messageId);
+        }
+
+        // Update state - remove evicted messages from each feed
+        set((state) => {
+          const newMessages = { ...state.messages };
+          const newMetadata = { ...state.feedCacheMetadata };
+
+          for (const [feedId, idsToRemove] of evictByFeed) {
+            const currentMessages = newMessages[feedId] || [];
+            const remainingMessages = currentMessages.filter((m) => !idsToRemove.has(m.id));
+            newMessages[feedId] = remainingMessages;
+
+            // Update metadata for affected feeds
+            if (remainingMessages.length > 0) {
+              const oldestBlockIndex = Math.min(
+                ...remainingMessages.filter((m) => m.blockHeight !== undefined).map((m) => m.blockHeight!)
+              );
+              newMetadata[feedId] = {
+                hasOlderMessages: true,
+                oldestCachedBlockIndex: oldestBlockIndex,
+              };
+            }
+          }
+
+          return {
+            messages: newMessages,
+            feedCacheMetadata: newMetadata,
+          };
+        });
+
+        return evictedIds;
       },
     }),
     {
