@@ -23,7 +23,7 @@ export const FEED_TYPE_MAP: Record<number, Feed['type']> = {
 
 interface FeedsSyncMetadata {
   lastFeedBlockIndex: number;
-  lastMessageBlockIndex: number;
+  // FEAT-054: lastMessageBlockIndex REMOVED - now tracked per-feed in FeedCacheMetadata.lastSyncedMessageBlockIndex
   /** Last reaction tally version synced (Protocol Omega) */
   lastReactionTallyVersion: number;
   isPersonalFeedCreationPending: boolean;
@@ -284,6 +284,12 @@ interface FeedsActions {
    * Returns array of removed message IDs across all feeds.
    */
   handleStorageQuotaExceeded: () => string[];
+
+  /**
+   * FEAT-054: Clear all per-feed cache metadata (on logout).
+   * Called by reset() to ensure clean state.
+   */
+  clearAllFeedCacheMetadata: () => void;
 }
 
 type FeedsStore = FeedsState & FeedsActions;
@@ -293,7 +299,7 @@ const initialState: FeedsState = {
   messages: {},
   syncMetadata: {
     lastFeedBlockIndex: 0,
-    lastMessageBlockIndex: 0,
+    // FEAT-054: lastMessageBlockIndex REMOVED - now tracked per-feed
     lastReactionTallyVersion: 0,
     isPersonalFeedCreationPending: false,
     personalFeedCreationBlockIndex: 0,
@@ -1147,6 +1153,8 @@ export const useFeedsStore = create<FeedsStore>()(
           feedCacheMetadata: {
             ...state.feedCacheMetadata,
             [feedId]: {
+              // Preserve existing lastSyncedMessageBlockIndex (FEAT-054)
+              ...state.feedCacheMetadata[feedId],
               hasOlderMessages: true, // We trimmed, so server has older messages
               oldestCachedBlockIndex: oldestBlockIndex,
             },
@@ -1232,6 +1240,8 @@ export const useFeedsStore = create<FeedsStore>()(
                 ...remainingMessages.filter((m) => m.blockHeight !== undefined).map((m) => m.blockHeight!)
               );
               newMetadata[feedId] = {
+                // Preserve existing lastSyncedMessageBlockIndex (FEAT-054)
+                ...newMetadata[feedId],
                 hasOlderMessages: true,
                 oldestCachedBlockIndex: oldestBlockIndex,
               };
@@ -1245,6 +1255,13 @@ export const useFeedsStore = create<FeedsStore>()(
         });
 
         return evictedIds;
+      },
+
+      // ============= FEAT-054: Per-Feed Sync Metadata Implementations =============
+
+      clearAllFeedCacheMetadata: () => {
+        debugLog('[FeedsStore] clearAllFeedCacheMetadata: clearing all per-feed cache metadata');
+        set({ feedCacheMetadata: {} });
       },
     }),
     {
