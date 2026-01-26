@@ -18,7 +18,6 @@ import { blockchainService } from '@/lib/grpc/services/blockchain';
 import { createGroupFeedTransaction, createJoinGroupFeedTransaction, type GroupParticipantInput } from './transactions';
 import { decryptKeyGeneration } from './group-crypto';
 import type { GroupOperationResult, GroupCreationData } from '@/types';
-import type { GroupFeedParticipantProto } from '@/lib/grpc/types';
 import { debugLog, debugError } from '@/lib/debug-logger';
 
 /**

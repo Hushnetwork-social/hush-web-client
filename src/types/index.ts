@@ -117,13 +117,16 @@ export interface FeedMessage {
 
 /**
  * Per-feed cache metadata for message virtualization (FEAT-053)
- * Tracks cache state to enable "Load More" pagination
+ * and per-feed sync tracking (FEAT-054)
+ * Tracks cache state to enable "Load More" pagination and selective sync
  */
 export interface FeedCacheMetadata {
   /** Whether server has messages older than the current cache */
   hasOlderMessages: boolean;
   /** Block index of the oldest message in the local cache */
   oldestCachedBlockIndex: number;
+  /** FEAT-054: Last synced message block index for this feed (enables selective sync) */
+  lastSyncedMessageBlockIndex: number;
 }
 
 // Blockchain types

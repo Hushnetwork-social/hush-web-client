@@ -145,10 +145,14 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
 
       try {
         debugLog(`[useNotifications] Fetching new messages for feed ${feedId.substring(0, 8)}...`);
-        const { syncMetadata, feeds, addMessages, getGroupKeyState } = useFeedsStore.getState();
+        const { syncMetadata, feeds, addMessages, getGroupKeyState, getFeedCacheMetadata } = useFeedsStore.getState();
 
-        // Fetch messages from the last synced block
-        const response = await fetchMessages(currentUserId, syncMetadata.lastMessageBlockIndex, syncMetadata.lastReactionTallyVersion);
+        // FEAT-054: Use per-feed lastSyncedMessageBlockIndex instead of global
+        const feedCacheMetadata = getFeedCacheMetadata(feedId);
+        const lastSyncedBlockIndex = feedCacheMetadata?.lastSyncedMessageBlockIndex ?? 0;
+
+        // Fetch messages from the last synced block for this feed
+        const response = await fetchMessages(currentUserId, lastSyncedBlockIndex, syncMetadata.lastReactionTallyVersion);
 
         // Filter for messages in this feed
         const feedMessages = response.messages.filter(m => m.feedId === feedId);
@@ -229,9 +233,12 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
             }
           }
 
-          // Update sync metadata
+          // FEAT-054: Update per-feed sync metadata
+          useFeedsStore.getState().updateFeedCacheMetadata(feedId, {
+            lastSyncedMessageBlockIndex: response.maxBlockIndex,
+          });
+          // Update global reaction tally version
           useFeedsStore.getState().setSyncMetadata({
-            lastMessageBlockIndex: response.maxBlockIndex,
             lastReactionTallyVersion: response.maxReactionTallyVersion,
           });
         }

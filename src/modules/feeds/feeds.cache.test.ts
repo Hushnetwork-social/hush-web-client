@@ -468,11 +468,13 @@ describe('FEAT-053: Client Message Cache Limits', () => {
       useFeedsStore.getState().updateFeedCacheMetadata('feed-1', {
         hasOlderMessages: true,
         oldestCachedBlockIndex: 500,
+        lastSyncedMessageBlockIndex: 500,
       });
 
       const metadata = useFeedsStore.getState().getFeedCacheMetadata('feed-1');
       expect(metadata?.hasOlderMessages).toBe(true);
       expect(metadata?.oldestCachedBlockIndex).toBe(500);
+      expect(metadata?.lastSyncedMessageBlockIndex).toBe(500);
     });
 
     it('should return undefined for non-existent feed metadata', () => {
@@ -499,11 +501,237 @@ describe('FEAT-053: Client Message Cache Limits', () => {
       useFeedsStore.getState().updateFeedCacheMetadata('feed-1', {
         hasOlderMessages: true,
         oldestCachedBlockIndex: 500,
+        lastSyncedMessageBlockIndex: 500,
       });
 
       useFeedsStore.getState().reset();
 
       expect(useFeedsStore.getState().feedCacheMetadata).toEqual({});
+    });
+  });
+
+  // ============= FEAT-054: Per-Feed Sync Metadata Tests =============
+
+  describe('FEAT-054: Per-Feed Sync Metadata', () => {
+    describe('lastSyncedMessageBlockIndex', () => {
+      it('should store lastSyncedMessageBlockIndex per feed', () => {
+        useFeedsStore.getState().updateFeedCacheMetadata('feed-1', {
+          hasOlderMessages: false,
+          oldestCachedBlockIndex: 100,
+          lastSyncedMessageBlockIndex: 500,
+        });
+
+        const metadata = useFeedsStore.getState().getFeedCacheMetadata('feed-1');
+        expect(metadata?.lastSyncedMessageBlockIndex).toBe(500);
+      });
+
+      it('should allow different feeds to have different sync positions', () => {
+        // Set up feed-1 synced to block 100
+        useFeedsStore.getState().updateFeedCacheMetadata('feed-1', {
+          hasOlderMessages: false,
+          oldestCachedBlockIndex: 50,
+          lastSyncedMessageBlockIndex: 100,
+        });
+
+        // Set up feed-2 synced to block 500
+        useFeedsStore.getState().updateFeedCacheMetadata('feed-2', {
+          hasOlderMessages: false,
+          oldestCachedBlockIndex: 200,
+          lastSyncedMessageBlockIndex: 500,
+        });
+
+        const metadata1 = useFeedsStore.getState().getFeedCacheMetadata('feed-1');
+        const metadata2 = useFeedsStore.getState().getFeedCacheMetadata('feed-2');
+
+        expect(metadata1?.lastSyncedMessageBlockIndex).toBe(100);
+        expect(metadata2?.lastSyncedMessageBlockIndex).toBe(500);
+      });
+
+      it('should update lastSyncedMessageBlockIndex independently', () => {
+        // Initial state for feed-1
+        useFeedsStore.getState().updateFeedCacheMetadata('feed-1', {
+          hasOlderMessages: false,
+          oldestCachedBlockIndex: 100,
+          lastSyncedMessageBlockIndex: 100,
+        });
+
+        // Update only lastSyncedMessageBlockIndex
+        useFeedsStore.getState().updateFeedCacheMetadata('feed-1', {
+          lastSyncedMessageBlockIndex: 200,
+        });
+
+        const metadata = useFeedsStore.getState().getFeedCacheMetadata('feed-1');
+        expect(metadata?.lastSyncedMessageBlockIndex).toBe(200);
+        expect(metadata?.hasOlderMessages).toBe(false); // preserved
+        expect(metadata?.oldestCachedBlockIndex).toBe(100); // preserved
+      });
+    });
+
+    describe('clearAllFeedCacheMetadata', () => {
+      it('should clear all feed cache metadata', () => {
+        // Set up metadata for multiple feeds
+        useFeedsStore.getState().updateFeedCacheMetadata('feed-1', {
+          hasOlderMessages: true,
+          oldestCachedBlockIndex: 100,
+          lastSyncedMessageBlockIndex: 500,
+        });
+        useFeedsStore.getState().updateFeedCacheMetadata('feed-2', {
+          hasOlderMessages: false,
+          oldestCachedBlockIndex: 200,
+          lastSyncedMessageBlockIndex: 600,
+        });
+        useFeedsStore.getState().updateFeedCacheMetadata('feed-3', {
+          hasOlderMessages: true,
+          oldestCachedBlockIndex: 50,
+          lastSyncedMessageBlockIndex: 300,
+        });
+
+        // Verify metadata exists
+        expect(Object.keys(useFeedsStore.getState().feedCacheMetadata)).toHaveLength(3);
+
+        // Clear all metadata
+        useFeedsStore.getState().clearAllFeedCacheMetadata();
+
+        // Verify all cleared
+        expect(useFeedsStore.getState().feedCacheMetadata).toEqual({});
+      });
+
+      it('should be called by reset() (implicitly via initialState)', () => {
+        // Set up metadata
+        useFeedsStore.getState().updateFeedCacheMetadata('feed-1', {
+          hasOlderMessages: true,
+          oldestCachedBlockIndex: 100,
+          lastSyncedMessageBlockIndex: 500,
+        });
+
+        // Reset store (simulates logout)
+        useFeedsStore.getState().reset();
+
+        // Verify metadata is cleared
+        expect(useFeedsStore.getState().feedCacheMetadata).toEqual({});
+      });
+    });
+
+    describe('Global lastMessageBlockIndex removal', () => {
+      it('should NOT have lastMessageBlockIndex in syncMetadata', () => {
+        const syncMetadata = useFeedsStore.getState().syncMetadata;
+
+        // Verify lastMessageBlockIndex does not exist
+        expect('lastMessageBlockIndex' in syncMetadata).toBe(false);
+      });
+
+      it('should have lastFeedBlockIndex still available', () => {
+        const syncMetadata = useFeedsStore.getState().syncMetadata;
+
+        // lastFeedBlockIndex should still exist (for feed list sync)
+        expect('lastFeedBlockIndex' in syncMetadata).toBe(true);
+        expect(syncMetadata.lastFeedBlockIndex).toBe(0);
+      });
+    });
+
+    describe('New feed detection via missing metadata', () => {
+      it('should return undefined for feeds without metadata', () => {
+        // Feed-1 has never been synced (no metadata entry)
+        const metadata = useFeedsStore.getState().getFeedCacheMetadata('new-feed-no-metadata');
+
+        // This indicates a new feed requiring FetchLatest mode
+        expect(metadata).toBeUndefined();
+      });
+
+      it('should distinguish between new feeds and synced feeds', () => {
+        // Set up a synced feed
+        useFeedsStore.getState().updateFeedCacheMetadata('synced-feed', {
+          hasOlderMessages: false,
+          oldestCachedBlockIndex: 100,
+          lastSyncedMessageBlockIndex: 500,
+        });
+
+        // Synced feed has metadata
+        const syncedMetadata = useFeedsStore.getState().getFeedCacheMetadata('synced-feed');
+        expect(syncedMetadata).toBeDefined();
+        expect(syncedMetadata?.lastSyncedMessageBlockIndex).toBe(500);
+
+        // New feed has no metadata (returns undefined)
+        const newFeedMetadata = useFeedsStore.getState().getFeedCacheMetadata('new-feed');
+        expect(newFeedMetadata).toBeUndefined();
+      });
+    });
+
+    describe('Per-feed sync state for group feeds', () => {
+      it('should use per-feed sync position for group feeds (no block 0 workaround)', () => {
+        // Set up a group feed with sync position at block 300
+        useFeedsStore.getState().updateFeedCacheMetadata('group-feed-1', {
+          hasOlderMessages: false,
+          oldestCachedBlockIndex: 50,
+          lastSyncedMessageBlockIndex: 300,
+        });
+
+        // When retrieving sync position for group feed
+        const metadata = useFeedsStore.getState().getFeedCacheMetadata('group-feed-1');
+
+        // Should return 300 (NOT 0 as the old workaround did)
+        expect(metadata?.lastSyncedMessageBlockIndex).toBe(300);
+      });
+
+      it('should allow group feeds to have independent sync positions', () => {
+        // Set up multiple group feeds at different sync positions
+        useFeedsStore.getState().updateFeedCacheMetadata('group-A', {
+          hasOlderMessages: false,
+          oldestCachedBlockIndex: 10,
+          lastSyncedMessageBlockIndex: 100,
+        });
+
+        useFeedsStore.getState().updateFeedCacheMetadata('group-B', {
+          hasOlderMessages: false,
+          oldestCachedBlockIndex: 200,
+          lastSyncedMessageBlockIndex: 500,
+        });
+
+        // Each group should have its own independent sync position
+        const metadataA = useFeedsStore.getState().getFeedCacheMetadata('group-A');
+        const metadataB = useFeedsStore.getState().getFeedCacheMetadata('group-B');
+
+        expect(metadataA?.lastSyncedMessageBlockIndex).toBe(100);
+        expect(metadataB?.lastSyncedMessageBlockIndex).toBe(500);
+      });
+    });
+
+    describe('Sync state persistence via Zustand persist', () => {
+      it('should include feedCacheMetadata in persisted state', () => {
+        // Set up sync state for a feed
+        useFeedsStore.getState().updateFeedCacheMetadata('feed-bob', {
+          hasOlderMessages: false,
+          oldestCachedBlockIndex: 100,
+          lastSyncedMessageBlockIndex: 500,
+        });
+
+        // Get the store state
+        const state = useFeedsStore.getState();
+
+        // Verify feedCacheMetadata is part of the state
+        expect(state.feedCacheMetadata).toBeDefined();
+        expect(state.feedCacheMetadata['feed-bob']).toBeDefined();
+        expect(state.feedCacheMetadata['feed-bob'].lastSyncedMessageBlockIndex).toBe(500);
+      });
+
+      it('should preserve lastSyncedMessageBlockIndex when updating other metadata', () => {
+        // Set initial metadata including lastSyncedMessageBlockIndex
+        useFeedsStore.getState().updateFeedCacheMetadata('feed-1', {
+          hasOlderMessages: false,
+          oldestCachedBlockIndex: 100,
+          lastSyncedMessageBlockIndex: 500,
+        });
+
+        // Update only hasOlderMessages (partial update)
+        useFeedsStore.getState().updateFeedCacheMetadata('feed-1', {
+          hasOlderMessages: true,
+        });
+
+        // lastSyncedMessageBlockIndex should be preserved
+        const metadata = useFeedsStore.getState().getFeedCacheMetadata('feed-1');
+        expect(metadata?.lastSyncedMessageBlockIndex).toBe(500);
+        expect(metadata?.hasOlderMessages).toBe(true);
+      });
     });
   });
 });

@@ -61,8 +61,7 @@ export class FeedsSyncable implements ISyncable {
   // Track if initial full sync is complete - after this, only sync active feed incrementally
   private isInitialSyncComplete = false;
 
-  // Track the blockIndex we had for each feed before server sync (to detect changes)
-  private previousFeedBlockIndices = new Map<string, number>();
+  // FEAT-054: previousFeedBlockIndices REMOVED - now using persisted FeedCacheMetadata.lastSyncedMessageBlockIndex
 
   // Track previous group settings for each group feed (for change detection)
   // This is captured at the START of each sync cycle, BEFORE any updates
@@ -127,12 +126,9 @@ export class FeedsSyncable implements ISyncable {
       // Clear any previous error
       useFeedsStore.getState().setError(null);
 
-      // Update previousFeedBlockIndices AFTER all syncing is done
-      // This ensures the next sync cycle can correctly detect changes
-      const currentFeeds = useFeedsStore.getState().feeds;
-      for (const feed of currentFeeds) {
-        this.previousFeedBlockIndices.set(feed.id, feed.blockIndex ?? 0);
-      }
+      // FEAT-054: previousFeedBlockIndices updates REMOVED
+      // Per-feed sync state is now tracked via FeedCacheMetadata.lastSyncedMessageBlockIndex
+      // which is updated in syncMessagesForFeed() after successful message sync
 
       this.isFirstSync = false;
     } catch (error) {
@@ -603,19 +599,18 @@ export class FeedsSyncable implements ISyncable {
   }
 
   /**
-   * Sync messages from blockchain
+   * Sync messages from blockchain (initial full sync for all feeds)
+   *
+   * FEAT-054: This method syncs ALL feeds from block 0 during initial sync.
+   * Per-feed lastSyncedMessageBlockIndex is updated after each feed's messages are processed.
    */
   private async syncMessages(address: string): Promise<void> {
     const { syncMetadata, feeds } = useFeedsStore.getState();
-    let blockIndex = syncMetadata.lastMessageBlockIndex;
 
-    // On new session, reset to fetch all messages from block 0
-    // This ensures cached messages are updated with any new fields (e.g., replyToMessageId)
-    // Use the flag set at start of syncTask (before hasValidatedThisSession was updated)
-    if (this.shouldResetReactionTallyVersion) {
-      debugLog(`[FeedsSyncable] Resetting lastMessageBlockIndex from ${blockIndex} to 0 for full message sync`);
-      blockIndex = 0;
-    }
+    // FEAT-054: Initial sync always starts from block 0 to fetch all messages
+    // Per-feed sync positions are updated as we process messages
+    const blockIndex = 0;
+    debugLog(`[FeedsSyncable] syncMessages (initial sync): starting from block 0`);
 
     // On new session, reset reaction tally version to get all tallies fresh
     // This ensures we sync all reactions after page reload
@@ -627,7 +622,8 @@ export class FeedsSyncable implements ISyncable {
 
     debugLog(`[FeedsSyncable] syncMessages: fetching from blockIndex ${blockIndex}`);
     const response = await fetchMessages(address, blockIndex, lastReactionTallyVersion);
-    const { messages: newMessages, maxBlockIndex, reactionTallies, maxReactionTallyVersion } = response;
+    // FEAT-054: maxBlockIndex no longer used - per-feed sync positions calculated from each feed's messages
+    const { messages: newMessages, reactionTallies, maxReactionTallyVersion } = response;
 
     if (newMessages.length > 0) {
       debugLog(`[FeedsSyncable] Found ${newMessages.length} new message(s)`);
@@ -643,6 +639,9 @@ export class FeedsSyncable implements ISyncable {
       // Decrypt and add messages to each feed
       for (const [feedId, messages] of messagesByFeed) {
         const feed = feeds.find((f) => f.id === feedId);
+
+        // FEAT-054: Calculate max block height for this feed's messages
+        const feedMaxBlockHeight = Math.max(...messages.map(m => m.blockHeight ?? 0));
 
         // For group feeds, use multi-key decryption with fallback to trying all keys
         if (feed?.type === 'group') {
@@ -678,6 +677,12 @@ export class FeedsSyncable implements ISyncable {
             // Cannot track mentions for encrypted messages
           }
         }
+
+        // FEAT-054: Update per-feed sync metadata with the max block height from this feed's messages
+        useFeedsStore.getState().updateFeedCacheMetadata(feedId, {
+          lastSyncedMessageBlockIndex: feedMaxBlockHeight,
+        });
+        debugLog(`[FeedsSyncable] Updated feed ${feedId.substring(0, 8)}... lastSyncedMessageBlockIndex: ${feedMaxBlockHeight}`);
       }
     }
 
@@ -687,12 +692,12 @@ export class FeedsSyncable implements ISyncable {
       await this.processReactionTallies(reactionTallies, feeds);
     }
 
-    // Update sync metadata with both block index and reaction tally version
+    // FEAT-054: Update sync metadata - only reaction tally version remains global
+    // Per-feed lastSyncedMessageBlockIndex is updated above for each feed
     if (maxReactionTallyVersion > lastReactionTallyVersion) {
       debugLog(`[FeedsSyncable] Updating lastReactionTallyVersion: ${lastReactionTallyVersion} -> ${maxReactionTallyVersion}`);
     }
     useFeedsStore.getState().setSyncMetadata({
-      lastMessageBlockIndex: maxBlockIndex,
       lastReactionTallyVersion: maxReactionTallyVersion,
     });
   }
@@ -1044,11 +1049,12 @@ export class FeedsSyncable implements ISyncable {
     }
 
     // Check if the active feed has changes (blockIndex increased from server sync)
-    // We compare with our tracked previousBlockIndex
-    const previousBlockIndex = this.previousFeedBlockIndices.get(selectedFeedId) ?? 0;
+    // FEAT-054: Compare with per-feed lastSyncedMessageBlockIndex from persisted metadata
+    const feedCacheMetadata = useFeedsStore.getState().getFeedCacheMetadata(selectedFeedId);
+    const lastSyncedBlockIndex = feedCacheMetadata?.lastSyncedMessageBlockIndex ?? 0;
     const currentBlockIndex = activeFeed.blockIndex ?? 0;
 
-    const hasNewMessages = currentBlockIndex > previousBlockIndex || activeFeed.needsSync;
+    const hasNewMessages = currentBlockIndex > lastSyncedBlockIndex || activeFeed.needsSync;
 
     // Always sync for active feed to get reaction updates
     // Reactions don't update blockIndex, so we need to poll for them
@@ -1086,30 +1092,26 @@ export class FeedsSyncable implements ISyncable {
    */
   private async syncMessagesForFeed(address: string, feed: Feed, processMessages: boolean = true): Promise<void> {
     const { syncMetadata } = useFeedsStore.getState();
-    let blockIndex = syncMetadata.lastMessageBlockIndex;
+
+    // FEAT-054: Use per-feed lastSyncedMessageBlockIndex instead of global
+    const feedCacheMetadata = useFeedsStore.getState().getFeedCacheMetadata(feed.id);
+    let blockIndex = feedCacheMetadata?.lastSyncedMessageBlockIndex ?? 0;
+
+    // If no cached metadata exists, this is a new feed - start from block 0 (FetchLatest behavior)
+    const isNewFeed = !feedCacheMetadata?.lastSyncedMessageBlockIndex;
+    if (isNewFeed) {
+      debugLog(`[FeedsSyncable] Feed ${feed.id.substring(0, 8)}... has no cached sync position - starting from block 0`);
+      blockIndex = 0;
+    }
 
     // On new session, reset to fetch all messages from block 0
     if (this.shouldResetReactionTallyVersion) {
       blockIndex = 0;
     }
 
-    // CRITICAL FIX: When syncing a GROUP feed, ALWAYS query from block 0.
-    //
-    // Problem: The global lastMessageBlockIndex might be higher than when this
-    // specific group was last synced. This happens when:
-    // 1. Alice syncs other feeds, advancing lastMessageBlockIndex to 10
-    // 2. Bob joins and sends message at blocks 8 and 9
-    // 3. When Alice opens the group, the server-side delta query (LastUpdatedAtBlock >= 10)
-    //    doesn't return the group because 9 < 10
-    // 4. Without the group in the response, needsSync isn't set
-    // 5. Without needsSync, the message query uses blockIndex 10, missing Bob's message
-    //
-    // Solution: For group feeds, always query from block 0. The server uses
-    // per-feed caching so this is efficient.
-    if (feed.type === 'group' || feed.needsSync) {
-      debugLog(`[FeedsSyncable] Feed ${feed.id.substring(0, 8)}... (type=${feed.type}, needsSync=${feed.needsSync}) - resetting blockIndex from ${blockIndex} to 0`);
-      blockIndex = 0;
-    }
+    // FEAT-054: GROUP feed workaround REMOVED
+    // With per-feed sync state, GROUP feeds now use their own lastSyncedMessageBlockIndex
+    // just like other feed types. No special-casing needed.
 
     // Fetch messages for this specific feed
     // TODO: The API currently fetches all messages for all feeds
@@ -1177,9 +1179,15 @@ export class FeedsSyncable implements ISyncable {
       }
     }
 
-    // Update sync metadata
+    // FEAT-054: Update per-feed sync metadata with the max block index from this feed's messages
+    // This tracks where we've synced to for THIS specific feed
+    useFeedsStore.getState().updateFeedCacheMetadata(feed.id, {
+      lastSyncedMessageBlockIndex: maxBlockIndex,
+    });
+    debugLog(`[FeedsSyncable] Updated feed ${feed.id.substring(0, 8)}... lastSyncedMessageBlockIndex: ${maxBlockIndex}`);
+
+    // Update global sync metadata (only reaction tally version remains global)
     useFeedsStore.getState().setSyncMetadata({
-      lastMessageBlockIndex: maxBlockIndex,
       lastReactionTallyVersion: maxReactionTallyVersion,
     });
   }
