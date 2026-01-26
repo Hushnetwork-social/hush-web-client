@@ -57,6 +57,29 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   const messageInputRef = useRef<MessageInputHandle>(null);
   const { credentials, currentUser } = useAppStore();
 
+  // FEAT-055: Track previous feedId for cleanup on feed switch
+  const previousFeedIdRef = useRef<string | null>(null);
+
+  // FEAT-055: Cleanup previous feed when feedId changes or component unmounts
+  useEffect(() => {
+    // On feedId change: cleanup the previous feed
+    if (previousFeedIdRef.current && previousFeedIdRef.current !== feed.id) {
+      debugLog(`[ChatView] Feed changed: ${previousFeedIdRef.current.substring(0, 8)}... -> ${feed.id.substring(0, 8)}..., triggering cleanup`);
+      useFeedsStore.getState().cleanupFeed(previousFeedIdRef.current);
+    }
+
+    // Update ref to current feedId
+    previousFeedIdRef.current = feed.id;
+
+    // Cleanup on unmount (navigating away from ChatView entirely)
+    return () => {
+      if (previousFeedIdRef.current) {
+        debugLog(`[ChatView] Unmounting, triggering cleanup for feedId=${previousFeedIdRef.current.substring(0, 8)}...`);
+        useFeedsStore.getState().cleanupFeed(previousFeedIdRef.current);
+      }
+    };
+  }, [feed.id]);
+
   // Android virtual keyboard detection for compact header mode
   const { isKeyboardVisible } = useVirtualKeyboard();
   // Subscribe to just this feed's messages for efficient updates

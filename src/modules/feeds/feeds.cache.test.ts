@@ -734,4 +734,156 @@ describe('FEAT-053: Client Message Cache Limits', () => {
       });
     });
   });
+
+  // ============= FEAT-055: House-cleaning on Feed Close Tests =============
+
+  describe('FEAT-055: House-cleaning on Feed Close', () => {
+    describe('inMemoryMessages', () => {
+      it('should initialize as empty object', () => {
+        expect(useFeedsStore.getState().inMemoryMessages).toEqual({});
+      });
+
+      it('should reset to empty object on store reset', () => {
+        // Manually set inMemoryMessages (simulating scroll-up data)
+        useFeedsStore.setState({
+          inMemoryMessages: {
+            'feed-1': [createMessage('mem-1', 'feed-1', 1000, 50, true)],
+          },
+        });
+
+        useFeedsStore.getState().reset();
+
+        expect(useFeedsStore.getState().inMemoryMessages).toEqual({});
+      });
+    });
+
+    describe('cleanupFeed', () => {
+      it('should not throw for non-existent feed', async () => {
+        // Call cleanup for a feed that doesn't exist
+        expect(() => {
+          useFeedsStore.getState().cleanupFeed('non-existent-feed');
+        }).not.toThrow();
+
+        // Wait for debounce
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        // No error should occur
+        expect(useFeedsStore.getState().messages['non-existent-feed']).toBeUndefined();
+      });
+
+      it('should clear inMemoryMessages for the specified feed after debounce', async () => {
+        // Set up inMemoryMessages for multiple feeds
+        useFeedsStore.setState({
+          inMemoryMessages: {
+            'feed-1': [createMessage('mem-1', 'feed-1', 1000, 50, true)],
+            'feed-2': [createMessage('mem-2', 'feed-2', 2000, 60, true)],
+          },
+        });
+
+        // Call cleanup for feed-1
+        useFeedsStore.getState().cleanupFeed('feed-1');
+
+        // Wait for debounce (150ms + buffer)
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        // feed-1 should be cleared, feed-2 should remain
+        expect(useFeedsStore.getState().inMemoryMessages['feed-1']).toBeUndefined();
+        expect(useFeedsStore.getState().inMemoryMessages['feed-2']).toBeDefined();
+      });
+
+      it('should trim localStorage messages to 100 read', async () => {
+        // Set up 150 read messages
+        const messages = Array.from({ length: 150 }, (_, i) =>
+          createMessage(`msg-${i}`, 'feed-1', i * 1000, i, true)
+        );
+        useFeedsStore.getState().setMessages('feed-1', messages);
+
+        // Call cleanup
+        useFeedsStore.getState().cleanupFeed('feed-1');
+
+        // Wait for debounce
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        // Should have exactly 100 read messages remaining
+        const remaining = useFeedsStore.getState().messages['feed-1'];
+        expect(remaining.filter((m) => m.isRead)).toHaveLength(100);
+      });
+
+      it('should preserve all unread messages during cleanup', async () => {
+        // Set up 100 read messages + 50 unread messages
+        const readMessages = Array.from({ length: 100 }, (_, i) =>
+          createMessage(`read-${i}`, 'feed-1', i * 1000, i, true)
+        );
+        const unreadMessages = Array.from({ length: 50 }, (_, i) =>
+          createMessage(`unread-${i}`, 'feed-1', i * 1000 + 200000, i + 200, false)
+        );
+        useFeedsStore.getState().setMessages('feed-1', [...readMessages, ...unreadMessages]);
+
+        // Call cleanup
+        useFeedsStore.getState().cleanupFeed('feed-1');
+
+        // Wait for debounce
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        // All 50 unread should remain
+        const remaining = useFeedsStore.getState().messages['feed-1'];
+        const unreadRemaining = remaining.filter((m) => !m.isRead);
+        expect(unreadRemaining).toHaveLength(50);
+      });
+
+      it('should debounce rapid calls (only last feedId executes)', async () => {
+        // Set up messages for multiple feeds
+        useFeedsStore.getState().setMessages('feed-A', Array.from({ length: 150 }, (_, i) =>
+          createMessage(`a-${i}`, 'feed-A', i * 1000, i, true)
+        ));
+        useFeedsStore.getState().setMessages('feed-B', Array.from({ length: 150 }, (_, i) =>
+          createMessage(`b-${i}`, 'feed-B', i * 1000, i, true)
+        ));
+        useFeedsStore.getState().setMessages('feed-C', Array.from({ length: 150 }, (_, i) =>
+          createMessage(`c-${i}`, 'feed-C', i * 1000, i, true)
+        ));
+
+        // Rapid fire cleanup calls (simulating A -> B -> C navigation)
+        useFeedsStore.getState().cleanupFeed('feed-A');
+        useFeedsStore.getState().cleanupFeed('feed-B');
+        useFeedsStore.getState().cleanupFeed('feed-C'); // Only this should execute
+
+        // Wait for debounce
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        // Only feed-C should be trimmed (last call wins)
+        expect(useFeedsStore.getState().messages['feed-A']).toHaveLength(150); // Not trimmed
+        expect(useFeedsStore.getState().messages['feed-B']).toHaveLength(150); // Not trimmed
+        expect(useFeedsStore.getState().messages['feed-C']).toHaveLength(100); // Trimmed
+      });
+
+      it('should handle cleanup when no trimming is needed', async () => {
+        // Set up 50 read messages (under limit)
+        const messages = Array.from({ length: 50 }, (_, i) =>
+          createMessage(`msg-${i}`, 'feed-1', i * 1000, i, true)
+        );
+        useFeedsStore.getState().setMessages('feed-1', messages);
+
+        // Set up inMemoryMessages
+        useFeedsStore.setState((state) => ({
+          ...state,
+          inMemoryMessages: {
+            'feed-1': [createMessage('mem-1', 'feed-1', 1000, 50, true)],
+          },
+        }));
+
+        // Call cleanup
+        useFeedsStore.getState().cleanupFeed('feed-1');
+
+        // Wait for debounce
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        // inMemoryMessages should be cleared
+        expect(useFeedsStore.getState().inMemoryMessages['feed-1']).toBeUndefined();
+
+        // localStorage messages should remain unchanged (under limit)
+        expect(useFeedsStore.getState().messages['feed-1']).toHaveLength(50);
+      });
+    });
+  });
 });

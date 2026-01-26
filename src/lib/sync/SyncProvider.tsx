@@ -25,6 +25,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useAppStore } from '@/stores';
+import { useFeedsStore } from '@/modules/feeds';
 import {
   type ISyncable,
   type SyncProviderAPI,
@@ -267,6 +268,32 @@ export function SyncProvider({ children, config }: SyncProviderProps) {
   useEffect(() => {
     return () => {
       isMountedRef.current = false;
+    };
+  }, []);
+
+  // =============================================================================
+  // FEAT-055: Best-effort cleanup on tab close
+  // =============================================================================
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleBeforeUnload = () => {
+      // Get currently selected feed from app store
+      const selectedFeedId = useAppStore.getState().selectedFeedId;
+
+      if (selectedFeedId) {
+        debugLog(`[SyncProvider] beforeunload: triggering cleanup for feedId=${selectedFeedId.substring(0, 8)}...`);
+        // Best-effort cleanup - may not complete before tab closes
+        // Do NOT return anything (would show confirmation dialog)
+        useFeedsStore.getState().cleanupFeed(selectedFeedId);
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, []);
 

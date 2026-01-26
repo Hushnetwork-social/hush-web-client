@@ -1121,4 +1121,78 @@ describe('ChatView', () => {
       });
     });
   });
+
+  // =============================================================================
+  // FEAT-055: House-cleaning on Feed Close
+  // =============================================================================
+
+  describe('FEAT-055: Cleanup on Feed Close', () => {
+    const feedA: Feed = {
+      id: 'feed-A',
+      name: 'Feed A',
+      type: 'chat',
+      participants: ['user-1', 'user-2'],
+      createdAt: Date.now(),
+      lastMessageAt: Date.now(),
+    };
+
+    const feedB: Feed = {
+      id: 'feed-B',
+      name: 'Feed B',
+      type: 'chat',
+      participants: ['user-1', 'user-3'],
+      createdAt: Date.now(),
+      lastMessageAt: Date.now(),
+    };
+
+    let cleanupFeedSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      // Spy on cleanupFeed
+      cleanupFeedSpy = vi.spyOn(useFeedsStore.getState(), 'cleanupFeed');
+    });
+
+    afterEach(() => {
+      cleanupFeedSpy.mockRestore();
+    });
+
+    it('should NOT call cleanup on initial mount', () => {
+      render(<ChatView feed={feedA} />);
+
+      // No cleanup should be triggered on first render
+      expect(cleanupFeedSpy).not.toHaveBeenCalled();
+    });
+
+    it('should call cleanup for previous feed when feedId changes', async () => {
+      const { rerender } = render(<ChatView feed={feedA} />);
+
+      // No cleanup on initial mount
+      expect(cleanupFeedSpy).not.toHaveBeenCalled();
+
+      // Switch to Feed B
+      rerender(<ChatView feed={feedB} />);
+
+      // Wait for debounce (150ms)
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      // Cleanup should be called for Feed A (the previous feed)
+      expect(cleanupFeedSpy).toHaveBeenCalledWith('feed-A');
+    });
+
+    it('should call cleanup on unmount', async () => {
+      const { unmount } = render(<ChatView feed={feedA} />);
+
+      // No cleanup on initial mount
+      expect(cleanupFeedSpy).not.toHaveBeenCalled();
+
+      // Unmount the component
+      unmount();
+
+      // Wait for debounce (150ms)
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      // Cleanup should be called for Feed A
+      expect(cleanupFeedSpy).toHaveBeenCalledWith('feed-A');
+    });
+  });
 });

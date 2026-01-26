@@ -11,6 +11,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Feed, FeedMessage, FeedCacheMetadata, GroupFeedMember, GroupMemberRole, GroupKeyGeneration, GroupKeyState, SettingsChangeRecord } from '@/types';
 import { debugLog } from '@/lib/debug-logger';
+import { useReactionsStore } from '@/modules/reactions/useReactionsStore';
 
 // Feed type mapping from server (FeedType enum)
 // Server: Personal=0, Chat=1, Broadcast=2, Group=3
@@ -72,6 +73,16 @@ interface FeedsState {
 
   /** Per-feed cache metadata for message virtualization */
   feedCacheMetadata: Record<string, FeedCacheMetadata>;
+
+  // ============= In-Memory Messages (FEAT-055/FEAT-056) =============
+
+  /**
+   * FEAT-055: Placeholder for scroll-up messages (memory-only, NOT persisted).
+   * When user scrolls up to view older messages, they're stored here temporarily.
+   * Cleaned up when navigating away from the feed (house-cleaning).
+   * Populated by FEAT-056 (Load More Pagination).
+   */
+  inMemoryMessages: Record<string, FeedMessage[]>;
 }
 
 interface FeedsActions {
@@ -290,6 +301,18 @@ interface FeedsActions {
    * Called by reset() to ensure clean state.
    */
   clearAllFeedCacheMetadata: () => void;
+
+  // ============= FEAT-055: House-cleaning Actions =============
+
+  /**
+   * FEAT-055: Clean up a feed when user navigates away.
+   * - Clears inMemoryMessages for the feed
+   * - Trims localStorage messages to 100 read + all unread
+   * - Triggers reaction cleanup for trimmed messages
+   *
+   * This is debounced (150ms) and fire-and-forget (async, doesn't block navigation).
+   */
+  cleanupFeed: (feedId: string) => void;
 }
 
 type FeedsStore = FeedsState & FeedsActions;
@@ -313,6 +336,7 @@ const initialState: FeedsState = {
   memberRoles: {},
   groupKeyStates: {},
   feedCacheMetadata: {},
+  inMemoryMessages: {},
 };
 
 /**
@@ -330,6 +354,10 @@ function sortFeeds(feeds: Feed[]): Feed[] {
  * Custom storage adapter for Zustand persist that handles QuotaExceededError (FEAT-053)
  * When localStorage quota is exceeded, it triggers LRU eviction of oldest read messages.
  */
+// FEAT-055: Module-level debounce timeout for cleanupFeed
+// Placed outside store to survive React re-renders and ensure proper debouncing
+let cleanupTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
 const createQuotaHandlingStorage = (): {
   getItem: (name: string) => { state: unknown } | null;
   setItem: (name: string, value: { state: unknown }) => void;
@@ -1262,6 +1290,48 @@ export const useFeedsStore = create<FeedsStore>()(
       clearAllFeedCacheMetadata: () => {
         debugLog('[FeedsStore] clearAllFeedCacheMetadata: clearing all per-feed cache metadata');
         set({ feedCacheMetadata: {} });
+      },
+
+      // ============= FEAT-055: House-cleaning Implementations =============
+
+      cleanupFeed: (feedId) => {
+        // Cancel any pending cleanup (debounce)
+        if (cleanupTimeoutId) {
+          clearTimeout(cleanupTimeoutId);
+        }
+
+        // Debounce: Wait 150ms before executing cleanup
+        // This handles rapid feed switching (A -> B -> C) by only cleaning the last previous feed
+        cleanupTimeoutId = setTimeout(() => {
+          try {
+            debugLog(`[FeedsStore] cleanupFeed: starting cleanup for feedId=${feedId.substring(0, 8)}...`);
+
+            // 1. Clear inMemoryMessages for this feed
+            const currentInMemory = get().inMemoryMessages;
+            if (currentInMemory[feedId]) {
+              // eslint-disable-next-line @typescript-eslint/no-unused-vars
+              const { [feedId]: _removed, ...remainingInMemory } = currentInMemory;
+              set({ inMemoryMessages: remainingInMemory });
+              debugLog(`[FeedsStore] cleanupFeed: cleared inMemoryMessages for feedId=${feedId.substring(0, 8)}...`);
+            }
+
+            // 2. Trim localStorage messages to 100 read + all unread
+            // trimMessagesToLimit returns array of removed message IDs
+            const removedIds = get().trimMessagesToLimit(feedId, 100);
+            debugLog(`[FeedsStore] cleanupFeed: trimmed ${removedIds.length} messages from feedId=${feedId.substring(0, 8)}...`);
+
+            // 3. Clean up reactions for trimmed messages
+            if (removedIds.length > 0) {
+              useReactionsStore.getState().removeReactionsForMessages(removedIds);
+              debugLog(`[FeedsStore] cleanupFeed: removed reactions for ${removedIds.length} trimmed messages`);
+            }
+
+            debugLog(`[FeedsStore] cleanupFeed: completed for feedId=${feedId.substring(0, 8)}...`);
+          } catch (error) {
+            // Graceful degradation: log and continue, don't block navigation
+            console.warn('[FeedsStore] cleanupFeed failed:', error);
+          }
+        }, 150);
       },
     }),
     {
