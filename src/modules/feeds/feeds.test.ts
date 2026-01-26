@@ -171,14 +171,15 @@ describe('useFeedsStore', () => {
 
   describe('Sync Metadata', () => {
     it('should update sync metadata', () => {
+      // FEAT-054: lastMessageBlockIndex removed - now tracked per-feed
       useFeedsStore.getState().setSyncMetadata({
         lastFeedBlockIndex: 100,
-        lastMessageBlockIndex: 150,
+        lastReactionTallyVersion: 50,
       });
 
       const { syncMetadata } = useFeedsStore.getState();
       expect(syncMetadata.lastFeedBlockIndex).toBe(100);
-      expect(syncMetadata.lastMessageBlockIndex).toBe(150);
+      expect(syncMetadata.lastReactionTallyVersion).toBe(50);
     });
 
     it('should track personal feed creation pending state', () => {
@@ -515,9 +516,13 @@ describe('FeedsSyncable', () => {
 
     await syncable.syncTask();
 
-    const { syncMetadata } = useFeedsStore.getState();
+    const { syncMetadata, getFeedCacheMetadata } = useFeedsStore.getState();
     expect(syncMetadata.lastFeedBlockIndex).toBe(250);
-    expect(syncMetadata.lastMessageBlockIndex).toBe(300);
+
+    // FEAT-054: lastMessageBlockIndex is now per-feed in FeedCacheMetadata
+    // Check that feed-1's lastSyncedMessageBlockIndex was updated
+    const feedMetadata = getFeedCacheMetadata('feed-1');
+    expect(feedMetadata?.lastSyncedMessageBlockIndex).toBe(300);
   });
 });
 
@@ -590,7 +595,10 @@ describe('Sync Integration', () => {
     expect(state.feeds[0].type).toBe('personal'); // Personal first
     expect(state.messages['personal-feed']).toHaveLength(1);
     expect(state.syncMetadata.lastFeedBlockIndex).toBe(150);
-    expect(state.syncMetadata.lastMessageBlockIndex).toBe(100);
+
+    // FEAT-054: lastMessageBlockIndex is now per-feed in FeedCacheMetadata
+    const feedMetadata = state.getFeedCacheMetadata('personal-feed');
+    expect(feedMetadata?.lastSyncedMessageBlockIndex).toBe(100);
   });
 });
 

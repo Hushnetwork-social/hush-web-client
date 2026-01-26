@@ -52,7 +52,6 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
   inviteCode,
   currentUserRole,
   currentUserAddress,
-  isLastAdmin: _isLastAdmin,
   onLeave,
   onDelete,
   onUpdate,

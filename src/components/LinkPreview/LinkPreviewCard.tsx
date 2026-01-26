@@ -1,6 +1,7 @@
 "use client";
 
 import { memo } from "react";
+import Image from "next/image";
 import { Link as LinkIcon } from "lucide-react";
 import type { UrlMetadata } from "@/lib/urlDetector/urlMetadataCache";
 
@@ -83,11 +84,13 @@ export const LinkPreviewCard = memo(function LinkPreviewCard({
       {/* Thumbnail or fallback icon */}
       <div className="flex-shrink-0">
         {hasImage ? (
-          <img
+          <Image
             src={`data:image/jpeg;base64,${metadata.imageBase64}`}
             alt=""
+            width={100}
+            height={100}
             className="w-[100px] h-[100px] rounded-md object-cover bg-hush-bg-hover"
-            loading="lazy"
+            unoptimized
           />
         ) : (
           <div
