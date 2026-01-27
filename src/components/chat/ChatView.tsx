@@ -952,6 +952,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   }, [replyingTo]);
 
   // Reply to Message: Scroll to a specific message when clicking reply preview
+  // FEAT-056: Enhanced to also highlight the original message after scrolling
   const handleScrollToMessage = useCallback((messageId: string) => {
     const messageIndex = messages.findIndex((m) => m.id === messageId);
     if (messageIndex !== -1 && virtuosoRef.current) {
@@ -960,8 +961,17 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
         behavior: "smooth",
         align: "center",
       });
+
+      // After scroll completes, highlight the message element
+      // Use a delay to allow Virtuoso to render the element
+      setTimeout(() => {
+        const element = document.querySelector(`[data-message-id="${messageId}"]`);
+        if (element instanceof HTMLElement) {
+          highlightMessage(element);
+        }
+      }, 500);
     }
-  }, [messages]);
+  }, [messages, highlightMessage]);
 
   // Reply to Message: Resolve display name from public key
   // For chat feeds: if it's the other participant, use feed.name; if it's me, use "You"
@@ -1232,6 +1242,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
                     onScrollToMessage={handleScrollToMessage}
                     message={item}
                     resolveDisplayName={resolveDisplayName}
+                    feedId={feed.id}
                     showSender={isGroupFeed}
                     senderName={getSenderDisplayName(item.senderPublicKey, item.senderName)}
                     senderRole={getSenderRole(item.senderPublicKey)}

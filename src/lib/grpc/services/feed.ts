@@ -8,6 +8,8 @@ import type {
   GetFeedForAddressReply,
   GetFeedMessagesForAddressRequest,
   GetFeedMessagesForAddressReply,
+  GetMessageByIdRequest,
+  GetMessageByIdResponse,
 } from '../types';
 
 const SERVICE_NAME = 'rpcHush.HushFeed';
@@ -104,6 +106,26 @@ export const feedService = {
     return client.unaryCall<GetFeedMessagesForAddressRequest, GetFeedMessagesForAddressReply>(
       SERVICE_NAME,
       'GetFeedMessagesForAddress',
+      request
+    );
+  },
+
+  /**
+   * FEAT-056: Fetch a single message by ID (for reply preview)
+   * Used when replied-to message is not in cache.
+   */
+  async getMessageById(
+    feedId: string,
+    messageId: string
+  ): Promise<GetMessageByIdResponse> {
+    const client = getGrpcClient();
+    const request: GetMessageByIdRequest = {
+      FeedId: feedId,
+      MessageId: messageId,
+    };
+    return client.unaryCall<GetMessageByIdRequest, GetMessageByIdResponse>(
+      SERVICE_NAME,
+      'GetMessageById',
       request
     );
   },

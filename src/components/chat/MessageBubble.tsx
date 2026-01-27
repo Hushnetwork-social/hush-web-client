@@ -33,6 +33,8 @@ interface MessageBubbleProps {
   message?: FeedMessage;
   /** Reply to Message: Function to resolve display name from public key (with optional server-provided name) */
   resolveDisplayName?: (publicKey: string, senderName?: string) => string;
+  /** FEAT-056: Feed ID for fetching reply preview from server */
+  feedId?: string;
   /** Group Feed: Whether to show sender name (for group messages from others) */
   showSender?: boolean;
   /** Group Feed: Display name of the sender */
@@ -58,6 +60,7 @@ export const MessageBubble = memo(function MessageBubble({
   onScrollToMessage,
   message,
   resolveDisplayName,
+  feedId,
   showSender = false,
   senderName,
   senderRole,
@@ -247,9 +250,10 @@ export const MessageBubble = memo(function MessageBubble({
             `}
           >
             {/* Reply preview - shows when this message is a reply */}
-            {replyToMessageId && (
+            {replyToMessageId && feedId && (
               <ReplyPreview
                 messageId={replyToMessageId}
+                feedId={feedId}
                 onPreviewClick={onScrollToMessage}
                 resolveDisplayName={resolveDisplayName}
               />

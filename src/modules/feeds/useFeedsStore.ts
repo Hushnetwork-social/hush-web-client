@@ -143,6 +143,13 @@ interface FeedsActions {
   /** Get a message by ID (searches across all feeds) */
   getMessageById: (messageId: string) => FeedMessage | undefined;
 
+  /**
+   * FEAT-056: Fetch a message by ID, checking cache first then server.
+   * Returns the message if found, null if not found.
+   * Fetched messages are NOT persisted (one-off for reply preview).
+   */
+  fetchMessageById: (feedId: string, messageId: string) => Promise<FeedMessage | null>;
+
   /** Update a feed's AES key (after decryption) */
   updateFeedAesKey: (feedId: string, aesKey: string) => void;
 
@@ -586,6 +593,72 @@ export const useFeedsStore = create<FeedsStore>()(
           if (found) return found;
         }
         return undefined;
+      },
+
+      fetchMessageById: async (feedId, messageId) => {
+        // Step 1: Check persisted messages cache
+        const persistedMessages = get().messages[feedId] || [];
+        const fromPersisted = persistedMessages.find((m) => m.id === messageId);
+        if (fromPersisted) {
+          debugLog(`[FeedsStore] fetchMessageById: Found in persisted cache for ${messageId.substring(0, 8)}...`);
+          return fromPersisted;
+        }
+
+        // Step 2: Check inMemory messages cache
+        const inMemoryMsgs = get().inMemoryMessages[feedId] || [];
+        const fromInMemory = inMemoryMsgs.find((m) => m.id === messageId);
+        if (fromInMemory) {
+          debugLog(`[FeedsStore] fetchMessageById: Found in inMemory cache for ${messageId.substring(0, 8)}...`);
+          return fromInMemory;
+        }
+
+        // Step 3: Fetch from server
+        debugLog(`[FeedsStore] fetchMessageById: Fetching from server for ${messageId.substring(0, 8)}...`);
+        try {
+          const response = await feedService.getMessageById(feedId, messageId);
+          if (!response.Success || !response.Message) {
+            debugLog(`[FeedsStore] fetchMessageById: Not found on server for ${messageId.substring(0, 8)}...`);
+            return null;
+          }
+
+          // Transform server message to FeedMessage format
+          const serverMsg = response.Message;
+          const feed = get().feeds.find((f) => f.id === feedId);
+
+          // Decrypt content if needed
+          let content = serverMsg.MessageContent;
+          if (feed?.aesKey) {
+            try {
+              content = await aesDecrypt(serverMsg.MessageContent, feed.aesKey);
+            } catch {
+              debugLog(`[FeedsStore] fetchMessageById: Failed to decrypt message ${messageId.substring(0, 8)}...`);
+              content = '[Message encrypted before you joined]';
+            }
+          }
+
+          const fetchedMessage: FeedMessage = {
+            id: serverMsg.FeedMessageId,
+            feedId: serverMsg.FeedId,
+            content,
+            senderPublicKey: serverMsg.IssuerPublicAddress,
+            senderName: serverMsg.IssuerName,
+            timestamp: serverMsg.TimeStamp?.seconds
+              ? serverMsg.TimeStamp.seconds * 1000 + Math.floor((serverMsg.TimeStamp.nanos || 0) / 1000000)
+              : Date.now(),
+            blockHeight: serverMsg.BlockIndex,
+            isConfirmed: true,
+            isRead: true,
+            replyToMessageId: serverMsg.ReplyToMessageId,
+            keyGeneration: serverMsg.KeyGeneration,
+          };
+
+          debugLog(`[FeedsStore] fetchMessageById: Fetched from server for ${messageId.substring(0, 8)}...`);
+          // Note: We intentionally do NOT persist this message (one-off for preview)
+          return fetchedMessage;
+        } catch (error) {
+          debugLog(`[FeedsStore] fetchMessageById: Error fetching ${messageId.substring(0, 8)}...`, error);
+          return null;
+        }
       },
 
       updateFeedAesKey: (feedId, aesKey) => {

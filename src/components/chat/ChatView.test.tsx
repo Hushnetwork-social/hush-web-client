@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { ChatView } from './ChatView';
 import { useAppStore } from '@/stores';
 import { useFeedsStore } from '@/modules/feeds/useFeedsStore';
@@ -429,11 +429,11 @@ describe('ChatView', () => {
 
       // Should show the message
       expect(screen.getByText('Regular message without reply')).toBeInTheDocument();
-      // Should not have "Reply to deleted message" or any reply preview
-      expect(screen.queryByText('Reply to deleted message')).not.toBeInTheDocument();
+      // Should not have "Original message unavailable" or any reply preview
+      expect(screen.queryByText('Original message unavailable')).not.toBeInTheDocument();
     });
 
-    it('should show deleted message placeholder for reply to non-existent message', () => {
+    it('should show unavailable message placeholder for reply to non-existent message', async () => {
       useFeedsStore.getState().addMessages('feed-123', [
         {
           id: 'reply-to-deleted',
@@ -448,7 +448,10 @@ describe('ChatView', () => {
 
       render(<ChatView feed={mockFeed} />);
 
-      expect(screen.getByText('Reply to deleted message')).toBeInTheDocument();
+      // FEAT-056: ReplyPreview now shows async loading state, then "Original message unavailable"
+      await waitFor(() => {
+        expect(screen.getByText('Original message unavailable')).toBeInTheDocument();
+      });
     });
   });
 

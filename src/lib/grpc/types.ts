@@ -207,6 +207,18 @@ export interface GetFeedMessagesForAddressReply {
   OldestBlockIndex?: number;                       // Block index of oldest returned message
 }
 
+// FEAT-056: GetMessageById - Fetch single message for reply preview
+export interface GetMessageByIdRequest {
+  FeedId: string;       // Feed containing the message
+  MessageId: string;    // ID of the message to retrieve
+}
+
+export interface GetMessageByIdResponse {
+  Success: boolean;                    // True if message found and accessible
+  Message?: FeedMessageEntity;         // The message (undefined if not found)
+  Error?: string;                      // Error message if not found
+}
+
 // ============= Feed Type Enum =============
 
 export enum FeedType {
