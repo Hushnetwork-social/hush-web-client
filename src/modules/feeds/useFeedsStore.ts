@@ -14,6 +14,7 @@ import { debugLog } from '@/lib/debug-logger';
 import { useReactionsStore } from '@/modules/reactions/useReactionsStore';
 import { feedService } from '@/lib/grpc/services/feed';
 import { useAppStore } from '@/stores/useAppStore';
+import { aesDecrypt } from '@/lib/crypto';
 
 // Feed type mapping from server (FeedType enum)
 // Server: Personal=0, Chat=1, Broadcast=2, Group=3
@@ -102,6 +103,14 @@ interface FeedsState {
    * Memory-only, NOT persisted.
    */
   isLoadingOlderMessages: Record<string, boolean>;
+
+  /**
+   * FEAT-056: Tracks error state per feed after failed load attempts.
+   * - null/undefined: No error
+   * - string: Error message to display (after 3 silent retries)
+   * Memory-only, NOT persisted.
+   */
+  feedLoadError: Record<string, string | null>;
 }
 
 interface FeedsActions {
@@ -362,6 +371,16 @@ interface FeedsActions {
    * FEAT-056: Set loading state for older messages.
    */
   setIsLoadingOlderMessages: (feedId: string, isLoading: boolean) => void;
+
+  /**
+   * FEAT-056: Set error state for a feed after failed load attempts.
+   */
+  setFeedLoadError: (feedId: string, error: string | null) => void;
+
+  /**
+   * FEAT-056: Clear error state for a feed (e.g., on successful retry).
+   */
+  clearFeedLoadError: (feedId: string) => void;
 }
 
 type FeedsStore = FeedsState & FeedsActions;
@@ -388,6 +407,7 @@ const initialState: FeedsState = {
   inMemoryMessages: {},
   feedHasMoreMessages: {},
   isLoadingOlderMessages: {},
+  feedLoadError: {},
 };
 
 /**
@@ -1449,55 +1469,184 @@ export const useFeedsStore = create<FeedsStore>()(
           isLoadingOlderMessages: { ...state.isLoadingOlderMessages, [feedId]: true },
         }));
 
-        try {
-          // Fetch older messages from server
-          const response = await feedService.getOlderMessages(profilePublicKey, oldestBlockHeight, 50);
-          debugLog(`[FeedsStore] loadOlderMessages: received ${response.Messages.length} messages, hasMore=${response.HasMoreMessages}`);
+        // FEAT-056: Retry logic - 3 silent retries before showing error
+        const MAX_RETRIES = 3;
 
-          // Convert server entities to FeedMessage format
-          // Note: Server uses PascalCase (FeedId, MessageContent, BlockIndex)
-          // Client uses camelCase (feedId, content, blockHeight)
-          const newMessages: FeedMessage[] = response.Messages.map((msg) => ({
-            id: msg.FeedMessageId,
-            feedId: msg.FeedId,
-            content: msg.MessageContent,
-            senderPublicKey: msg.IssuerPublicAddress,
-            senderName: msg.IssuerName,
-            isConfirmed: true,
-            isRead: true, // Older messages are considered "read" by default
-            timestamp: msg.TimeStamp ? msg.TimeStamp.seconds * 1000 + msg.TimeStamp.nanos / 1000000 : Date.now(),
-            blockHeight: msg.BlockIndex,
-            replyToMessageId: msg.ReplyToMessageId,
-          }));
+        for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+          try {
+            // Fetch older messages from server
+            const response = await feedService.getOlderMessages(profilePublicKey, oldestBlockHeight, 50);
+            debugLog(`[FeedsStore] loadOlderMessages: received ${response.Messages.length} messages, hasMore=${response.HasMoreMessages}`);
 
-          // Prepend to inMemoryMessages for this feed
-          const currentInMemory = get().inMemoryMessages[feedId] || [];
-          const mergedMessages = [...newMessages, ...currentInMemory];
+            // Convert server entities to FeedMessage format
+            // Note: Server uses PascalCase (FeedId, MessageContent, BlockIndex)
+            // Client uses camelCase (feedId, content, blockHeight)
+            const rawMessages: FeedMessage[] = response.Messages.map((msg) => ({
+              id: msg.FeedMessageId,
+              feedId: msg.FeedId,
+              content: msg.MessageContent,
+              senderPublicKey: msg.IssuerPublicAddress,
+              senderName: msg.IssuerName,
+              isConfirmed: true,
+              isRead: true, // Older messages are considered "read" by default
+              timestamp: msg.TimeStamp ? msg.TimeStamp.seconds * 1000 + msg.TimeStamp.nanos / 1000000 : Date.now(),
+              blockHeight: msg.BlockIndex,
+              replyToMessageId: msg.ReplyToMessageId,
+              keyGeneration: msg.KeyGeneration,
+            }));
 
-          // Enforce 500 message cap (discard oldest if exceeded)
-          const IN_MEMORY_CAP = 500;
-          const cappedMessages = mergedMessages.length > IN_MEMORY_CAP
-            ? mergedMessages.slice(-IN_MEMORY_CAP) // Keep newest N messages
-            : mergedMessages;
+            // FEAT-056 Task 3.4: Decrypt messages based on feed type
+            const feed = get().getFeed(feedId);
+            let newMessages: FeedMessage[] = rawMessages;
 
-          if (mergedMessages.length > IN_MEMORY_CAP) {
-            debugLog(`[FeedsStore] loadOlderMessages: capped inMemoryMessages from ${mergedMessages.length} to ${IN_MEMORY_CAP}`);
+            if (feed?.type === 'chat') {
+              // Chat feed: decrypt with feed's AES key
+              const feedAesKey = feed.aesKey;
+              if (feedAesKey) {
+                newMessages = await Promise.all(
+                  rawMessages.map(async (msg) => {
+                    try {
+                      const decryptedContent = await aesDecrypt(msg.content, feedAesKey);
+                      return {
+                        ...msg,
+                        content: decryptedContent,
+                        contentEncrypted: msg.content,
+                        decryptionFailed: false,
+                      };
+                    } catch {
+                      debugLog(`[FeedsStore] loadOlderMessages: failed to decrypt chat msg ${msg.id.substring(0, 8)}...`);
+                      return {
+                        ...msg,
+                        contentEncrypted: msg.content,
+                        decryptionFailed: true,
+                      };
+                    }
+                  })
+                );
+              } else {
+                debugLog(`[FeedsStore] loadOlderMessages: no AES key for chat feed ${feedId.substring(0, 8)}...`);
+              }
+            } else if (feed?.type === 'group') {
+              // Group feed: decrypt with keyGeneration-specific AES key
+              const keyState = get().getGroupKeyState(feedId);
+              if (keyState && keyState.keyGenerations.length > 0) {
+                // Get all available keys sorted by keyGeneration descending (try newest first)
+                const keysToTry = [...keyState.keyGenerations]
+                  .filter(kg => kg.aesKey)
+                  .sort((a, b) => b.keyGeneration - a.keyGeneration);
+
+                newMessages = await Promise.all(
+                  rawMessages.map(async (msg) => {
+                    // If message has keyGeneration, use that specific key
+                    if (msg.keyGeneration !== undefined) {
+                      const specificKey = keyState.keyGenerations.find(
+                        kg => kg.keyGeneration === msg.keyGeneration
+                      );
+                      if (specificKey?.aesKey) {
+                        try {
+                          const decryptedContent = await aesDecrypt(msg.content, specificKey.aesKey);
+                          return {
+                            ...msg,
+                            content: decryptedContent,
+                            contentEncrypted: msg.content,
+                            decryptionFailed: false,
+                          };
+                        } catch {
+                          debugLog(`[FeedsStore] loadOlderMessages: failed to decrypt with keyGen=${msg.keyGeneration}`);
+                          return {
+                            ...msg,
+                            contentEncrypted: msg.content,
+                            decryptionFailed: true,
+                          };
+                        }
+                      } else {
+                        // Missing key (joined after this KeyGeneration)
+                        debugLog(`[FeedsStore] loadOlderMessages: missing keyGen=${msg.keyGeneration} for msg ${msg.id.substring(0, 8)}...`);
+                        get().recordMissingKeyGeneration(feedId, msg.keyGeneration);
+                        return {
+                          ...msg,
+                          contentEncrypted: msg.content,
+                          decryptionFailed: true,
+                        };
+                      }
+                    }
+
+                    // No keyGeneration - try all keys until one works
+                    for (const keyGen of keysToTry) {
+                      try {
+                        const decryptedContent = await aesDecrypt(msg.content, keyGen.aesKey);
+                        return {
+                          ...msg,
+                          content: decryptedContent,
+                          contentEncrypted: msg.content,
+                          keyGeneration: keyGen.keyGeneration,
+                          decryptionFailed: false,
+                        };
+                      } catch {
+                        continue; // Try next key
+                      }
+                    }
+
+                    // All keys failed
+                    debugLog(`[FeedsStore] loadOlderMessages: all ${keysToTry.length} keys failed for msg ${msg.id.substring(0, 8)}...`);
+                    return {
+                      ...msg,
+                      contentEncrypted: msg.content,
+                      decryptionFailed: true,
+                    };
+                  })
+                );
+              } else {
+                debugLog(`[FeedsStore] loadOlderMessages: no KeyGenerations for group feed ${feedId.substring(0, 8)}...`);
+                // Mark all as decryption failed
+                newMessages = rawMessages.map(msg => ({
+                  ...msg,
+                  contentEncrypted: msg.content,
+                  decryptionFailed: true,
+                }));
+              }
+            }
+            // For personal/broadcast feeds: no encryption, messages stay as-is
+
+            // Prepend to inMemoryMessages for this feed
+            const currentInMemory = get().inMemoryMessages[feedId] || [];
+            const mergedMessages = [...newMessages, ...currentInMemory];
+
+            // Enforce 500 message cap (discard oldest if exceeded)
+            const IN_MEMORY_CAP = 500;
+            const cappedMessages = mergedMessages.length > IN_MEMORY_CAP
+              ? mergedMessages.slice(-IN_MEMORY_CAP) // Keep newest N messages
+              : mergedMessages;
+
+            if (mergedMessages.length > IN_MEMORY_CAP) {
+              debugLog(`[FeedsStore] loadOlderMessages: capped inMemoryMessages from ${mergedMessages.length} to ${IN_MEMORY_CAP}`);
+            }
+
+            // Update state - success
+            set((state) => ({
+              inMemoryMessages: { ...state.inMemoryMessages, [feedId]: cappedMessages },
+              feedHasMoreMessages: { ...state.feedHasMoreMessages, [feedId]: response.HasMoreMessages ?? true },
+              isLoadingOlderMessages: { ...state.isLoadingOlderMessages, [feedId]: false },
+            }));
+
+            // Clear any previous error on success
+            get().clearFeedLoadError(feedId);
+
+            debugLog(`[FeedsStore] loadOlderMessages: completed for feedId=${feedId.substring(0, 8)}..., inMemory count=${cappedMessages.length}`);
+            return; // Success - exit the function
+          } catch (error) {
+            if (attempt < MAX_RETRIES) {
+              debugLog(`[FeedsStore] loadOlderMessages: attempt ${attempt}/${MAX_RETRIES} failed, retrying...`);
+              // Silent retry - continue to next iteration
+            } else {
+              // All retries exhausted - set error state
+              console.error(`[FeedsStore] loadOlderMessages failed after ${MAX_RETRIES} attempts:`, error);
+              set((state) => ({
+                isLoadingOlderMessages: { ...state.isLoadingOlderMessages, [feedId]: false },
+              }));
+              get().setFeedLoadError(feedId, 'Failed to load older messages. Tap to retry.');
+            }
           }
-
-          // Update state
-          set((state) => ({
-            inMemoryMessages: { ...state.inMemoryMessages, [feedId]: cappedMessages },
-            feedHasMoreMessages: { ...state.feedHasMoreMessages, [feedId]: response.HasMoreMessages ?? true },
-            isLoadingOlderMessages: { ...state.isLoadingOlderMessages, [feedId]: false },
-          }));
-
-          debugLog(`[FeedsStore] loadOlderMessages: completed for feedId=${feedId.substring(0, 8)}..., inMemory count=${cappedMessages.length}`);
-        } catch (error) {
-          console.error('[FeedsStore] loadOlderMessages failed:', error);
-          // Clear loading state on error
-          set((state) => ({
-            isLoadingOlderMessages: { ...state.isLoadingOlderMessages, [feedId]: false },
-          }));
         }
       },
 
@@ -1549,6 +1698,24 @@ export const useFeedsStore = create<FeedsStore>()(
           isLoadingOlderMessages: { ...state.isLoadingOlderMessages, [feedId]: isLoading },
         }));
         debugLog(`[FeedsStore] setIsLoadingOlderMessages: feedId=${feedId.substring(0, 8)}... isLoading=${isLoading}`);
+      },
+
+      setFeedLoadError: (feedId, error) => {
+        set((state) => ({
+          feedLoadError: { ...state.feedLoadError, [feedId]: error },
+        }));
+        if (error) {
+          debugLog(`[FeedsStore] setFeedLoadError: feedId=${feedId.substring(0, 8)}... error=${error}`);
+        }
+      },
+
+      clearFeedLoadError: (feedId) => {
+        set((state) => {
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          const { [feedId]: _removed, ...rest } = state.feedLoadError;
+          return { feedLoadError: rest };
+        });
+        debugLog(`[FeedsStore] clearFeedLoadError: feedId=${feedId.substring(0, 8)}...`);
       },
     }),
     {

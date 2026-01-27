@@ -176,6 +176,7 @@ export interface FeedMessageEntity {
   TimeStamp: { seconds: number; nanos: number };
   BlockIndex: number;
   ReplyToMessageId?: string;  // Reply to Message: parent message reference
+  KeyGeneration?: number;     // FEAT-056: Key generation used to encrypt group messages
 }
 
 export interface GetFeedMessagesForAddressRequest {

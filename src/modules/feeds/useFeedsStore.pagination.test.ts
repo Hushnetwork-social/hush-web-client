@@ -324,4 +324,172 @@ describe('FEAT-056: Load More Pagination', () => {
       warnSpy.mockRestore();
     });
   });
+
+  // ============= Task 3.3: Error Handling with Retry Logic =============
+  describe('feedLoadError state', () => {
+    it('should set error state for a feed', () => {
+      useFeedsStore.getState().setFeedLoadError('feed-1', 'Failed to load messages');
+
+      expect(useFeedsStore.getState().feedLoadError['feed-1']).toBe('Failed to load messages');
+    });
+
+    it('should set null error state to clear error', () => {
+      useFeedsStore.getState().setFeedLoadError('feed-1', 'Failed to load messages');
+      useFeedsStore.getState().setFeedLoadError('feed-1', null);
+
+      expect(useFeedsStore.getState().feedLoadError['feed-1']).toBeNull();
+    });
+
+    it('should track separate errors per feed', () => {
+      useFeedsStore.getState().setFeedLoadError('feed-1', 'Error 1');
+      useFeedsStore.getState().setFeedLoadError('feed-2', 'Error 2');
+
+      expect(useFeedsStore.getState().feedLoadError['feed-1']).toBe('Error 1');
+      expect(useFeedsStore.getState().feedLoadError['feed-2']).toBe('Error 2');
+    });
+
+    it('should clear error state for a specific feed', () => {
+      useFeedsStore.getState().setFeedLoadError('feed-1', 'Error 1');
+      useFeedsStore.getState().setFeedLoadError('feed-2', 'Error 2');
+
+      useFeedsStore.getState().clearFeedLoadError('feed-1');
+
+      expect(useFeedsStore.getState().feedLoadError['feed-1']).toBeUndefined();
+      expect(useFeedsStore.getState().feedLoadError['feed-2']).toBe('Error 2'); // Other feed unchanged
+    });
+
+    it('should clear feedLoadError on reset', () => {
+      useFeedsStore.getState().setFeedLoadError('feed-1', 'Error 1');
+      useFeedsStore.getState().setFeedLoadError('feed-2', 'Error 2');
+
+      useFeedsStore.getState().reset();
+
+      expect(useFeedsStore.getState().feedLoadError).toEqual({});
+    });
+  });
+
+  // ============= Task 3.4: Group Key Rotation Tests =============
+  describe('Group key handling', () => {
+    it('should record missing key generation when keyGeneration is not available', () => {
+      // Set up a group feed
+      useFeedsStore.setState({
+        feeds: [{
+          id: 'group-feed-1',
+          type: 'group',
+          name: 'Test Group',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          unreadCount: 0,
+        }],
+      });
+
+      // Set up group key state with only keyGeneration 2
+      useFeedsStore.getState().setGroupKeyState('group-feed-1', {
+        currentKeyGeneration: 2,
+        keyGenerations: [
+          { keyGeneration: 2, aesKey: 'key-2', validFromBlock: 100 },
+        ],
+        missingKeyGenerations: [],
+      });
+
+      // Record a missing key generation
+      useFeedsStore.getState().recordMissingKeyGeneration('group-feed-1', 1);
+
+      // Should have recorded the missing key
+      const keyState = useFeedsStore.getState().getGroupKeyState('group-feed-1');
+      expect(keyState?.missingKeyGenerations).toContain(1);
+    });
+
+    it('should preserve messages with keyGeneration field', () => {
+      // Create a message with keyGeneration
+      const msg: FeedMessage = {
+        id: 'msg-1',
+        feedId: 'feed-1',
+        content: 'Encrypted content',
+        senderPublicKey: 'user-1',
+        senderName: 'Alice',
+        timestamp: 1000,
+        blockHeight: 100,
+        isConfirmed: true,
+        isRead: true,
+        keyGeneration: 5,
+      };
+
+      useFeedsStore.setState({
+        inMemoryMessages: {
+          'feed-1': [msg],
+        },
+      });
+
+      const result = useFeedsStore.getState().getDisplayMessages('feed-1');
+
+      expect(result[0].keyGeneration).toBe(5);
+    });
+
+    it('should handle messages with decryptionFailed flag', () => {
+      // Create a message that failed to decrypt
+      const msg: FeedMessage = {
+        id: 'msg-1',
+        feedId: 'feed-1',
+        content: '[Message encrypted before you joined]',
+        contentEncrypted: 'encrypted-content-here',
+        senderPublicKey: 'user-1',
+        senderName: 'Alice',
+        timestamp: 1000,
+        blockHeight: 100,
+        isConfirmed: true,
+        isRead: true,
+        keyGeneration: 1,
+        decryptionFailed: true,
+      };
+
+      useFeedsStore.setState({
+        inMemoryMessages: {
+          'feed-1': [msg],
+        },
+      });
+
+      const result = useFeedsStore.getState().getDisplayMessages('feed-1');
+
+      expect(result[0].decryptionFailed).toBe(true);
+      expect(result[0].contentEncrypted).toBe('encrypted-content-here');
+    });
+
+    it('should get group key by specific generation', () => {
+      useFeedsStore.getState().setGroupKeyState('group-feed-1', {
+        currentKeyGeneration: 3,
+        keyGenerations: [
+          { keyGeneration: 1, aesKey: 'key-1', validFromBlock: 100, validToBlock: 199 },
+          { keyGeneration: 2, aesKey: 'key-2', validFromBlock: 200, validToBlock: 299 },
+          { keyGeneration: 3, aesKey: 'key-3', validFromBlock: 300 },
+        ],
+        missingKeyGenerations: [],
+      });
+
+      // Get specific generation
+      const key1 = useFeedsStore.getState().getGroupKeyByGeneration('group-feed-1', 1);
+      const key2 = useFeedsStore.getState().getGroupKeyByGeneration('group-feed-1', 2);
+      const key3 = useFeedsStore.getState().getGroupKeyByGeneration('group-feed-1', 3);
+      const keyMissing = useFeedsStore.getState().getGroupKeyByGeneration('group-feed-1', 99);
+
+      expect(key1).toBe('key-1');
+      expect(key2).toBe('key-2');
+      expect(key3).toBe('key-3');
+      expect(keyMissing).toBeUndefined();
+    });
+
+    it('should detect missing key generations', () => {
+      useFeedsStore.getState().setGroupKeyState('group-feed-1', {
+        currentKeyGeneration: 5,
+        keyGenerations: [
+          { keyGeneration: 3, aesKey: 'key-3', validFromBlock: 300 },
+          { keyGeneration: 5, aesKey: 'key-5', validFromBlock: 500 },
+        ],
+        missingKeyGenerations: [1, 2, 4], // User joined at generation 3, missing 1, 2, 4
+      });
+
+      expect(useFeedsStore.getState().hasMissingKeyGenerations('group-feed-1')).toBe(true);
+      expect(useFeedsStore.getState().getMissingKeyGenerations('group-feed-1')).toEqual([1, 2, 4]);
+    });
+  });
 });
