@@ -182,6 +182,10 @@ export interface GetFeedMessagesForAddressRequest {
   ProfilePublicKey: string;
   BlockIndex: number;
   LastReactionTallyVersion: number;  // Only return tallies newer than this version
+  // FEAT-052: Server pagination support
+  Limit?: number;                    // Max messages to return (default 100)
+  FetchLatest?: boolean;             // Get latest N messages (forward pagination)
+  BeforeBlockIndex?: number;         // Get messages before this block (backward pagination)
 }
 
 // Reaction tally returned with feed messages (Protocol Omega)
@@ -197,6 +201,9 @@ export interface GetFeedMessagesForAddressReply {
   Messages: FeedMessageEntity[];
   ReactionTallies: MessageReactionTallyEntity[];  // Tallies for messages with reactions
   MaxReactionTallyVersion: number;                 // For incremental sync
+  // FEAT-052: Server pagination support
+  HasMoreMessages?: boolean;                       // True if older messages exist
+  OldestBlockIndex?: number;                       // Block index of oldest returned message
 }
 
 // ============= Feed Type Enum =============

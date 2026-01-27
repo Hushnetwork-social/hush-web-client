@@ -83,4 +83,28 @@ export const feedService = {
       request
     );
   },
+
+  /**
+   * FEAT-056: Get older messages before a specific block index (backward pagination)
+   * Used for "Load More" when user scrolls up in conversation.
+   */
+  async getOlderMessages(
+    profilePublicKey: string,
+    beforeBlockIndex: number,
+    limit: number = 50
+  ): Promise<GetFeedMessagesForAddressReply> {
+    const client = getGrpcClient();
+    const request: GetFeedMessagesForAddressRequest = {
+      ProfilePublicKey: profilePublicKey,
+      BlockIndex: 0,  // Not used for backward pagination
+      LastReactionTallyVersion: 0,  // Not tracking reactions for older messages
+      BeforeBlockIndex: beforeBlockIndex,
+      Limit: limit,
+    };
+    return client.unaryCall<GetFeedMessagesForAddressRequest, GetFeedMessagesForAddressReply>(
+      SERVICE_NAME,
+      'GetFeedMessagesForAddress',
+      request
+    );
+  },
 };

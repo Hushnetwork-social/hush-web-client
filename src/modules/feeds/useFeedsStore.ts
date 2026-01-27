@@ -12,6 +12,8 @@ import { persist } from 'zustand/middleware';
 import type { Feed, FeedMessage, FeedCacheMetadata, GroupFeedMember, GroupMemberRole, GroupKeyGeneration, GroupKeyState, SettingsChangeRecord } from '@/types';
 import { debugLog } from '@/lib/debug-logger';
 import { useReactionsStore } from '@/modules/reactions/useReactionsStore';
+import { feedService } from '@/lib/grpc/services/feed';
+import { useAppStore } from '@/stores/useAppStore';
 
 // Feed type mapping from server (FeedType enum)
 // Server: Personal=0, Chat=1, Broadcast=2, Group=3
@@ -330,6 +332,36 @@ interface FeedsActions {
    * This is debounced (150ms) and fire-and-forget (async, doesn't block navigation).
    */
   cleanupFeed: (feedId: string) => void;
+
+  // ============= FEAT-056: Load More Pagination Actions =============
+
+  /**
+   * FEAT-056: Load older messages from server when user scrolls up.
+   * - Skips if already loading for this feed
+   * - Skips if feedHasMoreMessages is false
+   * - Prepends loaded messages to inMemoryMessages
+   * - Enforces 500 message cap (discards oldest)
+   * - Updates feedHasMoreMessages from server response
+   */
+  loadOlderMessages: (feedId: string) => Promise<void>;
+
+  /**
+   * FEAT-056: Get all displayable messages for a feed (merged in-memory + persisted).
+   * - Merges inMemoryMessages (older) with messages (recent)
+   * - Deduplicates by message ID
+   * - Sorts by timestamp ascending
+   */
+  getDisplayMessages: (feedId: string) => FeedMessage[];
+
+  /**
+   * FEAT-056: Set whether a feed has more older messages on server.
+   */
+  setFeedHasMoreMessages: (feedId: string, hasMore: boolean) => void;
+
+  /**
+   * FEAT-056: Set loading state for older messages.
+   */
+  setIsLoadingOlderMessages: (feedId: string, isLoading: boolean) => void;
 }
 
 type FeedsStore = FeedsState & FeedsActions;
@@ -1366,6 +1398,157 @@ export const useFeedsStore = create<FeedsStore>()(
             console.warn('[FeedsStore] cleanupFeed failed:', error);
           }
         }, 150);
+      },
+
+      // ============= FEAT-056: Load More Pagination Implementations =============
+
+      loadOlderMessages: async (feedId) => {
+        const state = get();
+
+        // Guard: Skip if already loading for this feed
+        if (state.isLoadingOlderMessages[feedId]) {
+          debugLog(`[FeedsStore] loadOlderMessages: skipping - already loading for feedId=${feedId.substring(0, 8)}...`);
+          return;
+        }
+
+        // Guard: Skip if we know there are no more messages
+        if (state.feedHasMoreMessages[feedId] === false) {
+          debugLog(`[FeedsStore] loadOlderMessages: skipping - no more messages for feedId=${feedId.substring(0, 8)}...`);
+          return;
+        }
+
+        // Get user's profile public key for the request
+        const profilePublicKey = useAppStore.getState().currentUser?.publicKey;
+        if (!profilePublicKey) {
+          console.warn('[FeedsStore] loadOlderMessages: no profile public key available');
+          return;
+        }
+
+        // Get the oldest blockHeight from displayed messages to use as the "before" cursor
+        const displayMessages = get().getDisplayMessages(feedId);
+        if (displayMessages.length === 0) {
+          debugLog(`[FeedsStore] loadOlderMessages: skipping - no messages to paginate from for feedId=${feedId.substring(0, 8)}...`);
+          return;
+        }
+
+        // Find oldest blockHeight (minimum), filtering out undefined values
+        const blockHeights = displayMessages
+          .map(m => m.blockHeight)
+          .filter((h): h is number => h !== undefined);
+
+        if (blockHeights.length === 0) {
+          debugLog(`[FeedsStore] loadOlderMessages: skipping - no messages with blockHeight for feedId=${feedId.substring(0, 8)}...`);
+          return;
+        }
+
+        const oldestBlockHeight = Math.min(...blockHeights);
+        debugLog(`[FeedsStore] loadOlderMessages: fetching before blockHeight=${oldestBlockHeight} for feedId=${feedId.substring(0, 8)}...`);
+
+        // Mark as loading
+        set((state) => ({
+          isLoadingOlderMessages: { ...state.isLoadingOlderMessages, [feedId]: true },
+        }));
+
+        try {
+          // Fetch older messages from server
+          const response = await feedService.getOlderMessages(profilePublicKey, oldestBlockHeight, 50);
+          debugLog(`[FeedsStore] loadOlderMessages: received ${response.Messages.length} messages, hasMore=${response.HasMoreMessages}`);
+
+          // Convert server entities to FeedMessage format
+          // Note: Server uses PascalCase (FeedId, MessageContent, BlockIndex)
+          // Client uses camelCase (feedId, content, blockHeight)
+          const newMessages: FeedMessage[] = response.Messages.map((msg) => ({
+            id: msg.FeedMessageId,
+            feedId: msg.FeedId,
+            content: msg.MessageContent,
+            senderPublicKey: msg.IssuerPublicAddress,
+            senderName: msg.IssuerName,
+            isConfirmed: true,
+            isRead: true, // Older messages are considered "read" by default
+            timestamp: msg.TimeStamp ? msg.TimeStamp.seconds * 1000 + msg.TimeStamp.nanos / 1000000 : Date.now(),
+            blockHeight: msg.BlockIndex,
+            replyToMessageId: msg.ReplyToMessageId,
+          }));
+
+          // Prepend to inMemoryMessages for this feed
+          const currentInMemory = get().inMemoryMessages[feedId] || [];
+          const mergedMessages = [...newMessages, ...currentInMemory];
+
+          // Enforce 500 message cap (discard oldest if exceeded)
+          const IN_MEMORY_CAP = 500;
+          const cappedMessages = mergedMessages.length > IN_MEMORY_CAP
+            ? mergedMessages.slice(-IN_MEMORY_CAP) // Keep newest N messages
+            : mergedMessages;
+
+          if (mergedMessages.length > IN_MEMORY_CAP) {
+            debugLog(`[FeedsStore] loadOlderMessages: capped inMemoryMessages from ${mergedMessages.length} to ${IN_MEMORY_CAP}`);
+          }
+
+          // Update state
+          set((state) => ({
+            inMemoryMessages: { ...state.inMemoryMessages, [feedId]: cappedMessages },
+            feedHasMoreMessages: { ...state.feedHasMoreMessages, [feedId]: response.HasMoreMessages ?? true },
+            isLoadingOlderMessages: { ...state.isLoadingOlderMessages, [feedId]: false },
+          }));
+
+          debugLog(`[FeedsStore] loadOlderMessages: completed for feedId=${feedId.substring(0, 8)}..., inMemory count=${cappedMessages.length}`);
+        } catch (error) {
+          console.error('[FeedsStore] loadOlderMessages failed:', error);
+          // Clear loading state on error
+          set((state) => ({
+            isLoadingOlderMessages: { ...state.isLoadingOlderMessages, [feedId]: false },
+          }));
+        }
+      },
+
+      getDisplayMessages: (feedId) => {
+        const state = get();
+        const inMemory = state.inMemoryMessages[feedId] || [];
+        const persisted = state.messages[feedId] || [];
+
+        // Fast path: if no in-memory messages, just return persisted
+        if (inMemory.length === 0) {
+          return persisted;
+        }
+
+        // Merge and deduplicate by message ID
+        const seenIds = new Set<string>();
+        const merged: FeedMessage[] = [];
+
+        // Add in-memory messages first (older messages)
+        for (const msg of inMemory) {
+          if (!seenIds.has(msg.id)) {
+            seenIds.add(msg.id);
+            merged.push(msg);
+          }
+        }
+
+        // Add persisted messages (recent messages), skip duplicates
+        for (const msg of persisted) {
+          if (!seenIds.has(msg.id)) {
+            seenIds.add(msg.id);
+            merged.push(msg);
+          }
+        }
+
+        // Sort by timestamp ascending
+        merged.sort((a, b) => a.timestamp - b.timestamp);
+
+        return merged;
+      },
+
+      setFeedHasMoreMessages: (feedId, hasMore) => {
+        set((state) => ({
+          feedHasMoreMessages: { ...state.feedHasMoreMessages, [feedId]: hasMore },
+        }));
+        debugLog(`[FeedsStore] setFeedHasMoreMessages: feedId=${feedId.substring(0, 8)}... hasMore=${hasMore}`);
+      },
+
+      setIsLoadingOlderMessages: (feedId, isLoading) => {
+        set((state) => ({
+          isLoadingOlderMessages: { ...state.isLoadingOlderMessages, [feedId]: isLoading },
+        }));
+        debugLog(`[FeedsStore] setIsLoadingOlderMessages: feedId=${feedId.substring(0, 8)}... isLoading=${isLoading}`);
       },
     }),
     {
