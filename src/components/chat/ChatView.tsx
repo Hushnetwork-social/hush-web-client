@@ -2,7 +2,7 @@
 
 import { useRef, useMemo, useCallback, useState, useEffect } from "react";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
-import { MessageSquare, Lock, ArrowLeft, Users, Settings, LogOut, Ban, Globe } from "lucide-react";
+import { MessageSquare, Lock, ArrowLeft, Users, Settings, LogOut, Ban, Globe, Loader2, MessageCircle, AlertCircle, Info } from "lucide-react";
 import { MessageBubble } from "./MessageBubble";
 import { SystemMessage } from "./SystemMessage";
 import { MessageInput, type MessageInputHandle } from "./MessageInput";
@@ -10,6 +10,7 @@ import { ReplyContextBar } from "./ReplyContextBar";
 import type { MentionParticipant } from "./MentionOverlay";
 import { MemberListPanel } from "@/components/groups/MemberListPanel";
 import { GroupSettingsPanel } from "@/components/groups/GroupSettingsPanel";
+import { JumpToBottomButton } from "./JumpToBottomButton";
 import { MentionNavButton, getUnreadCount, getUnreadMentions, markMentionRead, useMessageHighlight } from "@/lib/mentions";
 import { useAppStore } from "@/stores";
 import { useFeedsStore, sendMessage, markFeedAsRead } from "@/modules/feeds";
@@ -87,6 +88,32 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
     (state) => state.messages[feed.id] ?? EMPTY_MESSAGES
   );
   const groupMembersMap = useFeedsStore((state) => state.groupMembers);
+
+  // FEAT-056: Subscribe to loading state for older messages
+  const isLoadingOlderMessages = useFeedsStore(
+    (state) => state.isLoadingOlderMessages[feed.id] ?? false
+  );
+
+  // FEAT-056: Subscribe to hasMoreMessages state (false = beginning of conversation)
+  // Default to true (assume more messages exist until proven otherwise)
+  const hasMoreMessages = useFeedsStore(
+    (state) => state.feedHasMoreMessages[feed.id] ?? true
+  );
+
+  // FEAT-056: Subscribe to in-memory messages count for firstItemIndex calculation
+  const inMemoryMessagesCount = useFeedsStore(
+    (state) => (state.inMemoryMessages[feed.id] ?? []).length
+  );
+
+  // FEAT-056: Subscribe to error state for load failures
+  const feedLoadError = useFeedsStore(
+    (state) => state.feedLoadError[feed.id] ?? null
+  );
+
+  // FEAT-056: Subscribe to "was capped" state for memory cap notice
+  const feedWasCapped = useFeedsStore(
+    (state) => state.feedWasCapped[feed.id] ?? null
+  );
 
   const regularMessages = useMemo(
     () => feedMessages.filter(m => !m.decryptionFailed),
@@ -410,6 +437,14 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   // State for unread mentions count (for MentionNavButton)
   const [unreadMentionCount, setUnreadMentionCount] = useState(() => getUnreadCount(feed.id));
 
+  // FEAT-056: State for Jump to Bottom button
+  // Tracks whether user is at the bottom of the chat
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  // Tracks count of new messages since user scrolled away from bottom
+  const [newMessageCount, setNewMessageCount] = useState(0);
+  // Track chatItems length when user scrolled away to calculate new messages
+  const chatItemsCountWhenScrolledAwayRef = useRef<number>(0);
+
   // Message highlight hook for mention navigation
   const { highlightMessage } = useMessageHighlight();
 
@@ -695,6 +730,107 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   useEffect(() => {
     mentionNavIndexRef.current = 0;
   }, [feed.id]);
+
+  // FEAT-056: Handle atBottomStateChange from Virtuoso
+  const handleAtBottomStateChange = useCallback((atBottom: boolean) => {
+    setIsAtBottom(atBottom);
+    if (atBottom) {
+      // User scrolled back to bottom - reset new message count
+      setNewMessageCount(0);
+    } else {
+      // User scrolled away - record current count
+      chatItemsCountWhenScrolledAwayRef.current = chatItems.length;
+    }
+  }, [chatItems.length]);
+
+  // FEAT-056: Track new messages arriving while scrolled away
+  useEffect(() => {
+    if (!isAtBottom && chatItemsCountWhenScrolledAwayRef.current > 0) {
+      const newCount = chatItems.length - chatItemsCountWhenScrolledAwayRef.current;
+      if (newCount > 0) {
+        setNewMessageCount(newCount);
+      }
+    }
+  }, [isAtBottom, chatItems.length]);
+
+  // FEAT-056: Reset Jump to Bottom state when feed changes
+  useEffect(() => {
+    setIsAtBottom(true);
+    setNewMessageCount(0);
+    chatItemsCountWhenScrolledAwayRef.current = 0;
+  }, [feed.id]);
+
+  // FEAT-056: Handle Jump to Bottom button click
+  const handleJumpToBottom = useCallback(() => {
+    if (virtuosoRef.current) {
+      virtuosoRef.current.scrollToIndex({
+        index: chatItems.length - 1,
+        behavior: "smooth",
+        align: "end",
+      });
+    }
+    setNewMessageCount(0);
+    setIsAtBottom(true);
+  }, [chatItems.length]);
+
+  // FEAT-056: Debounced startReached handler for loading older messages
+  const startReachedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleStartReached = useCallback(() => {
+    // Skip if already loading or no more messages
+    if (isLoadingOlderMessages || !hasMoreMessages) {
+      return;
+    }
+
+    // Clear any existing debounce timeout
+    if (startReachedTimeoutRef.current) {
+      clearTimeout(startReachedTimeoutRef.current);
+    }
+
+    // Debounce: wait 500ms before triggering load
+    startReachedTimeoutRef.current = setTimeout(() => {
+      // Double-check conditions after debounce
+      const state = useFeedsStore.getState();
+      if (state.isLoadingOlderMessages[feed.id] || state.feedHasMoreMessages[feed.id] === false) {
+        return;
+      }
+      debugLog(`[ChatView] startReached triggered, calling loadOlderMessages for feed ${feed.id.substring(0, 8)}...`);
+      useFeedsStore.getState().loadOlderMessages(feed.id);
+    }, 500);
+  }, [feed.id, isLoadingOlderMessages, hasMoreMessages]);
+
+  // Cleanup startReached debounce timeout on unmount or feed change
+  useEffect(() => {
+    return () => {
+      if (startReachedTimeoutRef.current) {
+        clearTimeout(startReachedTimeoutRef.current);
+      }
+    };
+  }, [feed.id]);
+
+  // FEAT-056: Calculate firstItemIndex for scroll position preservation
+  // Using a large base number, subtract prepended message count
+  // This allows Virtuoso to maintain scroll position when items are prepended
+  const FIRST_ITEM_INDEX_BASE = 10000;
+  const firstItemIndex = useMemo(() => {
+    return Math.max(0, FIRST_ITEM_INDEX_BASE - inMemoryMessagesCount);
+  }, [inMemoryMessagesCount]);
+
+  // FEAT-056: Handle retry when load error occurs
+  const handleRetryLoad = useCallback(() => {
+    useFeedsStore.getState().clearFeedLoadError(feed.id);
+    useFeedsStore.getState().loadOlderMessages(feed.id);
+  }, [feed.id]);
+
+  // FEAT-056: Auto-dismiss memory cap notice after 3 seconds
+  useEffect(() => {
+    if (feedWasCapped) {
+      const timer = setTimeout(() => {
+        useFeedsStore.getState().clearFeedWasCapped(feed.id);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [feedWasCapped, feed.id]);
 
   // FEAT-051: Mark feed as read when viewing
   // This effect runs when the feed is opened and when new messages arrive while viewing
@@ -993,6 +1129,15 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
           />
         </div>
 
+        {/* FEAT-056: Floating Jump to Bottom Button - bottom-right */}
+        <div className="absolute bottom-2 right-2 z-10">
+          <JumpToBottomButton
+            count={newMessageCount}
+            isVisible={!isAtBottom}
+            onJump={handleJumpToBottom}
+          />
+        </div>
+
         {chatItems.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center p-4">
             <div className="w-16 h-16 rounded-full bg-hush-bg-dark flex items-center justify-center mb-4">
@@ -1013,9 +1158,54 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
             data={chatItems}
             followOutput="smooth"
             initialTopMostItemIndex={chatItems.length - 1}
+            firstItemIndex={firstItemIndex}
             className="flex-1"
             computeItemKey={(index, item) => item.id}
             rangeChanged={handleRangeChanged}
+            atBottomStateChange={handleAtBottomStateChange}
+            startReached={handleStartReached}
+            components={{
+              // FEAT-056: Header shows loading spinner, error state, memory cap notice, or "Beginning of conversation" indicator
+              Header: () => {
+                if (isLoadingOlderMessages) {
+                  return (
+                    <div className="flex items-center justify-center py-4">
+                      <Loader2 className="w-5 h-5 text-hush-purple animate-spin" />
+                      <span className="ml-2 text-sm text-hush-text-accent">Loading older messages...</span>
+                    </div>
+                  );
+                }
+                if (feedLoadError) {
+                  return (
+                    <button
+                      onClick={handleRetryLoad}
+                      className="w-full flex items-center justify-center py-4 text-orange-400 hover:text-orange-300 transition-colors"
+                    >
+                      <AlertCircle className="w-4 h-4 mr-2" />
+                      <span className="text-sm">Unable to load messages. Tap to retry</span>
+                    </button>
+                  );
+                }
+                // Show memory cap notice (auto-dismisses after 3s)
+                if (feedWasCapped) {
+                  return (
+                    <div className="flex items-center justify-center py-3 text-hush-text-accent bg-hush-bg-element/50">
+                      <Info className="w-4 h-4 mr-2" />
+                      <span className="text-xs">Older messages unloaded to save memory</span>
+                    </div>
+                  );
+                }
+                if (!hasMoreMessages) {
+                  return (
+                    <div className="flex items-center justify-center py-4 text-hush-text-accent">
+                      <MessageCircle className="w-4 h-4 mr-2" />
+                      <span className="text-sm">Beginning of conversation</span>
+                    </div>
+                  );
+                }
+                return null;
+              },
+            }}
             itemContent={(index, item) => (
               <div className="px-4 py-1">
                 {item.type === 'system' ? (

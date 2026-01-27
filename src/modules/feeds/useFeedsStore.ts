@@ -111,6 +111,14 @@ interface FeedsState {
    * Memory-only, NOT persisted.
    */
   feedLoadError: Record<string, string | null>;
+
+  /**
+   * FEAT-056: Timestamp when messages were last capped for a feed.
+   * - null/undefined: No recent capping
+   * - number: Timestamp when capping occurred (for showing notice)
+   * Memory-only, NOT persisted.
+   */
+  feedWasCapped: Record<string, number | null>;
 }
 
 interface FeedsActions {
@@ -381,6 +389,11 @@ interface FeedsActions {
    * FEAT-056: Clear error state for a feed (e.g., on successful retry).
    */
   clearFeedLoadError: (feedId: string) => void;
+
+  /**
+   * FEAT-056: Clear the "was capped" notice state for a feed.
+   */
+  clearFeedWasCapped: (feedId: string) => void;
 }
 
 type FeedsStore = FeedsState & FeedsActions;
@@ -408,6 +421,7 @@ const initialState: FeedsState = {
   feedHasMoreMessages: {},
   isLoadingOlderMessages: {},
   feedLoadError: {},
+  feedWasCapped: {},
 };
 
 /**
@@ -1389,14 +1403,23 @@ export const useFeedsStore = create<FeedsStore>()(
             // 1b. FEAT-056: Clear pagination state for this feed
             const currentHasMore = get().feedHasMoreMessages;
             const currentIsLoading = get().isLoadingOlderMessages;
-            if (currentHasMore[feedId] !== undefined || currentIsLoading[feedId] !== undefined) {
+            const currentLoadError = get().feedLoadError;
+            const currentWasCapped = get().feedWasCapped;
+            if (currentHasMore[feedId] !== undefined || currentIsLoading[feedId] !== undefined ||
+                currentLoadError[feedId] !== undefined || currentWasCapped[feedId] !== undefined) {
               // eslint-disable-next-line @typescript-eslint/no-unused-vars
               const { [feedId]: _hasMore, ...remainingHasMore } = currentHasMore;
               // eslint-disable-next-line @typescript-eslint/no-unused-vars
               const { [feedId]: _isLoading, ...remainingIsLoading } = currentIsLoading;
+              // eslint-disable-next-line @typescript-eslint/no-unused-vars
+              const { [feedId]: _loadError, ...remainingLoadError } = currentLoadError;
+              // eslint-disable-next-line @typescript-eslint/no-unused-vars
+              const { [feedId]: _wasCapped, ...remainingWasCapped } = currentWasCapped;
               set({
                 feedHasMoreMessages: remainingHasMore,
                 isLoadingOlderMessages: remainingIsLoading,
+                feedLoadError: remainingLoadError,
+                feedWasCapped: remainingWasCapped,
               });
               debugLog(`[FeedsStore] cleanupFeed: cleared pagination state for feedId=${feedId.substring(0, 8)}...`);
             }
@@ -1614,11 +1637,12 @@ export const useFeedsStore = create<FeedsStore>()(
 
             // Enforce 500 message cap (discard oldest if exceeded)
             const IN_MEMORY_CAP = 500;
-            const cappedMessages = mergedMessages.length > IN_MEMORY_CAP
+            const wasCapped = mergedMessages.length > IN_MEMORY_CAP;
+            const cappedMessages = wasCapped
               ? mergedMessages.slice(-IN_MEMORY_CAP) // Keep newest N messages
               : mergedMessages;
 
-            if (mergedMessages.length > IN_MEMORY_CAP) {
+            if (wasCapped) {
               debugLog(`[FeedsStore] loadOlderMessages: capped inMemoryMessages from ${mergedMessages.length} to ${IN_MEMORY_CAP}`);
             }
 
@@ -1627,6 +1651,8 @@ export const useFeedsStore = create<FeedsStore>()(
               inMemoryMessages: { ...state.inMemoryMessages, [feedId]: cappedMessages },
               feedHasMoreMessages: { ...state.feedHasMoreMessages, [feedId]: response.HasMoreMessages ?? true },
               isLoadingOlderMessages: { ...state.isLoadingOlderMessages, [feedId]: false },
+              // FEAT-056: Track when capping occurred for showing notice
+              ...(wasCapped && { feedWasCapped: { ...state.feedWasCapped, [feedId]: Date.now() } }),
             }));
 
             // Clear any previous error on success
@@ -1716,6 +1742,14 @@ export const useFeedsStore = create<FeedsStore>()(
           return { feedLoadError: rest };
         });
         debugLog(`[FeedsStore] clearFeedLoadError: feedId=${feedId.substring(0, 8)}...`);
+      },
+
+      clearFeedWasCapped: (feedId) => {
+        set((state) => {
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          const { [feedId]: _removed, ...rest } = state.feedWasCapped;
+          return { feedWasCapped: rest };
+        });
       },
     }),
     {

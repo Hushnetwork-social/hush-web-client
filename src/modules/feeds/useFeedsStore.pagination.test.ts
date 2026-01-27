@@ -492,4 +492,57 @@ describe('FEAT-056: Load More Pagination', () => {
       expect(useFeedsStore.getState().getMissingKeyGenerations('group-feed-1')).toEqual([1, 2, 4]);
     });
   });
+
+  // ============= Task 4.7: Memory Cap Notice Tests =============
+  describe('feedWasCapped state', () => {
+    it('should initialize feedWasCapped as empty object', () => {
+      expect(useFeedsStore.getState().feedWasCapped).toEqual({});
+    });
+
+    it('should clear feedWasCapped for a specific feed', () => {
+      // Manually set feedWasCapped state
+      useFeedsStore.setState({
+        feedWasCapped: {
+          'feed-1': Date.now(),
+          'feed-2': Date.now() - 1000,
+        },
+      });
+
+      useFeedsStore.getState().clearFeedWasCapped('feed-1');
+
+      expect(useFeedsStore.getState().feedWasCapped['feed-1']).toBeUndefined();
+      expect(useFeedsStore.getState().feedWasCapped['feed-2']).toBeDefined(); // Other feed unchanged
+    });
+
+    it('should clear feedWasCapped on cleanupFeed', async () => {
+      // Set up feedWasCapped state
+      useFeedsStore.setState({
+        feedWasCapped: {
+          'feed-1': Date.now(),
+          'feed-2': Date.now(),
+        },
+      });
+
+      // Call cleanupFeed
+      useFeedsStore.getState().cleanupFeed('feed-1');
+
+      // Wait for debounce
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      expect(useFeedsStore.getState().feedWasCapped['feed-1']).toBeUndefined();
+      expect(useFeedsStore.getState().feedWasCapped['feed-2']).toBeDefined(); // Other feed unchanged
+    });
+
+    it('should clear feedWasCapped on reset', () => {
+      useFeedsStore.setState({
+        feedWasCapped: {
+          'feed-1': Date.now(),
+        },
+      });
+
+      useFeedsStore.getState().reset();
+
+      expect(useFeedsStore.getState().feedWasCapped).toEqual({});
+    });
+  });
 });
