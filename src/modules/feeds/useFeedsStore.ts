@@ -83,6 +83,23 @@ interface FeedsState {
    * Populated by FEAT-056 (Load More Pagination).
    */
   inMemoryMessages: Record<string, FeedMessage[]>;
+
+  // ============= FEAT-056: Load More Pagination State =============
+
+  /**
+   * FEAT-056: Tracks whether each feed has more older messages on the server.
+   * - undefined: Unknown (not yet attempted to load more)
+   * - true: Server has more messages to load
+   * - false: No more messages (beginning of conversation reached)
+   * Memory-only, NOT persisted.
+   */
+  feedHasMoreMessages: Record<string, boolean>;
+
+  /**
+   * FEAT-056: Tracks loading state per feed to prevent concurrent requests.
+   * Memory-only, NOT persisted.
+   */
+  isLoadingOlderMessages: Record<string, boolean>;
 }
 
 interface FeedsActions {
@@ -337,6 +354,8 @@ const initialState: FeedsState = {
   groupKeyStates: {},
   feedCacheMetadata: {},
   inMemoryMessages: {},
+  feedHasMoreMessages: {},
+  isLoadingOlderMessages: {},
 };
 
 /**
@@ -1313,6 +1332,21 @@ export const useFeedsStore = create<FeedsStore>()(
               const { [feedId]: _removed, ...remainingInMemory } = currentInMemory;
               set({ inMemoryMessages: remainingInMemory });
               debugLog(`[FeedsStore] cleanupFeed: cleared inMemoryMessages for feedId=${feedId.substring(0, 8)}...`);
+            }
+
+            // 1b. FEAT-056: Clear pagination state for this feed
+            const currentHasMore = get().feedHasMoreMessages;
+            const currentIsLoading = get().isLoadingOlderMessages;
+            if (currentHasMore[feedId] !== undefined || currentIsLoading[feedId] !== undefined) {
+              // eslint-disable-next-line @typescript-eslint/no-unused-vars
+              const { [feedId]: _hasMore, ...remainingHasMore } = currentHasMore;
+              // eslint-disable-next-line @typescript-eslint/no-unused-vars
+              const { [feedId]: _isLoading, ...remainingIsLoading } = currentIsLoading;
+              set({
+                feedHasMoreMessages: remainingHasMore,
+                isLoadingOlderMessages: remainingIsLoading,
+              });
+              debugLog(`[FeedsStore] cleanupFeed: cleared pagination state for feedId=${feedId.substring(0, 8)}...`);
             }
 
             // 2. Trim localStorage messages to 100 read + all unread
