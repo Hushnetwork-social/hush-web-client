@@ -1844,7 +1844,9 @@ export const useFeedsStore = create<FeedsStore>()(
 
 // FEAT-055: Expose store to window for E2E test verification
 // This allows E2E tests to intercept store actions like cleanupFeed
-if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+// Check for NEXT_PUBLIC_DEBUG_LOGGING since E2E tests run with NODE_ENV=production
+const isE2EOrDev = process.env.NODE_ENV !== 'production' || process.env.NEXT_PUBLIC_DEBUG_LOGGING === 'true';
+if (typeof window !== 'undefined' && isE2EOrDev) {
   (window as unknown as { __zustand_stores?: Record<string, unknown> }).__zustand_stores = {
     ...((window as unknown as { __zustand_stores?: Record<string, unknown> }).__zustand_stores || {}),
     feedsStore: useFeedsStore,
