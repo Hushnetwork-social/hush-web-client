@@ -323,6 +323,44 @@ describe('FEAT-056: Load More Pagination', () => {
 
       warnSpy.mockRestore();
     });
+
+    it('should skip and set hasMoreMessages=false when oldest message is near feed creation block', async () => {
+      // Mock useAppStore to provide a user profile
+      const { useAppStore } = await import('@/stores');
+      useAppStore.setState({
+        currentUser: {
+          publicKey: 'test-public-key',
+          name: 'Test User',
+        },
+      });
+
+      // Add a feed with blockIndex (creation block)
+      useFeedsStore.getState().addFeeds([{
+        id: 'feed-1',
+        type: 'chat',
+        name: 'Test Feed',
+        participants: [],
+        unreadCount: 0,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        blockIndex: 100, // Feed created at block 100
+      }]);
+
+      // Add messages starting at block 102 (within 5 blocks of creation)
+      useFeedsStore.getState().setMessages('feed-1', [
+        createMessage('msg-1', 'feed-1', 1000, 102),
+        createMessage('msg-2', 'feed-1', 1001, 103),
+      ]);
+
+      // Attempt to load older messages
+      await useFeedsStore.getState().loadOlderMessages('feed-1');
+
+      // Should have set feedHasMoreMessages to false (we're at the beginning)
+      expect(useFeedsStore.getState().feedHasMoreMessages['feed-1']).toBe(false);
+
+      // Loading state should not have been set (early return)
+      expect(useFeedsStore.getState().isLoadingOlderMessages['feed-1']).toBeUndefined();
+    });
   });
 
   // ============= Task 3.3: Error Handling with Retry Logic =============

@@ -1558,6 +1558,19 @@ export const useFeedsStore = create<FeedsStore>()(
         }
 
         const oldestBlockHeight = Math.min(...blockHeights);
+
+        // FEAT-056: Proactive guard - if oldest message is at or very close to feed creation, skip
+        // This prevents unnecessary server requests when we're clearly at the beginning of the feed
+        const feed = get().getFeed(feedId);
+        if (feed?.blockIndex !== undefined && oldestBlockHeight <= feed.blockIndex + 5) {
+          // The oldest message is within 5 blocks of feed creation - we're at the beginning
+          debugLog(`[FeedsStore] loadOlderMessages: skipping - oldest message (block ${oldestBlockHeight}) is near feed creation (block ${feed.blockIndex}) for feedId=${feedId.substring(0, 8)}...`);
+          set((state) => ({
+            feedHasMoreMessages: { ...state.feedHasMoreMessages, [feedId]: false },
+          }));
+          return;
+        }
+
         debugLog(`[FeedsStore] loadOlderMessages: fetching before blockHeight=${oldestBlockHeight} for feedId=${feedId.substring(0, 8)}...`);
 
         // Mark as loading
@@ -1734,6 +1747,24 @@ export const useFeedsStore = create<FeedsStore>()(
             debugLog(`[FeedsStore] loadOlderMessages: completed for feedId=${feedId.substring(0, 8)}..., inMemory count=${cappedMessages.length}`);
             return; // Success - exit the function
           } catch (error) {
+            // FEAT-056: Check if this is a decode error (empty/malformed response)
+            // This typically happens when we're at the beginning of the feed and server returns empty result
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            const isDecodeError = errorMessage.includes('too short') ||
+                                  errorMessage.includes('decode') ||
+                                  errorMessage.includes('Invalid gRPC');
+
+            if (isDecodeError) {
+              // Treat decode errors as "no more messages" - this is likely the beginning of the feed
+              debugLog(`[FeedsStore] loadOlderMessages: decode error detected, treating as end of feed for feedId=${feedId.substring(0, 8)}...`);
+              set((state) => ({
+                feedHasMoreMessages: { ...state.feedHasMoreMessages, [feedId]: false },
+                isLoadingOlderMessages: { ...state.isLoadingOlderMessages, [feedId]: false },
+              }));
+              get().clearFeedLoadError(feedId);
+              return; // Exit - no more messages
+            }
+
             if (attempt < MAX_RETRIES) {
               debugLog(`[FeedsStore] loadOlderMessages: attempt ${attempt}/${MAX_RETRIES} failed, retrying...`);
               // Silent retry - continue to next iteration
