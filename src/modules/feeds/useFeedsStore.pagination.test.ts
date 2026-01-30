@@ -361,6 +361,54 @@ describe('FEAT-056: Load More Pagination', () => {
       // Loading state should not have been set (early return)
       expect(useFeedsStore.getState().isLoadingOlderMessages['feed-1']).toBeUndefined();
     });
+
+    it('should skip when oldest message has larger gap from feed creation (real-world scenario)', async () => {
+      // Reproduces real-world scenario from console logs:
+      // - Feed created at block 2133
+      // - First message at block 2142 (9 block gap)
+      // - This is NORMAL for new groups where time passes between creation and first message
+      // - The guard MUST still trigger and prevent useless API calls
+
+      // Mock useAppStore to provide a user profile
+      const { useAppStore } = await import('@/stores');
+      useAppStore.setState({
+        currentUser: {
+          publicKey: 'test-public-key',
+          name: 'Test User',
+        },
+      });
+
+      // Add a group feed with blockIndex 2133 (real data from logs)
+      useFeedsStore.getState().addFeeds([{
+        id: 'feed-1',
+        type: 'group',
+        name: 'NewPublicGroup_IV',
+        participants: [],
+        unreadCount: 0,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        blockIndex: 2133, // Feed created at block 2133
+      }]);
+
+      // Messages starting at block 2142 (9 block gap - realistic for new groups)
+      useFeedsStore.getState().setMessages('feed-1', [
+        createMessage('msg-1', 'feed-1', 1000, 2142),
+        createMessage('msg-2', 'feed-1', 1001, 2143),
+        createMessage('msg-3', 'feed-1', 1002, 2144),
+        createMessage('msg-4', 'feed-1', 1003, 2156),
+      ]);
+
+      // Attempt to load older messages
+      await useFeedsStore.getState().loadOlderMessages('feed-1');
+
+      // EXPECTED: Should set hasMoreMessages to false WITHOUT calling the API
+      // The guard should recognize that oldest message (block 2142) is close enough
+      // to feed creation (block 2133) that there can't be any older messages
+      expect(useFeedsStore.getState().feedHasMoreMessages['feed-1']).toBe(false);
+
+      // Loading state should not have been set (early return from guard)
+      expect(useFeedsStore.getState().isLoadingOlderMessages['feed-1']).toBeUndefined();
+    });
   });
 
   // ============= Task 3.3: Error Handling with Retry Logic =============

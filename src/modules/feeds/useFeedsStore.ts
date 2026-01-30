@@ -1559,11 +1559,15 @@ export const useFeedsStore = create<FeedsStore>()(
 
         const oldestBlockHeight = Math.min(...blockHeights);
 
-        // FEAT-056: Proactive guard - if oldest message is at or very close to feed creation, skip
+        // FEAT-056: Proactive guard - if oldest message is at or close to feed creation, skip
         // This prevents unnecessary server requests when we're clearly at the beginning of the feed
+        // Real-world scenario: A new group feed might be created (e.g., block 2133) and first message
+        // arrives several blocks later (e.g., block 2142 - a 9-block gap). This is completely normal.
+        // Use 50 blocks as threshold to be safe (covers ~few minutes at typical block rates)
+        const FEED_CREATION_THRESHOLD_BLOCKS = 50;
         const feed = get().getFeed(feedId);
-        if (feed?.blockIndex !== undefined && oldestBlockHeight <= feed.blockIndex + 5) {
-          // The oldest message is within 5 blocks of feed creation - we're at the beginning
+        if (feed?.blockIndex !== undefined && oldestBlockHeight <= feed.blockIndex + FEED_CREATION_THRESHOLD_BLOCKS) {
+          // The oldest message is within threshold of feed creation - we're at the beginning
           debugLog(`[FeedsStore] loadOlderMessages: skipping - oldest message (block ${oldestBlockHeight}) is near feed creation (block ${feed.blockIndex}) for feedId=${feedId.substring(0, 8)}...`);
           set((state) => ({
             feedHasMoreMessages: { ...state.feedHasMoreMessages, [feedId]: false },
