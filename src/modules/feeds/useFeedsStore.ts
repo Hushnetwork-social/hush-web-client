@@ -1841,3 +1841,12 @@ export const useFeedsStore = create<FeedsStore>()(
     }
   )
 );
+
+// FEAT-055: Expose store to window for E2E test verification
+// This allows E2E tests to intercept store actions like cleanupFeed
+if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+  (window as unknown as { __zustand_stores?: Record<string, unknown> }).__zustand_stores = {
+    ...((window as unknown as { __zustand_stores?: Record<string, unknown> }).__zustand_stores || {}),
+    feedsStore: useFeedsStore,
+  };
+}
