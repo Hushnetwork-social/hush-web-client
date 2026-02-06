@@ -99,6 +99,8 @@ export interface NewFeedMessagePayload {
   FeedId: string;
   MessageContent: string; // Encrypted with feed's AES key
   ReplyToMessageId?: string; // Reply to Message: parent message reference
+  KeyGeneration?: number; // Group feeds: which key generation was used for encryption
+  AuthorCommitment?: string; // Protocol Omega: anonymous reactions commitment (base64)
 }
 
 // ChatFeedParticipant - matches server's ChatFeedParticipant record
@@ -375,7 +377,8 @@ export async function createFeedMessageTransaction(
   feedAesKey: string,
   signingPrivateKey: Uint8Array,
   signingPublicAddress: string,
-  replyToMessageId?: string
+  replyToMessageId?: string,
+  keyGeneration?: number
 ): Promise<{ signedTransaction: string; messageId: string }> {
   // Generate unique message ID
   const messageId = generateGuid();
@@ -389,6 +392,7 @@ export async function createFeedMessageTransaction(
     FeedId: feedId,
     MessageContent: encryptedContent,
     ...(replyToMessageId && { ReplyToMessageId: replyToMessageId }),
+    ...(keyGeneration !== undefined && { KeyGeneration: keyGeneration }),
   };
 
   // Create unsigned transaction

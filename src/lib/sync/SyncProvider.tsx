@@ -309,6 +309,24 @@ export function SyncProvider({ children, config }: SyncProviderProps) {
     (window as unknown as Record<string, unknown>).__e2e_triggerSync = async (): Promise<boolean> => {
       console.log('[E2E] Manual sync triggered');
 
+      // CRITICAL: Wait for any in-progress sync to complete first
+      // This prevents the new sync from being skipped due to the isSyncing guard
+      // in FeedsSyncable. Without this, rapid sync triggers can skip syncs entirely.
+      const maxWaitMs = 10000; // Max 10 seconds
+      const pollIntervalMs = 100;
+      let waitedMs = 0;
+
+      // Check if FeedsSyncable is currently syncing via the store's syncing flag
+      while (useFeedsStore.getState().isSyncing && waitedMs < maxWaitMs) {
+        console.log(`[E2E] Waiting for in-progress sync to complete... (${waitedMs}ms)`);
+        await new Promise<void>((resolve) => setTimeout(resolve, pollIntervalMs));
+        waitedMs += pollIntervalMs;
+      }
+
+      if (waitedMs > 0) {
+        console.log(`[E2E] Previous sync completed after ${waitedMs}ms`);
+      }
+
       const alwaysSyncables = syncablesRef.current.filter((s) => !s.requiresAuth);
       const authSyncables = syncablesRef.current.filter((s) => s.requiresAuth);
 
@@ -320,6 +338,14 @@ export function SyncProvider({ children, config }: SyncProviderProps) {
       // Run auth-dependent syncables if authenticated
       if (isAuthenticated && authSyncables.length > 0) {
         await runSyncTasks(authSyncables, 'E2E-Manual');
+      }
+
+      // Wait for sync to actually complete (not just be triggered)
+      // The runSyncTasks call above might return while sync is still in progress
+      waitedMs = 0;
+      while (useFeedsStore.getState().isSyncing && waitedMs < maxWaitMs) {
+        await new Promise<void>((resolve) => setTimeout(resolve, pollIntervalMs));
+        waitedMs += pollIntervalMs;
       }
 
       // Wait for React to process state updates and re-render

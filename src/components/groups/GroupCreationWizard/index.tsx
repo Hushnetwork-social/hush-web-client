@@ -15,6 +15,15 @@ import {
 } from "@/lib/crypto/transactions";
 import { hexToBytes } from "@/lib/crypto/keys";
 import { submitTransaction } from "@/modules/blockchain";
+import { buildApiUrl } from "@/lib/api-config";
+
+// Status types for creation flow (mirrors auth/page.tsx pattern)
+export type CreationStatus =
+  | "idle"
+  | "creating"
+  | "waiting_for_blockchain"
+  | "loading_data"
+  | "done";
 
 interface GroupCreationWizardProps {
   isOpen: boolean;
@@ -40,6 +49,7 @@ export const GroupCreationWizard = memo(function GroupCreationWizard({
   // Local UI state
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [creationStatus, setCreationStatus] = useState<CreationStatus>("idle");
 
   // Get current user credentials
   const credentials = useAppStore((state) => state.credentials);
@@ -51,6 +61,7 @@ export const GroupCreationWizard = memo(function GroupCreationWizard({
       flow.reset();
       setIsCreating(false);
       setError(null);
+      setCreationStatus("idle");
     }
   }, [isOpen, flow]);
 
@@ -97,6 +108,7 @@ export const GroupCreationWizard = memo(function GroupCreationWizard({
 
       setIsCreating(true);
       setError(null);
+      setCreationStatus("creating");
 
       try {
         debugLog("[GroupCreationWizard] Creating group:", data.name);
@@ -135,6 +147,54 @@ export const GroupCreationWizard = memo(function GroupCreationWizard({
 
         debugLog("[GroupCreationWizard] Transaction submitted successfully");
 
+        // =====================================================================
+        // Poll for blockchain confirmation (like auth/page.tsx pattern)
+        // The wizard must wait for the feed to actually exist on the blockchain
+        // before closing, otherwise syncs may overwrite local data.
+        // =====================================================================
+        setCreationStatus("waiting_for_blockchain");
+        debugLog("[GroupCreationWizard] Waiting for blockchain confirmation...");
+
+        const maxAttempts = 30;
+        const pollInterval = 1000; // 1 second
+        let feedConfirmed = false;
+
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+          try {
+            // Check if feed exists via API (same pattern as auth/page.tsx)
+            const feedsResponse = await fetch(
+              buildApiUrl(`/api/feeds/list?address=${encodeURIComponent(credentials.signingPublicKey)}&blockIndex=0`)
+            );
+            const feedsData = await feedsResponse.json();
+
+            // Check if our group feed is in the response
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const groupFeed = feedsData.feeds?.find((f: any) => f.feedId === feedId);
+            if (groupFeed) {
+              debugLog(`[GroupCreationWizard] Feed confirmed on blockchain after ${attempt + 1} attempt(s)`);
+              feedConfirmed = true;
+              break;
+            }
+
+            debugLog(`[GroupCreationWizard] Polling attempt ${attempt + 1}/${maxAttempts}: feed not yet indexed`);
+          } catch (pollError) {
+            debugError(`[GroupCreationWizard] Polling attempt ${attempt + 1} failed:`, pollError);
+          }
+
+          // Wait before next poll
+          await new Promise((resolve) => setTimeout(resolve, pollInterval));
+        }
+
+        if (!feedConfirmed) {
+          debugError("[GroupCreationWizard] Feed not confirmed after max attempts, proceeding anyway");
+        }
+
+        // =====================================================================
+        // Load feed data into local store
+        // =====================================================================
+        setCreationStatus("loading_data");
+        debugLog("[GroupCreationWizard] Loading feed data...");
+
         // Add the new group feed to the local store
         useFeedsStore.getState().addFeeds([{
           id: feedId,
@@ -169,14 +229,16 @@ export const GroupCreationWizard = memo(function GroupCreationWizard({
           })),
         ]);
 
+        setCreationStatus("done");
         debugLog("[GroupCreationWizard] Group created successfully:", feedId);
 
-        // Notify parent and close
+        // Notify parent and close - only after blockchain confirmation
         onGroupCreated(feedId);
         onClose();
       } catch (err) {
         debugError("[GroupCreationWizard] Create failed:", err);
         setError(err instanceof Error ? err.message : "Failed to create group");
+        setCreationStatus("idle");
       } finally {
         setIsCreating(false);
       }
@@ -275,6 +337,7 @@ export const GroupCreationWizard = memo(function GroupCreationWizard({
               onCreate={handleCreate}
               isCreating={isCreating}
               groupType={flow.groupType}
+              creationStatus={creationStatus}
             />
           )}
         </div>

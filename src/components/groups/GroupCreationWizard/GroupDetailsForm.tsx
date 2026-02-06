@@ -4,6 +4,7 @@ import { useState, useCallback, memo, useEffect, useMemo } from "react";
 import { Loader2, ArrowLeft, Lock, Globe, Users } from "lucide-react";
 import type { SelectedMember } from "./MemberSelector";
 import type { GroupType } from "./useCreateGroupFlow";
+import type { CreationStatus } from "./index";
 
 interface GroupDetailsFormProps {
   selectedMembers: SelectedMember[];
@@ -11,6 +12,7 @@ interface GroupDetailsFormProps {
   onCreate: (data: { name: string; description: string; isPublic: boolean }) => void;
   isCreating: boolean;
   groupType?: GroupType;
+  creationStatus?: CreationStatus;
 }
 
 /**
@@ -25,6 +27,7 @@ export const GroupDetailsForm = memo(function GroupDetailsForm({
   onCreate,
   isCreating,
   groupType,
+  creationStatus = "idle",
 }: GroupDetailsFormProps) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -73,6 +76,20 @@ export const GroupDetailsForm = memo(function GroupDetailsForm({
   );
 
   const canCreate = name.trim().length > 0 && name.length <= 100 && !isCreating;
+
+  // Get status text for button display
+  const statusText = useMemo(() => {
+    switch (creationStatus) {
+      case "creating":
+        return "Creating group...";
+      case "waiting_for_blockchain":
+        return "Waiting for blockchain...";
+      case "loading_data":
+        return "Loading data...";
+      default:
+        return "Creating...";
+    }
+  }, [creationStatus]);
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col h-full">
@@ -223,7 +240,7 @@ export const GroupDetailsForm = memo(function GroupDetailsForm({
           {isCreating ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" />
-              Creating...
+              {statusText}
             </>
           ) : (
             "Create Group"

@@ -248,12 +248,17 @@ export async function sendMessage(
   // For group feeds, use the current KeyGeneration's key from groupKeyStates
   // For other feeds (personal, chat), use the feed's direct aesKey
   let aesKey: string | undefined;
+  let keyGeneration: number | undefined;
 
   if (feed.type === 'group') {
     // Group feeds: use the current KeyGeneration's key
     aesKey = useFeedsStore.getState().getCurrentGroupKey(feedId);
+    const keyState = useFeedsStore.getState().getGroupKeyState(feedId);
+    keyGeneration = keyState?.currentKeyGeneration;
+
+    debugLog(`[FeedsService] Group message - feedId=${feedId.substring(0, 8)}..., keyGeneration=${keyGeneration}, hasAesKey=${!!aesKey}, keyCount=${keyState?.keyGenerations.length ?? 0}`);
+
     if (!aesKey) {
-      const keyState = useFeedsStore.getState().getGroupKeyState(feedId);
       debugError(`[FeedsService] No current group key for feed ${feedId}. KeyState:`, {
         hasKeyState: !!keyState,
         currentKeyGen: keyState?.currentKeyGeneration,
@@ -280,7 +285,8 @@ export async function sendMessage(
       aesKey,
       privateKeyBytes,
       credentials.signingPublicKey,
-      replyToMessageId
+      replyToMessageId,
+      keyGeneration
     );
 
     // Create optimistic message for immediate UI display
