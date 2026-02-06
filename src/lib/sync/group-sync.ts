@@ -250,16 +250,22 @@ export async function syncKeyGenerations(
   privateEncryptKeyHex: string
 ): Promise<SyncResultWithData<GroupKeyState>> {
   debugLog('[GroupSync] syncKeyGenerations:', { feedId: feedId.substring(0, 8) });
+  console.log(`[E2E KeyGen] syncKeyGenerations START for feed ${feedId.substring(0, 8)}...`);
 
   try {
     const store = useFeedsStore.getState();
     const existingState = store.getGroupKeyState(feedId);
+    console.log(`[E2E KeyGen] Existing state: currentKeyGen=${existingState?.currentKeyGeneration ?? 'none'}, keyCount=${existingState?.keyGenerations.length ?? 0}`);
 
     // Step 1: Fetch KeyGenerations from server
     // The server only returns KeyGenerations the user has access to
+    console.log(`[E2E KeyGen] Calling gRPC getKeyGenerations...`);
     const serverKeyGens = await groupService.getKeyGenerations(feedId, userAddress);
+    console.log(`[E2E KeyGen] Server returned ${serverKeyGens?.length ?? 0} KeyGenerations:`,
+      serverKeyGens?.map(k => ({ keyGen: k.KeyGeneration, validFrom: k.ValidFromBlock, validTo: k.ValidToBlock, hasKey: !!k.EncryptedKey })));
 
     if (!serverKeyGens || serverKeyGens.length === 0) {
+      console.log('[E2E KeyGen] No KeyGenerations returned from server!');
       debugLog('[GroupSync] No KeyGenerations returned');
       return { success: true, data: undefined };
     }
@@ -302,7 +308,10 @@ export async function syncKeyGenerations(
       }
     }
 
+    console.log(`[E2E KeyGen] keysToDecrypt=${keysToDecrypt.length}, alreadyCached=${alreadyCachedCount}, validityUpdates=${keysWithValidityUpdates.length}`);
+
     if (keysToDecrypt.length === 0 && keysWithValidityUpdates.length === 0) {
+      console.log('[E2E KeyGen] All keys already cached, no validity changes - nothing to do');
       debugLog('[GroupSync] All keys already cached, no validity changes:', {
         total: serverKeyGens.length,
         cached: alreadyCachedCount,
@@ -337,7 +346,9 @@ export async function syncKeyGenerations(
     const newlyDecryptedKeyGens: GroupKeyGeneration[] = [];
     let maxKeyGeneration = 0;
 
+    console.log(`[E2E KeyGen] Starting decryption of ${keysToDecrypt.length} keys...`);
     for (const serverKeyGen of keysToDecrypt) {
+      console.log(`[E2E KeyGen] Decrypting KeyGen ${serverKeyGen.KeyGeneration}...`);
       try {
         const decryptResult = await decryptKeyGeneration(
           serverKeyGen.EncryptedKey,
@@ -345,6 +356,7 @@ export async function syncKeyGenerations(
         );
 
         if (decryptResult.success && decryptResult.data) {
+          console.log(`[E2E KeyGen] SUCCESS decrypting KeyGen ${serverKeyGen.KeyGeneration}`);
           newlyDecryptedKeyGens.push({
             keyGeneration: serverKeyGen.KeyGeneration,
             aesKey: decryptResult.data,
@@ -357,12 +369,14 @@ export async function syncKeyGenerations(
             validFromBlock: serverKeyGen.ValidFromBlock,
           });
         } else {
+          console.error(`[E2E KeyGen] FAILED decrypting KeyGen ${serverKeyGen.KeyGeneration}: ${decryptResult.error}`);
           debugWarn('[GroupSync] Failed to decrypt KeyGeneration:', {
             keyGen: serverKeyGen.KeyGeneration,
             error: decryptResult.error,
           });
         }
       } catch (error) {
+        console.error(`[E2E KeyGen] ERROR decrypting KeyGen ${serverKeyGen.KeyGeneration}:`, error);
         debugWarn('[GroupSync] Error decrypting KeyGeneration:', {
           keyGen: serverKeyGen.KeyGeneration,
           error: error instanceof Error ? error.message : 'Unknown error',
@@ -379,9 +393,11 @@ export async function syncKeyGenerations(
     // Step 5: Merge new keys AND validity updates with existing ones
     // Combine newly decrypted keys with keys that have validity updates
     const allKeysToMerge = [...newlyDecryptedKeyGens, ...keysWithValidityUpdates];
+    console.log(`[E2E KeyGen] Merging ${allKeysToMerge.length} keys (${newlyDecryptedKeyGens.length} new, ${keysWithValidityUpdates.length} validity updates)`);
     store.mergeKeyGenerations(feedId, allKeysToMerge, missingKeyGens);
 
     const finalState = store.getGroupKeyState(feedId);
+    console.log(`[E2E KeyGen] FINAL state: currentKeyGen=${finalState?.currentKeyGeneration ?? 'none'}, keyCount=${finalState?.keyGenerations.length ?? 0}, keys=${JSON.stringify(finalState?.keyGenerations.map(k => ({ gen: k.keyGeneration, hasAes: !!k.aesKey })))}`);
 
     debugLog('[GroupSync] KeyGenerations synced:', {
       newlyDecrypted: newlyDecryptedKeyGens.length,
@@ -394,6 +410,7 @@ export async function syncKeyGenerations(
     return { success: true, data: finalState };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to sync KeyGenerations';
+    console.error(`[E2E KeyGen] syncKeyGenerations ERROR:`, error);
     debugError('[GroupSync] syncKeyGenerations error:', message);
     return { success: false, error: message };
   }

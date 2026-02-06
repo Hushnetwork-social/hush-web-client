@@ -307,6 +307,13 @@ interface FeedsActions {
    */
   hasDecryptedKey: (feedId: string, keyGeneration: number) => boolean;
 
+  /**
+   * Retry decryption for messages that failed because KeyGeneration wasn't available yet.
+   * This should be called after mergeKeyGenerations to re-decrypt messages
+   * that were stored with decryptionFailed: true.
+   */
+  retryDecryptFailedMessages: (feedId: string) => Promise<void>;
+
   // ============= FEAT-051: Read Watermarks Actions =============
 
   /** Update lastReadBlockIndex for a feed (after marking as read) */
@@ -1272,6 +1279,120 @@ export const useFeedsStore = create<FeedsStore>()(
         return keyState.keyGenerations.some(
           (k) => k.keyGeneration === keyGeneration && k.aesKey !== undefined
         );
+      },
+
+      retryDecryptFailedMessages: async (feedId) => {
+        const currentMessages = get().messages[feedId] || [];
+        const keyState = get().groupKeyStates[feedId];
+
+        // Find messages that failed decryption
+        const failedMessages = currentMessages.filter((m) => m.decryptionFailed === true);
+
+        if (failedMessages.length === 0) {
+          debugLog(`[FeedsStore] retryDecryptFailedMessages: no failed messages for feed ${feedId.substring(0, 8)}...`);
+          return;
+        }
+
+        if (!keyState || keyState.keyGenerations.length === 0) {
+          debugLog(`[FeedsStore] retryDecryptFailedMessages: no KeyGenerations available for feed ${feedId.substring(0, 8)}...`);
+          return;
+        }
+
+        debugLog(`[FeedsStore] retryDecryptFailedMessages: retrying ${failedMessages.length} messages for feed ${feedId.substring(0, 8)}...`);
+
+        // Import aesDecrypt dynamically to avoid circular dependency
+        const { aesDecrypt } = await import('@/lib/crypto/encryption');
+
+        // Build a map of keyGeneration -> aesKey for O(1) lookup
+        const keyMap = new Map<number, string>();
+        for (const kg of keyState.keyGenerations) {
+          if (kg.aesKey) {
+            keyMap.set(kg.keyGeneration, kg.aesKey);
+          }
+        }
+
+        // Try to re-decrypt each failed message
+        const updatedMessages: FeedMessage[] = [];
+        let successCount = 0;
+        let stillFailedCount = 0;
+
+        for (const msg of failedMessages) {
+          const keyGenToTry = msg.keyGeneration;
+
+          // If message has a specific keyGeneration, try that key
+          if (keyGenToTry !== undefined && keyMap.has(keyGenToTry)) {
+            const aesKey = keyMap.get(keyGenToTry)!;
+            try {
+              const decryptedContent = await aesDecrypt(msg.contentEncrypted || msg.content, aesKey);
+              updatedMessages.push({
+                ...msg,
+                content: decryptedContent,
+                decryptionFailed: false,
+              });
+              successCount++;
+              debugLog(`[FeedsStore] retryDecryptFailedMessages: SUCCESS - msg ${msg.id.substring(0, 8)}... decrypted with keyGen ${keyGenToTry}`);
+            } catch {
+              // Key exists but decryption still failed - keep as failed
+              updatedMessages.push(msg);
+              stillFailedCount++;
+              debugLog(`[FeedsStore] retryDecryptFailedMessages: STILL FAILED - msg ${msg.id.substring(0, 8)}... keyGen ${keyGenToTry} (key exists but decryption failed)`);
+            }
+          } else if (keyGenToTry === undefined) {
+            // No keyGeneration specified - try all keys
+            let decrypted = false;
+            for (const [keyGen, aesKey] of keyMap.entries()) {
+              try {
+                const decryptedContent = await aesDecrypt(msg.contentEncrypted || msg.content, aesKey);
+                updatedMessages.push({
+                  ...msg,
+                  content: decryptedContent,
+                  keyGeneration: keyGen, // Set the keyGeneration that worked
+                  decryptionFailed: false,
+                });
+                successCount++;
+                decrypted = true;
+                debugLog(`[FeedsStore] retryDecryptFailedMessages: SUCCESS - msg ${msg.id.substring(0, 8)}... decrypted with keyGen ${keyGen} (no keyGen specified)`);
+                break;
+              } catch {
+                // Try next key
+              }
+            }
+            if (!decrypted) {
+              updatedMessages.push(msg);
+              stillFailedCount++;
+              debugLog(`[FeedsStore] retryDecryptFailedMessages: STILL FAILED - msg ${msg.id.substring(0, 8)}... (tried all keys)`);
+            }
+          } else {
+            // KeyGeneration specified but we don't have that key yet
+            updatedMessages.push(msg);
+            stillFailedCount++;
+            debugLog(`[FeedsStore] retryDecryptFailedMessages: SKIPPED - msg ${msg.id.substring(0, 8)}... needs keyGen ${keyGenToTry} which we don't have`);
+          }
+        }
+
+        // Update the store with the re-decrypted messages
+        if (successCount > 0) {
+          set((state) => {
+            const existingMessages = state.messages[feedId] || [];
+            // Create a map of updated messages by ID
+            const updatedMap = new Map(updatedMessages.map((m) => [m.id, m]));
+            // Replace failed messages with their updated versions
+            const newMessages = existingMessages.map((m) =>
+              updatedMap.has(m.id) ? updatedMap.get(m.id)! : m
+            );
+
+            debugLog(`[FeedsStore] retryDecryptFailedMessages: COMPLETE - success=${successCount}, stillFailed=${stillFailedCount}`);
+
+            return {
+              messages: {
+                ...state.messages,
+                [feedId]: newMessages,
+              },
+            };
+          });
+        } else {
+          debugLog(`[FeedsStore] retryDecryptFailedMessages: COMPLETE - no messages could be decrypted`);
+        }
       },
 
       // ============= FEAT-051: Read Watermarks Implementations =============

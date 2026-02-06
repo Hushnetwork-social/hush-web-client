@@ -541,6 +541,14 @@ export class FeedsSyncable implements ISyncable {
           debugWarn(`[FeedsSyncable] Failed to sync KeyGenerations for group ${feed.id.substring(0, 8)}...: ${keysResult.error}`);
         } else if (keysResult.data) {
           debugLog(`[FeedsSyncable] Synced KeyGenerations for group ${feed.id.substring(0, 8)}...: keyGen=${keysResult.data.currentKeyGeneration}, count=${keysResult.data.keyGenerations.length}`);
+
+          // CRITICAL: Retry decryption for any messages that previously failed
+          // This handles the case where messages were fetched before KeyGenerations synced
+          try {
+            await useFeedsStore.getState().retryDecryptFailedMessages(feed.id);
+          } catch (retryError) {
+            debugWarn(`[FeedsSyncable] Error retrying message decryption for group ${feed.id.substring(0, 8)}...:`, retryError);
+          }
         }
       } catch (error) {
         debugError(`[FeedsSyncable] Error syncing group ${feed.id.substring(0, 8)}...:`, error);
@@ -563,25 +571,39 @@ export class FeedsSyncable implements ISyncable {
   private async syncAllGroupKeyGenerations(userAddress: string): Promise<void> {
     const credentials = useAppStore.getState().credentials;
     if (!credentials?.encryptionPrivateKey) {
+      console.log('[E2E KeyGen] syncAllGroupKeyGenerations: skipping - no encryptionPrivateKey');
       return;
     }
 
     const allGroupFeeds = useFeedsStore.getState().feeds.filter(f => f.type === 'group');
 
     if (allGroupFeeds.length === 0) {
+      console.log('[E2E KeyGen] syncAllGroupKeyGenerations: no group feeds to sync');
       return;
     }
+
+    console.log(`[E2E KeyGen] syncAllGroupKeyGenerations: syncing ${allGroupFeeds.length} group feed(s)`,
+      allGroupFeeds.map(f => ({ id: f.id.substring(0, 8), name: f.name })));
 
     // Sync KeyGenerations for all group feeds in parallel
     const syncPromises = allGroupFeeds.map(async (feed) => {
       try {
+        // Log state BEFORE sync
+        const stateBefore = useFeedsStore.getState().getGroupKeyState(feed.id);
+        console.log(`[E2E KeyGen] BEFORE sync for ${feed.name}: currentKeyGen=${stateBefore?.currentKeyGeneration ?? 'none'}, keyCount=${stateBefore?.keyGenerations.length ?? 0}`);
+
         const keysResult = await syncKeyGenerations(
           feed.id,
           userAddress,
           credentials.encryptionPrivateKey
         );
 
+        // Log state AFTER sync
+        const stateAfter = useFeedsStore.getState().getGroupKeyState(feed.id);
+        console.log(`[E2E KeyGen] AFTER sync for ${feed.name}: currentKeyGen=${stateAfter?.currentKeyGeneration ?? 'none'}, keyCount=${stateAfter?.keyGenerations.length ?? 0}, success=${keysResult.success}`);
+
         if (!keysResult.success) {
+          console.error(`[E2E KeyGen] FAILED to sync for ${feed.name}: ${keysResult.error}`);
           debugWarn(`[FeedsSyncable] Failed to sync KeyGenerations for group ${feed.id.substring(0, 8)}...: ${keysResult.error}`);
         } else if (keysResult.data) {
           // Only log if there's a change (new key generation)
@@ -589,8 +611,17 @@ export class FeedsSyncable implements ISyncable {
           if (!currentState || currentState.currentKeyGeneration !== keysResult.data.currentKeyGeneration) {
             debugLog(`[FeedsSyncable] KeyGen updated for group ${feed.id.substring(0, 8)}...: keyGen=${keysResult.data.currentKeyGeneration}`);
           }
+
+          // CRITICAL: Retry decryption for any messages that previously failed
+          // This handles the case where messages were fetched before KeyGenerations synced
+          try {
+            await useFeedsStore.getState().retryDecryptFailedMessages(feed.id);
+          } catch (retryError) {
+            debugWarn(`[FeedsSyncable] Error retrying message decryption for group ${feed.id.substring(0, 8)}...:`, retryError);
+          }
         }
       } catch (error) {
+        console.error(`[E2E KeyGen] ERROR syncing for ${feed.id.substring(0, 8)}...:`, error);
         debugError(`[FeedsSyncable] Error syncing KeyGenerations for group ${feed.id.substring(0, 8)}...:`, error);
       }
     });
@@ -1285,9 +1316,13 @@ export class FeedsSyncable implements ISyncable {
    * @returns Array of messages with decrypted content or decryptionFailed flag
    */
   private async decryptGroupMessages(feedId: string, messages: FeedMessage[]): Promise<FeedMessage[]> {
+    console.log(`[E2E Decrypt] decryptGroupMessages for feed ${feedId.substring(0, 8)}..., ${messages.length} messages`);
     const keyState = useFeedsStore.getState().getGroupKeyState(feedId);
 
+    console.log(`[E2E Decrypt] KeyState: currentKeyGen=${keyState?.currentKeyGeneration ?? 'none'}, keyCount=${keyState?.keyGenerations.length ?? 0}, keys=${JSON.stringify(keyState?.keyGenerations.map(k => ({ gen: k.keyGeneration, hasAes: !!k.aesKey })))}`);
+
     if (!keyState || keyState.keyGenerations.length === 0) {
+      console.error(`[E2E Decrypt] NO KeyGenerations available! All messages will fail decryption.`);
       debugWarn(`[FeedsSyncable] No KeyGenerations available for group feed ${feedId.substring(0, 8)}...`);
       // Mark all messages as decryption failed
       return messages.map(msg => ({
@@ -1305,6 +1340,11 @@ export class FeedsSyncable implements ISyncable {
     // Count messages with/without keyGeneration for performance analysis
     const withKeyGen = messages.filter(m => m.keyGeneration !== undefined).length;
     const withoutKeyGen = messages.length - withKeyGen;
+    console.log(`[E2E Decrypt] Messages: ${withKeyGen} with keyGen, ${withoutKeyGen} without. Keys available: ${keysToTry.map(k => k.keyGeneration).join(', ')}`);
+    // Log each message's keyGeneration for debugging
+    messages.forEach((msg, i) => {
+      console.log(`[E2E Decrypt] Message ${i}: id=${msg.id.substring(0, 8)}, keyGen=${msg.keyGeneration ?? 'undefined'}, sender=${msg.senderPublicKey?.substring(0, 8)}`);
+    });
     debugLog(`[FeedsSyncable] Decrypting ${messages.length} group messages (${withKeyGen} with keyGen, ${withoutKeyGen} without), ${keysToTry.length} keys available`);
 
     let directDecryptCount = 0;
@@ -1339,6 +1379,7 @@ export class FeedsSyncable implements ISyncable {
             }
           } else {
             // We don't have this KeyGeneration (unban gap)
+            console.error(`[E2E Decrypt] MISSING KEY: Message ${msg.id.substring(0, 8)} needs keyGen=${msg.keyGeneration} but we don't have it! Available: ${keyState.keyGenerations.map(k => k.keyGeneration).join(', ')}`);
             debugLog(`[FeedsSyncable] Missing keyGen=${msg.keyGeneration} for msg ${msg.id.substring(0, 8)}...`);
             useFeedsStore.getState().recordMissingKeyGeneration(feedId, msg.keyGeneration);
             return {
