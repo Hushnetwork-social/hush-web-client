@@ -193,11 +193,24 @@ export async function checkHasPersonalFeed(address: string): Promise<boolean> {
 }
 
 /**
+ * FEAT-057: Transaction status for idempotency responses
+ */
+export enum TransactionStatus {
+  UNSPECIFIED = 0,      // Default for backward compatibility
+  ACCEPTED = 1,         // New transaction accepted
+  ALREADY_EXISTS = 2,   // Duplicate found in database (already confirmed)
+  PENDING = 3,          // Duplicate found in MemPool (still pending)
+  REJECTED = 4,         // Transaction validation failed
+}
+
+/**
  * Submits a transaction to the blockchain.
+ * Returns transaction status for idempotency handling (FEAT-057/FEAT-058).
  */
 export async function submitTransaction(signedTransaction: string): Promise<{
   successful: boolean;
   message: string;
+  status: TransactionStatus;
 }> {
   const response = await fetch(buildApiUrl('/api/blockchain/submit'), {
     method: 'POST',
@@ -214,6 +227,7 @@ export async function submitTransaction(signedTransaction: string): Promise<{
   return {
     successful: data.successful ?? false,
     message: data.message ?? data.error ?? '',
+    status: data.status ?? TransactionStatus.UNSPECIFIED,
   };
 }
 
@@ -289,15 +303,22 @@ export async function sendMessage(
       keyGeneration
     );
 
-    // Create optimistic message for immediate UI display
+    // FEAT-058: Create optimistic message with retry tracking fields
+    const now = Date.now();
     const optimisticMessage: FeedMessage = {
       id: messageId,
       feedId,
       content: messageContent, // Already decrypted for display
       senderPublicKey: credentials.signingPublicKey,
-      timestamp: Date.now(),
+      timestamp: now,
       isConfirmed: false, // Not yet confirmed - will show single checkmark
       replyToMessageId: replyToMessageId || undefined,  // Reply to Message: pass through parent reference
+      // FEAT-058: Retry tracking fields
+      status: 'pending',
+      retryCount: 0,
+      lastAttemptTime: now,
+      contentPlaintext: messageContent,  // Store for re-encryption on retry
+      keyGeneration,  // Store for group feed retry re-encryption check
     };
 
     // Add to store immediately (optimistic UI)
@@ -308,14 +329,33 @@ export async function sendMessage(
     // Submit to blockchain
     const result = await submitTransaction(signedTransaction);
 
+    // FEAT-058: Update message status based on transaction result
     if (!result.successful) {
       debugError(`[FeedsService] Message submission failed: ${result.message}`);
-      // Note: We could remove the optimistic message here, but keeping it
-      // allows the user to see what failed and potentially retry
+      // Keep message in pending state for automatic retry
+      // The FeedsSyncable will retry these messages
       return { success: false, messageId, error: result.message };
     }
 
-    debugLog(`[FeedsService] Message ${messageId} submitted successfully`);
+    // FEAT-058: Handle transaction status for idempotency
+    if (result.status === TransactionStatus.ALREADY_EXISTS) {
+      // Message was already confirmed - mark as confirmed immediately
+      debugLog(`[FeedsService] Message ${messageId} already exists (confirmed)`);
+      useFeedsStore.getState().updateMessageRetryState(feedId, messageId, {
+        status: 'confirmed',
+      });
+    } else if (result.status === TransactionStatus.ACCEPTED) {
+      // Message accepted - waiting for block confirmation
+      debugLog(`[FeedsService] Message ${messageId} accepted, awaiting confirmation`);
+      useFeedsStore.getState().updateMessageRetryState(feedId, messageId, {
+        status: 'confirming',
+        lastAttemptTime: Date.now(),
+        retryCount: 1,  // First attempt completed
+      });
+    }
+    // For PENDING status, leave as-is - will be handled by sync
+
+    debugLog(`[FeedsService] Message ${messageId} submitted successfully (status: ${TransactionStatus[result.status]})`);
     return { success: true, messageId };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -429,6 +469,166 @@ export async function createChatFeed(
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     debugError(`[FeedsService] Create chat feed failed:`, error);
     return { success: false, error: errorMessage };
+  }
+}
+
+/**
+ * FEAT-058: Retries sending a failed or pending message.
+ * Re-encrypts the message content if needed (for group feeds with new key generation).
+ *
+ * @param feedId The feed containing the message
+ * @param messageId The message ID to retry
+ * @param isManualRetry If true, resets the retry count (user-initiated retry)
+ * @returns Result with transaction status
+ */
+export async function retryMessage(
+  feedId: string,
+  messageId: string,
+  isManualRetry: boolean = false
+): Promise<{
+  success: boolean;
+  status: TransactionStatus;
+  error?: string;
+}> {
+  const credentials = useAppStore.getState().credentials;
+  const feed = useFeedsStore.getState().getFeed(feedId);
+  const messages = useFeedsStore.getState().messages[feedId] ?? [];
+  const message = messages.find((m) => m.id === messageId);
+
+  // Validate credentials
+  if (!credentials?.signingPrivateKey || !credentials?.signingPublicKey) {
+    return { success: false, status: TransactionStatus.REJECTED, error: 'Not authenticated' };
+  }
+
+  // Validate feed
+  if (!feed) {
+    return { success: false, status: TransactionStatus.REJECTED, error: 'Feed not found' };
+  }
+
+  // Validate message
+  if (!message) {
+    return { success: false, status: TransactionStatus.REJECTED, error: 'Message not found' };
+  }
+
+  // Get plaintext content for re-encryption
+  const messageContent = message.contentPlaintext ?? message.content;
+  if (!messageContent) {
+    return { success: false, status: TransactionStatus.REJECTED, error: 'Message content not available for retry' };
+  }
+
+  // Determine the AES key to use for encryption
+  let aesKey: string | undefined;
+  let keyGeneration: number | undefined;
+  let needsReEncryption = false;
+
+  if (feed.type === 'group') {
+    // Group feeds: check if we need to re-encrypt with a newer key
+    const keyState = useFeedsStore.getState().getGroupKeyState(feedId);
+    keyGeneration = keyState?.currentKeyGeneration;
+    aesKey = useFeedsStore.getState().getCurrentGroupKey(feedId);
+
+    // If current key generation is higher than what message was encrypted with,
+    // we need to re-encrypt
+    if (message.keyGeneration !== undefined && keyGeneration !== undefined) {
+      needsReEncryption = keyGeneration > message.keyGeneration;
+    }
+
+    debugLog(`[FeedsService] Retry group message - keyGeneration=${keyGeneration}, messageKeyGen=${message.keyGeneration}, needsReEncryption=${needsReEncryption}`);
+
+    if (!aesKey) {
+      debugError(`[FeedsService] No current group key for feed ${feedId} during retry`);
+      return { success: false, status: TransactionStatus.REJECTED, error: 'Group encryption key not available' };
+    }
+  } else {
+    // Non-group feeds: use the feed's direct AES key
+    aesKey = feed.aesKey;
+    if (!aesKey) {
+      return { success: false, status: TransactionStatus.REJECTED, error: 'Feed encryption key not available' };
+    }
+  }
+
+  try {
+    // Convert private key from hex to bytes
+    const privateKeyBytes = hexToBytes(credentials.signingPrivateKey);
+
+    // Create and sign the transaction (will generate same messageId due to deterministic signature)
+    // We pass the original messageId to ensure idempotency works
+    const { signedTransaction } = await createFeedMessageTransaction(
+      feedId,
+      messageContent,
+      aesKey,
+      privateKeyBytes,
+      credentials.signingPublicKey,
+      message.replyToMessageId,
+      keyGeneration,
+      messageId  // Pass original messageId for idempotency
+    );
+
+    debugLog(`[FeedsService] Retrying message ${messageId} (manual=${isManualRetry})`);
+
+    // Submit to blockchain
+    const result = await submitTransaction(signedTransaction);
+
+    // Handle transaction status
+    if (result.status === TransactionStatus.ALREADY_EXISTS) {
+      // Message was already confirmed on blockchain - mark as confirmed
+      debugLog(`[FeedsService] Retry: Message ${messageId} already exists (confirmed)`);
+      useFeedsStore.getState().updateMessageRetryState(feedId, messageId, {
+        status: 'confirmed',
+      });
+      return { success: true, status: result.status };
+    }
+
+    if (result.status === TransactionStatus.ACCEPTED) {
+      // Message accepted - update retry state
+      debugLog(`[FeedsService] Retry: Message ${messageId} accepted`);
+      const currentRetryCount = message.retryCount ?? 0;
+      useFeedsStore.getState().updateMessageRetryState(feedId, messageId, {
+        status: 'confirming',
+        lastAttemptTime: Date.now(),
+        retryCount: isManualRetry ? 1 : currentRetryCount + 1,
+        // Update keyGeneration if re-encrypted with newer key
+        ...(needsReEncryption && keyGeneration !== undefined && { keyGeneration }),
+      });
+      return { success: true, status: result.status };
+    }
+
+    if (result.status === TransactionStatus.PENDING) {
+      // Message still pending in MemPool - don't increment retry count
+      debugLog(`[FeedsService] Retry: Message ${messageId} still pending in MemPool`);
+      useFeedsStore.getState().updateMessageRetryState(feedId, messageId, {
+        lastAttemptTime: Date.now(),
+        // Don't increment retryCount for PENDING status
+      });
+      return { success: true, status: result.status };
+    }
+
+    if (result.status === TransactionStatus.REJECTED) {
+      // Message was rejected - mark as failed
+      debugError(`[FeedsService] Retry: Message ${messageId} rejected: ${result.message}`);
+      useFeedsStore.getState().updateMessageRetryState(feedId, messageId, {
+        status: 'failed',
+      });
+      return { success: false, status: result.status, error: result.message };
+    }
+
+    // Default: treat as successful retry attempt
+    if (result.successful) {
+      const currentRetryCount = message.retryCount ?? 0;
+      useFeedsStore.getState().updateMessageRetryState(feedId, messageId, {
+        status: 'confirming',
+        lastAttemptTime: Date.now(),
+        retryCount: isManualRetry ? 1 : currentRetryCount + 1,
+      });
+      return { success: true, status: result.status };
+    }
+
+    debugError(`[FeedsService] Retry failed: ${result.message}`);
+    return { success: false, status: result.status, error: result.message };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    debugError(`[FeedsService] Retry message failed:`, error);
+    return { success: false, status: TransactionStatus.REJECTED, error: errorMessage };
   }
 }
 

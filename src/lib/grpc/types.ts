@@ -20,9 +20,21 @@ export interface SubmitSignedTransactionRequest {
   SignedTransaction: string;
 }
 
+/**
+ * FEAT-057: Transaction status for idempotency responses
+ */
+export enum TransactionStatus {
+  UNSPECIFIED = 0,      // Default for backward compatibility
+  ACCEPTED = 1,         // New transaction accepted
+  ALREADY_EXISTS = 2,   // Duplicate found in database (already confirmed)
+  PENDING = 3,          // Duplicate found in MemPool (still pending)
+  REJECTED = 4,         // Transaction validation failed
+}
+
 export interface SubmitSignedTransactionReply {
   Successfull: boolean;
   Message: string;
+  Status?: TransactionStatus;  // FEAT-057: Idempotency status
 }
 
 // ============= Identity Service Types =============

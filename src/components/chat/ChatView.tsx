@@ -13,7 +13,7 @@ import { GroupSettingsPanel } from "@/components/groups/GroupSettingsPanel";
 import { JumpToBottomButton } from "./JumpToBottomButton";
 import { MentionNavButton, getUnreadCount, getUnreadMentions, markMentionRead, useMessageHighlight } from "@/lib/mentions";
 import { useAppStore } from "@/stores";
-import { useFeedsStore, sendMessage, markFeedAsRead } from "@/modules/feeds";
+import { useFeedsStore, sendMessage, markFeedAsRead, retryMessage } from "@/modules/feeds";
 import { useFeedReactions } from "@/hooks/useFeedReactions";
 import { useVirtualKeyboard } from "@/hooks/useVirtualKeyboard";
 import type { Feed, FeedMessage, GroupFeedMember, SettingsChangeRecord } from "@/types";
@@ -1232,6 +1232,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
                     timestamp={formatTime(item.timestamp)}
                     isOwn={isOwnMessage(item)}
                     isConfirmed={item.isConfirmed}
+                    status={item.status}
                     messageId={item.id}
                     reactionCounts={getReactionCounts(item.id)}
                     myReaction={getMyReaction(item.id)}
@@ -1246,6 +1247,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
                     showSender={isGroupFeed}
                     senderName={getSenderDisplayName(item.senderPublicKey, item.senderName)}
                     senderRole={getSenderRole(item.senderPublicKey)}
+                    onRetryClick={item.status === 'failed' ? () => retryMessage(item.feedId, item.id, true) : undefined}
                   />
                 )}
               </div>

@@ -685,15 +685,28 @@ function parseECPoint(bytes: Uint8Array): ECPointBytes {
   return point;
 }
 
+/**
+ * FEAT-057: Transaction status for idempotency responses
+ */
+export enum TransactionStatusEnum {
+  UNSPECIFIED = 0,      // Default for backward compatibility
+  ACCEPTED = 1,         // New transaction accepted
+  ALREADY_EXISTS = 2,   // Duplicate found in database (already confirmed)
+  PENDING = 3,          // Duplicate found in MemPool (still pending)
+  REJECTED = 4,         // Transaction validation failed
+}
+
 export interface SubmitTransactionResponse {
   successful: boolean;
   message: string;
+  status: TransactionStatusEnum;  // FEAT-057: Idempotency status
 }
 
 export function parseSubmitTransactionResponse(messageBytes: Uint8Array): SubmitTransactionResponse {
   const result: SubmitTransactionResponse = {
     successful: false,
     message: '',
+    status: TransactionStatusEnum.UNSPECIFIED,
   };
 
   let offset = 0;
@@ -709,6 +722,11 @@ export function parseSubmitTransactionResponse(messageBytes: Uint8Array): Submit
       const valueResult = parseVarint(messageBytes, offset);
       offset += valueResult.bytesRead;
       result.successful = valueResult.value === 1;
+    } else if (wireType === 0 && fieldNumber === 3) {
+      // FEAT-057: Parse status field (field 3, varint)
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+      result.status = valueResult.value as TransactionStatusEnum;
     } else if (wireType === 2 && fieldNumber === 2) {
       const lenResult = parseVarint(messageBytes, offset);
       offset += lenResult.bytesRead;

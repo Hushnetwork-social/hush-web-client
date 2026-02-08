@@ -370,6 +370,8 @@ export async function createPersonalFeedTransaction(
  * @param signingPrivateKey - User's private signing key
  * @param signingPublicAddress - User's public signing address
  * @param replyToMessageId - Optional: ID of the message being replied to
+ * @param keyGeneration - Optional: Key generation for group feed encryption
+ * @param existingMessageId - Optional: Existing message ID for retry (FEAT-058 idempotency)
  */
 export async function createFeedMessageTransaction(
   feedId: string,
@@ -378,10 +380,11 @@ export async function createFeedMessageTransaction(
   signingPrivateKey: Uint8Array,
   signingPublicAddress: string,
   replyToMessageId?: string,
-  keyGeneration?: number
+  keyGeneration?: number,
+  existingMessageId?: string
 ): Promise<{ signedTransaction: string; messageId: string }> {
-  // Generate unique message ID
-  const messageId = generateGuid();
+  // FEAT-058: Use existing messageId for retry idempotency, or generate new one
+  const messageId = existingMessageId ?? generateGuid();
 
   // Encrypt message content with feed's AES key
   const encryptedContent = await aesEncrypt(messageContent, feedAesKey);

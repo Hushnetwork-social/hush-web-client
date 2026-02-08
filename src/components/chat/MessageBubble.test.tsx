@@ -361,4 +361,122 @@ describe('MessageBubble', () => {
       expect(screen.getByText('Hello, world!')).toBeInTheDocument();
     });
   });
+
+  describe('Message Status Icons (FEAT-058)', () => {
+    it('should render Clock icon for pending status', () => {
+      render(
+        <MessageBubble
+          {...defaultProps}
+          isOwn={true}
+          status="pending"
+        />
+      );
+      const pendingIcon = screen.getByTestId('message-pending');
+      expect(pendingIcon).toBeInTheDocument();
+      expect(pendingIcon).toHaveAttribute('aria-label', 'Message pending');
+    });
+
+    it('should render Loader2 with animate-spin for confirming status', () => {
+      render(
+        <MessageBubble
+          {...defaultProps}
+          isOwn={true}
+          status="confirming"
+        />
+      );
+      const confirmingIcon = screen.getByTestId('message-confirming');
+      expect(confirmingIcon).toBeInTheDocument();
+      expect(confirmingIcon).toHaveAttribute('aria-label', 'Sending message');
+      expect(confirmingIcon).toHaveClass('animate-spin');
+    });
+
+    it('should render Check icon for confirmed status', () => {
+      render(
+        <MessageBubble
+          {...defaultProps}
+          isOwn={true}
+          status="confirmed"
+        />
+      );
+      const confirmedIcon = screen.getByTestId('message-confirmed');
+      expect(confirmedIcon).toBeInTheDocument();
+      expect(confirmedIcon).toHaveAttribute('aria-label', 'Message delivered');
+    });
+
+    it('should render AlertTriangle for failed status', () => {
+      render(
+        <MessageBubble
+          {...defaultProps}
+          isOwn={true}
+          status="failed"
+        />
+      );
+      const failedIcon = screen.getByTestId('message-failed');
+      expect(failedIcon).toBeInTheDocument();
+      expect(failedIcon).toHaveAttribute('aria-label', 'Message failed - click to retry');
+    });
+
+    it('should call onRetryClick when failed icon is clicked', () => {
+      const onRetryClick = vi.fn();
+      render(
+        <MessageBubble
+          {...defaultProps}
+          isOwn={true}
+          status="failed"
+          onRetryClick={onRetryClick}
+        />
+      );
+      const failedIcon = screen.getByTestId('message-failed');
+      fireEvent.click(failedIcon);
+      expect(onRetryClick).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not show status icon for non-own messages', () => {
+      render(
+        <MessageBubble
+          {...defaultProps}
+          isOwn={false}
+          status="pending"
+        />
+      );
+      expect(screen.queryByTestId('message-pending')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('message-confirming')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('message-confirmed')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('message-failed')).not.toBeInTheDocument();
+    });
+
+    it('should show timestamp for confirming status', () => {
+      render(
+        <MessageBubble
+          {...defaultProps}
+          isOwn={true}
+          status="confirming"
+        />
+      );
+      expect(screen.getByText('12:34')).toBeInTheDocument();
+    });
+
+    it('should not show timestamp for pending status', () => {
+      render(
+        <MessageBubble
+          {...defaultProps}
+          isOwn={true}
+          status="pending"
+        />
+      );
+      expect(screen.queryByText('12:34')).not.toBeInTheDocument();
+    });
+
+    it('should fall back to isConfirmed when status not provided', () => {
+      render(
+        <MessageBubble
+          {...defaultProps}
+          isOwn={true}
+          isConfirmed={true}
+        />
+      );
+      const confirmedIcon = screen.getByTestId('message-confirmed');
+      expect(confirmedIcon).toBeInTheDocument();
+    });
+  });
 });

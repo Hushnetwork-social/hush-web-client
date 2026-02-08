@@ -9,7 +9,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { Feed, FeedMessage, FeedCacheMetadata, GroupFeedMember, GroupMemberRole, GroupKeyGeneration, GroupKeyState, SettingsChangeRecord } from '@/types';
+import type { Feed, FeedMessage, FeedCacheMetadata, GroupFeedMember, GroupMemberRole, GroupKeyGeneration, GroupKeyState, SettingsChangeRecord, MessageStatus } from '@/types';
 import { debugLog } from '@/lib/debug-logger';
 import { useReactionsStore } from '@/modules/reactions/useReactionsStore';
 import { feedService } from '@/lib/grpc/services/feed';
@@ -408,6 +408,30 @@ interface FeedsActions {
    * FEAT-056: Clear the "was capped" notice state for a feed.
    */
   clearFeedWasCapped: (feedId: string) => void;
+
+  // ============= FEAT-058: Message Retry Actions =============
+
+  /**
+   * FEAT-058: Update message retry state (status, retryCount, lastAttemptTime).
+   * Keeps isConfirmed in sync for backward compatibility.
+   */
+  updateMessageRetryState: (
+    feedId: string,
+    messageId: string,
+    update: Partial<Pick<FeedMessage, 'status' | 'retryCount' | 'lastAttemptTime'>>
+  ) => void;
+
+  /**
+   * FEAT-058: Get all unconfirmed messages across all feeds.
+   * Returns messages with status !== 'confirmed', sorted by timestamp ascending (oldest first).
+   */
+  getUnconfirmedMessages: () => FeedMessage[];
+
+  /**
+   * FEAT-058: Check if any pending or failed messages exist.
+   * Used for logout confirmation dialog.
+   */
+  hasPendingOrFailedMessages: () => boolean;
 }
 
 type FeedsStore = FeedsState & FeedsActions;
@@ -654,6 +678,8 @@ export const useFeedsStore = create<FeedsStore>()(
               : Date.now(),
             blockHeight: serverMsg.BlockIndex,
             isConfirmed: true,
+            // FEAT-058: Messages from server are confirmed
+            status: 'confirmed',
             isRead: true,
             replyToMessageId: serverMsg.ReplyToMessageId,
             keyGeneration: serverMsg.KeyGeneration,
@@ -769,6 +795,8 @@ export const useFeedsStore = create<FeedsStore>()(
                 return {
                   ...msg,
                   isConfirmed: true,
+                  // FEAT-058: Update status to confirmed
+                  status: 'confirmed' as MessageStatus,
                   blockHeight: confirmedMsg.blockHeight,
                   timestamp: confirmedMsg.timestamp,
                   // Merge replyToMessageId from server if local message is missing it
@@ -1722,6 +1750,8 @@ export const useFeedsStore = create<FeedsStore>()(
               senderPublicKey: msg.IssuerPublicAddress,
               senderName: msg.IssuerName,
               isConfirmed: true,
+              // FEAT-058: Messages from server are confirmed
+              status: 'confirmed' as MessageStatus,
               isRead: true, // Older messages are considered "read" by default
               timestamp: msg.TimeStamp ? msg.TimeStamp.seconds * 1000 + msg.TimeStamp.nanos / 1000000 : Date.now(),
               blockHeight: msg.BlockIndex,
@@ -1980,6 +2010,77 @@ export const useFeedsStore = create<FeedsStore>()(
           return { feedWasCapped: rest };
         });
       },
+
+      // ============= FEAT-058: Message Retry Implementations =============
+
+      updateMessageRetryState: (feedId, messageId, update) => {
+        set((state) => {
+          const feedMessages = state.messages[feedId];
+          if (!feedMessages) return state;
+
+          const messageIndex = feedMessages.findIndex((m) => m.id === messageId);
+          if (messageIndex === -1) return state;
+
+          const updatedMessages = [...feedMessages];
+          const currentMessage = updatedMessages[messageIndex];
+
+          updatedMessages[messageIndex] = {
+            ...currentMessage,
+            ...update,
+            // Keep isConfirmed in sync for backward compatibility
+            isConfirmed: update.status === 'confirmed'
+              ? true
+              : update.status === 'failed' || update.status === 'pending' || update.status === 'confirming'
+                ? false
+                : currentMessage.isConfirmed,
+          };
+
+          debugLog(`[FeedsStore] updateMessageRetryState: feedId=${feedId.substring(0, 8)}..., messageId=${messageId.substring(0, 8)}..., update=`, update);
+
+          return {
+            messages: {
+              ...state.messages,
+              [feedId]: updatedMessages,
+            },
+          };
+        });
+      },
+
+      getUnconfirmedMessages: () => {
+        const state = get();
+        const unconfirmed: FeedMessage[] = [];
+
+        for (const feedId of Object.keys(state.messages)) {
+          const messages = state.messages[feedId] || [];
+          for (const message of messages) {
+            // Check status field first, fall back to isConfirmed for migrated messages
+            const status = message.status ?? (message.isConfirmed ? 'confirmed' : 'pending');
+            if (status !== 'confirmed') {
+              unconfirmed.push(message);
+            }
+          }
+        }
+
+        // Sort by timestamp ascending (oldest first - retry oldest messages first)
+        return unconfirmed.sort((a, b) => a.timestamp - b.timestamp);
+      },
+
+      hasPendingOrFailedMessages: () => {
+        const state = get();
+
+        for (const feedId of Object.keys(state.messages)) {
+          const messages = state.messages[feedId] || [];
+          for (const message of messages) {
+            // Check status field first, fall back to isConfirmed for migrated messages
+            const status = message.status ?? (message.isConfirmed ? 'confirmed' : 'pending');
+            if (status === 'pending' || status === 'failed') {
+              return true;
+            }
+          }
+        }
+
+        return false;
+      },
     }),
     {
       name: 'hush-feeds-storage',
@@ -1994,6 +2095,42 @@ export const useFeedsStore = create<FeedsStore>()(
         groupKeyStates: state.groupKeyStates,
         feedCacheMetadata: state.feedCacheMetadata,
       }),
+      // FEAT-058: Migrate messages from isConfirmed boolean to status model
+      onRehydrateStorage: () => {
+        return (state, error) => {
+          if (error) {
+            console.error('FEAT-058: Error rehydrating feeds store:', error);
+            return;
+          }
+
+          if (state) {
+            // FEAT-058: Migrate messages from isConfirmed to status model
+            let migratedCount = 0;
+
+            for (const feedId of Object.keys(state.messages)) {
+              const messages = state.messages[feedId] || [];
+              const migratedMessages = messages.map((message) => {
+                // Skip if already has status field (already migrated)
+                if (message.status !== undefined) return message;
+
+                migratedCount++;
+                return {
+                  ...message,
+                  status: message.isConfirmed ? 'confirmed' : 'pending',
+                  retryCount: 0,
+                  lastAttemptTime: 0,
+                } as FeedMessage;
+              });
+
+              state.messages[feedId] = migratedMessages;
+            }
+
+            if (migratedCount > 0) {
+              debugLog(`FEAT-058: Migrated ${migratedCount} messages to status model`);
+            }
+          }
+        };
+      },
     }
   )
 );

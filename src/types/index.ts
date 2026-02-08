@@ -96,6 +96,15 @@ export interface ProfileSearchResult {
   publicEncryptAddress: string;
 }
 
+/**
+ * FEAT-058: Message delivery status for retry tracking
+ * - 'pending': Message created locally, not yet submitted to server
+ * - 'confirming': Message submitted, waiting for block confirmation
+ * - 'confirmed': Message confirmed in a block
+ * - 'failed': Message failed after max retries
+ */
+export type MessageStatus = 'pending' | 'confirming' | 'confirmed' | 'failed';
+
 // Message types
 export interface FeedMessage {
   id: string;
@@ -107,12 +116,26 @@ export interface FeedMessage {
   contentEncrypted?: string;
   timestamp: number;
   blockHeight?: number;
+  /**
+   * @deprecated Use status instead. Kept for backward compatibility during migration.
+   * Will be removed in future version.
+   */
   isConfirmed: boolean;
   replyToMessageId?: string;  // Reply to Message: parent message reference
   keyGeneration?: number;     // Group Feeds: Key generation used to encrypt this message
   decryptionFailed?: boolean; // True if message could not be decrypted (user lacks key)
   /** Whether user has read this message (based on lastReadBlockIndex) - undefined treated as unread */
   isRead?: boolean;
+
+  // FEAT-058: Retry tracking fields
+  /** Current delivery status of the message */
+  status?: MessageStatus;
+  /** Number of retry attempts made (0-3) */
+  retryCount?: number;
+  /** Unix timestamp of last send/retry attempt */
+  lastAttemptTime?: number;
+  /** Original plaintext content for re-encryption (group feeds only, transient) */
+  contentPlaintext?: string;
 }
 
 /**

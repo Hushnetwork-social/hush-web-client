@@ -24,6 +24,8 @@ export {
   findExistingChatFeed,
   createChatFeed,
   markFeedAsRead,  // FEAT-051: Cross-device read sync
+  retryMessage,    // FEAT-058: Retry unconfirmed messages
+  TransactionStatus,  // FEAT-057: Transaction status enum
 } from './FeedsService';
 
 /**

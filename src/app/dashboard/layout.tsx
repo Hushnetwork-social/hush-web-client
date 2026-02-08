@@ -34,6 +34,11 @@ const PasswordDialog = dynamic(
   { ssr: false }
 );
 
+const ConfirmDialog = dynamic(
+  () => import("@/components/shared/ConfirmDialog").then((mod) => mod.ConfirmDialog),
+  { ssr: false }
+);
+
 interface DashboardLayoutProps {
   children: React.ReactNode;
 }
@@ -46,6 +51,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
   const [showGroupWizard, setShowGroupWizard] = useState(false);
+  const [showLogoutConfirmation, setShowLogoutConfirmation] = useState(false);
+  const [pendingMessageCount, setPendingMessageCount] = useState(0);
 
   // Initialize notification system
   const { toasts, dismissToast, markAsRead } = useNotifications();
@@ -161,7 +168,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     }
   }, [credentials, currentUser]);
 
-  const handleLogout = useCallback(() => {
+  // FEAT-058: Perform actual logout
+  const performLogout = useCallback(() => {
     // Reset all module stores
     useFeedsStore.getState().reset();
     resetIdentitySyncState();
@@ -171,6 +179,26 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     logout();
     router.push("/auth");
   }, [logout, router]);
+
+  // FEAT-058: Check for unsent messages before logout
+  const handleLogout = useCallback(() => {
+    const hasPending = useFeedsStore.getState().hasPendingOrFailedMessages();
+
+    if (hasPending) {
+      // Get count for dialog message
+      const unconfirmed = useFeedsStore.getState().getUnconfirmedMessages();
+      setPendingMessageCount(unconfirmed.length);
+      setShowLogoutConfirmation(true);
+    } else {
+      performLogout();
+    }
+  }, [performLogout]);
+
+  // FEAT-058: Handle logout confirmation
+  const handleLogoutConfirm = useCallback(() => {
+    setShowLogoutConfirmation(false);
+    performLogout();
+  }, [performLogout]);
 
   // Show loading while checking auth
   if (isCheckingAuth || !isAuthenticated) {
@@ -275,6 +303,18 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         isOpen={showGroupWizard}
         onClose={() => setShowGroupWizard(false)}
         onGroupCreated={handleGroupCreated}
+      />
+
+      {/* FEAT-058: Logout Confirmation Dialog for Unsent Messages */}
+      <ConfirmDialog
+        isOpen={showLogoutConfirmation}
+        title="Unsent Messages"
+        message={`You have ${pendingMessageCount} unsent message${pendingMessageCount !== 1 ? 's' : ''} that will be lost if you logout now.`}
+        confirmLabel="Logout Anyway"
+        cancelLabel="Cancel"
+        variant="danger"
+        onConfirm={handleLogoutConfirm}
+        onCancel={() => setShowLogoutConfirmation(false)}
       />
     </div>
   );

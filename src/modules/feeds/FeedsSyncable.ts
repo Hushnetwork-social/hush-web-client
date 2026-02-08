@@ -22,7 +22,8 @@ import {
   aesDecrypt,
 } from '@/lib/crypto';
 import { decryptReactionTally, initializeBsgs } from '@/lib/crypto/reactions';
-import { fetchFeeds, fetchMessages, submitTransaction, type FetchMessagesResponse } from './FeedsService';
+import { fetchFeeds, fetchMessages, submitTransaction, retryMessage, TransactionStatus, type FetchMessagesResponse } from './FeedsService';
+import { shouldRetry, isMaxAttemptsReached, MESSAGE_RETRY_CONFIG } from '@/lib/retry';
 import { checkIdentityExists } from '../identity/IdentityService';
 import { useFeedsStore } from './useFeedsStore';
 import { useBlockchainStore } from '../blockchain/useBlockchainStore';
@@ -122,6 +123,9 @@ export class FeedsSyncable implements ISyncable {
 
       // Check for personal feed and create if missing
       await this.ensurePersonalFeed(credentials);
+
+      // FEAT-058: Retry unconfirmed messages
+      await this.retryUnconfirmedMessages();
 
       // Clear any previous error
       useFeedsStore.getState().setError(null);
@@ -940,6 +944,91 @@ export class FeedsSyncable implements ISyncable {
       throw error;
     } finally {
       store.setCreatingPersonalFeed(false);
+    }
+  }
+
+  /**
+   * FEAT-058: Retry unconfirmed messages
+   *
+   * This method runs on every sync cycle and:
+   * 1. Gets all unconfirmed messages (pending or failed)
+   * 2. For each message that should be retried (based on retry timing)
+   * 3. Submits the message again
+   * 4. Handles the TransactionStatus response
+   *
+   * Messages are processed sequentially to preserve order.
+   */
+  private async retryUnconfirmedMessages(): Promise<void> {
+    const unconfirmedMessages = useFeedsStore.getState().getUnconfirmedMessages();
+
+    if (unconfirmedMessages.length === 0) {
+      return;
+    }
+
+    debugLog(`[FeedsSyncable] FEAT-058: Found ${unconfirmedMessages.length} unconfirmed message(s)`);
+
+    // Process messages sequentially to preserve order
+    for (const message of unconfirmedMessages) {
+      // Build retry state from message fields
+      const retryState = {
+        attemptCount: message.retryCount ?? 0,
+        lastAttemptTime: message.lastAttemptTime ?? 0,
+        status: message.status === 'failed' ? 'failed' as const :
+                message.status === 'pending' ? 'pending' as const :
+                message.status === 'confirming' ? 'retrying' as const : 'idle' as const,
+      };
+
+      // Check if we should retry this message
+      const retryCheck = shouldRetry(retryState, MESSAGE_RETRY_CONFIG);
+
+      if (!retryCheck.shouldRetry) {
+        // Check if max attempts reached and message should be marked as failed
+        if (retryCheck.reason === 'max_attempts_reached' && message.status !== 'failed') {
+          debugLog(`[FeedsSyncable] Message ${message.id.substring(0, 8)}... max attempts reached, marking as failed`);
+          useFeedsStore.getState().updateMessageRetryState(message.feedId, message.id, {
+            status: 'failed',
+          });
+        }
+        continue;
+      }
+
+      debugLog(`[FeedsSyncable] Retrying message ${message.id.substring(0, 8)}... (attempt ${retryState.attemptCount + 1}/${MESSAGE_RETRY_CONFIG.maxAttempts})`);
+
+      try {
+        // Retry the message
+        const result = await retryMessage(message.feedId, message.id, false);
+
+        if (result.status === TransactionStatus.ALREADY_EXISTS) {
+          debugLog(`[FeedsSyncable] Message ${message.id.substring(0, 8)}... already confirmed on blockchain`);
+          // Message was already confirmed - retryMessage already updated the store
+        } else if (result.status === TransactionStatus.ACCEPTED) {
+          debugLog(`[FeedsSyncable] Message ${message.id.substring(0, 8)}... accepted, awaiting confirmation`);
+          // Message accepted - retryMessage already updated the store
+        } else if (result.status === TransactionStatus.PENDING) {
+          debugLog(`[FeedsSyncable] Message ${message.id.substring(0, 8)}... still pending in MemPool`);
+          // Message still pending - retryMessage already updated the store
+        } else if (result.status === TransactionStatus.REJECTED) {
+          debugLog(`[FeedsSyncable] Message ${message.id.substring(0, 8)}... rejected: ${result.error}`);
+          // Message rejected - retryMessage already marked as failed
+        } else if (!result.success) {
+          // Check if max attempts reached after this attempt
+          const newRetryCount = (message.retryCount ?? 0) + 1;
+          if (isMaxAttemptsReached({ ...retryState, attemptCount: newRetryCount }, MESSAGE_RETRY_CONFIG)) {
+            debugLog(`[FeedsSyncable] Message ${message.id.substring(0, 8)}... failed after ${newRetryCount} attempts`);
+            useFeedsStore.getState().updateMessageRetryState(message.feedId, message.id, {
+              status: 'failed',
+              retryCount: newRetryCount,
+              lastAttemptTime: Date.now(),
+            });
+          }
+        }
+      } catch (error) {
+        debugError(`[FeedsSyncable] Error retrying message ${message.id.substring(0, 8)}...:`, error);
+        // Update lastAttemptTime but don't mark as failed yet (network errors are transient)
+        useFeedsStore.getState().updateMessageRetryState(message.feedId, message.id, {
+          lastAttemptTime: Date.now(),
+        });
+      }
     }
   }
 

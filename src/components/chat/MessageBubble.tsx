@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, memo, useMemo, useCallback } from "react";
-import { Check, SmilePlus, Reply } from "lucide-react";
+import { Check, SmilePlus, Reply, Clock, Loader2, AlertTriangle } from "lucide-react";
 import { ReactionPicker } from "./ReactionPicker";
 import { ReactionBar } from "./ReactionBar";
 import { ReplyPreview } from "./ReplyPreview";
@@ -10,13 +10,84 @@ import { LinkPreviewCarousel } from "@/components/LinkPreview";
 import { parseMentions, MentionText } from "@/lib/mentions";
 import { useLinkPreviews } from "@/hooks/useLinkPreviews";
 import type { EmojiCounts } from "@/modules/reactions/useReactionsStore";
-import type { FeedMessage, GroupMemberRole } from "@/types";
+import type { FeedMessage, GroupMemberRole, MessageStatus } from "@/types";
+
+/**
+ * FEAT-058: Message status icon component
+ * Shows visual indicator for message delivery state
+ */
+interface MessageStatusIconProps {
+  status: MessageStatus;
+  isOwn: boolean;
+  onRetryClick?: () => void;
+}
+
+function MessageStatusIcon({ status, isOwn, onRetryClick }: MessageStatusIconProps) {
+  // Status styling differs based on message ownership
+  const baseClasses = isOwn ? "text-hush-bg-dark/70" : "text-hush-text-accent";
+
+  switch (status) {
+    case 'pending':
+      return (
+        <Clock
+          className={`w-3.5 h-3.5 opacity-40 ${baseClasses}`}
+          aria-label="Message pending"
+          data-testid="message-pending"
+        />
+      );
+
+    case 'confirming':
+      return (
+        <Loader2
+          className={`w-3.5 h-3.5 animate-spin ${isOwn ? "text-hush-bg-dark/70" : "text-blue-400"}`}
+          aria-label="Sending message"
+          data-testid="message-confirming"
+        />
+      );
+
+    case 'confirmed':
+      return (
+        <Check
+          className={`w-3.5 h-3.5 opacity-20 ${baseClasses}`}
+          aria-label="Message delivered"
+          data-testid="message-confirmed"
+        />
+      );
+
+    case 'failed':
+      return (
+        <AlertTriangle
+          className={`w-3.5 h-3.5 text-amber-500 cursor-pointer hover:text-amber-400 transition-colors`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onRetryClick?.();
+          }}
+          aria-label="Message failed - click to retry"
+          role="button"
+          tabIndex={0}
+          data-testid="message-failed"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              onRetryClick?.();
+            }
+          }}
+        />
+      );
+
+    default:
+      return null;
+  }
+}
 
 interface MessageBubbleProps {
   content: string;
   timestamp: string;
   isOwn: boolean;
+  /** @deprecated Use status instead */
   isConfirmed?: boolean;
+  /** FEAT-058: Message delivery status */
+  status?: MessageStatus;
   messageId?: string;
   reactionCounts?: EmojiCounts;
   myReaction?: number | null;
@@ -43,6 +114,8 @@ interface MessageBubbleProps {
   senderRole?: GroupMemberRole;
   /** Mention: Handler for when a mention is clicked */
   onMentionClick?: (identityId: string) => void;
+  /** FEAT-058: Handler for retrying failed message */
+  onRetryClick?: () => void;
 }
 
 export const MessageBubble = memo(function MessageBubble({
@@ -50,6 +123,7 @@ export const MessageBubble = memo(function MessageBubble({
   timestamp,
   isOwn,
   isConfirmed = false,
+  status,
   messageId,
   reactionCounts,
   myReaction,
@@ -65,7 +139,11 @@ export const MessageBubble = memo(function MessageBubble({
   senderName,
   senderRole,
   onMentionClick,
+  onRetryClick,
 }: MessageBubbleProps) {
+  // FEAT-058: Compute effective status (backward compatible with isConfirmed)
+  const effectiveStatus: MessageStatus = status ?? (isConfirmed ? 'confirmed' : 'pending');
+  const isMessageConfirmed = effectiveStatus === 'confirmed';
   const [showPicker, setShowPicker] = useState(false);
   const [isHovering, setIsHovering] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
@@ -182,7 +260,7 @@ export const MessageBubble = memo(function MessageBubble({
       >
         <div className="relative group max-w-[60%] flex items-center min-w-0">
         {/* Action buttons - shows on hover, positioned on the LEFT side for own messages */}
-        {isConfirmed && isOwn && (
+        {isMessageConfirmed && isOwn && (
           <div className="flex items-center mr-1">
             {/* Reply button */}
             {onReplyClick && message && (
@@ -273,18 +351,26 @@ export const MessageBubble = memo(function MessageBubble({
                 )
               )}
             </p>
-            {/* Only show timestamp and checkmark when confirmed */}
-            {isConfirmed && (
-              <div
-                className={`
-                  flex items-center justify-end space-x-1 mt-1
-                  ${isOwn ? "text-hush-bg-dark/70" : "text-hush-text-accent"}
-                `}
-              >
+            {/* FEAT-058: Show timestamp and status icon */}
+            <div
+              className={`
+                flex items-center justify-end space-x-1 mt-1
+                ${isOwn ? "text-hush-bg-dark/70" : "text-hush-text-accent"}
+              `}
+            >
+              {/* Only show timestamp when confirmed or confirming */}
+              {(effectiveStatus === 'confirmed' || effectiveStatus === 'confirming') && (
                 <span className="text-[10px]">{timestamp}</span>
-                {isOwn && <Check className="w-3.5 h-3.5 opacity-20" data-testid="message-confirmed" />}
-              </div>
-            )}
+              )}
+              {/* FEAT-058: Show status icon for own messages */}
+              {isOwn && (
+                <MessageStatusIcon
+                  status={effectiveStatus}
+                  isOwn={isOwn}
+                  onRetryClick={effectiveStatus === 'failed' ? onRetryClick : undefined}
+                />
+              )}
+            </div>
           </div>
 
           {/* Link previews - shown below message content */}
@@ -317,7 +403,7 @@ export const MessageBubble = memo(function MessageBubble({
         </div>
 
         {/* Action buttons - shows on hover, positioned on the RIGHT side for others' messages */}
-        {isConfirmed && !isOwn && (
+        {isMessageConfirmed && !isOwn && (
           <div className="flex items-center ml-1">
             {/* Reply button */}
             {onReplyClick && message && (

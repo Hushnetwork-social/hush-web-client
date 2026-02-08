@@ -3,6 +3,7 @@ import type {
   GetBlockchainHeightRequest,
   GetBlockchainHeightReply,
   SubmitSignedTransactionReply,
+  TransactionStatus,
 } from '../types';
 
 const SERVICE_NAME = 'rpcHush.HushBlockchain';
@@ -47,6 +48,7 @@ export const blockchainService = {
     return {
       Successfull: data.successful,
       Message: data.message || '',
+      Status: data.status as TransactionStatus,  // FEAT-057: Include transaction status
     };
   },
 };
