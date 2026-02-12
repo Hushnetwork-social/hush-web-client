@@ -1079,20 +1079,42 @@ export const useFeedsStore = create<FeedsStore>()(
           // Sort messages by timestamp to ensure correct order
           updatedMessages.sort((a, b) => a.timestamp - b.timestamp);
 
-          // Update the feed's updatedAt to reflect new activity
-          // This ensures feeds with recent messages appear at the top of the list
-          const latestMessageTimestamp = trulyNewMessages.length > 0
-            ? Math.max(...trulyNewMessages.map((m) => m.timestamp))
-            : null;
+          // FEAT-062: Update feed's blockIndex via max(current, maxIncomingBlockIndex)
+          // Only consider messages with defined blockIndex (excludes optimistic/pending)
+          const incomingBlockIndexes = trulyNewMessages
+            .map((m) => m.blockHeight)
+            .filter((bi): bi is number => bi !== undefined && bi > 0);
+          const maxIncomingBlockIndex = incomingBlockIndexes.length > 0
+            ? Math.max(...incomingBlockIndexes)
+            : 0;
+
+          // FEAT-062: Check if hasPendingMessages should be cleared
+          // After confirming pending messages, check if any unconfirmed messages remain
+          let clearPendingFlag = false;
+          if (messagesToConfirm.length > 0) {
+            const hasUnconfirmed = updatedMessages.some(
+              (m) => m.feedId === feedId && !m.isConfirmed
+            );
+            if (!hasUnconfirmed) {
+              clearPendingFlag = true;
+            }
+          }
 
           let updatedFeeds = state.feeds;
-          if (latestMessageTimestamp) {
+          const currentFeed = state.feeds.find((f) => f.id === feedId);
+          const currentBlockIndex = currentFeed?.blockIndex ?? 0;
+          const needsUpdate = maxIncomingBlockIndex > currentBlockIndex || clearPendingFlag;
+
+          if (needsUpdate) {
             updatedFeeds = state.feeds.map((feed) =>
               feed.id === feedId
-                ? { ...feed, updatedAt: Math.max(feed.updatedAt, latestMessageTimestamp) }
+                ? {
+                    ...feed,
+                    blockIndex: Math.max(currentBlockIndex, maxIncomingBlockIndex),
+                    ...(clearPendingFlag ? { hasPendingMessages: false } : {}),
+                  }
                 : feed
             );
-            // Re-sort feeds to maintain order (personal first, then by updatedAt)
             updatedFeeds = sortFeeds(updatedFeeds);
           }
 
@@ -1110,11 +1132,11 @@ export const useFeedsStore = create<FeedsStore>()(
       addPendingMessage: (feedId, message) => {
         debugLog(`[FeedsStore] addPendingMessage: feedId=${feedId}, messageId=${message.id}, isConfirmed=${message.isConfirmed}`);
         set((state) => {
-          // Update the feed's updatedAt to reflect the new message activity
+          // FEAT-062: Set hasPendingMessages flag for sort boosting (do NOT modify blockIndex)
           const updatedFeeds = sortFeeds(
             state.feeds.map((feed) =>
               feed.id === feedId
-                ? { ...feed, updatedAt: Math.max(feed.updatedAt, message.timestamp) }
+                ? { ...feed, hasPendingMessages: true }
                 : feed
             )
           );

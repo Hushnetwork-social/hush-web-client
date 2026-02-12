@@ -12,7 +12,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useFeedsStore } from '../useFeedsStore';
-import type { Feed } from '@/types';
+import type { Feed, FeedMessage } from '@/types';
 
 /** Helper to create a test feed with sensible defaults */
 function createTestFeed(overrides: Partial<Feed> = {}): Feed {
@@ -25,6 +25,19 @@ function createTestFeed(overrides: Partial<Feed> = {}): Feed {
     createdAt: 1000,
     updatedAt: 1000,
     blockIndex: 0,
+    ...overrides,
+  };
+}
+
+/** Helper to create a test message */
+function createTestMessage(overrides: Partial<FeedMessage> = {}): FeedMessage {
+  return {
+    id: `msg-${Math.random().toString(36).substring(7)}`,
+    feedId: 'feed-1',
+    senderPublicKey: 'sender-key',
+    content: 'Test message',
+    timestamp: Date.now(),
+    isConfirmed: true,
     ...overrides,
   };
 }
@@ -234,6 +247,217 @@ describe('FEAT-062: Feed Sorting (blockIndex-based)', () => {
       const sorted = useFeedsStore.getState().feeds;
       expect(sorted).toHaveLength(1);
       expect(sorted[0].id).toBe('only-feed');
+    });
+  });
+
+  // === Phase 3 Tests: addMessages() + Pending Message Lifecycle ===
+
+  describe('F2-002: blockIndex updated on new messages', () => {
+    it('should update feed blockIndex from incoming messages', () => {
+      // Arrange: feed with blockIndex 500
+      const feed = createTestFeed({ id: 'feed-1', blockIndex: 500 });
+      useFeedsStore.getState().setFeeds([feed]);
+
+      const newMessages = [
+        createTestMessage({ id: 'msg-1', feedId: 'feed-1', blockHeight: 600, timestamp: 1000 }),
+        createTestMessage({ id: 'msg-2', feedId: 'feed-1', blockHeight: 650, timestamp: 2000 }),
+      ];
+
+      // Act
+      useFeedsStore.getState().addMessages('feed-1', newMessages);
+
+      // Assert: blockIndex updated to max(500, 600, 650) = 650
+      const updatedFeed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(updatedFeed?.blockIndex).toBe(650);
+    });
+
+    it('should NOT decrease blockIndex from older messages (max protection)', () => {
+      // Arrange: feed with blockIndex 500
+      const feed = createTestFeed({ id: 'feed-1', blockIndex: 500 });
+      useFeedsStore.getState().setFeeds([feed]);
+
+      const olderMessages = [
+        createTestMessage({ id: 'msg-1', feedId: 'feed-1', blockHeight: 300, timestamp: 1000 }),
+        createTestMessage({ id: 'msg-2', feedId: 'feed-1', blockHeight: 400, timestamp: 2000 }),
+      ];
+
+      // Act
+      useFeedsStore.getState().addMessages('feed-1', olderMessages);
+
+      // Assert: blockIndex remains 500
+      const updatedFeed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(updatedFeed?.blockIndex).toBe(500);
+    });
+
+    it('should handle mixed old and new messages correctly', () => {
+      // Arrange
+      const feed = createTestFeed({ id: 'feed-1', blockIndex: 500 });
+      useFeedsStore.getState().setFeeds([feed]);
+
+      const mixedMessages = [
+        createTestMessage({ id: 'msg-1', feedId: 'feed-1', blockHeight: 300, timestamp: 1000 }),
+        createTestMessage({ id: 'msg-2', feedId: 'feed-1', blockHeight: 600, timestamp: 2000 }),
+      ];
+
+      // Act
+      useFeedsStore.getState().addMessages('feed-1', mixedMessages);
+
+      // Assert: max(500, 300, 600) = 600
+      const updatedFeed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(updatedFeed?.blockIndex).toBe(600);
+    });
+
+    it('should ignore messages without blockHeight for max calculation', () => {
+      // Arrange
+      const feed = createTestFeed({ id: 'feed-1', blockIndex: 500 });
+      useFeedsStore.getState().setFeeds([feed]);
+
+      const messages = [
+        createTestMessage({ id: 'msg-1', feedId: 'feed-1', blockHeight: undefined, timestamp: 1000 }),
+      ];
+
+      // Act
+      useFeedsStore.getState().addMessages('feed-1', messages);
+
+      // Assert: blockIndex unchanged (no valid blockHeights)
+      const updatedFeed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(updatedFeed?.blockIndex).toBe(500);
+    });
+  });
+
+  describe('F2-003: hasPendingMessages on pending message', () => {
+    it('should set hasPendingMessages when addPendingMessage is called', () => {
+      // Arrange
+      const feed = createTestFeed({ id: 'feed-1', blockIndex: 500 });
+      useFeedsStore.getState().setFeeds([feed]);
+
+      const pendingMsg = createTestMessage({
+        id: 'pending-1',
+        feedId: 'feed-1',
+        isConfirmed: false,
+        status: 'pending' as FeedMessage['status'],
+      });
+
+      // Act
+      useFeedsStore.getState().addPendingMessage('feed-1', pendingMsg);
+
+      // Assert
+      const updatedFeed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(updatedFeed?.hasPendingMessages).toBe(true);
+      expect(updatedFeed?.blockIndex).toBe(500); // blockIndex unchanged
+    });
+
+    it('should keep hasPendingMessages on multiple pending messages', () => {
+      // Arrange
+      const feed = createTestFeed({ id: 'feed-1', blockIndex: 500 });
+      useFeedsStore.getState().setFeeds([feed]);
+
+      const msg1 = createTestMessage({ id: 'pending-1', feedId: 'feed-1', isConfirmed: false, status: 'pending' as FeedMessage['status'] });
+      const msg2 = createTestMessage({ id: 'pending-2', feedId: 'feed-1', isConfirmed: false, status: 'pending' as FeedMessage['status'] });
+
+      // Act
+      useFeedsStore.getState().addPendingMessage('feed-1', msg1);
+      useFeedsStore.getState().addPendingMessage('feed-1', msg2);
+
+      // Assert
+      const updatedFeed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(updatedFeed?.hasPendingMessages).toBe(true);
+    });
+  });
+
+  describe('F2-005: Sort called after blockIndex update', () => {
+    it('should re-sort feeds when blockIndex increases from new messages', () => {
+      // Arrange: feed-A has higher blockIndex initially
+      const feeds = [
+        createTestFeed({ id: 'feed-A', blockIndex: 500 }),
+        createTestFeed({ id: 'feed-B', blockIndex: 400 }),
+      ];
+      useFeedsStore.getState().setFeeds(feeds);
+
+      // Verify initial order
+      expect(useFeedsStore.getState().feeds[0].id).toBe('feed-A');
+
+      // Act: new message arrives for feed-B at blockIndex 600
+      const newMsg = createTestMessage({ id: 'msg-1', feedId: 'feed-B', blockHeight: 600, timestamp: 1000 });
+      useFeedsStore.getState().addMessages('feed-B', [newMsg]);
+
+      // Assert: feed-B now first (blockIndex 600 > 500)
+      const sorted = useFeedsStore.getState().feeds;
+      expect(sorted[0].id).toBe('feed-B');
+      expect(sorted[1].id).toBe('feed-A');
+    });
+  });
+
+  describe('hasPendingMessages lifecycle', () => {
+    it('should clear hasPendingMessages when all pending messages are confirmed', () => {
+      // Arrange: feed with one pending message
+      const feed = createTestFeed({ id: 'feed-1', blockIndex: 500, hasPendingMessages: true });
+      useFeedsStore.getState().setFeeds([feed]);
+
+      const pendingMsg = createTestMessage({
+        id: 'msg-1',
+        feedId: 'feed-1',
+        isConfirmed: false,
+        blockHeight: undefined,
+      });
+      // Set up the pending message in the store
+      useFeedsStore.setState((state) => ({
+        messages: { ...state.messages, 'feed-1': [pendingMsg] },
+      }));
+
+      // Act: confirmation arrives for msg-1
+      const confirmedMsg = createTestMessage({
+        id: 'msg-1',
+        feedId: 'feed-1',
+        isConfirmed: true,
+        blockHeight: 550,
+        timestamp: 2000,
+      });
+      useFeedsStore.getState().addMessages('feed-1', [confirmedMsg]);
+
+      // Assert: hasPendingMessages cleared
+      const updatedFeed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(updatedFeed?.hasPendingMessages).toBe(false);
+    });
+
+    it('should keep hasPendingMessages when some pending messages remain', () => {
+      // Arrange: feed with two pending messages
+      const feed = createTestFeed({ id: 'feed-1', blockIndex: 500, hasPendingMessages: true });
+      useFeedsStore.getState().setFeeds([feed]);
+
+      const pendingMsg1 = createTestMessage({ id: 'msg-1', feedId: 'feed-1', isConfirmed: false, blockHeight: undefined });
+      const pendingMsg2 = createTestMessage({ id: 'msg-2', feedId: 'feed-1', isConfirmed: false, blockHeight: undefined });
+      useFeedsStore.setState((state) => ({
+        messages: { ...state.messages, 'feed-1': [pendingMsg1, pendingMsg2] },
+      }));
+
+      // Act: only msg-1 confirmed
+      const confirmedMsg1 = createTestMessage({ id: 'msg-1', feedId: 'feed-1', isConfirmed: true, blockHeight: 550, timestamp: 2000 });
+      useFeedsStore.getState().addMessages('feed-1', [confirmedMsg1]);
+
+      // Assert: hasPendingMessages still true (msg-2 still unconfirmed)
+      const updatedFeed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(updatedFeed?.hasPendingMessages).toBe(true);
+    });
+  });
+
+  describe('Scroll-up pagination protection', () => {
+    it('should not change blockIndex when loading older paginated messages', () => {
+      // Arrange: feed at blockIndex 500
+      const feed = createTestFeed({ id: 'feed-1', blockIndex: 500 });
+      useFeedsStore.getState().setFeeds([feed]);
+
+      // Act: loading older messages via scroll-up pagination (FEAT-059)
+      const olderMessages = [
+        createTestMessage({ id: 'old-1', feedId: 'feed-1', blockHeight: 100, timestamp: 100 }),
+        createTestMessage({ id: 'old-2', feedId: 'feed-1', blockHeight: 200, timestamp: 200 }),
+        createTestMessage({ id: 'old-3', feedId: 'feed-1', blockHeight: 300, timestamp: 300 }),
+      ];
+      useFeedsStore.getState().addMessages('feed-1', olderMessages);
+
+      // Assert: blockIndex unchanged
+      const updatedFeed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(updatedFeed?.blockIndex).toBe(500);
     });
   });
 });
