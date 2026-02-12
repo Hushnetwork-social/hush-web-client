@@ -427,6 +427,7 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
         console.error('[useNotifications] Stream error:', error);
         handleError(error);
       },
+      undefined, // onStreamEnd - will be wired in Phase 4
       `browser-${Date.now()}`,
       'browser'
     );
