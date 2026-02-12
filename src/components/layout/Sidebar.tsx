@@ -87,6 +87,7 @@ export function Sidebar({
       <div className="flex-shrink-0 bg-hush-bg-element rounded-bl-xl p-2">
         <div className="relative">
           <button
+            data-testid="user-menu-trigger"
             onClick={() => setShowUserMenu(!showUserMenu)}
             className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl hover:bg-hush-bg-hover transition-colors cursor-pointer"
           >
@@ -126,6 +127,7 @@ export function Sidebar({
                 <span className="text-sm">Account Details</span>
               </button>
               <button
+                data-testid="logout-button"
                 onClick={() => {
                   onLogout?.();
                   setShowUserMenu(false);

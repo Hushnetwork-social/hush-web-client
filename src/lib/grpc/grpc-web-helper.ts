@@ -1782,6 +1782,108 @@ export function parseDeleteGroupFeedResponse(messageBytes: Uint8Array): DeleteGr
   return result;
 }
 
+// ============= FEAT-059: Per-Feed Pagination for Scroll-Based Prefetch =============
+
+/**
+ * Build GetFeedMessagesByIdRequest for binary gRPC
+ * Proto: message GetFeedMessagesByIdRequest {
+ *   string FeedId = 1;
+ *   string UserAddress = 2;
+ *   optional int64 BeforeBlockIndex = 3;
+ *   optional int32 Limit = 4;
+ * }
+ */
+export function buildGetFeedMessagesByIdRequest(
+  feedId: string,
+  userAddress: string,
+  beforeBlockIndex?: number,
+  limit?: number
+): Uint8Array {
+  const bytes = [
+    ...encodeString(1, feedId),
+    ...encodeString(2, userAddress),
+  ];
+  if (beforeBlockIndex !== undefined && beforeBlockIndex > 0) {
+    bytes.push(...encodeVarintField(3, beforeBlockIndex));
+  }
+  if (limit !== undefined && limit > 0) {
+    bytes.push(...encodeVarintField(4, limit));
+  }
+  return new Uint8Array(bytes);
+}
+
+/**
+ * Response from GetFeedMessagesById
+ */
+export interface GetFeedMessagesByIdResult {
+  messages: FeedMessage[];
+  hasMoreMessages: boolean;
+  oldestBlockIndex: number;
+  newestBlockIndex: number;
+}
+
+/**
+ * Parse GetFeedMessagesByIdReply
+ * Proto: message GetFeedMessagesByIdReply {
+ *   repeated GetFeedMessagesForAddressReply.FeedMessage Messages = 1;
+ *   bool HasMoreMessages = 2;
+ *   int64 OldestBlockIndex = 3;
+ *   int64 NewestBlockIndex = 4;
+ * }
+ */
+export function parseGetFeedMessagesByIdResponse(messageBytes: Uint8Array): GetFeedMessagesByIdResult {
+  const result: GetFeedMessagesByIdResult = {
+    messages: [],
+    hasMoreMessages: false,
+    oldestBlockIndex: 0,
+    newestBlockIndex: 0,
+  };
+
+  let offset = 0;
+  while (offset < messageBytes.length) {
+    const tagResult = parseVarint(messageBytes, offset);
+    const tag = tagResult.value;
+    offset += tagResult.bytesRead;
+
+    const fieldNumber = tag >> 3;
+    const wireType = tag & 0x07;
+
+    if (wireType === 2 && fieldNumber === 1) {
+      // Messages (repeated FeedMessage)
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead;
+      const msgBytes = messageBytes.slice(offset, offset + lenResult.value);
+      offset += lenResult.value;
+      result.messages.push(parseSingleMessage(msgBytes));
+    } else if (wireType === 0 && fieldNumber === 2) {
+      // HasMoreMessages (bool)
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+      result.hasMoreMessages = valueResult.value === 1;
+    } else if (wireType === 0 && fieldNumber === 3) {
+      // OldestBlockIndex (int64)
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+      result.oldestBlockIndex = valueResult.value;
+    } else if (wireType === 0 && fieldNumber === 4) {
+      // NewestBlockIndex (int64)
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+      result.newestBlockIndex = valueResult.value;
+    } else if (wireType === 0) {
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+    } else if (wireType === 2) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead + lenResult.value;
+    } else {
+      break;
+    }
+  }
+
+  return result;
+}
+
 // ============= Device Token Registration (Push Notifications) =============
 
 /**

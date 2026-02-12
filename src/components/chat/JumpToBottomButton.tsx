@@ -57,6 +57,7 @@ export const JumpToBottomButton = memo(function JumpToBottomButton({
       onClick={handleClick}
       className="flex items-center gap-1 px-3 py-2 bg-hush-bg-secondary/90 backdrop-blur-sm hover:bg-hush-bg-hover border border-hush-bg-hover rounded-full shadow-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-hush-purple focus:ring-offset-2 focus:ring-offset-hush-bg-dark"
       aria-label={ariaLabel}
+      data-testid="jump-to-bottom-button"
     >
       {/* Down Arrow Icon */}
       <ChevronDown

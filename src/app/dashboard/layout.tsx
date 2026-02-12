@@ -306,16 +306,18 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       />
 
       {/* FEAT-058: Logout Confirmation Dialog for Unsent Messages */}
-      <ConfirmDialog
-        isOpen={showLogoutConfirmation}
-        title="Unsent Messages"
-        message={`You have ${pendingMessageCount} unsent message${pendingMessageCount !== 1 ? 's' : ''} that will be lost if you logout now.`}
-        confirmLabel="Logout Anyway"
-        cancelLabel="Cancel"
-        variant="danger"
-        onConfirm={handleLogoutConfirm}
-        onCancel={() => setShowLogoutConfirmation(false)}
-      />
+      <div data-testid="logout-confirm-dialog">
+        <ConfirmDialog
+          isOpen={showLogoutConfirmation}
+          title="Unsent Messages"
+          message={`You have ${pendingMessageCount} unsent message${pendingMessageCount !== 1 ? 's' : ''} that will be lost if you logout now.`}
+          confirmLabel="Logout Anyway"
+          cancelLabel="Cancel"
+          variant="danger"
+          onConfirm={handleLogoutConfirm}
+          onCancel={() => setShowLogoutConfirmation(false)}
+        />
+      </div>
     </div>
   );
 }

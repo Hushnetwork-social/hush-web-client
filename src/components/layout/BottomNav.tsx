@@ -109,6 +109,7 @@ export function BottomNav({
               <span className="text-sm">Account Details</span>
             </button>
             <button
+              data-testid="logout-button"
               onClick={() => {
                 onLogout?.();
                 setShowUserMenu(false);

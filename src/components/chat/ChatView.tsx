@@ -81,6 +81,13 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
     };
   }, [feed.id]);
 
+  // FEAT-059: Initialize prefetch when navigating to a feed
+  // Loads two pages (page 1 displayed, page 2 buffered) for seamless scrolling
+  useEffect(() => {
+    debugLog(`[ChatView] FEAT-059: Initializing prefetch for feedId=${feed.id.substring(0, 8)}...`);
+    useFeedsStore.getState().initializeFeedPrefetch(feed.id);
+  }, [feed.id]);
+
   // Android virtual keyboard detection for compact header mode
   const { isKeyboardVisible } = useVirtualKeyboard();
   // Subscribe to just this feed's messages for efficient updates
@@ -113,6 +120,16 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   // FEAT-056: Subscribe to "was capped" state for memory cap notice
   const feedWasCapped = useFeedsStore(
     (state) => state.feedWasCapped[feed.id] ?? null
+  );
+
+  // FEAT-059: Subscribe to prefetch isPrefetching for loading spinner
+  const isPrefetching = useFeedsStore(
+    (state) => state.prefetchState[feed.id]?.isPrefetching ?? false
+  );
+
+  // FEAT-059: Subscribe to prefetch hasMoreMessages for "beginning of conversation" indicator
+  const prefetchHasMoreMessages = useFeedsStore(
+    (state) => state.prefetchState[feed.id]?.hasMoreMessages ?? true
   );
 
   const regularMessages = useMemo(
@@ -573,8 +590,11 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   // Use a ref to debounce rapid scroll events
   const rangeChangedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // FEAT-059: Separate debounce ref for prefetch trigger
+  const prefetchTriggerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const handleRangeChanged = useCallback((range: { startIndex: number; endIndex: number }) => {
-    // Debounce: wait 150ms after scrolling stops before fetching
+    // Debounce: wait 150ms after scrolling stops before fetching reaction tallies
     if (rangeChangedTimeoutRef.current) {
       clearTimeout(rangeChangedTimeoutRef.current);
     }
@@ -596,13 +616,48 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
         fetchTalliesForMessages(visibleMessageIds);
       }
     }, 150);
-  }, [chatItems, fetchTalliesForMessages]);
 
-  // Cleanup debounce timeout on unmount
+    // FEAT-059: Check if we should trigger prefetch based on scroll position
+    // Trigger when user scrolls 25% into the buffer (viewing older messages)
+    if (prefetchTriggerTimeoutRef.current) {
+      clearTimeout(prefetchTriggerTimeoutRef.current);
+    }
+
+    prefetchTriggerTimeoutRef.current = setTimeout(() => {
+      // Get current prefetch state from store (to ensure freshness)
+      const currentPrefetchState = useFeedsStore.getState().getPrefetchState(feed.id);
+      if (!currentPrefetchState) return;
+
+      // Skip if already prefetching, no more messages, or no valid cursor
+      if (currentPrefetchState.isPrefetching ||
+          !currentPrefetchState.hasMoreMessages ||
+          !currentPrefetchState.oldestLoadedBlockIndex) {
+        return;
+      }
+
+      // Calculate prefetch threshold
+      // Page size is 100, trigger when user is 25% into the buffer
+      const PAGE_SIZE = 100;
+      const bufferThreshold = Math.floor(PAGE_SIZE * 0.25); // 25 messages
+
+      // startIndex is relative to firstItemIndex, which shifts as in-memory messages are prepended
+      // We want to trigger prefetch when user is viewing messages near the oldest loaded
+      // The threshold is: if visible startIndex (0-based in chatItems) is <= bufferThreshold
+      if (range.startIndex <= bufferThreshold) {
+        debugLog(`[ChatView] FEAT-059: Prefetch trigger - startIndex=${range.startIndex}, threshold=${bufferThreshold}`);
+        useFeedsStore.getState().prefetchNextPage(feed.id);
+      }
+    }, 100); // 100ms debounce for prefetch trigger
+  }, [chatItems, fetchTalliesForMessages, feed.id]);
+
+  // Cleanup debounce timeouts on unmount
   useEffect(() => {
     return () => {
       if (rangeChangedTimeoutRef.current) {
         clearTimeout(rangeChangedTimeoutRef.current);
+      }
+      if (prefetchTriggerTimeoutRef.current) {
+        clearTimeout(prefetchTriggerTimeoutRef.current);
       }
     };
   }, []);
@@ -1176,12 +1231,23 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
             startReached={handleStartReached}
             components={{
               // FEAT-056: Header shows loading spinner, error state, memory cap notice, or "Beginning of conversation" indicator
+              // FEAT-056/FEAT-059: Header shows loading spinner, error state, memory cap notice, or "Beginning of conversation"
               Header: () => {
+                // FEAT-056: Show spinner when loading older messages (manual load-more)
                 if (isLoadingOlderMessages) {
                   return (
                     <div className="flex items-center justify-center py-4">
                       <Loader2 className="w-5 h-5 text-hush-purple animate-spin" />
                       <span className="ml-2 text-sm text-hush-text-accent">Loading older messages...</span>
+                    </div>
+                  );
+                }
+                // FEAT-059: Show spinner when prefetching (automatic prefetch)
+                if (isPrefetching) {
+                  return (
+                    <div className="flex items-center justify-center py-4">
+                      <Loader2 className="w-5 h-5 text-hush-purple animate-spin" />
+                      <span className="ml-2 text-sm text-hush-text-accent">Loading messages...</span>
                     </div>
                   );
                 }
@@ -1205,7 +1271,9 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
                     </div>
                   );
                 }
-                if (!hasMoreMessages) {
+                // FEAT-059: Use prefetchHasMoreMessages for "beginning of conversation" indicator
+                // This reflects the prefetch state which tracks actual remaining messages
+                if (!hasMoreMessages && !prefetchHasMoreMessages) {
                   return (
                     <div className="flex items-center justify-center py-4 text-hush-text-accent">
                       <MessageCircle className="w-4 h-4 mr-2" />

@@ -162,8 +162,10 @@ export const GroupCreationWizard = memo(function GroupCreationWizard({
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
           try {
             // Check if feed exists via API (same pattern as auth/page.tsx)
+            // cache: 'no-store' prevents browser from serving stale responses
             const feedsResponse = await fetch(
-              buildApiUrl(`/api/feeds/list?address=${encodeURIComponent(credentials.signingPublicKey)}&blockIndex=0`)
+              buildApiUrl(`/api/feeds/list?address=${encodeURIComponent(credentials.signingPublicKey)}&blockIndex=0`),
+              { cache: 'no-store' }
             );
             const feedsData = await feedsResponse.json();
 

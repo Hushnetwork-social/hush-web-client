@@ -10,11 +10,12 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Feed, FeedMessage, FeedCacheMetadata, GroupFeedMember, GroupMemberRole, GroupKeyGeneration, GroupKeyState, SettingsChangeRecord, MessageStatus } from '@/types';
-import { debugLog } from '@/lib/debug-logger';
+import { debugLog, debugError } from '@/lib/debug-logger';
 import { useReactionsStore } from '@/modules/reactions/useReactionsStore';
 import { feedService } from '@/lib/grpc/services/feed';
 import { useAppStore } from '@/stores/useAppStore';
 import { aesDecrypt } from '@/lib/crypto';
+import { fetchFeedMessages } from './FeedsService';
 
 // Feed type mapping from server (FeedType enum)
 // Server: Personal=0, Chat=1, Broadcast=2, Group=3
@@ -24,6 +25,24 @@ export const FEED_TYPE_MAP: Record<number, Feed['type']> = {
   2: 'broadcast',
   3: 'group',
 };
+
+// ============= FEAT-059: Auto-Pagination Prefetch State =============
+
+/**
+ * FEAT-059: Per-feed prefetch state for scroll-based pagination.
+ * Tracks pagination cursor, loading state, and buffer status.
+ * Memory-only (NOT persisted to localStorage).
+ */
+export interface FeedPrefetchState {
+  /** Cursor for next page request - lowest block index from last fetched page */
+  oldestLoadedBlockIndex: number | null;
+  /** Prevents concurrent prefetches for this feed */
+  isPrefetching: boolean;
+  /** Number of pages loaded (2 on init, increments on each prefetch) */
+  loadedPageCount: number;
+  /** Whether more older pages exist on server */
+  hasMoreMessages: boolean;
+}
 
 interface FeedsSyncMetadata {
   lastFeedBlockIndex: number;
@@ -119,6 +138,37 @@ interface FeedsState {
    * Memory-only, NOT persisted.
    */
   feedWasCapped: Record<string, number | null>;
+
+  // ============= FEAT-059: Auto-Pagination Prefetch State =============
+
+  /**
+   * FEAT-059: Per-feed prefetch state for scroll-based auto-pagination.
+   * Tracks cursor, loading state, and page count.
+   * Memory-only (NOT persisted to localStorage).
+   */
+  prefetchState: Record<string, FeedPrefetchState>;
+
+  // ============= MT-002/MT-003: Observability Metrics =============
+
+  /**
+   * MT-002: Retry metrics counters.
+   * Memory-only (NOT persisted to localStorage).
+   */
+  retryMetrics: {
+    messagesPending: number;
+    messagesRetrying: number;
+    messagesFailed: number;
+    totalRetryAttempts: number;
+  };
+
+  /**
+   * MT-003: Prefetch metrics counters.
+   * Memory-only (NOT persisted to localStorage).
+   */
+  prefetchMetrics: {
+    pagesLoaded: number;
+    prefetchTriggeredCount: number;
+  };
 }
 
 interface FeedsActions {
@@ -432,6 +482,63 @@ interface FeedsActions {
    * Used for logout confirmation dialog.
    */
   hasPendingOrFailedMessages: () => boolean;
+
+  // ============= FEAT-059: Auto-Pagination Prefetch Actions =============
+
+  /**
+   * FEAT-059: Get prefetch state for a feed.
+   */
+  getPrefetchState: (feedId: string) => FeedPrefetchState | undefined;
+
+  /**
+   * FEAT-059: Initialize prefetch state for a feed (if not already initialized).
+   * Called when feed is opened.
+   */
+  initPrefetchState: (feedId: string) => void;
+
+  /**
+   * FEAT-059: Update prefetch state for a feed.
+   */
+  updatePrefetchState: (feedId: string, updates: Partial<FeedPrefetchState>) => void;
+
+  /**
+   * FEAT-059: Clear prefetch state for a feed.
+   * Called during house-cleaning when navigating away.
+   */
+  clearPrefetchState: (feedId: string) => void;
+
+  /**
+   * FEAT-059: Check if prefetch state exists for a feed.
+   */
+  hasPrefetchState: (feedId: string) => boolean;
+
+  /**
+   * FEAT-059: Initialize feed prefetch - loads two pages when feed is opened.
+   * - Page 1 (newest 100) goes to persisted messages
+   * - Page 2 (next 100 older) goes to inMemoryMessages buffer
+   * - Skips if prefetch state already exists (feed was recently opened)
+   */
+  initializeFeedPrefetch: (feedId: string) => Promise<void>;
+
+  /**
+   * FEAT-059: Prefetch the next page of older messages.
+   * Triggered by scroll approaching the top of the message list.
+   * - Guards against concurrent prefetches
+   * - Guards against fetching when no more messages exist
+   * - Prepends new messages to inMemoryMessages
+   */
+  prefetchNextPage: (feedId: string) => Promise<void>;
+
+  // ============= MT-002/MT-003: Metrics Actions =============
+
+  /** MT-002: Get retry metrics snapshot */
+  getRetryMetrics: () => FeedsState['retryMetrics'];
+
+  /** MT-003: Get prefetch metrics snapshot */
+  getPrefetchMetrics: () => FeedsState['prefetchMetrics'];
+
+  /** MT-002/MT-003: Reset all metrics counters to zero */
+  resetMetrics: () => void;
 }
 
 type FeedsStore = FeedsState & FeedsActions;
@@ -460,6 +567,17 @@ const initialState: FeedsState = {
   isLoadingOlderMessages: {},
   feedLoadError: {},
   feedWasCapped: {},
+  prefetchState: {},
+  retryMetrics: {
+    messagesPending: 0,
+    messagesRetrying: 0,
+    messagesFailed: 0,
+    totalRetryAttempts: 0,
+  },
+  prefetchMetrics: {
+    pagesLoaded: 0,
+    prefetchTriggeredCount: 0,
+  },
 };
 
 /**
@@ -471,6 +589,137 @@ function sortFeeds(feeds: Feed[]): Feed[] {
     if (b.type === 'personal') return 1;
     return b.updatedAt - a.updatedAt;
   });
+}
+
+/**
+ * FEAT-059: Helper to decrypt messages based on feed type.
+ * - Chat feeds: use feed's AES key
+ * - Group feeds: use KeyGeneration-specific AES keys
+ * - Personal/Broadcast: no encryption
+ */
+async function decryptMessages(
+  messages: FeedMessage[],
+  feed: Feed,
+  getState: () => FeedsStore
+): Promise<FeedMessage[]> {
+  if (feed.type === 'chat') {
+    // Chat feed: decrypt with feed's AES key
+    const feedAesKey = feed.aesKey;
+    if (!feedAesKey) {
+      debugLog(`[FeedsStore] decryptMessages: no AES key for chat feed ${feed.id.substring(0, 8)}...`);
+      return messages.map((msg) => ({
+        ...msg,
+        contentEncrypted: msg.content,
+        decryptionFailed: true,
+      }));
+    }
+
+    return Promise.all(
+      messages.map(async (msg) => {
+        try {
+          const decryptedContent = await aesDecrypt(msg.content, feedAesKey);
+          return {
+            ...msg,
+            content: decryptedContent,
+            contentEncrypted: msg.content,
+            decryptionFailed: false,
+          };
+        } catch {
+          debugLog(`[FeedsStore] decryptMessages: failed to decrypt chat msg ${msg.id.substring(0, 8)}...`);
+          return {
+            ...msg,
+            contentEncrypted: msg.content,
+            decryptionFailed: true,
+          };
+        }
+      })
+    );
+  } else if (feed.type === 'group') {
+    // Group feed: decrypt with keyGeneration-specific AES key
+    const keyState = getState().getGroupKeyState(feed.id);
+    if (!keyState || keyState.keyGenerations.length === 0) {
+      debugLog(`[FeedsStore] decryptMessages: no KeyGenerations for group feed ${feed.id.substring(0, 8)}...`);
+      return messages.map((msg) => ({
+        ...msg,
+        contentEncrypted: msg.content,
+        decryptionFailed: true,
+      }));
+    }
+
+    // Build key lookup map
+    const keyMap = new Map<number, string>();
+    for (const kg of keyState.keyGenerations) {
+      if (kg.aesKey) {
+        keyMap.set(kg.keyGeneration, kg.aesKey);
+      }
+    }
+
+    // Get all available keys sorted by keyGeneration descending (try newest first)
+    const keysToTry = [...keyState.keyGenerations]
+      .filter((kg) => kg.aesKey)
+      .sort((a, b) => b.keyGeneration - a.keyGeneration);
+
+    return Promise.all(
+      messages.map(async (msg) => {
+        // If message has keyGeneration, use that specific key
+        if (msg.keyGeneration !== undefined && keyMap.has(msg.keyGeneration)) {
+          const aesKey = keyMap.get(msg.keyGeneration)!;
+          try {
+            const decryptedContent = await aesDecrypt(msg.content, aesKey);
+            return {
+              ...msg,
+              content: decryptedContent,
+              contentEncrypted: msg.content,
+              decryptionFailed: false,
+            };
+          } catch {
+            debugLog(`[FeedsStore] decryptMessages: failed with keyGen=${msg.keyGeneration}`);
+            return {
+              ...msg,
+              contentEncrypted: msg.content,
+              decryptionFailed: true,
+            };
+          }
+        } else if (msg.keyGeneration !== undefined) {
+          // Missing key (joined after this KeyGeneration)
+          debugLog(`[FeedsStore] decryptMessages: missing keyGen=${msg.keyGeneration}`);
+          getState().recordMissingKeyGeneration(feed.id, msg.keyGeneration);
+          return {
+            ...msg,
+            contentEncrypted: msg.content,
+            decryptionFailed: true,
+          };
+        }
+
+        // No keyGeneration - try all keys until one works
+        for (const keyGen of keysToTry) {
+          try {
+            const decryptedContent = await aesDecrypt(msg.content, keyGen.aesKey);
+            return {
+              ...msg,
+              content: decryptedContent,
+              contentEncrypted: msg.content,
+              keyGeneration: keyGen.keyGeneration,
+              decryptionFailed: false,
+            };
+          } catch {
+            continue; // Try next key
+          }
+        }
+
+        // All keys failed
+        debugLog(`[FeedsStore] decryptMessages: all ${keysToTry.length} keys failed for msg ${msg.id.substring(0, 8)}...`);
+        return {
+          ...msg,
+          contentEncrypted: msg.content,
+          decryptionFailed: true,
+        };
+      })
+    );
+  }
+
+  // Personal/Broadcast feeds: no encryption
+  return messages;
 }
 
 /**
@@ -867,6 +1116,11 @@ export const useFeedsStore = create<FeedsStore>()(
             messages: {
               ...state.messages,
               [feedId]: [...(state.messages[feedId] || []), message],
+            },
+            // MT-002: Increment pending counter
+            retryMetrics: {
+              ...state.retryMetrics,
+              messagesPending: state.retryMetrics.messagesPending + 1,
             },
           };
         });
@@ -1646,6 +1900,9 @@ export const useFeedsStore = create<FeedsStore>()(
               debugLog(`[FeedsStore] cleanupFeed: cleared pagination state for feedId=${feedId.substring(0, 8)}...`);
             }
 
+            // 1c. FEAT-059: Clear prefetch state for this feed
+            get().clearPrefetchState(feedId);
+
             // 2. Trim localStorage messages to 100 read + all unread
             // trimMessagesToLimit returns array of removed message IDs
             const removedIds = get().trimMessagesToLimit(feedId, 100);
@@ -2037,11 +2294,21 @@ export const useFeedsStore = create<FeedsStore>()(
 
           debugLog(`[FeedsStore] updateMessageRetryState: feedId=${feedId.substring(0, 8)}..., messageId=${messageId.substring(0, 8)}..., update=`, update);
 
+          // MT-002: Increment retry metrics based on status change
+          const retryMetrics = { ...state.retryMetrics };
+          if (update.status === 'confirming') {
+            retryMetrics.messagesRetrying++;
+            retryMetrics.totalRetryAttempts++;
+          } else if (update.status === 'failed') {
+            retryMetrics.messagesFailed++;
+          }
+
           return {
             messages: {
               ...state.messages,
               [feedId]: updatedMessages,
             },
+            retryMetrics,
           };
         });
       },
@@ -2073,13 +2340,343 @@ export const useFeedsStore = create<FeedsStore>()(
           for (const message of messages) {
             // Check status field first, fall back to isConfirmed for migrated messages
             const status = message.status ?? (message.isConfirmed ? 'confirmed' : 'pending');
-            if (status === 'pending' || status === 'failed') {
+            if (status !== 'confirmed') {
               return true;
             }
           }
         }
 
         return false;
+      },
+
+      // ============= FEAT-059: Auto-Pagination Prefetch Implementations =============
+
+      getPrefetchState: (feedId) => {
+        return get().prefetchState[feedId];
+      },
+
+      initPrefetchState: (feedId) => {
+        // Skip if already initialized
+        if (get().prefetchState[feedId]) {
+          debugLog(`[FeedsStore] initPrefetchState: already initialized for feedId=${feedId.substring(0, 8)}...`);
+          return;
+        }
+
+        debugLog(`[FeedsStore] initPrefetchState: initializing for feedId=${feedId.substring(0, 8)}...`);
+        set((state) => ({
+          prefetchState: {
+            ...state.prefetchState,
+            [feedId]: {
+              oldestLoadedBlockIndex: null,
+              isPrefetching: false,
+              loadedPageCount: 0,
+              hasMoreMessages: true, // Assume more until server says otherwise
+            },
+          },
+        }));
+      },
+
+      updatePrefetchState: (feedId, updates) => {
+        set((state) => {
+          const current = state.prefetchState[feedId];
+          if (!current) {
+            debugLog(`[FeedsStore] updatePrefetchState: no state for feedId=${feedId.substring(0, 8)}..., creating with updates`);
+            return {
+              prefetchState: {
+                ...state.prefetchState,
+                [feedId]: {
+                  oldestLoadedBlockIndex: null,
+                  isPrefetching: false,
+                  loadedPageCount: 0,
+                  hasMoreMessages: true,
+                  ...updates,
+                },
+              },
+            };
+          }
+
+          debugLog(`[FeedsStore] updatePrefetchState: feedId=${feedId.substring(0, 8)}..., updates=`, updates);
+          return {
+            prefetchState: {
+              ...state.prefetchState,
+              [feedId]: {
+                ...current,
+                ...updates,
+              },
+            },
+          };
+        });
+      },
+
+      clearPrefetchState: (feedId) => {
+        const current = get().prefetchState;
+        if (!current[feedId]) {
+          return; // Nothing to clear
+        }
+
+        debugLog(`[FeedsStore] clearPrefetchState: clearing for feedId=${feedId.substring(0, 8)}...`);
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { [feedId]: _removed, ...remaining } = current;
+        set({ prefetchState: remaining });
+      },
+
+      hasPrefetchState: (feedId) => {
+        return get().prefetchState[feedId] !== undefined;
+      },
+
+      initializeFeedPrefetch: async (feedId) => {
+        // Skip if prefetch state already exists (feed was recently opened)
+        if (get().hasPrefetchState(feedId)) {
+          debugLog(`[FeedsStore] initializeFeedPrefetch: skipping - already initialized for feedId=${feedId.substring(0, 8)}...`);
+          return;
+        }
+
+        // Initialize prefetch state
+        get().initPrefetchState(feedId);
+
+        const feed = get().getFeed(feedId);
+        if (!feed) {
+          debugError(`[FeedsStore] initializeFeedPrefetch: feed not found for feedId=${feedId.substring(0, 8)}...`);
+          return;
+        }
+
+        debugLog(`[FeedsStore] initializeFeedPrefetch: starting for feedId=${feedId.substring(0, 8)}...`);
+
+        try {
+          // Page 1: Fetch newest 100 messages (no cursor)
+          const page1Response = await fetchFeedMessages(feedId, undefined, 100);
+          debugLog(`[FeedsStore] initializeFeedPrefetch: page1 received ${page1Response.messages.length} messages, hasMore=${page1Response.hasMoreMessages}`);
+
+          if (page1Response.messages.length === 0) {
+            // No messages in feed - update state and return
+            get().updatePrefetchState(feedId, {
+              loadedPageCount: 0,
+              hasMoreMessages: false,
+              oldestLoadedBlockIndex: null,
+            });
+            return;
+          }
+
+          // Decrypt page 1 messages
+          const decryptedPage1 = await decryptMessages(page1Response.messages, feed, get);
+
+          // Add page 1 to persisted messages
+          get().addMessages(feedId, decryptedPage1);
+
+          // Get cursor for page 2 (oldest block index from page 1)
+          const page1Cursor = page1Response.oldestBlockIndex;
+
+          // Update state after page 1
+          get().updatePrefetchState(feedId, {
+            loadedPageCount: 1,
+            oldestLoadedBlockIndex: page1Cursor,
+            hasMoreMessages: page1Response.hasMoreMessages,
+          });
+
+          // MT-003: Increment pages loaded
+          set((state) => ({
+            prefetchMetrics: {
+              ...state.prefetchMetrics,
+              pagesLoaded: state.prefetchMetrics.pagesLoaded + 1,
+            },
+          }));
+
+          // Page 2: Fetch next 100 older messages if more exist
+          if (page1Response.hasMoreMessages && page1Cursor > 0) {
+            debugLog(`[FeedsStore] initializeFeedPrefetch: fetching page2 before blockIndex=${page1Cursor}`);
+            const page2Response = await fetchFeedMessages(feedId, page1Cursor, 100);
+            debugLog(`[FeedsStore] initializeFeedPrefetch: page2 received ${page2Response.messages.length} messages, hasMore=${page2Response.hasMoreMessages}`);
+
+            if (page2Response.messages.length > 0) {
+              // Decrypt page 2 messages
+              const decryptedPage2 = await decryptMessages(page2Response.messages, feed, get);
+
+              // Store page 2 in inMemoryMessages buffer (prepend)
+              set((state) => ({
+                inMemoryMessages: {
+                  ...state.inMemoryMessages,
+                  [feedId]: decryptedPage2,
+                },
+              }));
+
+              // Update prefetch state with page 2 results
+              get().updatePrefetchState(feedId, {
+                loadedPageCount: 2,
+                oldestLoadedBlockIndex: page2Response.oldestBlockIndex,
+                hasMoreMessages: page2Response.hasMoreMessages,
+              });
+
+              // MT-003: Increment pages loaded for page 2
+              set((state) => ({
+                prefetchMetrics: {
+                  ...state.prefetchMetrics,
+                  pagesLoaded: state.prefetchMetrics.pagesLoaded + 1,
+                },
+              }));
+
+              debugLog(`[FeedsStore] initializeFeedPrefetch: completed - loaded 2 pages for feedId=${feedId.substring(0, 8)}...`);
+            } else {
+              // Page 2 was empty
+              get().updatePrefetchState(feedId, {
+                hasMoreMessages: false,
+              });
+              debugLog(`[FeedsStore] initializeFeedPrefetch: completed - page2 empty for feedId=${feedId.substring(0, 8)}...`);
+            }
+          } else {
+            debugLog(`[FeedsStore] initializeFeedPrefetch: completed - no more messages after page1 for feedId=${feedId.substring(0, 8)}...`);
+          }
+        } catch (error) {
+          debugError(`[FeedsStore] initializeFeedPrefetch: error for feedId=${feedId.substring(0, 8)}...`, error);
+          // Clear prefetch state on error to allow retry
+          get().clearPrefetchState(feedId);
+        }
+      },
+
+      prefetchNextPage: async (feedId) => {
+        const prefetchState = get().getPrefetchState(feedId);
+
+        // Guard: Skip if no prefetch state
+        if (!prefetchState) {
+          debugLog(`[FeedsStore] prefetchNextPage: skipping - no prefetch state for feedId=${feedId.substring(0, 8)}...`);
+          return;
+        }
+
+        // Guard: Skip if already prefetching
+        if (prefetchState.isPrefetching) {
+          debugLog(`[FeedsStore] prefetchNextPage: skipping - already prefetching for feedId=${feedId.substring(0, 8)}...`);
+          return;
+        }
+
+        // Guard: Skip if no more messages
+        if (!prefetchState.hasMoreMessages) {
+          debugLog(`[FeedsStore] prefetchNextPage: skipping - no more messages for feedId=${feedId.substring(0, 8)}...`);
+          return;
+        }
+
+        // Guard: Need a valid cursor
+        const cursor = prefetchState.oldestLoadedBlockIndex;
+        if (cursor === null || cursor <= 0) {
+          debugLog(`[FeedsStore] prefetchNextPage: skipping - no valid cursor for feedId=${feedId.substring(0, 8)}...`);
+          return;
+        }
+
+        const feed = get().getFeed(feedId);
+        if (!feed) {
+          debugError(`[FeedsStore] prefetchNextPage: feed not found for feedId=${feedId.substring(0, 8)}...`);
+          return;
+        }
+
+        // Set isPrefetching to true
+        get().updatePrefetchState(feedId, { isPrefetching: true });
+
+        // MT-003: Increment prefetch triggered count
+        set((state) => ({
+          prefetchMetrics: {
+            ...state.prefetchMetrics,
+            prefetchTriggeredCount: state.prefetchMetrics.prefetchTriggeredCount + 1,
+          },
+        }));
+
+        debugLog(`[FeedsStore] prefetchNextPage: fetching before blockIndex=${cursor} for feedId=${feedId.substring(0, 8)}...`);
+
+        // Retry logic with exponential backoff
+        const MAX_RETRIES = 3;
+        let lastError: Error | null = null;
+
+        for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+          try {
+            const response = await fetchFeedMessages(feedId, cursor, 100);
+            debugLog(`[FeedsStore] prefetchNextPage: received ${response.messages.length} messages, hasMore=${response.hasMoreMessages}`);
+
+            if (response.messages.length > 0) {
+              // Decrypt messages
+              const decryptedMessages = await decryptMessages(response.messages, feed, get);
+
+              // Prepend to inMemoryMessages
+              const currentInMemory = get().inMemoryMessages[feedId] || [];
+              const mergedMessages = [...decryptedMessages, ...currentInMemory];
+
+              // Enforce 500 message cap
+              const IN_MEMORY_CAP = 500;
+              const cappedMessages = mergedMessages.length > IN_MEMORY_CAP
+                ? mergedMessages.slice(-IN_MEMORY_CAP)
+                : mergedMessages;
+
+              set((state) => ({
+                inMemoryMessages: {
+                  ...state.inMemoryMessages,
+                  [feedId]: cappedMessages,
+                },
+              }));
+
+              // Update prefetch state
+              get().updatePrefetchState(feedId, {
+                isPrefetching: false,
+                loadedPageCount: prefetchState.loadedPageCount + 1,
+                oldestLoadedBlockIndex: response.oldestBlockIndex,
+                hasMoreMessages: response.hasMoreMessages,
+              });
+
+              // MT-003: Increment pages loaded
+              set((state) => ({
+                prefetchMetrics: {
+                  ...state.prefetchMetrics,
+                  pagesLoaded: state.prefetchMetrics.pagesLoaded + 1,
+                },
+              }));
+
+              debugLog(`[FeedsStore] prefetchNextPage: completed - page ${prefetchState.loadedPageCount + 1} for feedId=${feedId.substring(0, 8)}...`);
+            } else {
+              // Empty response - no more messages
+              get().updatePrefetchState(feedId, {
+                isPrefetching: false,
+                hasMoreMessages: false,
+              });
+              debugLog(`[FeedsStore] prefetchNextPage: completed - no more messages for feedId=${feedId.substring(0, 8)}...`);
+            }
+
+            return; // Success - exit function
+          } catch (error) {
+            lastError = error instanceof Error ? error : new Error(String(error));
+
+            if (attempt < MAX_RETRIES) {
+              // Exponential backoff: 100ms, 200ms, 400ms
+              const delay = 100 * Math.pow(2, attempt - 1);
+              debugLog(`[FeedsStore] prefetchNextPage: attempt ${attempt}/${MAX_RETRIES} failed, retrying in ${delay}ms...`);
+              await new Promise((resolve) => setTimeout(resolve, delay));
+            }
+          }
+        }
+
+        // All retries failed
+        debugError(`[FeedsStore] prefetchNextPage: failed after ${MAX_RETRIES} attempts`, lastError);
+        get().updatePrefetchState(feedId, { isPrefetching: false });
+        // Don't set hasMoreMessages to false - allow retry on next scroll
+      },
+
+      // ============= MT-002/MT-003: Metrics Implementations =============
+
+      getRetryMetrics: () => {
+        return get().retryMetrics;
+      },
+
+      getPrefetchMetrics: () => {
+        return get().prefetchMetrics;
+      },
+
+      resetMetrics: () => {
+        set({
+          retryMetrics: {
+            messagesPending: 0,
+            messagesRetrying: 0,
+            messagesFailed: 0,
+            totalRetryAttempts: 0,
+          },
+          prefetchMetrics: {
+            pagesLoaded: 0,
+            prefetchTriggeredCount: 0,
+          },
+        });
       },
     }),
     {

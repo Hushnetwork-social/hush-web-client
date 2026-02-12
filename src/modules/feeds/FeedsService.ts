@@ -632,6 +632,99 @@ export async function retryMessage(
   }
 }
 
+// ============= FEAT-059: Per-Feed Pagination for Scroll-Based Prefetch =============
+
+/**
+ * Response type for per-feed pagination API
+ */
+export interface FetchFeedMessagesResponse {
+  messages: FeedMessage[];
+  hasMoreMessages: boolean;
+  oldestBlockIndex: number;
+  newestBlockIndex: number;
+}
+
+/**
+ * FEAT-059: Fetches messages for a specific feed with cursor-based backward pagination.
+ * Used for scroll-based prefetch buffering.
+ *
+ * @param feedId The specific feed to fetch messages from
+ * @param beforeBlockIndex Optional cursor: return messages older than this block index (omit for newest)
+ * @param limit Optional: Max messages to return (default: 100)
+ * @returns Messages with pagination metadata
+ */
+export async function fetchFeedMessages(
+  feedId: string,
+  beforeBlockIndex?: number,
+  limit?: number
+): Promise<FetchFeedMessagesResponse> {
+  const credentials = useAppStore.getState().credentials;
+  const userAddress = credentials?.signingPublicKey;
+
+  if (!userAddress) {
+    debugError('[FeedsService] fetchFeedMessages: No user credentials');
+    return {
+      messages: [],
+      hasMoreMessages: false,
+      oldestBlockIndex: 0,
+      newestBlockIndex: 0,
+    };
+  }
+
+  const params = new URLSearchParams({
+    feedId,
+    userAddress,
+  });
+
+  if (beforeBlockIndex !== undefined && beforeBlockIndex > 0) {
+    params.set('beforeBlockIndex', beforeBlockIndex.toString());
+  }
+
+  if (limit !== undefined && limit > 0) {
+    params.set('limit', limit.toString());
+  }
+
+  const response = await fetch(buildApiUrl(`/api/feeds/messages-by-id?${params}`));
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch feed messages: HTTP ${response.status}`);
+  }
+
+  const data = await response.json();
+
+  if (!data.messages || !Array.isArray(data.messages)) {
+    return {
+      messages: [],
+      hasMoreMessages: false,
+      oldestBlockIndex: 0,
+      newestBlockIndex: 0,
+    };
+  }
+
+  // Convert server messages to app message format
+  const messages: FeedMessage[] = data.messages.map((msg: ServerMessage) => {
+    return {
+      id: msg.feedMessageId,
+      feedId: msg.feedId,
+      content: msg.messageContent,
+      senderPublicKey: msg.issuerPublicAddress,
+      senderName: msg.issuerName || undefined,
+      timestamp: msg.timestamp ? new Date(msg.timestamp).getTime() : Date.now(),
+      blockHeight: msg.blockIndex,
+      isConfirmed: true,
+      replyToMessageId: msg.replyToMessageId || undefined,
+      keyGeneration: msg.keyGeneration,
+    };
+  });
+
+  return {
+    messages,
+    hasMoreMessages: data.hasMoreMessages ?? false,
+    oldestBlockIndex: data.oldestBlockIndex ?? 0,
+    newestBlockIndex: data.newestBlockIndex ?? 0,
+  };
+}
+
 /**
  * FEAT-051: Marks a feed as read up to a specific block index.
  * This is a fire-and-forget operation - errors are logged but not thrown.
