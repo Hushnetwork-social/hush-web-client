@@ -107,8 +107,9 @@ export async function fetchFeeds(
   });
 
   // Calculate max block index from response
+  // FEAT-062: Use blockIndex (not createdAt) since createdAt is now preserved from first creation
   const maxBlockIndex = feeds.length > 0
-    ? Math.max(...feeds.map((f) => f.createdAt), blockIndex)
+    ? Math.max(...feeds.map((f) => f.blockIndex ?? 0), blockIndex)
     : blockIndex;
 
   return { feeds, maxBlockIndex };

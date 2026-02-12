@@ -830,6 +830,8 @@ export const useFeedsStore = create<FeedsStore>()(
               aesKey: keyChanged ? undefined : (existingFeed.aesKey || serverFeed.aesKey),
               // Preserve unreadCount - server doesn't track this, it's client-side only
               unreadCount: existingFeed.unreadCount ?? 0,
+              // FEAT-062: Preserve createdAt from first creation (don't overwrite with latest blockIndex)
+              createdAt: existingFeed.createdAt,
             };
           }
           return existingFeed;

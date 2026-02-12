@@ -460,4 +460,89 @@ describe('FEAT-062: Feed Sorting (blockIndex-based)', () => {
       expect(updatedFeed?.blockIndex).toBe(500);
     });
   });
+
+  // === Phase 4 Tests: createdAt Fix + Cross-Feature ===
+
+  describe('createdAt preservation during feed sync merge', () => {
+    it('should preserve createdAt when feed is synced again via addFeeds', () => {
+      // Arrange: local feed with createdAt = 100
+      const localFeed = createTestFeed({ id: 'feed-1', createdAt: 100, blockIndex: 100 });
+      useFeedsStore.getState().setFeeds([localFeed]);
+
+      // Act: server returns the same feed with updated blockIndex
+      const serverFeed = createTestFeed({ id: 'feed-1', createdAt: 500, blockIndex: 500 });
+      useFeedsStore.getState().addFeeds([serverFeed]);
+
+      // Assert: createdAt preserved, blockIndex updated
+      const mergedFeed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(mergedFeed?.createdAt).toBe(100); // preserved
+      expect(mergedFeed?.blockIndex).toBe(500); // updated from server
+    });
+
+    it('should set createdAt from blockIndex for new feeds', () => {
+      // Arrange: no existing feeds
+      useFeedsStore.getState().setFeeds([]);
+
+      // Act: server returns a new feed
+      const newFeed = createTestFeed({ id: 'feed-new', createdAt: 200, blockIndex: 200 });
+      useFeedsStore.getState().addFeeds([newFeed]);
+
+      // Assert: new feed gets createdAt as provided
+      const addedFeed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-new');
+      expect(addedFeed?.createdAt).toBe(200);
+      expect(addedFeed?.blockIndex).toBe(200);
+    });
+  });
+
+  describe('CF-002: Read sync does NOT affect feed sort position', () => {
+    it('should not change sort order when unreadCount changes', () => {
+      // Arrange: two feeds in specific order
+      const feeds = [
+        createTestFeed({ id: 'feed-1', blockIndex: 800, unreadCount: 5 }),
+        createTestFeed({ id: 'feed-2', blockIndex: 600, unreadCount: 10 }),
+      ];
+      useFeedsStore.getState().setFeeds(feeds);
+
+      // Verify initial order
+      const initial = useFeedsStore.getState().feeds;
+      expect(initial[0].id).toBe('feed-1');
+      expect(initial[1].id).toBe('feed-2');
+
+      // Act: simulate MessagesRead event — change unreadCount without changing blockIndex
+      useFeedsStore.setState((state) => ({
+        feeds: state.feeds.map((f) =>
+          f.id === 'feed-2' ? { ...f, unreadCount: 0 } : f
+        ),
+      }));
+
+      // Assert: sort order unchanged — blockIndex determines order, not unreadCount
+      const after = useFeedsStore.getState().feeds;
+      expect(after[0].id).toBe('feed-1');
+      expect(after[1].id).toBe('feed-2');
+      expect(after[1].blockIndex).toBe(600); // blockIndex unchanged
+    });
+
+    it('should not move feed down when marked as fully read', () => {
+      // Arrange: feed at position 1 (after personal)
+      const feeds = [
+        createTestFeed({ id: 'personal', type: 'personal', blockIndex: 10 }),
+        createTestFeed({ id: 'feed-1', blockIndex: 800, unreadCount: 5 }),
+        createTestFeed({ id: 'feed-2', blockIndex: 600, unreadCount: 0 }),
+      ];
+      useFeedsStore.getState().setFeeds(feeds);
+
+      // Act: mark feed-1 as fully read
+      useFeedsStore.setState((state) => ({
+        feeds: state.feeds.map((f) =>
+          f.id === 'feed-1' ? { ...f, unreadCount: 0, lastReadBlockIndex: 800 } : f
+        ),
+      }));
+
+      // Assert: feed-1 stays at same position
+      const after = useFeedsStore.getState().feeds;
+      expect(after[0].id).toBe('personal');
+      expect(after[1].id).toBe('feed-1');
+      expect(after[1].blockIndex).toBe(800);
+    });
+  });
 });
