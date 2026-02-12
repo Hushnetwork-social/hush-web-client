@@ -581,13 +581,21 @@ const initialState: FeedsState = {
 };
 
 /**
- * Sort feeds with personal feed first, then by updatedAt (newest first)
+ * FEAT-062: Sort feeds by blockIndex (blockchain-canonical ordering).
+ * Priority: Personal feed first → feeds with pending messages → by blockIndex descending.
  */
 function sortFeeds(feeds: Feed[]): Feed[] {
   return [...feeds].sort((a, b) => {
+    // Personal feed always first
     if (a.type === 'personal') return -1;
     if (b.type === 'personal') return 1;
-    return b.updatedAt - a.updatedAt;
+
+    // Feeds with pending messages sort above non-pending
+    if (a.hasPendingMessages && !b.hasPendingMessages) return -1;
+    if (!a.hasPendingMessages && b.hasPendingMessages) return 1;
+
+    // Sort by blockIndex descending
+    return (b.blockIndex ?? 0) - (a.blockIndex ?? 0);
   });
 }
 

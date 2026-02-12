@@ -87,6 +87,8 @@ export interface Feed {
   settingsChangeHistory?: SettingsChangeRecord[];
   /** FEAT-051: Last read block index for cross-device read sync (0 = not read) */
   lastReadBlockIndex?: number;
+  /** FEAT-062: Client-only flag for optimistic sort boosting when pending messages exist */
+  hasPendingMessages?: boolean;
 }
 
 // Profile search result type
