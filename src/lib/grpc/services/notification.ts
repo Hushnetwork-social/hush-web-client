@@ -82,6 +82,7 @@ export type ErrorCallback = (error: Error) => void;
  * @param userId - The user's public signing address
  * @param onEvent - Callback for each received event
  * @param onError - Callback for errors
+ * @param onStreamEnd - Callback when stream ends normally (server-initiated close, not user abort)
  * @param deviceId - Optional device identifier for debugging
  * @param platform - Optional platform identifier ('browser', 'tauri', etc.)
  * @returns AbortController to cancel the subscription
@@ -90,6 +91,7 @@ export function subscribeToEvents(
   userId: string,
   onEvent: FeedEventCallback,
   onError?: ErrorCallback,
+  onStreamEnd?: () => void,
   deviceId?: string,
   platform: string = 'browser'
 ): AbortController {
@@ -186,6 +188,12 @@ export function subscribeToEvents(
               console.log(`[NotificationService] Received trailer frame (end of stream or error)`);
             }
           }
+        }
+        // Stream ended normally (server closed the stream)
+        // Only notify caller if the stream wasn't aborted by the user
+        if (!abortController.signal.aborted && onStreamEnd) {
+          debugLog(`[NotificationService] Stream ended, notifying caller`);
+          onStreamEnd();
         }
       } catch (readError) {
         if (abortController.signal.aborted) {
