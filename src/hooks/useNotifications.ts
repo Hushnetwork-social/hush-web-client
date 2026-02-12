@@ -19,6 +19,7 @@ import { onMemberJoin, onVisibilityChange } from '@/lib/events';
 import type { FeedEventResponse } from '@/lib/grpc/grpc-web-helper';
 import { debugLog, debugError } from '@/lib/debug-logger';
 import { parseMentions, trackMention } from '@/lib/mentions';
+import { getNextDelay, STREAM_RECONNECT_CONFIG } from '@/lib/backoff';
 import type { FeedMessage } from '@/types';
 
 // Event types matching proto enum
@@ -42,12 +43,10 @@ export interface UseNotificationsOptions {
   onNewMessage?: (event: FeedEventResponse) => void;
   /** Whether to auto-reconnect on disconnect (default: true) */
   autoReconnect?: boolean;
-  /** Reconnect delay in ms (default: 5000) */
-  reconnectDelay?: number;
 }
 
 export function useNotifications(options: UseNotificationsOptions = {}) {
-  const { onNewMessage, autoReconnect = true, reconnectDelay = 5000 } = options;
+  const { onNewMessage, autoReconnect = true } = options;
 
   const { isAuthenticated, credentials } = useAppStore();
   const selectedFeedId = useAppStore((state) => state.selectedFeedId);
@@ -63,6 +62,8 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
   const [toasts, setToasts] = useState<NotificationToast[]>([]);
   const abortControllerRef = useRef<AbortController | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const backoffAttemptRef = useRef(0);
+  const isOfflineRef = useRef(false);
 
   const userId = credentials?.signingPublicKey;
 
@@ -384,22 +385,60 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
     ]
   );
 
-  // Handle connection errors
+  // Handle connection errors with exponential backoff
   const handleError = useCallback(
     (error: Error) => {
       debugError('[useNotifications] Stream error:', error);
       setIsConnected(false);
 
-      if (autoReconnect) {
-        debugLog(`[useNotifications] Reconnecting in ${reconnectDelay}ms...`);
-        reconnectTimeoutRef.current = setTimeout(() => {
-          connect();
-        }, reconnectDelay);
+      backoffAttemptRef.current += 1;
+
+      if (!autoReconnect) return;
+
+      if (isOfflineRef.current) {
+        debugLog('[useNotifications] Stream error while offline, skipping reconnect');
+        return;
       }
+
+      // Clear any existing timer (single-timer guarantee)
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+
+      const delay = getNextDelay(backoffAttemptRef.current - 1, STREAM_RECONNECT_CONFIG);
+      debugLog(`[useNotifications] Reconnecting in ${delay}ms (attempt ${backoffAttemptRef.current})`);
+      reconnectTimeoutRef.current = setTimeout(() => {
+        connect();
+      }, delay);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [autoReconnect, reconnectDelay]
+    [autoReconnect]
   );
+
+  // Handle normal stream end (server-initiated close) - reset backoff and reconnect at base delay
+  const handleStreamEnd = useCallback(() => {
+    debugLog('[useNotifications] Stream ended normally, reconnecting in 5000ms');
+    setIsConnected(false);
+    backoffAttemptRef.current = 0;
+
+    if (!autoReconnect) return;
+
+    if (isOfflineRef.current) {
+      debugLog('[useNotifications] Stream ended while offline, skipping reconnect');
+      return;
+    }
+
+    // Clear any existing timer (single-timer guarantee)
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+    }
+
+    const delay = getNextDelay(0, STREAM_RECONNECT_CONFIG);
+    reconnectTimeoutRef.current = setTimeout(() => {
+      connect();
+    }, delay);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoReconnect]);
 
   // Connect to notification stream
   const connect = useCallback(() => {
@@ -420,6 +459,11 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
       userId,
       (event) => {
         console.log('[useNotifications] Received event:', event.type, 'feedId:', event.feedId);
+        // Reset backoff on successful reconnection (first event received)
+        if (backoffAttemptRef.current > 0) {
+          debugLog('[useNotifications] Stream connected, backoff reset');
+        }
+        backoffAttemptRef.current = 0;
         setIsConnected(true);
         handleEvent(event);
       },
@@ -427,13 +471,15 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
         console.error('[useNotifications] Stream error:', error);
         handleError(error);
       },
-      undefined, // onStreamEnd - will be wired in Phase 4
+      () => {
+        handleStreamEnd();
+      },
       `browser-${Date.now()}`,
       'browser'
     );
 
     setIsConnected(true);
-  }, [userId, handleEvent, handleError]);
+  }, [userId, handleEvent, handleError, handleStreamEnd]);
 
   // Disconnect from notification stream
   const disconnect = useCallback(() => {
@@ -500,6 +546,53 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, userId]);
+
+  // Online/offline event listeners for reconnection management
+  useEffect(() => {
+    if (!autoReconnect || !isAuthenticated) return;
+
+    const handleOffline = () => {
+      debugLog('[useNotifications] Browser offline, pausing reconnection');
+      isOfflineRef.current = true;
+
+      // Cancel any pending reconnection timer
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+    };
+
+    const handleOnline = () => {
+      debugLog('[useNotifications] Browser online, reconnecting in 5000ms');
+      isOfflineRef.current = false;
+      backoffAttemptRef.current = 0;
+
+      // Don't schedule reconnect if already connected
+      if (abortControllerRef.current && !abortControllerRef.current.signal.aborted) {
+        debugLog('[useNotifications] Already connected, skipping reconnect on online event');
+        return;
+      }
+
+      // Clear any existing timer (single-timer guarantee for rapid toggling EC-002)
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+
+      const delay = getNextDelay(0, STREAM_RECONNECT_CONFIG);
+      reconnectTimeoutRef.current = setTimeout(() => {
+        connect();
+      }, delay);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoReconnect, isAuthenticated]);
 
   // Subscribe to member join events for toast notifications
   useEffect(() => {
