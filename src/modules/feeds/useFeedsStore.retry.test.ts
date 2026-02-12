@@ -332,16 +332,16 @@ describe('FEAT-058: Message Retry - useFeedsStore', () => {
       expect(hasPending).toBe(false);
     });
 
-    it('should return false if only confirming messages exist', () => {
-      // Arrange - confirming is not pending or failed
+    it('should return true if only confirming messages exist', () => {
+      // Arrange - confirming is not yet confirmed on-chain, so it counts as unconfirmed
       const message = createTestMessage({ status: 'confirming' });
       useFeedsStore.getState().setMessages('feed-1', [message]);
 
       // Act
       const hasPending = useFeedsStore.getState().hasPendingOrFailedMessages();
 
-      // Assert - confirming is NOT pending or failed
-      expect(hasPending).toBe(false);
+      // Assert - confirming is NOT confirmed, so hasPendingOrFailedMessages returns true
+      expect(hasPending).toBe(true);
     });
 
     it('should return false if no messages exist', () => {
