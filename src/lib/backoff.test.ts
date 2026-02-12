@@ -100,6 +100,33 @@ describe('backoff', () => {
         expect(getNextDelay(0)).toBe(5000);
         expect(getNextDelay(1)).toBe(10000);
       });
+
+      it('handles fractional attempt count without error', () => {
+        const result = getNextDelay(1.5);
+        expect(Number.isFinite(result)).toBe(true);
+        expect(result).toBeGreaterThanOrEqual(5000);
+        expect(result).toBeLessThanOrEqual(30000);
+      });
+
+      it('caps immediately with very large multiplier', () => {
+        const config: BackoffConfig = { initialDelayMs: 1000, maxDelayMs: 5000, multiplier: 100 };
+        expect(getNextDelay(0, config)).toBe(1000);
+        expect(getNextDelay(1, config)).toBe(5000);
+      });
+
+      it('handles multiplier less than 1 (decreasing delays)', () => {
+        const config: BackoffConfig = { initialDelayMs: 10000, maxDelayMs: 30000, multiplier: 0.5 };
+        expect(getNextDelay(0, config)).toBe(10000);
+        expect(getNextDelay(1, config)).toBe(5000);
+        expect(getNextDelay(2, config)).toBe(2500);
+      });
+
+      it('validates complete progression for default config', () => {
+        const progression = Array.from({ length: 11 }, (_, i) => getNextDelay(i));
+        expect(progression).toEqual([
+          5000, 10000, 20000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000,
+        ]);
+      });
     });
   });
 });
