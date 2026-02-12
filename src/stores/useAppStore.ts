@@ -42,6 +42,9 @@ interface AppStore {
   setSelectedNav: (nav: string) => void;
 }
 
+// FEAT-059: Expose store to window for E2E test verification (same pattern as useFeedsStore)
+const isE2EOrDev = process.env.NODE_ENV !== 'production' || process.env.NEXT_PUBLIC_DEBUG_LOGGING === 'true';
+
 export const useAppStore = create<AppStore>()(
   persist(
     (set) => ({
@@ -109,3 +112,10 @@ export const useAppStore = create<AppStore>()(
     }
   )
 );
+
+if (typeof window !== 'undefined' && isE2EOrDev) {
+  (window as unknown as { __zustand_stores?: Record<string, unknown> }).__zustand_stores = {
+    ...((window as unknown as { __zustand_stores?: Record<string, unknown> }).__zustand_stores || {}),
+    appStore: useAppStore,
+  };
+}

@@ -147,6 +147,28 @@ interface FeedsState {
    * Memory-only (NOT persisted to localStorage).
    */
   prefetchState: Record<string, FeedPrefetchState>;
+
+  // ============= MT-002/MT-003: Observability Metrics =============
+
+  /**
+   * MT-002: Retry metrics counters.
+   * Memory-only (NOT persisted to localStorage).
+   */
+  retryMetrics: {
+    messagesPending: number;
+    messagesRetrying: number;
+    messagesFailed: number;
+    totalRetryAttempts: number;
+  };
+
+  /**
+   * MT-003: Prefetch metrics counters.
+   * Memory-only (NOT persisted to localStorage).
+   */
+  prefetchMetrics: {
+    pagesLoaded: number;
+    prefetchTriggeredCount: number;
+  };
 }
 
 interface FeedsActions {
@@ -506,6 +528,17 @@ interface FeedsActions {
    * - Prepends new messages to inMemoryMessages
    */
   prefetchNextPage: (feedId: string) => Promise<void>;
+
+  // ============= MT-002/MT-003: Metrics Actions =============
+
+  /** MT-002: Get retry metrics snapshot */
+  getRetryMetrics: () => FeedsState['retryMetrics'];
+
+  /** MT-003: Get prefetch metrics snapshot */
+  getPrefetchMetrics: () => FeedsState['prefetchMetrics'];
+
+  /** MT-002/MT-003: Reset all metrics counters to zero */
+  resetMetrics: () => void;
 }
 
 type FeedsStore = FeedsState & FeedsActions;
@@ -535,6 +568,16 @@ const initialState: FeedsState = {
   feedLoadError: {},
   feedWasCapped: {},
   prefetchState: {},
+  retryMetrics: {
+    messagesPending: 0,
+    messagesRetrying: 0,
+    messagesFailed: 0,
+    totalRetryAttempts: 0,
+  },
+  prefetchMetrics: {
+    pagesLoaded: 0,
+    prefetchTriggeredCount: 0,
+  },
 };
 
 /**
@@ -1073,6 +1116,11 @@ export const useFeedsStore = create<FeedsStore>()(
             messages: {
               ...state.messages,
               [feedId]: [...(state.messages[feedId] || []), message],
+            },
+            // MT-002: Increment pending counter
+            retryMetrics: {
+              ...state.retryMetrics,
+              messagesPending: state.retryMetrics.messagesPending + 1,
             },
           };
         });
@@ -2246,11 +2294,21 @@ export const useFeedsStore = create<FeedsStore>()(
 
           debugLog(`[FeedsStore] updateMessageRetryState: feedId=${feedId.substring(0, 8)}..., messageId=${messageId.substring(0, 8)}..., update=`, update);
 
+          // MT-002: Increment retry metrics based on status change
+          const retryMetrics = { ...state.retryMetrics };
+          if (update.status === 'confirming') {
+            retryMetrics.messagesRetrying++;
+            retryMetrics.totalRetryAttempts++;
+          } else if (update.status === 'failed') {
+            retryMetrics.messagesFailed++;
+          }
+
           return {
             messages: {
               ...state.messages,
               [feedId]: updatedMessages,
             },
+            retryMetrics,
           };
         });
       },
@@ -2282,7 +2340,7 @@ export const useFeedsStore = create<FeedsStore>()(
           for (const message of messages) {
             // Check status field first, fall back to isConfirmed for migrated messages
             const status = message.status ?? (message.isConfirmed ? 'confirmed' : 'pending');
-            if (status === 'pending' || status === 'failed') {
+            if (status !== 'confirmed') {
               return true;
             }
           }
@@ -2415,6 +2473,14 @@ export const useFeedsStore = create<FeedsStore>()(
             hasMoreMessages: page1Response.hasMoreMessages,
           });
 
+          // MT-003: Increment pages loaded
+          set((state) => ({
+            prefetchMetrics: {
+              ...state.prefetchMetrics,
+              pagesLoaded: state.prefetchMetrics.pagesLoaded + 1,
+            },
+          }));
+
           // Page 2: Fetch next 100 older messages if more exist
           if (page1Response.hasMoreMessages && page1Cursor > 0) {
             debugLog(`[FeedsStore] initializeFeedPrefetch: fetching page2 before blockIndex=${page1Cursor}`);
@@ -2439,6 +2505,14 @@ export const useFeedsStore = create<FeedsStore>()(
                 oldestLoadedBlockIndex: page2Response.oldestBlockIndex,
                 hasMoreMessages: page2Response.hasMoreMessages,
               });
+
+              // MT-003: Increment pages loaded for page 2
+              set((state) => ({
+                prefetchMetrics: {
+                  ...state.prefetchMetrics,
+                  pagesLoaded: state.prefetchMetrics.pagesLoaded + 1,
+                },
+              }));
 
               debugLog(`[FeedsStore] initializeFeedPrefetch: completed - loaded 2 pages for feedId=${feedId.substring(0, 8)}...`);
             } else {
@@ -2495,6 +2569,14 @@ export const useFeedsStore = create<FeedsStore>()(
         // Set isPrefetching to true
         get().updatePrefetchState(feedId, { isPrefetching: true });
 
+        // MT-003: Increment prefetch triggered count
+        set((state) => ({
+          prefetchMetrics: {
+            ...state.prefetchMetrics,
+            prefetchTriggeredCount: state.prefetchMetrics.prefetchTriggeredCount + 1,
+          },
+        }));
+
         debugLog(`[FeedsStore] prefetchNextPage: fetching before blockIndex=${cursor} for feedId=${feedId.substring(0, 8)}...`);
 
         // Retry logic with exponential backoff
@@ -2535,6 +2617,14 @@ export const useFeedsStore = create<FeedsStore>()(
                 hasMoreMessages: response.hasMoreMessages,
               });
 
+              // MT-003: Increment pages loaded
+              set((state) => ({
+                prefetchMetrics: {
+                  ...state.prefetchMetrics,
+                  pagesLoaded: state.prefetchMetrics.pagesLoaded + 1,
+                },
+              }));
+
               debugLog(`[FeedsStore] prefetchNextPage: completed - page ${prefetchState.loadedPageCount + 1} for feedId=${feedId.substring(0, 8)}...`);
             } else {
               // Empty response - no more messages
@@ -2562,6 +2652,31 @@ export const useFeedsStore = create<FeedsStore>()(
         debugError(`[FeedsStore] prefetchNextPage: failed after ${MAX_RETRIES} attempts`, lastError);
         get().updatePrefetchState(feedId, { isPrefetching: false });
         // Don't set hasMoreMessages to false - allow retry on next scroll
+      },
+
+      // ============= MT-002/MT-003: Metrics Implementations =============
+
+      getRetryMetrics: () => {
+        return get().retryMetrics;
+      },
+
+      getPrefetchMetrics: () => {
+        return get().prefetchMetrics;
+      },
+
+      resetMetrics: () => {
+        set({
+          retryMetrics: {
+            messagesPending: 0,
+            messagesRetrying: 0,
+            messagesFailed: 0,
+            totalRetryAttempts: 0,
+          },
+          prefetchMetrics: {
+            pagesLoaded: 0,
+            prefetchTriggeredCount: 0,
+          },
+        });
       },
     }),
     {
