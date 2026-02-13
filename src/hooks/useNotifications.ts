@@ -360,8 +360,8 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
           break;
 
         case EventType.MessagesRead:
-          // Another device marked feed as read
-          markFeedAsReadInStore(event.feedId);
+          // FEAT-063: Pass upToBlockIndex so receiving device calculates remaining unreads
+          markFeedAsReadInStore(event.feedId, event.upToBlockIndex);
           break;
 
         case EventType.UnreadCountSync:

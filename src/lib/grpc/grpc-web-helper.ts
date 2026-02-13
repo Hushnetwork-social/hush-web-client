@@ -856,6 +856,7 @@ export interface FeedEventResponse {
   unreadCount: number;
   allCounts: Record<string, number>;
   timestampUnixMs: number;
+  upToBlockIndex: number; // FEAT-063: block index up to which messages were read
 }
 
 export function parseFeedEventResponse(messageBytes: Uint8Array): FeedEventResponse {
@@ -867,6 +868,7 @@ export function parseFeedEventResponse(messageBytes: Uint8Array): FeedEventRespo
     unreadCount: 0,
     allCounts: {},
     timestampUnixMs: 0,
+    upToBlockIndex: 0,
   };
 
   let offset = 0;
@@ -886,6 +888,7 @@ export function parseFeedEventResponse(messageBytes: Uint8Array): FeedEventRespo
       if (fieldNumber === 1) result.type = valueResult.value;
       if (fieldNumber === 5) result.unreadCount = valueResult.value;
       if (fieldNumber === 7) result.timestampUnixMs = valueResult.value;
+      if (fieldNumber === 8) result.upToBlockIndex = valueResult.value;
     } else if (wireType === 2) {
       // Length-delimited (string or embedded message)
       const lenResult = parseVarint(messageBytes, offset);

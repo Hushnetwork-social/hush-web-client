@@ -263,8 +263,8 @@ interface FeedsActions {
   /** Increment unread count for a feed */
   incrementUnreadCount: (feedId: string) => void;
 
-  /** Mark a feed as read (set unread count to 0) */
-  markFeedAsRead: (feedId: string) => void;
+  /** Mark a feed as read, calculating remaining unreads from watermark (FEAT-063) */
+  markFeedAsRead: (feedId: string, upToBlockIndex?: number) => void;
 
   /** Sync all unread counts from server (bulk update) */
   syncUnreadCounts: (counts: Record<string, number>) => void;
@@ -1120,6 +1120,17 @@ export const useFeedsStore = create<FeedsStore>()(
             updatedFeeds = sortFeeds(updatedFeeds);
           }
 
+          // FEAT-063: Recalculate unreadCount when lastReadBlockIndex is set
+          const feedForRecalc = updatedFeeds.find((f) => f.id === feedId);
+          if (feedForRecalc && (feedForRecalc.lastReadBlockIndex ?? 0) > 0) {
+            const recalcUnread = updatedMessages.filter(
+              (m) => m.blockHeight === undefined || m.blockHeight > (feedForRecalc.lastReadBlockIndex ?? 0)
+            ).length;
+            updatedFeeds = updatedFeeds.map((f) =>
+              f.id === feedId ? { ...f, unreadCount: recalcUnread } : f
+            );
+          }
+
           debugLog(`[FeedsStore] addMessages COMMIT: feedId=${feedId.substring(0, 8)}..., finalCount=${updatedMessages.length}, msgIds=[${updatedMessages.map(m => m.id.substring(0, 8)).join(', ')}]`);
           return {
             feeds: updatedFeeds,
@@ -1225,12 +1236,38 @@ export const useFeedsStore = create<FeedsStore>()(
         }));
       },
 
-      markFeedAsRead: (feedId) => {
-        set((state) => ({
-          feeds: state.feeds.map((f) =>
-            f.id === feedId ? { ...f, unreadCount: 0 } : f
-          ),
-        }));
+      markFeedAsRead: (feedId, upToBlockIndex?) => {
+        set((state) => {
+          const feed = state.feeds.find((f) => f.id === feedId);
+          if (!feed) return state;
+
+          // FEAT-063: Max-wins - ignore stale events
+          if (upToBlockIndex !== undefined && upToBlockIndex > 0 && upToBlockIndex <= (feed.lastReadBlockIndex ?? 0)) {
+            return state;
+          }
+
+          let newUnreadCount = 0;
+          if (upToBlockIndex !== undefined && upToBlockIndex > 0) {
+            // FEAT-063: Calculate remaining unreads from local cache
+            const messages = state.messages[feedId] || [];
+            newUnreadCount = messages.filter(
+              (m) => m.blockHeight === undefined || m.blockHeight > upToBlockIndex
+            ).length;
+          }
+          // else: no watermark = set to 0 (backward compat)
+
+          return {
+            feeds: state.feeds.map((f) =>
+              f.id === feedId
+                ? {
+                    ...f,
+                    unreadCount: newUnreadCount,
+                    lastReadBlockIndex: Math.max(f.lastReadBlockIndex ?? 0, upToBlockIndex ?? 0),
+                  }
+                : f
+            ),
+          };
+        });
         // Note: Do NOT clear mentions here - user needs to navigate to them via MentionNavButton
         // Mentions are cleared individually when user navigates to each one
       },
