@@ -36,11 +36,17 @@ export function FeedList({ onFeedSelect }: FeedListProps) {
     // Note: needsSync is cleared by FeedsSyncable after fetching messages
     const feed = feeds.find((f) => f.id === feedId);
     if (feed && feed.unreadCount > 0 && credentials?.signingPublicKey) {
-      // Optimistic update
-      markFeedAsRead(feedId);
-      // Notify server
+      // FEAT-063: Compute max blockIndex from local messages for cross-device sync
+      const feedMessages = messages[feedId] || [];
+      const blockHeights = feedMessages
+        .map((m) => m.blockHeight)
+        .filter((bh): bh is number => bh !== undefined && bh > 0);
+      const maxBlockIndex = blockHeights.length > 0 ? Math.max(...blockHeights) : 0;
+      // Optimistic update with watermark
+      markFeedAsRead(feedId, maxBlockIndex > 0 ? maxBlockIndex : undefined);
+      // Notify server with watermark so cross-device sync works correctly
       try {
-        await notificationService.markFeedAsRead(credentials.signingPublicKey, feedId);
+        await notificationService.markFeedAsRead(credentials.signingPublicKey, feedId, maxBlockIndex > 0 ? maxBlockIndex : undefined);
       } catch (error) {
         console.error('[FeedList] Failed to mark feed as read:', error);
       }

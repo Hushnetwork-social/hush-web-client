@@ -5,13 +5,36 @@
  * - F3-003: Client calculates remaining unreads from upToBlockIndex
  * - F3-005: Max-wins watermark semantics
  * - F3-006: lastReadBlockIndex updated on event
+ * - F3-007: Mention badge clears when unreadCount reaches 0
  * - addMessages recalculation when lastReadBlockIndex is set
  * - Pending messages always count as unread
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useFeedsStore } from '../useFeedsStore';
 import type { Feed, FeedMessage } from '@/types';
+
+// Storage key must match MENTION_STORAGE_KEY in useFeedsStore.ts
+const MENTION_STORAGE_KEY = 'hush_mention_tracking';
+
+// In-memory storage for localStorage mock (setup.ts mocks localStorage with vi.fn())
+let mockStorage: Record<string, string> = {};
+
+/** Helper to seed mention tracking data into mock localStorage */
+function seedMentions(feedId: string, messageIds: string[]): void {
+  const raw = mockStorage[MENTION_STORAGE_KEY] || '{}';
+  const data = JSON.parse(raw);
+  data[feedId] = { messageIds };
+  mockStorage[MENTION_STORAGE_KEY] = JSON.stringify(data);
+}
+
+/** Helper to check if mentions exist for a feed in mock localStorage */
+function hasMentionsInStorage(feedId: string): boolean {
+  const raw = mockStorage[MENTION_STORAGE_KEY];
+  if (!raw) return false;
+  const data = JSON.parse(raw);
+  return feedId in data;
+}
 
 /** Helper to create a test feed with sensible defaults */
 function createTestFeed(overrides: Partial<Feed> = {}): Feed {
@@ -44,6 +67,11 @@ function createTestMessage(overrides: Partial<FeedMessage> = {}): FeedMessage {
 describe('FEAT-063: Cross-Device Read Sync', () => {
   beforeEach(() => {
     useFeedsStore.getState().reset();
+    // Configure localStorage mock with real in-memory storage for F3-007 tests
+    mockStorage = {};
+    vi.mocked(localStorage.getItem).mockImplementation((key: string) => mockStorage[key] ?? null);
+    vi.mocked(localStorage.setItem).mockImplementation((key: string, value: string) => { mockStorage[key] = value; });
+    vi.mocked(localStorage.removeItem).mockImplementation((key: string) => { delete mockStorage[key]; });
   });
 
   describe('F3-003: Client calculates remaining unreads from watermark', () => {
@@ -234,6 +262,116 @@ describe('FEAT-063: Cross-Device Read Sync', () => {
       // Assert: pending message counts as unread
       const updatedFeed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
       expect(updatedFeed?.unreadCount).toBe(1);
+    });
+  });
+
+  describe('F3-007: Mention badge clears when unreadCount reaches 0', () => {
+    it('should clear mentions from localStorage when markFeedAsRead sets unreadCount to 0', () => {
+      // Arrange: feed fully read (watermark >= all messages) with mentions tracked
+      const feed = createTestFeed({ id: 'feed-1', unreadCount: 3 });
+      useFeedsStore.getState().setFeeds([feed]);
+      useFeedsStore.getState().addMessages('feed-1', [
+        createTestMessage({ id: 'msg-1', feedId: 'feed-1', blockHeight: 700, timestamp: 1 }),
+        createTestMessage({ id: 'msg-2', feedId: 'feed-1', blockHeight: 800, timestamp: 2 }),
+      ]);
+      seedMentions('feed-1', ['msg-1', 'msg-2']);
+      expect(hasMentionsInStorage('feed-1')).toBe(true);
+
+      // Act: mark as read beyond all messages
+      useFeedsStore.getState().markFeedAsRead('feed-1', 900);
+
+      // Assert: mentions cleared because unreadCount = 0
+      expect(hasMentionsInStorage('feed-1')).toBe(false);
+    });
+
+    it('should NOT clear mentions when markFeedAsRead leaves unreadCount > 0', () => {
+      // Arrange: feed with messages after the watermark
+      const feed = createTestFeed({ id: 'feed-1', unreadCount: 5 });
+      useFeedsStore.getState().setFeeds([feed]);
+      useFeedsStore.getState().addMessages('feed-1', [
+        createTestMessage({ id: 'msg-1', feedId: 'feed-1', blockHeight: 700, timestamp: 1 }),
+        createTestMessage({ id: 'msg-2', feedId: 'feed-1', blockHeight: 850, timestamp: 2 }),
+        createTestMessage({ id: 'msg-3', feedId: 'feed-1', blockHeight: 900, timestamp: 3 }),
+      ]);
+      seedMentions('feed-1', ['msg-2', 'msg-3']);
+
+      // Act: mark as read up to 800 (still 2 unreads after)
+      useFeedsStore.getState().markFeedAsRead('feed-1', 800);
+
+      // Assert: mentions NOT cleared because unreadCount = 2
+      expect(hasMentionsInStorage('feed-1')).toBe(true);
+    });
+
+    it('should clear mentions when markFeedAsRead with no watermark (backward compat)', () => {
+      // Arrange
+      const feed = createTestFeed({ id: 'feed-1', unreadCount: 5 });
+      useFeedsStore.getState().setFeeds([feed]);
+      seedMentions('feed-1', ['msg-1']);
+
+      // Act: mark as read without watermark (old behavior sets to 0)
+      useFeedsStore.getState().markFeedAsRead('feed-1');
+
+      // Assert: mentions cleared because unreadCount = 0
+      expect(hasMentionsInStorage('feed-1')).toBe(false);
+    });
+
+    it('should NOT clear mentions when max-wins ignores stale event', () => {
+      // Arrange: feed already read to 800 with remaining unreads
+      const feed = createTestFeed({ id: 'feed-1', lastReadBlockIndex: 800, unreadCount: 3 });
+      useFeedsStore.getState().setFeeds([feed]);
+      seedMentions('feed-1', ['msg-1']);
+
+      // Act: stale event with lower watermark (no-op)
+      useFeedsStore.getState().markFeedAsRead('feed-1', 600);
+
+      // Assert: mentions NOT cleared (stale event was ignored)
+      expect(hasMentionsInStorage('feed-1')).toBe(true);
+    });
+
+    it('should clear mentions when addMessages recalculates unreadCount to 0', () => {
+      // Arrange: feed already read to 900, no messages yet, but has mentions tracked
+      const feed = createTestFeed({ id: 'feed-1', lastReadBlockIndex: 900, unreadCount: 0 });
+      useFeedsStore.getState().setFeeds([feed]);
+      seedMentions('feed-1', ['msg-1']);
+
+      // Act: messages arrive, all within the read watermark
+      useFeedsStore.getState().addMessages('feed-1', [
+        createTestMessage({ id: 'msg-1', feedId: 'feed-1', blockHeight: 700, timestamp: 1 }),
+        createTestMessage({ id: 'msg-2', feedId: 'feed-1', blockHeight: 800, timestamp: 2 }),
+      ]);
+
+      // Assert: mentions cleared because recalculated unreadCount = 0
+      expect(hasMentionsInStorage('feed-1')).toBe(false);
+    });
+
+    it('should NOT clear mentions when addMessages recalculates unreadCount > 0', () => {
+      // Arrange: feed read to 800
+      const feed = createTestFeed({ id: 'feed-1', lastReadBlockIndex: 800, unreadCount: 0 });
+      useFeedsStore.getState().setFeeds([feed]);
+      seedMentions('feed-1', ['msg-2']);
+
+      // Act: messages arrive, some after the watermark
+      useFeedsStore.getState().addMessages('feed-1', [
+        createTestMessage({ id: 'msg-1', feedId: 'feed-1', blockHeight: 750, timestamp: 1 }),
+        createTestMessage({ id: 'msg-2', feedId: 'feed-1', blockHeight: 850, timestamp: 2 }),
+      ]);
+
+      // Assert: mentions NOT cleared because unreadCount = 1
+      expect(hasMentionsInStorage('feed-1')).toBe(true);
+    });
+
+    it('should increment mentionVersion when mentions are cleared', () => {
+      // Arrange
+      const feed = createTestFeed({ id: 'feed-1', unreadCount: 3 });
+      useFeedsStore.getState().setFeeds([feed]);
+      seedMentions('feed-1', ['msg-1']);
+      const versionBefore = useFeedsStore.getState().mentionVersion;
+
+      // Act
+      useFeedsStore.getState().markFeedAsRead('feed-1', 900);
+
+      // Assert: mentionVersion incremented (triggers React re-render for "@" badge)
+      expect(useFeedsStore.getState().mentionVersion).toBe(versionBefore + 1);
     });
   });
 });

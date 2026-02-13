@@ -216,18 +216,20 @@ export function subscribeToEvents(
 }
 
 /**
- * Mark a feed as read (resets unread count to 0).
+ * Mark a feed as read up to a given block index.
  *
  * @param userId - The user's public signing address
  * @param feedId - The feed ID to mark as read
+ * @param upToBlockIndex - Optional block index watermark (0 or omitted = mark all as read)
  * @returns Promise resolving to success status
  */
 export async function markFeedAsRead(
   userId: string,
-  feedId: string
+  feedId: string,
+  upToBlockIndex?: number
 ): Promise<{ success: boolean }> {
   try {
-    const requestBytes = buildMarkFeedAsReadRequest(userId, feedId);
+    const requestBytes = buildMarkFeedAsReadRequest(userId, feedId, upToBlockIndex);
     const responseBytes = await browserGrpcCall(SERVICE_NAME, 'MarkFeedAsRead', requestBytes);
     const messageBytes = parseGrpcResponse(responseBytes);
 

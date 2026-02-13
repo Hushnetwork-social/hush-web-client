@@ -835,10 +835,11 @@ export function buildSubscribeToEventsRequest(userId: string, deviceId?: string,
   return new Uint8Array(bytes);
 }
 
-export function buildMarkFeedAsReadRequest(userId: string, feedId: string): Uint8Array {
+export function buildMarkFeedAsReadRequest(userId: string, feedId: string, upToBlockIndex?: number): Uint8Array {
   const bytes = [
     ...encodeString(1, userId),
     ...encodeString(2, feedId),
+    ...(upToBlockIndex && upToBlockIndex > 0 ? encodeVarintField(3, upToBlockIndex) : []),
   ];
   return new Uint8Array(bytes);
 }

@@ -17,6 +17,24 @@ import { useAppStore } from '@/stores/useAppStore';
 import { aesDecrypt } from '@/lib/crypto';
 import { fetchFeedMessages } from './FeedsService';
 
+// FEAT-063: Clear mentions for a feed directly via localStorage.
+// Avoids circular dependency with mentionTracker.ts (which imports useFeedsStore).
+const MENTION_STORAGE_KEY = 'hush_mention_tracking';
+function clearMentionsForFeed(feedId: string, incrementVersion: () => void): void {
+  try {
+    const raw = localStorage.getItem(MENTION_STORAGE_KEY);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    if (data[feedId]) {
+      delete data[feedId];
+      localStorage.setItem(MENTION_STORAGE_KEY, JSON.stringify(data));
+      incrementVersion();
+    }
+  } catch {
+    // localStorage may not be available in tests or SSR
+  }
+}
+
 // Feed type mapping from server (FeedType enum)
 // Server: Personal=0, Chat=1, Broadcast=2, Group=3
 export const FEED_TYPE_MAP: Record<number, Feed['type']> = {
@@ -1122,12 +1140,13 @@ export const useFeedsStore = create<FeedsStore>()(
 
           // FEAT-063: Recalculate unreadCount when lastReadBlockIndex is set
           const feedForRecalc = updatedFeeds.find((f) => f.id === feedId);
+          let recalcUnread: number | undefined;
           if (feedForRecalc && (feedForRecalc.lastReadBlockIndex ?? 0) > 0) {
-            const recalcUnread = updatedMessages.filter(
+            recalcUnread = updatedMessages.filter(
               (m) => m.blockHeight === undefined || m.blockHeight > (feedForRecalc.lastReadBlockIndex ?? 0)
             ).length;
             updatedFeeds = updatedFeeds.map((f) =>
-              f.id === feedId ? { ...f, unreadCount: recalcUnread } : f
+              f.id === feedId ? { ...f, unreadCount: recalcUnread! } : f
             );
           }
 
@@ -1140,6 +1159,11 @@ export const useFeedsStore = create<FeedsStore>()(
             },
           };
         });
+        // FEAT-063: Zero unreads = zero mentions after recalculation
+        const feedAfterAdd = get().feeds.find((f) => f.id === feedId);
+        if (feedAfterAdd && feedAfterAdd.unreadCount === 0 && (feedAfterAdd.lastReadBlockIndex ?? 0) > 0) {
+          clearMentionsForFeed(feedId, () => get().incrementMentionVersion());
+        }
       },
 
       addPendingMessage: (feedId, message) => {
@@ -1268,8 +1292,11 @@ export const useFeedsStore = create<FeedsStore>()(
             ),
           };
         });
-        // Note: Do NOT clear mentions here - user needs to navigate to them via MentionNavButton
-        // Mentions are cleared individually when user navigates to each one
+        // FEAT-063: Zero unreads = zero mentions - clear mention badge when fully read
+        const updatedFeed = get().feeds.find((f) => f.id === feedId);
+        if (updatedFeed && updatedFeed.unreadCount === 0) {
+          clearMentionsForFeed(feedId, () => get().incrementMentionVersion());
+        }
       },
 
       syncUnreadCounts: (counts) => {
@@ -1279,8 +1306,8 @@ export const useFeedsStore = create<FeedsStore>()(
             unreadCount: counts[f.id] ?? f.unreadCount ?? 0,
           })),
         }));
-        // Note: Do NOT clear mentions based on unreadCount - mentions are independent
-        // Mentions are cleared individually when user navigates to each one via MentionNavButton
+        // Note: syncUnreadCounts is a bulk fallback path; mention clearing is handled
+        // by markFeedAsRead and addMessages which are the primary recalculation points
       },
 
       getTotalUnreadCount: () => {

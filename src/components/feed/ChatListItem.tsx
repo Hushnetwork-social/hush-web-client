@@ -127,7 +127,7 @@ export const ChatListItem = memo(function ChatListItem({
           {/* Badges container: unread count + mention indicator */}
           <div className="flex items-center gap-1 ml-2 flex-shrink-0">
             {unreadCount > 0 && (
-              <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-hush-purple flex items-center justify-center">
+              <span data-testid="unread-badge" className="min-w-[20px] h-5 px-1.5 rounded-full bg-hush-purple flex items-center justify-center">
                 <span className="text-[10px] font-bold text-hush-bg-dark">
                   {unreadCount}
                 </span>
