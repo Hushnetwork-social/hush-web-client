@@ -279,6 +279,7 @@ export interface Feed {
   feedType: number;
   blockIndex: number;
   participants: FeedParticipant[];
+  lastReadBlockIndex: number;  // FEAT-051: User's last read position in this feed
 }
 
 export function parseFeedsResponse(messageBytes: Uint8Array): Feed[] {
@@ -324,6 +325,7 @@ function parseSingleFeed(feedBytes: Uint8Array): Feed {
     feedType: 0,
     blockIndex: 0,
     participants: [],
+    lastReadBlockIndex: 0,
   };
 
   let offset = 0;
@@ -340,6 +342,7 @@ function parseSingleFeed(feedBytes: Uint8Array): Feed {
       offset += valueResult.bytesRead;
       if (fieldNumber === 4) feed.feedType = valueResult.value;
       if (fieldNumber === 5) feed.blockIndex = valueResult.value;
+      if (fieldNumber === 7) feed.lastReadBlockIndex = valueResult.value;
     } else if (wireType === 2) {
       const lenResult = parseVarint(feedBytes, offset);
       offset += lenResult.bytesRead;

@@ -23,6 +23,7 @@ import {
 } from '@/lib/crypto';
 import { decryptReactionTally, initializeBsgs } from '@/lib/crypto/reactions';
 import { fetchFeeds, fetchMessages, submitTransaction, retryMessage, TransactionStatus, type FetchMessagesResponse } from './FeedsService';
+import { getUnreadCounts } from '@/lib/grpc/services/notification';
 import { shouldRetry, isMaxAttemptsReached, MESSAGE_RETRY_CONFIG } from '@/lib/retry';
 import { checkIdentityExists } from '../identity/IdentityService';
 import { useFeedsStore } from './useFeedsStore';
@@ -119,6 +120,17 @@ export class FeedsSyncable implements ISyncable {
       } else {
         // Incremental sync: only fetch messages for the ACTIVE feed if it needs sync
         await this.syncActiveFeedMessages(credentials.signingPublicKey);
+
+        // FEAT-063: Sync messages for newly discovered feeds (needsSync flag)
+        // When syncFeeds discovers new feeds or feeds with updated blockIndex,
+        // they are marked with needsSync. Without this, non-active feeds would
+        // never get their messages fetched, leaving unreadCount at 0.
+        await this.syncFeedsNeedingMessages(credentials.signingPublicKey);
+
+        // FEAT-063: Sync unread counts from server for non-active feeds.
+        // The notification stream handles real-time unread updates, but if an event
+        // is missed (network issues, stream reconnection), this ensures counts stay accurate.
+        await this.syncUnreadCounts(credentials.signingPublicKey);
       }
 
       // Check for personal feed and create if missing
@@ -1203,6 +1215,47 @@ export class FeedsSyncable implements ISyncable {
     // Clear the needsSync flag if it was set
     if (activeFeed.needsSync) {
       useFeedsStore.getState().clearFeedNeedsSync(selectedFeedId);
+    }
+  }
+
+  /**
+   * FEAT-063: Sync messages for feeds that were newly discovered or have updated blockIndex.
+   * These feeds were marked with needsSync by detectAndMarkFeedsNeedingSync but are not
+   * the active feed, so syncActiveFeedMessages would skip them. Without this, non-active
+   * feeds would never get their messages fetched, leaving unreadCount at 0.
+   */
+  private async syncFeedsNeedingMessages(address: string): Promise<void> {
+    const selectedFeedId = useAppStore.getState().selectedFeedId;
+    const feedsNeedingSync = useFeedsStore.getState().feeds.filter(
+      (f) => f.needsSync && f.id !== selectedFeedId
+    );
+
+    if (feedsNeedingSync.length === 0) return;
+
+    debugLog(`[FeedsSyncable] Syncing messages for ${feedsNeedingSync.length} non-active feed(s) with needsSync`);
+
+    for (const feed of feedsNeedingSync) {
+      await this.syncMessagesForFeed(address, feed, true);
+      useFeedsStore.getState().clearFeedNeedsSync(feed.id);
+    }
+  }
+
+  /**
+   * FEAT-063: Sync unread counts from the server for all feeds.
+   * This is a lightweight fallback that ensures unread counts stay accurate even if
+   * the notification stream misses events (network issues, reconnection gaps).
+   * The server calculates unread counts from lastReadBlockIndex vs message positions.
+   */
+  private async syncUnreadCounts(address: string): Promise<void> {
+    try {
+      const counts = await getUnreadCounts(address);
+      if (Object.keys(counts).length > 0) {
+        useFeedsStore.getState().syncUnreadCounts(counts);
+        debugLog(`[FeedsSyncable] Synced unread counts for ${Object.keys(counts).length} feed(s)`);
+      }
+    } catch (error) {
+      // Non-critical - notification stream is the primary path
+      debugWarn(`[FeedsSyncable] Failed to sync unread counts:`, error);
     }
   }
 

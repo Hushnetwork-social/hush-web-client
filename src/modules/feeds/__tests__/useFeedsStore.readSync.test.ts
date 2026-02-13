@@ -246,6 +246,233 @@ describe('FEAT-063: Cross-Device Read Sync', () => {
     });
   });
 
+  describe('Real sync flow: addFeeds then addMessages', () => {
+    it('should calculate unreadCount when new feed arrives via addFeeds then messages via addMessages', () => {
+      // This test simulates the real FeedsSyncable flow:
+      // 1. syncFeeds() calls fetchFeeds() → returns feed with unreadCount: 0
+      // 2. addFeeds() adds the new feed as-is (unreadCount: 0)
+      // 3. syncMessages() calls fetchMessages() → returns messages
+      // 4. addMessages() recalculates unreadCount from lastReadBlockIndex
+
+      // Arrange: New feed arrives from server with unreadCount: 0 and lastReadBlockIndex: 0
+      const serverFeed = createTestFeed({
+        id: 'feed-1',
+        unreadCount: 0,
+        lastReadBlockIndex: 0,
+        blockIndex: 500,
+      });
+
+      // Act: addFeeds (simulates syncFeeds → addFeeds)
+      useFeedsStore.getState().addFeeds([serverFeed]);
+
+      // Verify feed starts with unreadCount: 0
+      let feed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(feed?.unreadCount).toBe(0);
+
+      // Act: addMessages (simulates syncMessages → addMessages)
+      useFeedsStore.getState().addMessages('feed-1', [
+        createTestMessage({ id: 'msg-1', feedId: 'feed-1', blockHeight: 400, timestamp: 1 }),
+        createTestMessage({ id: 'msg-2', feedId: 'feed-1', blockHeight: 500, timestamp: 2 }),
+      ]);
+
+      // Assert: Both messages are unread (lastReadBlockIndex=0, all blockHeights > 0)
+      feed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(feed?.unreadCount).toBe(2);
+    });
+
+    it('should preserve unreadCount on existing feed when addFeeds merges server data', () => {
+      // Arrange: Existing feed with unreadCount=3 (from previous addMessages)
+      useFeedsStore.getState().setFeeds([
+        createTestFeed({ id: 'feed-1', unreadCount: 3, blockIndex: 500 }),
+      ]);
+
+      // Act: Server returns same feed (addFeeds merge path)
+      useFeedsStore.getState().addFeeds([
+        createTestFeed({ id: 'feed-1', unreadCount: 0, blockIndex: 600 }),
+      ]);
+
+      // Assert: unreadCount preserved (not overwritten by server's 0)
+      const feed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(feed?.unreadCount).toBe(3);
+    });
+
+    it('should recalculate unreadCount when server lastReadBlockIndex increases (cross-device read sync)', () => {
+      // Simulates: Alice reads on Device A → server lastReadBlockIndex updates
+      // → Device B fetches feed → addFeeds merges → unreadCount recalculated from messages
+
+      // Arrange: Device B has feed with 2 unread messages
+      useFeedsStore.getState().setFeeds([
+        createTestFeed({ id: 'feed-1', unreadCount: 2, lastReadBlockIndex: 0, blockIndex: 500 }),
+      ]);
+      // Messages in store (both at blocks > 0, so both unread when lastReadBlockIndex=0)
+      useFeedsStore.getState().addMessages('feed-1', [
+        createTestMessage({ id: 'msg-1', feedId: 'feed-1', blockHeight: 400, timestamp: 1 }),
+        createTestMessage({ id: 'msg-2', feedId: 'feed-1', blockHeight: 500, timestamp: 2 }),
+      ]);
+
+      // Act: Server returns feed with updated lastReadBlockIndex=500 (Alice read on Device A)
+      useFeedsStore.getState().addFeeds([
+        createTestFeed({ id: 'feed-1', unreadCount: 0, lastReadBlockIndex: 500, blockIndex: 500 }),
+      ]);
+
+      // Assert: unreadCount recalculated — both messages at blockHeight <= 500, so 0 unread
+      const feed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(feed?.unreadCount).toBe(0);
+      expect(feed?.lastReadBlockIndex).toBe(500);
+    });
+
+    it('should calculate partial unread when lastReadBlockIndex increases but not all messages read', () => {
+      // Arrange: Feed with 3 messages, currently all unread
+      useFeedsStore.getState().setFeeds([
+        createTestFeed({ id: 'feed-1', unreadCount: 3, lastReadBlockIndex: 0, blockIndex: 900 }),
+      ]);
+      useFeedsStore.getState().addMessages('feed-1', [
+        createTestMessage({ id: 'msg-1', feedId: 'feed-1', blockHeight: 400, timestamp: 1 }),
+        createTestMessage({ id: 'msg-2', feedId: 'feed-1', blockHeight: 700, timestamp: 2 }),
+        createTestMessage({ id: 'msg-3', feedId: 'feed-1', blockHeight: 900, timestamp: 3 }),
+      ]);
+
+      // Act: Alice read up to block 700 on Device A
+      useFeedsStore.getState().addFeeds([
+        createTestFeed({ id: 'feed-1', unreadCount: 0, lastReadBlockIndex: 700, blockIndex: 900 }),
+      ]);
+
+      // Assert: 1 message after block 700 (msg-3 at 900)
+      const feed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(feed?.unreadCount).toBe(1);
+    });
+  });
+
+  describe('FEAT-063: needsSync flag for non-active feed message sync', () => {
+    it('should set needsSync via markFeedNeedsSync and clear via clearFeedNeedsSync', () => {
+      // Arrange: Feed exists in store
+      useFeedsStore.getState().setFeeds([createTestFeed({ id: 'feed-1' })]);
+
+      // Act: Mark feed as needing sync (simulates detectAndMarkFeedsNeedingSync)
+      useFeedsStore.getState().markFeedNeedsSync('feed-1', true);
+
+      // Assert: needsSync is set
+      let feed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(feed?.needsSync).toBe(true);
+
+      // Act: Clear needsSync (simulates syncFeedsNeedingMessages after fetching)
+      useFeedsStore.getState().clearFeedNeedsSync('feed-1');
+
+      // Assert: needsSync is cleared
+      feed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(feed?.needsSync).toBe(false);
+    });
+
+    it('should compute unreadCount after addFeeds + markNeedsSync + addMessages (full sync flow)', () => {
+      // Simulates the complete production flow:
+      // 1. syncFeeds → addFeeds (new feed with unreadCount: 0)
+      // 2. detectAndMarkFeedsNeedingSync → markFeedNeedsSync
+      // 3. syncFeedsNeedingMessages → syncMessagesForFeed → addMessages
+      // 4. clearFeedNeedsSync
+
+      // Step 1: New feed arrives from server
+      useFeedsStore.getState().addFeeds([
+        createTestFeed({ id: 'feed-1', unreadCount: 0, lastReadBlockIndex: 0, blockIndex: 500 }),
+      ]);
+
+      // Step 2: Feed marked as needing sync
+      useFeedsStore.getState().markFeedNeedsSync('feed-1', true);
+
+      // Step 3: Messages arrive for this feed
+      useFeedsStore.getState().addMessages('feed-1', [
+        createTestMessage({ id: 'msg-1', feedId: 'feed-1', blockHeight: 400, timestamp: 1 }),
+        createTestMessage({ id: 'msg-2', feedId: 'feed-1', blockHeight: 500, timestamp: 2 }),
+      ]);
+
+      // Step 4: Clear needsSync
+      useFeedsStore.getState().clearFeedNeedsSync('feed-1');
+
+      // Assert: unreadCount calculated correctly (both messages unread since never read)
+      const feed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(feed?.unreadCount).toBe(2);
+      expect(feed?.needsSync).toBe(false);
+    });
+  });
+
+  describe('F3-E2E-002: Post-read message arrival (feed not selected)', () => {
+    it('should show unread=1 when new message arrives after markFeedAsRead', () => {
+      // Simulates the F3-E2E-002 scenario:
+      // 1. Alice has a feed with Message 1 (block 800)
+      // 2. Alice reads it (markFeedAsRead with upToBlockIndex=800)
+      // 3. Alice navigates away (feed is no longer selected)
+      // 4. Bob sends Message 2 (block 900) — arrives via addMessages
+      // 5. Unread badge should show "1"
+
+      // Step 1: Feed with Message 1
+      useFeedsStore.getState().setFeeds([
+        createTestFeed({ id: 'feed-1', unreadCount: 0, lastReadBlockIndex: 0, blockIndex: 800 }),
+      ]);
+      useFeedsStore.getState().addMessages('feed-1', [
+        createTestMessage({ id: 'msg-1', feedId: 'feed-1', blockHeight: 800, timestamp: 1 }),
+      ]);
+
+      // Verify: 1 unread (message at 800 > lastReadBlockIndex 0)
+      let feed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(feed?.unreadCount).toBe(1);
+
+      // Step 2: Alice reads (markFeedAsRead up to block 800)
+      useFeedsStore.getState().markFeedAsRead('feed-1', 800);
+      feed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(feed?.unreadCount).toBe(0);
+      expect(feed?.lastReadBlockIndex).toBe(800);
+
+      // Step 3: Alice navigates away (no state change needed at store level)
+
+      // Step 4: Message 2 arrives via sync (addMessages)
+      useFeedsStore.getState().addMessages('feed-1', [
+        createTestMessage({ id: 'msg-2', feedId: 'feed-1', blockHeight: 900, timestamp: 2 }),
+      ]);
+
+      // Step 5: Unread badge should show "1"
+      feed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(feed?.unreadCount).toBe(1);
+    });
+
+    it('should show unread=2 when multiple messages arrive after read', () => {
+      // Arrange: Feed read up to block 800
+      useFeedsStore.getState().setFeeds([
+        createTestFeed({ id: 'feed-1', unreadCount: 0, lastReadBlockIndex: 800, blockIndex: 800 }),
+      ]);
+      useFeedsStore.getState().addMessages('feed-1', [
+        createTestMessage({ id: 'msg-1', feedId: 'feed-1', blockHeight: 800, timestamp: 1 }),
+      ]);
+
+      // Act: Two new messages arrive after read
+      useFeedsStore.getState().addMessages('feed-1', [
+        createTestMessage({ id: 'msg-2', feedId: 'feed-1', blockHeight: 900, timestamp: 2 }),
+        createTestMessage({ id: 'msg-3', feedId: 'feed-1', blockHeight: 950, timestamp: 3 }),
+      ]);
+
+      // Assert: 2 unread messages (900, 950 > lastReadBlockIndex 800)
+      const feed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(feed?.unreadCount).toBe(2);
+    });
+
+    it('should show correct unread via syncUnreadCounts (server-side fallback)', () => {
+      // Simulates: notification stream missed the event, but sync fetches unread counts
+      // from server and applies them via syncUnreadCounts
+
+      // Arrange: Feed with 0 unread (local state is stale)
+      useFeedsStore.getState().setFeeds([
+        createTestFeed({ id: 'feed-1', unreadCount: 0, lastReadBlockIndex: 800 }),
+        createTestFeed({ id: 'feed-2', unreadCount: 0 }),
+      ]);
+
+      // Act: Server reports 1 unread for feed-1 and 3 for feed-2
+      useFeedsStore.getState().syncUnreadCounts({ 'feed-1': 1, 'feed-2': 3 });
+
+      // Assert: unread counts updated from server
+      const feeds = useFeedsStore.getState().feeds;
+      expect(feeds.find((f) => f.id === 'feed-1')?.unreadCount).toBe(1);
+      expect(feeds.find((f) => f.id === 'feed-2')?.unreadCount).toBe(3);
+    });
+  });
+
   describe('Pending messages edge case', () => {
     it('should count pending messages (undefined blockHeight) as unread', () => {
       // Arrange

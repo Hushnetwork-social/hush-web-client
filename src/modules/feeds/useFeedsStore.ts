@@ -827,6 +827,7 @@ export const useFeedsStore = create<FeedsStore>()(
 
       addFeeds: (newFeeds) => {
         const currentFeeds = get().feeds;
+        const currentMessages = get().messages;
         const existingIds = new Set(currentFeeds.map((f) => f.id));
         const newFeedsMap = new Map(newFeeds.map((f) => [f.id, f]));
 
@@ -839,15 +840,30 @@ export const useFeedsStore = create<FeedsStore>()(
             if (keyChanged && existingFeed.encryptedFeedKey) {
               console.log(`[E2E FeedsStore] KEY CHANGED for feed ${existingFeed.name}: old=${existingFeed.encryptedFeedKey?.substring(0, 20)}..., new=${serverFeed.encryptedFeedKey?.substring(0, 20)}...`);
             }
-            // Merge server data, preserving local-only data like decrypted aesKey and unreadCount
+
+            // FEAT-063: Recalculate unreadCount when server's lastReadBlockIndex increases
+            // This handles cross-device read sync: Device A reads → server updates lastReadBlockIndex
+            // → Device B fetches updated feed → unreadCount must be recalculated from messages
+            const serverLastRead = serverFeed.lastReadBlockIndex ?? 0;
+            const existingLastRead = existingFeed.lastReadBlockIndex ?? 0;
+            let unreadCount = existingFeed.unreadCount ?? 0;
+
+            if (serverLastRead > existingLastRead) {
+              const feedMessages = currentMessages[existingFeed.id] ?? [];
+              unreadCount = feedMessages.filter(
+                (m) => m.blockHeight === undefined || m.blockHeight > serverLastRead
+              ).length;
+              debugLog(`[FeedsStore] addFeeds: lastReadBlockIndex increased for ${existingFeed.id.substring(0, 8)}... (${existingLastRead} → ${serverLastRead}), recalculated unreadCount: ${unreadCount}`);
+            }
+
+            // Merge server data, preserving local-only data like decrypted aesKey
             return {
               ...existingFeed,
               ...serverFeed,
               // Keep the decrypted aesKey if we have it AND the encryptedFeedKey hasn't changed
               // If encryptedFeedKey changed (key rotation), clear aesKey to force re-decrypt
               aesKey: keyChanged ? undefined : (existingFeed.aesKey || serverFeed.aesKey),
-              // Preserve unreadCount - server doesn't track this, it's client-side only
-              unreadCount: existingFeed.unreadCount ?? 0,
+              unreadCount,
               // FEAT-062: Preserve createdAt from first creation (don't overwrite with latest blockIndex)
               createdAt: existingFeed.createdAt,
             };

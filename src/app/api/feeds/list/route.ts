@@ -57,6 +57,8 @@ export async function GET(request: NextRequest) {
         feedOwner: feed.feedOwner,
         feedType: feed.feedType,
         blockIndex: feed.blockIndex,
+        // FEAT-051: Include lastReadBlockIndex for cross-device read sync
+        lastReadBlockIndex: feed.lastReadBlockIndex ?? 0,
         participants: feed.participants.map(p => ({
           feedId: p.feedId,
           participantPublicAddress: p.participantPublicAddress,
