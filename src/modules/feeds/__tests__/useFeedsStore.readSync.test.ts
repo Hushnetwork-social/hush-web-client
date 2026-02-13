@@ -492,6 +492,157 @@ describe('FEAT-063: Cross-Device Read Sync', () => {
     });
   });
 
+  describe('CF-002: markFeedAsRead should not change feed ordering', () => {
+    it('should not change feed ordering when a feed is marked as read', () => {
+      // Arrange: Two feeds - Bob's feed has higher blockIndex (appears first in sort)
+      const bobFeed = createTestFeed({
+        id: 'feed-bob',
+        name: 'Bob',
+        unreadCount: 1,
+        blockIndex: 500,
+        updatedAt: 2000,
+      });
+      const charlieFeed = createTestFeed({
+        id: 'feed-charlie',
+        name: 'Charlie',
+        unreadCount: 0,
+        blockIndex: 300,
+        updatedAt: 1000,
+      });
+      useFeedsStore.getState().setFeeds([bobFeed, charlieFeed]);
+      useFeedsStore.getState().addMessages('feed-bob', [
+        createTestMessage({ id: 'msg-1', feedId: 'feed-bob', blockHeight: 500, timestamp: 1 }),
+      ]);
+
+      // Capture order before read
+      const feedsBefore = useFeedsStore.getState().feeds.map((f) => f.id);
+
+      // Act: Alice reads Bob's feed
+      useFeedsStore.getState().markFeedAsRead('feed-bob', 500);
+
+      // Assert: order unchanged
+      const feedsAfter = useFeedsStore.getState().feeds.map((f) => f.id);
+      expect(feedsAfter).toEqual(feedsBefore);
+    });
+  });
+
+  describe('EC-003: Messages between read and sync', () => {
+    it('should count all messages added after markFeedAsRead as unread', () => {
+      // Arrange: Feed with 1 message, Alice reads it
+      const feed = createTestFeed({ id: 'feed-1', unreadCount: 0, lastReadBlockIndex: 0, blockIndex: 800 });
+      useFeedsStore.getState().setFeeds([feed]);
+      useFeedsStore.getState().addMessages('feed-1', [
+        createTestMessage({ id: 'msg-1', feedId: 'feed-1', blockHeight: 800, timestamp: 1 }),
+      ]);
+      useFeedsStore.getState().markFeedAsRead('feed-1', 800);
+
+      // Verify: 0 unread after read
+      let state = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(state?.unreadCount).toBe(0);
+
+      // Act: 2 new messages arrive in a single batch (simulates messages between read and next sync)
+      useFeedsStore.getState().addMessages('feed-1', [
+        createTestMessage({ id: 'msg-2', feedId: 'feed-1', blockHeight: 850, timestamp: 2 }),
+        createTestMessage({ id: 'msg-3', feedId: 'feed-1', blockHeight: 900, timestamp: 3 }),
+      ]);
+
+      // Assert: both new messages counted as unread
+      state = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(state?.unreadCount).toBe(2);
+    });
+  });
+
+  describe('EC-006: Concurrent read positions converge to max watermark', () => {
+    it('should converge to highest watermark when concurrent markFeedAsRead calls arrive', () => {
+      // Arrange: Feed with messages at blocks 700, 750, 800
+      const feed = createTestFeed({ id: 'feed-1', unreadCount: 3, lastReadBlockIndex: 0 });
+      useFeedsStore.getState().setFeeds([feed]);
+      useFeedsStore.getState().addMessages('feed-1', [
+        createTestMessage({ id: 'msg-1', feedId: 'feed-1', blockHeight: 700, timestamp: 1 }),
+        createTestMessage({ id: 'msg-2', feedId: 'feed-1', blockHeight: 750, timestamp: 2 }),
+        createTestMessage({ id: 'msg-3', feedId: 'feed-1', blockHeight: 800, timestamp: 3 }),
+      ]);
+
+      // Act: Device A reads up to 800 (all messages)
+      useFeedsStore.getState().markFeedAsRead('feed-1', 800);
+
+      // Assert: 0 unread, lastReadBlockIndex=800
+      let state = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(state?.unreadCount).toBe(0);
+      expect(state?.lastReadBlockIndex).toBe(800);
+
+      // Act: Stale event from Device B with lower watermark (600) arrives after
+      useFeedsStore.getState().markFeedAsRead('feed-1', 600);
+
+      // Assert: still 0 unread, lastReadBlockIndex=800 (max-wins)
+      state = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(state?.unreadCount).toBe(0);
+      expect(state?.lastReadBlockIndex).toBe(800);
+    });
+  });
+
+  describe('EC-001: markFeedAsRead works independently of notification stream', () => {
+    it('should work purely from local state without any external dependencies', () => {
+      // Arrange: Feed with messages (no notification stream setup needed)
+      const feed = createTestFeed({ id: 'feed-1', unreadCount: 3 });
+      useFeedsStore.getState().setFeeds([feed]);
+      useFeedsStore.getState().addMessages('feed-1', [
+        createTestMessage({ id: 'msg-1', feedId: 'feed-1', blockHeight: 700, timestamp: 1 }),
+        createTestMessage({ id: 'msg-2', feedId: 'feed-1', blockHeight: 800, timestamp: 2 }),
+        createTestMessage({ id: 'msg-3', feedId: 'feed-1', blockHeight: 900, timestamp: 3 }),
+      ]);
+
+      // Act: markFeedAsRead works with only store state - no notification stream
+      useFeedsStore.getState().markFeedAsRead('feed-1', 800);
+
+      // Assert: correctly calculates remaining unreads
+      const updatedFeed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(updatedFeed?.unreadCount).toBe(1); // msg at 900 is after watermark
+      expect(updatedFeed?.lastReadBlockIndex).toBe(800);
+    });
+
+    it('should update unread counts via syncUnreadCounts even without notification stream', () => {
+      // Arrange: Feeds with stale unread counts (simulates missed notification events)
+      useFeedsStore.getState().setFeeds([
+        createTestFeed({ id: 'feed-1', unreadCount: 0 }),
+        createTestFeed({ id: 'feed-2', unreadCount: 0 }),
+      ]);
+
+      // Act: syncUnreadCounts provides server-side counts as fallback
+      useFeedsStore.getState().syncUnreadCounts({ 'feed-1': 2, 'feed-2': 5 });
+
+      // Assert: counts updated from server without any notification dependency
+      const feeds = useFeedsStore.getState().feeds;
+      expect(feeds.find((f) => f.id === 'feed-1')?.unreadCount).toBe(2);
+      expect(feeds.find((f) => f.id === 'feed-2')?.unreadCount).toBe(5);
+    });
+  });
+
+  describe('CF-003: Offline reconnection - addMessages recalculates from watermark', () => {
+    it('should correctly count unreads when messages arrive after offline gap', () => {
+      // Arrange: Feed read up to block 800 before going offline
+      const feed = createTestFeed({ id: 'feed-1', lastReadBlockIndex: 800, unreadCount: 0 });
+      useFeedsStore.getState().setFeeds([feed]);
+      useFeedsStore.getState().addMessages('feed-1', [
+        createTestMessage({ id: 'msg-1', feedId: 'feed-1', blockHeight: 750, timestamp: 1 }),
+        createTestMessage({ id: 'msg-2', feedId: 'feed-1', blockHeight: 800, timestamp: 2 }),
+      ]);
+
+      // Verify: 0 unread (both at or below watermark)
+      let state = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(state?.unreadCount).toBe(0);
+
+      // Act: After reconnection, new messages arrive via sync
+      useFeedsStore.getState().addMessages('feed-1', [
+        createTestMessage({ id: 'msg-3', feedId: 'feed-1', blockHeight: 900, timestamp: 3 }),
+      ]);
+
+      // Assert: new message correctly counted as unread from existing watermark
+      state = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(state?.unreadCount).toBe(1);
+    });
+  });
+
   describe('F3-007: Mention badge clears when unreadCount reaches 0', () => {
     it('should clear mentions from localStorage when markFeedAsRead sets unreadCount to 0', () => {
       // Arrange: feed fully read (watermark >= all messages) with mentions tracked
