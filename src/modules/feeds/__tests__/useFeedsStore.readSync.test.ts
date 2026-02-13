@@ -230,8 +230,8 @@ describe('FEAT-063: Cross-Device Read Sync', () => {
       expect(updatedFeed?.unreadCount).toBe(2);
     });
 
-    it('should not recalculate when lastReadBlockIndex is 0', () => {
-      // Arrange: feed without lastReadBlockIndex
+    it('should count all messages as unread when lastReadBlockIndex is 0 (never read)', () => {
+      // Arrange: feed without lastReadBlockIndex (never read by user)
       const feed = createTestFeed({ id: 'feed-1', unreadCount: 0 });
       useFeedsStore.getState().setFeeds([feed]);
 
@@ -240,9 +240,9 @@ describe('FEAT-063: Cross-Device Read Sync', () => {
         createTestMessage({ id: 'msg-1', feedId: 'feed-1', blockHeight: 850, timestamp: 1 }),
       ]);
 
-      // Assert: unreadCount not recalculated (no lastReadBlockIndex)
+      // Assert: message counted as unread (blockHeight > 0, user never read feed)
       const updatedFeed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
-      expect(updatedFeed?.unreadCount).toBe(0);
+      expect(updatedFeed?.unreadCount).toBe(1);
     });
   });
 

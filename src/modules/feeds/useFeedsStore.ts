@@ -1138,10 +1138,11 @@ export const useFeedsStore = create<FeedsStore>()(
             updatedFeeds = sortFeeds(updatedFeeds);
           }
 
-          // FEAT-063: Recalculate unreadCount when lastReadBlockIndex is set
+          // FEAT-063: Recalculate unreadCount from local messages and lastReadBlockIndex.
+          // When lastReadBlockIndex is 0/undefined (never read), all messages are unread.
           const feedForRecalc = updatedFeeds.find((f) => f.id === feedId);
           let recalcUnread: number | undefined;
-          if (feedForRecalc && (feedForRecalc.lastReadBlockIndex ?? 0) > 0) {
+          if (feedForRecalc) {
             recalcUnread = updatedMessages.filter(
               (m) => m.blockHeight === undefined || m.blockHeight > (feedForRecalc.lastReadBlockIndex ?? 0)
             ).length;
