@@ -494,6 +494,206 @@ describe('FEAT-062: Feed Sorting (blockIndex-based)', () => {
     });
   });
 
+  describe('BUG: addFeeds must NOT overwrite higher local blockIndex with stale server blockIndex', () => {
+    it('should preserve local blockIndex when it is higher than server blockIndex after addMessages', () => {
+      // Arrange: two feeds, feed-B initially ranked lower
+      const feeds = [
+        createTestFeed({ id: 'feed-A', blockIndex: 800 }),
+        createTestFeed({ id: 'feed-B', blockIndex: 400, name: 'GroupFeed' }),
+      ];
+      useFeedsStore.getState().setFeeds(feeds);
+
+      // Verify initial order: A first (800 > 400)
+      expect(useFeedsStore.getState().feeds[0].id).toBe('feed-A');
+      expect(useFeedsStore.getState().feeds[1].id).toBe('feed-B');
+
+      // Act step 1: New confirmed message arrives for feed-B at block 900
+      const confirmedMsg = createTestMessage({
+        id: 'msg-new',
+        feedId: 'feed-B',
+        blockHeight: 900,
+        timestamp: 5000,
+      });
+      useFeedsStore.getState().addMessages('feed-B', [confirmedMsg]);
+
+      // Verify: feed-B now ranks first (blockIndex 900 > 800)
+      expect(useFeedsStore.getState().feeds[0].id).toBe('feed-B');
+      expect(useFeedsStore.getState().feeds[0].blockIndex).toBe(900);
+
+      // Act step 2: Sync cycle calls addFeeds with STALE server data (blockIndex 400)
+      const serverFeedB = createTestFeed({ id: 'feed-B', blockIndex: 400, name: 'GroupFeed' });
+      const serverFeedA = createTestFeed({ id: 'feed-A', blockIndex: 800 });
+      useFeedsStore.getState().addFeeds([serverFeedA, serverFeedB]);
+
+      // Assert: feed-B's blockIndex must NOT be overwritten by server's stale value
+      const feedB = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-B');
+      expect(feedB?.blockIndex).toBe(900); // local value preserved, NOT 400
+
+      // Assert: sort order must still reflect the higher blockIndex
+      const sorted = useFeedsStore.getState().feeds;
+      expect(sorted[0].id).toBe('feed-B'); // still first (900 > 800)
+      expect(sorted[1].id).toBe('feed-A');
+    });
+
+    it('should accept server blockIndex when it is higher than local blockIndex', () => {
+      // Arrange: feed with blockIndex 500
+      const feed = createTestFeed({ id: 'feed-1', blockIndex: 500 });
+      useFeedsStore.getState().setFeeds([feed]);
+
+      // Act: server has higher blockIndex (new activity from another user)
+      const serverFeed = createTestFeed({ id: 'feed-1', blockIndex: 700 });
+      useFeedsStore.getState().addFeeds([serverFeed]);
+
+      // Assert: server's higher value wins
+      const merged = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(merged?.blockIndex).toBe(700);
+    });
+
+    it('should preserve sort order across multiple sync cycles after message confirmation', () => {
+      // Arrange: reproduce the exact production bug sequence
+      const feeds = [
+        createTestFeed({ id: 'feed-high', blockIndex: 2196 }),
+        createTestFeed({ id: 'feed-low', blockIndex: 500 }),
+      ];
+      useFeedsStore.getState().setFeeds(feeds);
+
+      // Step 1: Message confirmed at block 2278 for feed-low
+      const msg = createTestMessage({
+        id: 'msg-confirmed',
+        feedId: 'feed-low',
+        blockHeight: 2278,
+        timestamp: 10000,
+      });
+      useFeedsStore.getState().addMessages('feed-low', [msg]);
+
+      // Verify: feed-low is now first (2278 > 2196)
+      expect(useFeedsStore.getState().feeds[0].id).toBe('feed-low');
+
+      // Step 2: First sync cycle with stale server data
+      useFeedsStore.getState().addFeeds([
+        createTestFeed({ id: 'feed-high', blockIndex: 2196 }),
+        createTestFeed({ id: 'feed-low', blockIndex: 500 }),
+      ]);
+
+      // Assert: still correct after first sync
+      expect(useFeedsStore.getState().feeds[0].id).toBe('feed-low');
+      expect(useFeedsStore.getState().feeds.find((f) => f.id === 'feed-low')?.blockIndex).toBe(2278);
+
+      // Step 3: Second sync cycle - still stale
+      useFeedsStore.getState().addFeeds([
+        createTestFeed({ id: 'feed-high', blockIndex: 2196 }),
+        createTestFeed({ id: 'feed-low', blockIndex: 500 }),
+      ]);
+
+      // Assert: still correct after second sync
+      expect(useFeedsStore.getState().feeds[0].id).toBe('feed-low');
+      expect(useFeedsStore.getState().feeds.find((f) => f.id === 'feed-low')?.blockIndex).toBe(2278);
+    });
+  });
+
+  describe('BUG: Confirmed pending message must update feed blockIndex', () => {
+    it('should update feed blockIndex when a pending message is confirmed (not just truly new messages)', () => {
+      // Arrange: two feeds, feed-B initially ranked lower
+      const feeds = [
+        createTestFeed({ id: 'feed-A', blockIndex: 800 }),
+        createTestFeed({ id: 'feed-B', blockIndex: 400 }),
+      ];
+      useFeedsStore.getState().setFeeds(feeds);
+
+      // Verify initial order: A first (800 > 400)
+      expect(useFeedsStore.getState().feeds[0].id).toBe('feed-A');
+
+      // Step 1: User sends a pending message on feed-B
+      const pendingMsg = createTestMessage({
+        id: 'msg-pending-1',
+        feedId: 'feed-B',
+        isConfirmed: false,
+        status: 'pending' as FeedMessage['status'],
+        blockHeight: undefined,
+        timestamp: 5000,
+      });
+      useFeedsStore.getState().addPendingMessage('feed-B', pendingMsg);
+
+      // Verify: feed-B now has hasPendingMessages boost → ranks first
+      const afterPending = useFeedsStore.getState().feeds;
+      expect(afterPending[0].id).toBe('feed-B');
+      expect(afterPending[0].hasPendingMessages).toBe(true);
+      expect(afterPending[0].blockIndex).toBe(400); // blockIndex unchanged
+
+      // Step 2: Server confirms the pending message at blockHeight 900
+      // addMessages receives the SAME message ID with isConfirmed=true and blockHeight
+      const confirmedMsg = createTestMessage({
+        id: 'msg-pending-1', // same ID as pending
+        feedId: 'feed-B',
+        isConfirmed: true,
+        status: 'confirmed' as FeedMessage['status'],
+        blockHeight: 900,
+        timestamp: 5000,
+      });
+      useFeedsStore.getState().addMessages('feed-B', [confirmedMsg]);
+
+      // Assert: feed-B's blockIndex MUST be updated to 900 (the confirmed blockHeight)
+      const feedB = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-B');
+      expect(feedB?.blockIndex).toBe(900); // BUG: currently stays at 400 because messagesToConfirm blockHeights are ignored
+      expect(feedB?.hasPendingMessages).toBe(false); // pending flag cleared
+
+      // Assert: sort order must reflect the updated blockIndex (900 > 800)
+      const sorted = useFeedsStore.getState().feeds;
+      expect(sorted[0].id).toBe('feed-B'); // feed-B should still be first (blockIndex 900 > 800)
+      expect(sorted[1].id).toBe('feed-A');
+    });
+
+    it('should not drop feed position when pending message is confirmed and boost is removed', () => {
+      // This reproduces the exact production bug: feed drops after confirmation
+      // because hasPendingMessages boost is removed but blockIndex is NOT updated
+      const feeds = [
+        createTestFeed({ id: 'personal', type: 'personal', blockIndex: 10 }),
+        createTestFeed({ id: 'feed-active', blockIndex: 2196 }),
+        createTestFeed({ id: 'feed-sender', blockIndex: 500 }),
+      ];
+      useFeedsStore.getState().setFeeds(feeds);
+
+      // Verify: personal, feed-active (2196), feed-sender (500)
+      const initial = useFeedsStore.getState().feeds.map((f) => f.id);
+      expect(initial).toEqual(['personal', 'feed-active', 'feed-sender']);
+
+      // Step 1: User sends message in feed-sender
+      const pendingMsg = createTestMessage({
+        id: 'msg-1',
+        feedId: 'feed-sender',
+        isConfirmed: false,
+        status: 'pending' as FeedMessage['status'],
+        blockHeight: undefined,
+        timestamp: Date.now(),
+      });
+      useFeedsStore.getState().addPendingMessage('feed-sender', pendingMsg);
+
+      // Feed-sender gets pending boost → moves above feed-active
+      const afterSend = useFeedsStore.getState().feeds.map((f) => f.id);
+      expect(afterSend).toEqual(['personal', 'feed-sender', 'feed-active']);
+
+      // Step 2: Server confirms at blockHeight 2300 (higher than feed-active's 2196)
+      const confirmedMsg = createTestMessage({
+        id: 'msg-1',
+        feedId: 'feed-sender',
+        isConfirmed: true,
+        status: 'confirmed' as FeedMessage['status'],
+        blockHeight: 2300,
+        timestamp: Date.now(),
+      });
+      useFeedsStore.getState().addMessages('feed-sender', [confirmedMsg]);
+
+      // Assert: feed-sender should STAY above feed-active (blockIndex 2300 > 2196)
+      const afterConfirm = useFeedsStore.getState().feeds.map((f) => f.id);
+      expect(afterConfirm).toEqual(['personal', 'feed-sender', 'feed-active']);
+
+      // Verify blockIndex was actually updated
+      const feedSender = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-sender');
+      expect(feedSender?.blockIndex).toBe(2300);
+      expect(feedSender?.hasPendingMessages).toBe(false);
+    });
+  });
+
   describe('CF-002: Read sync does NOT affect feed sort position', () => {
     it('should not change sort order when unreadCount changes', () => {
       // Arrange: two feeds in specific order

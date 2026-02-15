@@ -868,6 +868,10 @@ export const useFeedsStore = create<FeedsStore>()(
               unreadCount,
               // FEAT-062: Preserve createdAt from first creation (don't overwrite with latest blockIndex)
               createdAt: existingFeed.createdAt,
+              // BUG FIX: Preserve the higher blockIndex. addMessages() updates blockIndex locally
+              // when confirmed messages arrive, but the server may still return the feed's original
+              // (stale) blockIndex. Always keep the higher value to maintain correct sort order.
+              blockIndex: Math.max(existingFeed.blockIndex ?? 0, serverFeed.blockIndex ?? 0),
             };
           }
           return existingFeed;
@@ -1118,8 +1122,9 @@ export const useFeedsStore = create<FeedsStore>()(
           updatedMessages.sort((a, b) => a.timestamp - b.timestamp);
 
           // FEAT-062: Update feed's blockIndex via max(current, maxIncomingBlockIndex)
-          // Only consider messages with defined blockIndex (excludes optimistic/pending)
-          const incomingBlockIndexes = trulyNewMessages
+          // Consider BOTH truly new messages AND confirmed pending messages
+          // (confirmed messages have blockHeight from the blockchain but were previously pending)
+          const incomingBlockIndexes = [...trulyNewMessages, ...messagesToConfirm]
             .map((m) => m.blockHeight)
             .filter((bi): bi is number => bi !== undefined && bi > 0);
           const maxIncomingBlockIndex = incomingBlockIndexes.length > 0
