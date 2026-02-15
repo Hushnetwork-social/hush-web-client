@@ -12,7 +12,8 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useFeedsStore } from '../useFeedsStore';
-import type { Feed, FeedMessage } from '@/types';
+import { useAppStore } from '@/stores/useAppStore';
+import type { Feed, FeedMessage, Credentials } from '@/types';
 
 // Storage key must match MENTION_STORAGE_KEY in useFeedsStore.ts
 const MENTION_STORAGE_KEY = 'hush_mention_tracking';
@@ -750,6 +751,122 @@ describe('FEAT-063: Cross-Device Read Sync', () => {
 
       // Assert: mentionVersion incremented (triggers React re-render for "@" badge)
       expect(useFeedsStore.getState().mentionVersion).toBe(versionBefore + 1);
+    });
+  });
+
+  describe('Own messages should not count as unread', () => {
+    const CURRENT_USER_KEY = 'current-user-public-key';
+    const OTHER_USER_KEY = 'other-user-public-key';
+
+    beforeEach(() => {
+      // Set up useAppStore with credentials so own messages can be identified
+      useAppStore.setState({
+        credentials: {
+          signingPublicKey: CURRENT_USER_KEY,
+          signingPrivateKey: 'test-signing-private',
+          encryptionPublicKey: 'test-encryption-public',
+          encryptionPrivateKey: 'test-encryption-private',
+        } satisfies Credentials,
+      });
+    });
+
+    it('own messages should not count as unread in addMessages', () => {
+      // Arrange: feed with lastReadBlockIndex=800
+      const feed = createTestFeed({ id: 'feed-1', lastReadBlockIndex: 800, unreadCount: 0 });
+      useFeedsStore.getState().setFeeds([feed]);
+
+      // Act: own message arrives at block 900
+      useFeedsStore.getState().addMessages('feed-1', [
+        createTestMessage({
+          id: 'msg-own',
+          feedId: 'feed-1',
+          senderPublicKey: CURRENT_USER_KEY,
+          blockHeight: 900,
+          timestamp: 1,
+        }),
+      ]);
+
+      // Assert: own message not counted as unread
+      const updatedFeed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(updatedFeed?.unreadCount).toBe(0);
+    });
+
+    it('own messages should not count as unread in markFeedAsRead', () => {
+      // Arrange: feed with mixed messages
+      const feed = createTestFeed({ id: 'feed-1', unreadCount: 0 });
+      useFeedsStore.getState().setFeeds([feed]);
+      useFeedsStore.getState().addMessages('feed-1', [
+        createTestMessage({ id: 'msg-own', feedId: 'feed-1', senderPublicKey: CURRENT_USER_KEY, blockHeight: 900, timestamp: 1 }),
+        createTestMessage({ id: 'msg-other', feedId: 'feed-1', senderPublicKey: OTHER_USER_KEY, blockHeight: 950, timestamp: 2 }),
+      ]);
+
+      // Act: mark as read up to block 800 (both messages above watermark)
+      useFeedsStore.getState().markFeedAsRead('feed-1', 800);
+
+      // Assert: only the other user's message counts as unread
+      const updatedFeed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(updatedFeed?.unreadCount).toBe(1);
+    });
+
+    it('own messages should not count as unread in addFeeds cross-device sync', () => {
+      // Arrange: existing feed with messages, lastReadBlockIndex about to increase
+      useFeedsStore.getState().setFeeds([
+        createTestFeed({ id: 'feed-1', unreadCount: 0, lastReadBlockIndex: 0, blockIndex: 900 }),
+      ]);
+      useFeedsStore.getState().addMessages('feed-1', [
+        createTestMessage({ id: 'msg-own', feedId: 'feed-1', senderPublicKey: CURRENT_USER_KEY, blockHeight: 850, timestamp: 1 }),
+        createTestMessage({ id: 'msg-other', feedId: 'feed-1', senderPublicKey: OTHER_USER_KEY, blockHeight: 900, timestamp: 2 }),
+      ]);
+
+      // Act: server sends updated lastReadBlockIndex=800 (cross-device read sync)
+      useFeedsStore.getState().addFeeds([
+        createTestFeed({ id: 'feed-1', unreadCount: 0, lastReadBlockIndex: 800, blockIndex: 900 }),
+      ]);
+
+      // Assert: only the other user's message (900 > 800) counts as unread, not own (850 > 800)
+      const feed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(feed?.unreadCount).toBe(1);
+    });
+
+    it('mixed own + other messages counts only other as unread', () => {
+      // Arrange: feed with lastReadBlockIndex=700
+      const feed = createTestFeed({ id: 'feed-1', lastReadBlockIndex: 700, unreadCount: 0 });
+      useFeedsStore.getState().setFeeds([feed]);
+
+      // Act: 3 own messages + 2 other messages arrive above watermark
+      useFeedsStore.getState().addMessages('feed-1', [
+        createTestMessage({ id: 'msg-own-1', feedId: 'feed-1', senderPublicKey: CURRENT_USER_KEY, blockHeight: 750, timestamp: 1 }),
+        createTestMessage({ id: 'msg-own-2', feedId: 'feed-1', senderPublicKey: CURRENT_USER_KEY, blockHeight: 800, timestamp: 2 }),
+        createTestMessage({ id: 'msg-own-3', feedId: 'feed-1', senderPublicKey: CURRENT_USER_KEY, blockHeight: 850, timestamp: 3 }),
+        createTestMessage({ id: 'msg-other-1', feedId: 'feed-1', senderPublicKey: OTHER_USER_KEY, blockHeight: 900, timestamp: 4 }),
+        createTestMessage({ id: 'msg-other-2', feedId: 'feed-1', senderPublicKey: OTHER_USER_KEY, blockHeight: 950, timestamp: 5 }),
+      ]);
+
+      // Assert: only 2 other messages count as unread
+      const updatedFeed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(updatedFeed?.unreadCount).toBe(2);
+    });
+
+    it('own pending message (undefined blockHeight) should not count as unread', () => {
+      // Arrange: feed with lastReadBlockIndex=800
+      const feed = createTestFeed({ id: 'feed-1', lastReadBlockIndex: 800, unreadCount: 0 });
+      useFeedsStore.getState().setFeeds([feed]);
+
+      // Act: own pending (optimistic) message arrives
+      useFeedsStore.getState().addMessages('feed-1', [
+        createTestMessage({
+          id: 'msg-pending',
+          feedId: 'feed-1',
+          senderPublicKey: CURRENT_USER_KEY,
+          blockHeight: undefined,
+          isConfirmed: false,
+          timestamp: 1,
+        }),
+      ]);
+
+      // Assert: own pending message not counted as unread
+      const updatedFeed = useFeedsStore.getState().feeds.find((f) => f.id === 'feed-1');
+      expect(updatedFeed?.unreadCount).toBe(0);
     });
   });
 });

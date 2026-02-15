@@ -849,9 +849,11 @@ export const useFeedsStore = create<FeedsStore>()(
             let unreadCount = existingFeed.unreadCount ?? 0;
 
             if (serverLastRead > existingLastRead) {
+              const currentUserPublicKey = useAppStore.getState().credentials?.signingPublicKey;
               const feedMessages = currentMessages[existingFeed.id] ?? [];
               unreadCount = feedMessages.filter(
-                (m) => m.blockHeight === undefined || m.blockHeight > serverLastRead
+                (m) => m.senderPublicKey !== currentUserPublicKey &&
+                  (m.blockHeight === undefined || m.blockHeight > serverLastRead)
               ).length;
               debugLog(`[FeedsStore] addFeeds: lastReadBlockIndex increased for ${existingFeed.id.substring(0, 8)}... (${existingLastRead} → ${serverLastRead}), recalculated unreadCount: ${unreadCount}`);
             }
@@ -1156,11 +1158,14 @@ export const useFeedsStore = create<FeedsStore>()(
 
           // FEAT-063: Recalculate unreadCount from local messages and lastReadBlockIndex.
           // When lastReadBlockIndex is 0/undefined (never read), all messages are unread.
+          // Exclude own messages — a user's own messages should never count as unread.
           const feedForRecalc = updatedFeeds.find((f) => f.id === feedId);
           let recalcUnread: number | undefined;
           if (feedForRecalc) {
+            const currentUserPublicKey = useAppStore.getState().credentials?.signingPublicKey;
             recalcUnread = updatedMessages.filter(
-              (m) => m.blockHeight === undefined || m.blockHeight > (feedForRecalc.lastReadBlockIndex ?? 0)
+              (m) => m.senderPublicKey !== currentUserPublicKey &&
+                (m.blockHeight === undefined || m.blockHeight > (feedForRecalc.lastReadBlockIndex ?? 0))
             ).length;
             updatedFeeds = updatedFeeds.map((f) =>
               f.id === feedId ? { ...f, unreadCount: recalcUnread! } : f
@@ -1290,9 +1295,12 @@ export const useFeedsStore = create<FeedsStore>()(
           let newUnreadCount = 0;
           if (upToBlockIndex !== undefined && upToBlockIndex > 0) {
             // FEAT-063: Calculate remaining unreads from local cache
+            // Exclude own messages — a user's own messages should never count as unread.
+            const currentUserPublicKey = useAppStore.getState().credentials?.signingPublicKey;
             const messages = state.messages[feedId] || [];
             newUnreadCount = messages.filter(
-              (m) => m.blockHeight === undefined || m.blockHeight > upToBlockIndex
+              (m) => m.senderPublicKey !== currentUserPublicKey &&
+                (m.blockHeight === undefined || m.blockHeight > upToBlockIndex)
             ).length;
           }
           // else: no watermark = set to 0 (backward compat)

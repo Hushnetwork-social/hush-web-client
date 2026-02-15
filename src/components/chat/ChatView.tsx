@@ -1175,6 +1175,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
                 onClick={handleOpenSettingsPanel}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-hush-text-accent hover:bg-hush-bg-hover hover:text-hush-text-primary transition-colors"
                 aria-label="Group settings"
+                data-testid="group-settings-button"
               >
                 <Settings className="w-4 h-4" />
                 <span className="hidden sm:inline">Settings</span>

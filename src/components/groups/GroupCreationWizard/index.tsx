@@ -214,6 +214,18 @@ export const GroupCreationWizard = memo(function GroupCreationWizard({
         // Store the AES key locally for message encryption/decryption
         useFeedsStore.getState().updateFeedAesKey(feedId, feedAesKey);
 
+        // Initialize groupKeyStates so FeedList recognizes the feed as "ready"
+        // (FeedList checks groupKeyStates[feedId]?.keyGenerations.some(kg => !!kg.aesKey))
+        useFeedsStore.getState().setGroupKeyState(feedId, {
+          currentKeyGeneration: 0,
+          keyGenerations: [{
+            keyGeneration: 0,
+            validFromBlock: 0,
+            aesKey: feedAesKey,
+          }],
+          missingKeyGenerations: [],
+        });
+
         // Set user role as Admin for this group
         useFeedsStore.getState().setUserRole(feedId, "Admin");
 

@@ -228,6 +228,7 @@ export default function AccountPage() {
           </label>
           <input
             id="display-name"
+            data-testid="account-display-name-input"
             type="text"
             value={editedName}
             onChange={(e) => setEditedName(e.target.value)}
@@ -237,6 +238,7 @@ export default function AccountPage() {
           <button
             onClick={handleSave}
             disabled={isSaveDisabled}
+            data-testid="account-save-button"
             className={`
               mt-3 flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all
               ${isSaveDisabled

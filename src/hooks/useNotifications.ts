@@ -352,7 +352,13 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
             // Also tell server to mark as read so unread count stays at 0
             const currentUserId = userIdRef.current;
             if (currentUserId) {
-              notificationService.markFeedAsRead(currentUserId, event.feedId).catch((err) => {
+              // Pass the latest blockHeight so the server advances the read position
+              const feedMessages = useFeedsStore.getState().messages[event.feedId] || [];
+              const maxBlockHeight = feedMessages.reduce(
+                (max, m) => (m.blockHeight !== undefined && m.blockHeight > max ? m.blockHeight : max),
+                0
+              );
+              notificationService.markFeedAsRead(currentUserId, event.feedId, maxBlockHeight || undefined).catch((err) => {
                 debugError('[useNotifications] Failed to mark viewed feed as read:', err);
               });
             }
@@ -515,11 +521,18 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
     async (feedId: string) => {
       if (!userId) return;
 
+      // Get the latest blockHeight to pass to server
+      const feedMessages = useFeedsStore.getState().messages[feedId] || [];
+      const maxBlockHeight = feedMessages.reduce(
+        (max, m) => (m.blockHeight !== undefined && m.blockHeight > max ? m.blockHeight : max),
+        0
+      );
+
       // Optimistic update
-      markFeedAsReadInStore(feedId);
+      markFeedAsReadInStore(feedId, maxBlockHeight || undefined);
 
       try {
-        await notificationService.markFeedAsRead(userId, feedId);
+        await notificationService.markFeedAsRead(userId, feedId, maxBlockHeight || undefined);
       } catch (error) {
         debugError('[useNotifications] Failed to mark feed as read:', error);
         // Could revert optimistic update here if needed

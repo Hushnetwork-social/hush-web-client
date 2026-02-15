@@ -117,6 +117,7 @@ export function Sidebar({
                 <span className="text-sm">Download keys</span>
               </button>
               <button
+                data-testid="menu-account-details"
                 onClick={() => {
                   onAccountDetails?.();
                   setShowUserMenu(false);
