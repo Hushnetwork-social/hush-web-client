@@ -6,7 +6,7 @@
  * See MemoryBank/HushWebClient/SYNC_ARCHITECTURE.md for full documentation.
  */
 
-import type { Feed, FeedMessage, ProfileSearchResult } from '@/types';
+import type { Feed, FeedMessage, ProfileSearchResult, AttachmentRefMeta } from '@/types';
 import { createFeedMessageTransaction, createChatFeedTransaction, hexToBytes } from '@/lib/crypto';
 import { FEED_TYPE_MAP, useFeedsStore } from './useFeedsStore';
 import { useAppStore } from '@/stores';
@@ -24,6 +24,15 @@ interface ServerFeed {
   lastReadBlockIndex: number;  // FEAT-051: User's last read position in this feed
 }
 
+// FEAT-066: Server attachment reference in message response
+interface ServerAttachmentRef {
+  id: string;
+  hash: string;
+  mimeType: string;
+  size: number;
+  fileName: string;
+}
+
 // Server message response type
 interface ServerMessage {
   feedId: string;
@@ -35,6 +44,7 @@ interface ServerMessage {
   blockIndex: number;
   replyToMessageId?: string;  // Reply to Message: parent message reference
   keyGeneration?: number;     // Group Feeds: Key generation used to encrypt this message
+  attachments?: ServerAttachmentRef[];  // FEAT-066: Attachment metadata
 }
 
 // Server reaction tally response type (Protocol Omega)
@@ -161,6 +171,7 @@ export async function fetchMessages(
       isConfirmed: true,
       replyToMessageId: msg.replyToMessageId || undefined,  // Reply to Message: pass through parent reference
       keyGeneration: msg.keyGeneration,  // Group Feeds: key generation used for encryption
+      attachments: parseAttachments(msg.attachments),  // FEAT-066
     };
   });
 
@@ -715,6 +726,7 @@ export async function fetchFeedMessages(
       isConfirmed: true,
       replyToMessageId: msg.replyToMessageId || undefined,
       keyGeneration: msg.keyGeneration,
+      attachments: parseAttachments(msg.attachments),  // FEAT-066
     };
   });
 
@@ -775,4 +787,25 @@ export async function markFeedAsRead(
     debugError(`[FeedsService] markFeedAsRead error:`, error);
     return false;
   }
+}
+
+// ============= FEAT-066: Attachment Parsing Helper =============
+
+/**
+ * Parses server attachment references into client-side AttachmentRefMeta.
+ * Returns undefined if no attachments (backward compatible with old messages).
+ */
+function parseAttachments(
+  serverAttachments?: ServerAttachmentRef[]
+): AttachmentRefMeta[] | undefined {
+  if (!serverAttachments || serverAttachments.length === 0) {
+    return undefined;
+  }
+  return serverAttachments.map((att) => ({
+    id: att.id,
+    hash: att.hash,
+    mimeType: att.mimeType,
+    size: att.size,
+    fileName: att.fileName,
+  }));
 }

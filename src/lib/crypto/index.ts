@@ -54,6 +54,8 @@ export {
   eciesDecrypt,
   aesEncrypt,
   aesDecrypt,
+  aesEncryptBytes,
+  aesDecryptBytes,
 } from './encryption';
 
 export {

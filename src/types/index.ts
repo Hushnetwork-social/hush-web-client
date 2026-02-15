@@ -107,6 +107,15 @@ export interface ProfileSearchResult {
  */
 export type MessageStatus = 'pending' | 'confirming' | 'confirmed' | 'failed';
 
+// FEAT-066: Attachment metadata reference (lightweight, no binary data)
+export interface AttachmentRefMeta {
+  id: string;
+  hash: string;
+  mimeType: string;
+  size: number;
+  fileName: string;
+}
+
 // Message types
 export interface FeedMessage {
   id: string;
@@ -128,6 +137,8 @@ export interface FeedMessage {
   decryptionFailed?: boolean; // True if message could not be decrypted (user lacks key)
   /** Whether user has read this message (based on lastReadBlockIndex) - undefined treated as unread */
   isRead?: boolean;
+  /** FEAT-066: Attachment metadata references (empty array if no attachments) */
+  attachments?: AttachmentRefMeta[];
 
   // FEAT-058: Retry tracking fields
   /** Current delivery status of the message */
