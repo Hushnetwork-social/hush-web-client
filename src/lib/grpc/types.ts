@@ -179,6 +179,15 @@ export interface GetFeedForAddressReply {
   Feeds: FeedEntity[];
 }
 
+// FEAT-066: Attachment metadata reference from proto AttachmentRef
+export interface AttachmentRefEntity {
+  Id: string;
+  Hash: string;
+  MimeType: string;
+  Size: number;
+  FileName: string;
+}
+
 export interface FeedMessageEntity {
   FeedId: string;
   FeedMessageId: string;
@@ -189,6 +198,7 @@ export interface FeedMessageEntity {
   BlockIndex: number;
   ReplyToMessageId?: string;  // Reply to Message: parent message reference
   KeyGeneration?: number;     // FEAT-056: Key generation used to encrypt group messages
+  Attachments?: AttachmentRefEntity[];  // FEAT-066: Attachment metadata references
 }
 
 export interface GetFeedMessagesForAddressRequest {
