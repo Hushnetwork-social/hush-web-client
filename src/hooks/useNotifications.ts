@@ -18,7 +18,7 @@ import { showNotification as showPlatformNotification } from '@/lib/notification
 import { onMemberJoin, onVisibilityChange } from '@/lib/events';
 import type { FeedEventResponse } from '@/lib/grpc/grpc-web-helper';
 import { debugLog, debugError } from '@/lib/debug-logger';
-import { parseMentions, trackMention } from '@/lib/mentions';
+import { parseMentions, trackMention, getMentionDisplayText } from '@/lib/mentions';
 import { getNextDelay, STREAM_RECONNECT_CONFIG } from '@/lib/backoff';
 import type { FeedMessage } from '@/types';
 
@@ -36,6 +36,9 @@ export interface NotificationToast {
   senderName: string;
   messagePreview: string;
   timestamp: number;
+  feedName?: string;
+  /** True when the notification message contains a mention of the current user */
+  isMention?: boolean;
 }
 
 export interface UseNotificationsOptions {
@@ -86,10 +89,13 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
       return [...prev, toast];
     });
 
-    // Auto-dismiss after 5 seconds
+    // Auto-dismiss: 5 seconds in production, 30 seconds in E2E mode (for screenshots/video)
+    const isE2E = typeof window !== 'undefined' && !!(window as unknown as Record<string, unknown>).__e2e_triggerSync;
+    const dismissTimeout = isE2E ? 30000 : 5000;
+
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== toast.id));
-    }, 5000);
+    }, dismissTimeout);
   }, []);
 
   // Remove a toast
@@ -322,15 +328,28 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
               ? await decryptMessagePreview(event.feedId, event.messagePreview)
               : 'New message';
 
+            // Convert raw mention format @[Bob](identityId) → @Bob for display
+            const displayPreview = getMentionDisplayText(decryptedPreview);
+
+            // Check if current user is mentioned in the message
+            const currentUserId = userIdRef.current;
+            const mentions = parseMentions(decryptedPreview);
+            const isMention = currentUserId
+              ? mentions.some((m) => m.identityId === currentUserId)
+              : false;
+
             const platform = detectPlatform();
+
+            const feedName = event.feedName || undefined;
 
             if (platform === 'tauri') {
               // Tauri: Use native OS notification
               await showPlatformNotification({
                 feedId: event.feedId,
                 senderName: event.senderName || 'Unknown',
-                messagePreview: decryptedPreview,
+                messagePreview: displayPreview,
                 timestamp: event.timestampUnixMs,
+                feedName,
               });
             } else {
               // Browser: Use in-app toast
@@ -338,8 +357,10 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
                 id: `${event.feedId}-${event.timestampUnixMs}-${Date.now()}`,
                 feedId: event.feedId,
                 senderName: event.senderName || 'Unknown',
-                messagePreview: decryptedPreview,
+                messagePreview: displayPreview,
                 timestamp: event.timestampUnixMs,
+                feedName,
+                isMention,
               };
               addToast(toast);
             }

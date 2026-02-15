@@ -173,6 +173,7 @@ export const MemberSelector = memo(function MemberSelector({
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Search by name..."
+              data-testid="member-search-input"
               className="w-full bg-hush-bg-dark border border-hush-bg-hover rounded-xl px-4 py-2.5 pl-10 text-sm text-hush-text-primary placeholder-hush-text-accent focus:outline-none focus:border-hush-purple"
               disabled={isSearching}
               aria-label="Search for members"
@@ -182,6 +183,7 @@ export const MemberSelector = memo(function MemberSelector({
           <button
             onClick={handleSearch}
             disabled={isSearching || !searchQuery.trim()}
+            data-testid="member-search-button"
             className="px-4 py-2.5 bg-hush-purple text-hush-bg-dark rounded-xl font-medium text-sm hover:bg-hush-purple-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             aria-label="Search"
           >
@@ -231,6 +233,7 @@ export const MemberSelector = memo(function MemberSelector({
                 <button
                   key={profile.publicSigningAddress}
                   onClick={() => toggleMember(profile)}
+                  data-testid={`member-result:${profile.displayName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`}
                   className={`w-full flex items-center p-3 rounded-xl border transition-colors text-left ${
                     isSelected
                       ? "border-hush-purple bg-hush-purple/10"
@@ -290,6 +293,7 @@ export const MemberSelector = memo(function MemberSelector({
           <button
             onClick={onNext}
             disabled={!canProceed}
+            data-testid="member-next-button"
             className="px-6 py-2.5 bg-hush-purple text-hush-bg-dark rounded-xl font-medium text-sm hover:bg-hush-purple-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             aria-label="Proceed to next step"
           >

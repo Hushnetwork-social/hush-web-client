@@ -44,6 +44,7 @@ export const ReplyContextBar = memo(function ReplyContextBar({
       role="status"
       aria-live="polite"
       aria-label={`Replying to ${senderName}`}
+      data-testid="reply-context-bar"
     >
       <div className="flex items-center gap-2 min-w-0 flex-1">
         <Reply className="w-4 h-4 text-hush-purple flex-shrink-0" />
@@ -68,6 +69,7 @@ export const ReplyContextBar = memo(function ReplyContextBar({
         "
         aria-label="Cancel reply"
         type="button"
+        data-testid="reply-cancel-button"
       >
         <X className="w-4 h-4" />
       </button>

@@ -329,6 +329,7 @@ export function NewChatView({ onFeedCreated, onFeedSelected, onBack, showBackBut
           <button
             role="tab"
             aria-selected={activeTab === "users"}
+            data-testid="new-chat-tab-users"
             onClick={() => handleTabChange("users")}
             className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
               activeTab === "users"
@@ -342,6 +343,7 @@ export function NewChatView({ onFeedCreated, onFeedSelected, onBack, showBackBut
           <button
             role="tab"
             aria-selected={activeTab === "publicGroups"}
+            data-testid="new-chat-tab-groups"
             onClick={() => handleTabChange("publicGroups")}
             className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
               activeTab === "publicGroups"
@@ -371,6 +373,7 @@ export function NewChatView({ onFeedCreated, onFeedSelected, onBack, showBackBut
               placeholder={
                 activeTab === "users" ? "Search by Profile Name" : "Search by name or invite code"
               }
+              data-testid="new-chat-search-input"
               className="w-full bg-hush-bg-dark border border-hush-bg-hover rounded-xl px-4 py-2.5 pl-10 text-sm text-hush-text-primary placeholder-hush-text-accent focus:outline-none focus:border-hush-purple"
               disabled={isSearching || isCreating || isSearchingGroups}
             />
@@ -382,6 +385,7 @@ export function NewChatView({ onFeedCreated, onFeedSelected, onBack, showBackBut
               (activeTab === "users" && (isSearching || isCreating || !searchQuery.trim())) ||
               (activeTab === "publicGroups" && (isSearchingGroups || !groupSearchQuery.trim()))
             }
+            data-testid="new-chat-search-button"
             className="px-4 py-2.5 bg-hush-purple text-hush-bg-dark rounded-xl font-medium text-sm hover:bg-hush-purple-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {(activeTab === "users" && isSearching) || (activeTab === "publicGroups" && isSearchingGroups) ? (
@@ -429,6 +433,7 @@ export function NewChatView({ onFeedCreated, onFeedSelected, onBack, showBackBut
                     key={profile.publicSigningAddress}
                     onClick={() => handleSelectProfile(profile)}
                     disabled={isCreating}
+                    data-testid={`new-chat-result:${profile.displayName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`}
                     className="w-full flex items-center p-3 rounded-xl border border-hush-bg-hover bg-hush-bg-dark hover:bg-hush-bg-hover transition-colors text-left disabled:opacity-50"
                   >
                     {/* Avatar */}

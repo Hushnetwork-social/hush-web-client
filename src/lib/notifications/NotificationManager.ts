@@ -18,6 +18,7 @@ export interface NotificationEvent {
   senderName: string;
   messagePreview: string;
   timestamp: number;
+  feedName?: string;
 }
 
 export interface NotificationHandler {
@@ -95,14 +96,15 @@ class TauriNotificationHandler implements NotificationHandler {
     try {
       const notification = await import('@tauri-apps/plugin-notification');
 
+      const isGroupMessage = !!event.feedName;
       await notification.sendNotification({
-        title: event.senderName || 'Hush Feeds',
-        body: event.messagePreview || 'New message',
-        // Note: Tauri 2.0 uses different options - actions, attachments etc.
-        // are configured differently than v1
+        title: isGroupMessage ? event.feedName! : (event.senderName || 'Hush Feeds'),
+        body: isGroupMessage
+          ? `${event.senderName}: ${event.messagePreview || 'New message'}`
+          : (event.messagePreview || 'New message'),
       });
 
-      debugLog(`[TauriNotificationHandler] Sent notification from ${event.senderName}`);
+      debugLog(`[TauriNotificationHandler] Sent notification from ${event.senderName}${isGroupMessage ? ` in ${event.feedName}` : ''}`);
     } catch (error) {
       debugError('[TauriNotificationHandler] Failed to show notification:', error);
     }

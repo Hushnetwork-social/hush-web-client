@@ -266,6 +266,7 @@ export const MessageBubble = memo(function MessageBubble({
             {onReplyClick && message && (
               <button
                 onClick={handleReplyClick}
+                data-testid="reply-button"
                 className={`
                   p-1 rounded-full mr-0.5
                   bg-hush-bg-light/80 hover:bg-hush-bg-light
@@ -409,6 +410,7 @@ export const MessageBubble = memo(function MessageBubble({
             {onReplyClick && message && (
               <button
                 onClick={handleReplyClick}
+                data-testid="reply-button"
                 className={`
                   p-1 rounded-full mr-0.5
                   bg-hush-bg-light/80 hover:bg-hush-bg-light

@@ -861,6 +861,7 @@ export interface FeedEventResponse {
   allCounts: Record<string, number>;
   timestampUnixMs: number;
   upToBlockIndex: number; // FEAT-063: block index up to which messages were read
+  feedName: string; // For group feeds: the group name
 }
 
 export function parseFeedEventResponse(messageBytes: Uint8Array): FeedEventResponse {
@@ -873,6 +874,7 @@ export function parseFeedEventResponse(messageBytes: Uint8Array): FeedEventRespo
     allCounts: {},
     timestampUnixMs: 0,
     upToBlockIndex: 0,
+    feedName: '',
   };
 
   let offset = 0;
@@ -910,6 +912,7 @@ export function parseFeedEventResponse(messageBytes: Uint8Array): FeedEventRespo
         if (fieldNumber === 2) result.feedId = strValue;
         if (fieldNumber === 3) result.senderName = strValue;
         if (fieldNumber === 4) result.messagePreview = strValue;
+        if (fieldNumber === 9) result.feedName = strValue;
       }
       offset += lenResult.value;
     } else {
