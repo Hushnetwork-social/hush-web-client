@@ -208,6 +208,89 @@ export async function aesDecrypt(encryptedBase64: string, aesKeyBase64: string):
   return new TextDecoder().decode(plaintext);
 }
 
+/**
+ * FEAT-066: Encrypt binary data using AES-256-GCM
+ * Works directly with Uint8Array, avoiding base64 conversion overhead.
+ * Output format: [12-byte IV][ciphertext + 16-byte auth tag]
+ *
+ * @param data Binary data to encrypt
+ * @param aesKeyBase64 Base64-encoded AES-256 key
+ * @returns Encrypted bytes (IV + ciphertext + tag)
+ */
+export async function aesEncryptBytes(data: Uint8Array, aesKeyBase64: string): Promise<Uint8Array> {
+  const key = base64ToBytes(aesKeyBase64);
+
+  // Generate random nonce
+  const nonce = new Uint8Array(GCM_NONCE_SIZE);
+  crypto.getRandomValues(nonce);
+
+  // Import key
+  const keyBuffer = new Uint8Array(key).buffer;
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    keyBuffer,
+    { name: 'AES-GCM' },
+    false,
+    ['encrypt']
+  );
+
+  // Encrypt (toArrayBuffer satisfies strict BufferSource typing)
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: nonce, tagLength: GCM_TAG_SIZE },
+    cryptoKey,
+    toArrayBuffer(data)
+  );
+
+  // Combine nonce + ciphertext (includes auth tag)
+  const result = new Uint8Array(nonce.length + ciphertext.byteLength);
+  result.set(nonce, 0);
+  result.set(new Uint8Array(ciphertext), nonce.length);
+
+  return result;
+}
+
+/**
+ * FEAT-066: Decrypt binary data using AES-256-GCM
+ * Works directly with Uint8Array, avoiding base64 conversion overhead.
+ *
+ * @param encrypted Encrypted bytes (IV + ciphertext + tag) from aesEncryptBytes
+ * @param aesKeyBase64 Base64-encoded AES-256 key
+ * @returns Decrypted binary data
+ */
+export async function aesDecryptBytes(encrypted: Uint8Array, aesKeyBase64: string): Promise<Uint8Array> {
+  const key = base64ToBytes(aesKeyBase64);
+
+  // Extract nonce and ciphertext
+  const nonce = encrypted.slice(0, GCM_NONCE_SIZE);
+  const ciphertext = encrypted.slice(GCM_NONCE_SIZE);
+
+  // Import key
+  const keyBuffer = new Uint8Array(key).buffer;
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    keyBuffer,
+    { name: 'AES-GCM' },
+    false,
+    ['decrypt']
+  );
+
+  // Decrypt (toArrayBuffer satisfies strict BufferSource typing)
+  const plaintext = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: nonce, tagLength: GCM_TAG_SIZE },
+    cryptoKey,
+    toArrayBuffer(ciphertext)
+  );
+
+  return new Uint8Array(plaintext);
+}
+
+// Helper to create a concrete ArrayBuffer from Uint8Array (satisfies strict BufferSource typing)
+function toArrayBuffer(data: Uint8Array): ArrayBuffer {
+  const buf = new ArrayBuffer(data.byteLength);
+  new Uint8Array(buf).set(data);
+  return buf;
+}
+
 // Helper functions for base64 encoding/decoding
 function bytesToBase64(bytes: Uint8Array): string {
   if (typeof window !== 'undefined') {
