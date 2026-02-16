@@ -1,8 +1,9 @@
 /**
  * FEAT-067: Thumbnail generation from images.
  *
- * Generates 300px-width thumbnails with EXIF orientation correction,
- * GIF first-frame extraction, and format preservation.
+ * Generates 300px-width thumbnails with EXIF orientation correction
+ * and format preservation. GIFs are passed through unchanged to
+ * preserve animation (canvas rendering destroys animation frames).
  * Pure utility with no UI dependencies.
  */
 
@@ -96,10 +97,9 @@ export function readExifOrientation(data: ArrayBuffer): number {
 
 /**
  * Determine the output MIME type for a thumbnail.
- * GIF → PNG (static first frame), others preserved.
+ * GIFs are handled earlier (pass-through), so won't reach here.
  */
 function thumbnailMimeType(originalType: string): string {
-  if (originalType === 'image/gif') return 'image/png';
   if (['image/jpeg', 'image/png', 'image/webp'].includes(originalType)) return originalType;
   // Default to JPEG for unknown types
   return 'image/jpeg';
@@ -117,6 +117,14 @@ export async function generateThumbnail(
   targetWidth: number = THUMBNAIL_TARGET_WIDTH,
 ): Promise<ThumbnailResult> {
   const mimeType = file.type || 'image/jpeg';
+
+  // GIF pass-through: Canvas rendering destroys animation frames.
+  // Return the original GIF blob to preserve animation in thumbnails.
+  if (mimeType === 'image/gif') {
+    const img = await loadImage(file);
+    return { blob: file, width: img.naturalWidth, height: img.naturalHeight };
+  }
+
   const outputType = thumbnailMimeType(mimeType);
 
   // Read EXIF orientation for JPEG

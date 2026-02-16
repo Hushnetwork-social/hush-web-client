@@ -226,16 +226,16 @@ describe('generateThumbnail', () => {
     expect(result.height).toBe(100);
   });
 
-  it('converts GIF to PNG', async () => {
+  it('passes GIF through unchanged to preserve animation', async () => {
     setupImageLoad(600, 400);
-    setupCanvasToBlob('image/png');
 
     const file = createMockFile('image/gif');
     const result = await generateThumbnail(file);
 
-    expect(result.blob.type).toBe('image/png');
-    expect(result.width).toBe(300);
-    expect(result.height).toBe(200);
+    expect(result.blob).toBe(file); // Same blob reference (no canvas conversion)
+    expect(result.blob.type).toBe('image/gif');
+    expect(result.width).toBe(600);
+    expect(result.height).toBe(400);
   });
 
   it('preserves WebP format', async () => {
