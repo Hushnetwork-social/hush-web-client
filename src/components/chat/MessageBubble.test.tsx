@@ -479,4 +479,72 @@ describe('MessageBubble', () => {
       expect(confirmedIcon).toBeInTheDocument();
     });
   });
+
+  describe('Attachment Integration (FEAT-067)', () => {
+    const imageAttachment = {
+      id: 'att-001',
+      hash: 'abc123',
+      mimeType: 'image/jpeg',
+      size: 500000,
+      fileName: 'photo.jpg',
+    };
+
+    const imageAttachment2 = {
+      id: 'att-002',
+      hash: 'def456',
+      mimeType: 'image/png',
+      size: 300000,
+      fileName: 'screenshot.png',
+    };
+
+    it('should render attachment thumbnails for a message with attachments', () => {
+      const thumbnails = new Map([['att-001', 'blob:thumb-1']]);
+      render(
+        <MessageBubble
+          {...defaultProps}
+          attachments={[imageAttachment]}
+          attachmentThumbnails={thumbnails}
+        />
+      );
+
+      expect(screen.getByTestId('attachment-image')).toBeInTheDocument();
+    });
+
+    it('should render multiple attachments in a carousel', () => {
+      const thumbnails = new Map([
+        ['att-001', 'blob:thumb-1'],
+        ['att-002', 'blob:thumb-2'],
+      ]);
+      render(
+        <MessageBubble
+          {...defaultProps}
+          attachments={[imageAttachment, imageAttachment2]}
+          attachmentThumbnails={thumbnails}
+        />
+      );
+
+      expect(screen.getByTestId('content-carousel')).toBeInTheDocument();
+    });
+
+    it('should not render attachments area for messages without attachments', () => {
+      render(<MessageBubble {...defaultProps} />);
+      expect(screen.queryByTestId('message-attachments')).not.toBeInTheDocument();
+    });
+
+    it('should call onAttachmentClick when thumbnail is clicked', () => {
+      const onAttachmentClick = vi.fn();
+      const thumbnails = new Map([['att-001', 'blob:thumb-1']]);
+      render(
+        <MessageBubble
+          {...defaultProps}
+          attachments={[imageAttachment]}
+          attachmentThumbnails={thumbnails}
+          onAttachmentClick={onAttachmentClick}
+        />
+      );
+
+      fireEvent.click(screen.getByTestId('attachment-image'));
+      expect(onAttachmentClick).toHaveBeenCalledWith('att-001', 0);
+    });
+  });
 });

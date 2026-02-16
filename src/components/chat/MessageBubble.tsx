@@ -6,11 +6,13 @@ import { ReactionPicker } from "./ReactionPicker";
 import { ReactionBar } from "./ReactionBar";
 import { ReplyPreview } from "./ReplyPreview";
 import { RoleBadge } from "@/components/shared/RoleBadge";
-import { LinkPreviewCarousel } from "@/components/LinkPreview";
+import { LinkPreviewCarousel, LinkPreviewCard, LinkPreviewSkeleton } from "@/components/LinkPreview";
+import { ContentCarousel } from "@/components/chat/ContentCarousel";
+import { AttachmentThumbnail } from "@/components/chat/AttachmentThumbnail";
 import { parseMentions, MentionText } from "@/lib/mentions";
 import { useLinkPreviews } from "@/hooks/useLinkPreviews";
 import type { EmojiCounts } from "@/modules/reactions/useReactionsStore";
-import type { FeedMessage, GroupMemberRole, MessageStatus } from "@/types";
+import type { FeedMessage, GroupMemberRole, MessageStatus, AttachmentRefMeta } from "@/types";
 
 /**
  * FEAT-058: Message status icon component
@@ -116,6 +118,12 @@ interface MessageBubbleProps {
   onMentionClick?: (identityId: string) => void;
   /** FEAT-058: Handler for retrying failed message */
   onRetryClick?: () => void;
+  /** FEAT-067: Attachment metadata for this message */
+  attachments?: AttachmentRefMeta[];
+  /** FEAT-067: Map of attachment ID -> thumbnail blob URL (null while loading) */
+  attachmentThumbnails?: Map<string, string | null>;
+  /** FEAT-067: Callback when an attachment thumbnail is clicked (opens lightbox) */
+  onAttachmentClick?: (attachmentId: string, index: number) => void;
 }
 
 export const MessageBubble = memo(function MessageBubble({
@@ -140,6 +148,9 @@ export const MessageBubble = memo(function MessageBubble({
   senderRole,
   onMentionClick,
   onRetryClick,
+  attachments,
+  attachmentThumbnails,
+  onAttachmentClick,
 }: MessageBubbleProps) {
   // FEAT-058: Compute effective status (backward compatible with isConfirmed)
   const effectiveStatus: MessageStatus = status ?? (isConfirmed ? 'confirmed' : 'pending');
@@ -150,6 +161,50 @@ export const MessageBubble = memo(function MessageBubble({
 
   // Link preview hook - detects URLs and fetches metadata
   const { urls, metadataMap, loadingUrls, hasUrls } = useLinkPreviews(content);
+
+  // FEAT-067: Build attachment thumbnail items
+  const hasAttachments = !!(attachments && attachments.length > 0);
+  const attachmentItems = useMemo(() => {
+    if (!attachments || attachments.length === 0) return [];
+    return attachments.map((att, index) => (
+      <AttachmentThumbnail
+        key={att.id}
+        attachment={att}
+        thumbnailUrl={attachmentThumbnails?.get(att.id) ?? null}
+        onClick={() => onAttachmentClick?.(att.id, index)}
+      />
+    ));
+  }, [attachments, attachmentThumbnails, onAttachmentClick]);
+
+  // Build link preview items for ContentCarousel (when mixing with attachments)
+  const linkPreviewItems = useMemo(() => {
+    if (!hasUrls || !hasAttachments) return [];
+    return urls.map((parsedUrl) => {
+      const normalizedUrl = parsedUrl.normalizedUrl;
+      const isLoading = loadingUrls.has(normalizedUrl);
+      const metadata = metadataMap.get(normalizedUrl);
+
+      if (isLoading) {
+        return <LinkPreviewSkeleton key={normalizedUrl} />;
+      }
+      if (metadata && metadata.success) {
+        return <LinkPreviewCard key={normalizedUrl} metadata={metadata} />;
+      }
+      if (metadata && !metadata.success) {
+        return (
+          <LinkPreviewCard
+            key={normalizedUrl}
+            metadata={{
+              ...metadata,
+              title: metadata.domain,
+              description: metadata.errorMessage || "Could not load preview",
+            }}
+          />
+        );
+      }
+      return <LinkPreviewSkeleton key={normalizedUrl} />;
+    });
+  }, [hasUrls, hasAttachments, urls, loadingUrls, metadataMap]);
 
   // Parse mentions from content
   const contentWithMentions = useMemo(() => {
@@ -374,8 +429,23 @@ export const MessageBubble = memo(function MessageBubble({
             </div>
           </div>
 
-          {/* Link previews - shown below message content */}
-          {hasUrls && (
+          {/* FEAT-067: Attachments and/or link previews below message content */}
+          {hasAttachments && (
+            <div className="mt-2 pb-1" data-testid="message-attachments">
+              {attachmentItems.length === 1 && !hasUrls ? (
+                // Single attachment, no link previews: render directly
+                attachmentItems[0]
+              ) : (
+                // Multiple items or mixed with link previews: use ContentCarousel
+                <ContentCarousel ariaLabel="Message content">
+                  {[...attachmentItems, ...linkPreviewItems]}
+                </ContentCarousel>
+              )}
+            </div>
+          )}
+
+          {/* Link previews only (no attachments) - backward compatible */}
+          {!hasAttachments && hasUrls && (
             <div className="mt-2 pb-1">
               <LinkPreviewCarousel
                 urls={urls}

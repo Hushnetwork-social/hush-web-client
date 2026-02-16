@@ -1,7 +1,7 @@
 "use client";
 
-import { memo, useState, useCallback, useRef, useEffect } from "react";
-import { Play } from "lucide-react";
+import { memo, useMemo } from "react";
+import { ContentCarousel } from "@/components/chat/ContentCarousel";
 import { LinkPreviewCard } from "./LinkPreviewCard";
 import { LinkPreviewSkeleton } from "./LinkPreviewSkeleton";
 import type { UrlMetadata } from "@/lib/urlDetector/urlMetadataCache";
@@ -20,190 +20,52 @@ interface LinkPreviewCarouselProps {
  * LinkPreviewCarousel Component
  *
  * Displays multiple link previews with navigation controls.
- * For a single URL, shows the preview without carousel controls.
- * Supports keyboard and touch navigation.
+ * Delegates carousel behavior to the generic ContentCarousel.
  */
 export const LinkPreviewCarousel = memo(function LinkPreviewCarousel({
   urls,
   metadataMap,
   loadingUrls,
 }: LinkPreviewCarouselProps) {
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const touchStartX = useRef<number | null>(null);
+  // Build children array from URL data
+  const children = useMemo(() => {
+    return urls.map((parsedUrl) => {
+      const normalizedUrl = parsedUrl.normalizedUrl;
+      const isLoading = loadingUrls.has(normalizedUrl);
+      const metadata = metadataMap.get(normalizedUrl);
 
-  const totalCount = urls.length;
-  const hasMultiple = totalCount > 1;
-  const canGoPrevious = currentIndex > 0;
-  const canGoNext = currentIndex < totalCount - 1;
-
-  const goToPrevious = useCallback(() => {
-    if (canGoPrevious) {
-      setCurrentIndex((prev) => prev - 1);
-    }
-  }, [canGoPrevious]);
-
-  const goToNext = useCallback(() => {
-    if (canGoNext) {
-      setCurrentIndex((prev) => prev + 1);
-    }
-  }, [canGoNext]);
-
-  // Keyboard navigation
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        goToPrevious();
-      } else if (e.key === "ArrowRight") {
-        e.preventDefault();
-        goToNext();
-      }
-    },
-    [goToPrevious, goToNext]
-  );
-
-  // Touch swipe support
-  const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    touchStartX.current = e.touches[0].clientX;
-  }, []);
-
-  const handleTouchEnd = useCallback(
-    (e: React.TouchEvent) => {
-      if (touchStartX.current === null) return;
-
-      const touchEndX = e.changedTouches[0].clientX;
-      const diff = touchStartX.current - touchEndX;
-      const threshold = 50; // Minimum swipe distance
-
-      if (Math.abs(diff) > threshold) {
-        if (diff > 0) {
-          // Swiped left -> go next
-          goToNext();
-        } else {
-          // Swiped right -> go previous
-          goToPrevious();
-        }
+      if (isLoading) {
+        return <LinkPreviewSkeleton key={normalizedUrl} />;
       }
 
-      touchStartX.current = null;
-    },
-    [goToNext, goToPrevious]
-  );
+      if (metadata && metadata.success) {
+        return <LinkPreviewCard key={normalizedUrl} metadata={metadata} />;
+      }
 
-  // Reset to first item if URLs change
-  useEffect(() => {
-    setCurrentIndex(0);
-  }, [urls.length]);
-
-  // Don't render if no URLs
-  if (totalCount === 0) {
-    return null;
-  }
-
-  const currentUrl = urls[currentIndex];
-  const normalizedUrl = currentUrl.normalizedUrl;
-  const isLoading = loadingUrls.has(normalizedUrl);
-  const metadata = metadataMap.get(normalizedUrl);
-
-  return (
-    <div
-      ref={containerRef}
-      className={`relative w-full ${hasMultiple ? "mb-3" : ""}`}
-      onKeyDown={handleKeyDown}
-      onTouchStart={handleTouchStart}
-      onTouchEnd={handleTouchEnd}
-      tabIndex={hasMultiple ? 0 : -1}
-      role={hasMultiple ? "region" : undefined}
-      aria-label={hasMultiple ? `Link previews, showing ${currentIndex + 1} of ${totalCount}` : undefined}
-    >
-      {/* Preview card or skeleton */}
-      <div className="w-full">
-        {isLoading ? (
-          <LinkPreviewSkeleton />
-        ) : metadata && metadata.success ? (
-          <LinkPreviewCard metadata={metadata} />
-        ) : metadata && !metadata.success ? (
-          // Failed to fetch - show minimal card with just URL
+      if (metadata && !metadata.success) {
+        return (
           <LinkPreviewCard
+            key={normalizedUrl}
             metadata={{
               ...metadata,
               title: metadata.domain,
               description: metadata.errorMessage || "Could not load preview",
             }}
           />
-        ) : (
-          // No metadata yet (shouldn't happen, but fallback)
-          <LinkPreviewSkeleton />
-        )}
-      </div>
+        );
+      }
 
-      {/* Navigation controls (only for multiple URLs) */}
-      {hasMultiple && (
-        <>
-          {/* Previous button - positioned on top of left border */}
-          <button
-            onClick={goToPrevious}
-            disabled={!canGoPrevious}
-            className={`
-              absolute -left-2.5 top-1/2 -translate-y-1/2
-              w-5 h-5
-              flex items-center justify-center
-              rounded-full
-              bg-hush-purple
-              transition-all duration-150
-              ${
-                canGoPrevious
-                  ? "hover:bg-hush-purple-light hover:scale-110 cursor-pointer"
-                  : "opacity-40 cursor-not-allowed"
-              }
-              focus:outline-none focus:ring-1 focus:ring-hush-purple/50
-            `}
-            aria-label="Previous link preview"
-            type="button"
-          >
-            <Play size={10} className="text-white rotate-180 -mr-px" fill="currentColor" />
-          </button>
+      return <LinkPreviewSkeleton key={normalizedUrl} />;
+    });
+  }, [urls, metadataMap, loadingUrls]);
 
-          {/* Next button - positioned on top of right border */}
-          <button
-            onClick={goToNext}
-            disabled={!canGoNext}
-            className={`
-              absolute -right-2.5 top-1/2 -translate-y-1/2
-              w-5 h-5
-              flex items-center justify-center
-              rounded-full
-              bg-hush-purple
-              transition-all duration-150
-              ${
-                canGoNext
-                  ? "hover:bg-hush-purple-light hover:scale-110 cursor-pointer"
-                  : "opacity-40 cursor-not-allowed"
-              }
-              focus:outline-none focus:ring-1 focus:ring-hush-purple/50
-            `}
-            aria-label="Next link preview"
-            type="button"
-          >
-            <Play size={10} className="text-white ml-px" fill="currentColor" />
-          </button>
+  if (urls.length === 0) {
+    return null;
+  }
 
-          {/* Page indicator - positioned on top of bottom border */}
-          <div
-            className="
-              absolute -bottom-2.5 left-1/2 -translate-x-1/2
-              text-[10px] text-white
-              bg-hush-purple
-              px-2 py-0.5
-              rounded-full
-            "
-            aria-hidden="true"
-          >
-            {currentIndex + 1} / {totalCount}
-          </div>
-        </>
-      )}
-    </div>
+  return (
+    <ContentCarousel ariaLabel="Link previews">
+      {children}
+    </ContentCarousel>
   );
 });
