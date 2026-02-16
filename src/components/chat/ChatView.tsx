@@ -7,6 +7,9 @@ import { MessageBubble } from "./MessageBubble";
 import { SystemMessage } from "./SystemMessage";
 import { MessageInput, type MessageInputHandle } from "./MessageInput";
 import { ReplyContextBar } from "./ReplyContextBar";
+import { ComposerOverlay, type ComposerFile } from "./ComposerOverlay";
+import { DropZoneOverlay } from "./DropZoneOverlay";
+import { MAX_ATTACHMENTS_PER_MESSAGE } from "@/lib/attachments/types";
 import type { MentionParticipant } from "./MentionOverlay";
 import { MemberListPanel } from "@/components/groups/MemberListPanel";
 import { GroupSettingsPanel } from "@/components/groups/GroupSettingsPanel";
@@ -1102,8 +1105,184 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
     }
   }, [feed.id, onSendMessage, replyingTo?.id]);
 
+  // FEAT-067: Composer overlay state
+  const [composerFiles, setComposerFiles] = useState<ComposerFile[]>([]);
+  const [isComposerOpen, setIsComposerOpen] = useState(false);
+  const [composerInitialText, setComposerInitialText] = useState("");
+  const [isDragOver, setIsDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // FEAT-067: Open composer overlay with files
+  const openComposer = useCallback((files: File[]) => {
+    const limited = files.slice(0, MAX_ATTACHMENTS_PER_MESSAGE);
+    const composerFiles: ComposerFile[] = limited.map(f => ({
+      file: f,
+      previewUrl: URL.createObjectURL(f),
+    }));
+
+    // Transfer text from MessageInput to overlay
+    const currentText = messageInputRef.current?.getText() ?? "";
+    messageInputRef.current?.setText("");
+
+    setComposerFiles(composerFiles);
+    setComposerInitialText(currentText);
+    setIsComposerOpen(true);
+  }, []);
+
+  // FEAT-067: Close composer overlay, return text to MessageInput
+  const handleComposerClose = useCallback((returnedText: string) => {
+    // Revoke all preview URLs
+    for (const cf of composerFiles) {
+      URL.revokeObjectURL(cf.previewUrl);
+    }
+    setIsComposerOpen(false);
+    setComposerFiles([]);
+    // Return text to MessageInput
+    if (returnedText) {
+      messageInputRef.current?.setText(returnedText);
+    }
+    messageInputRef.current?.focus();
+  }, [composerFiles]);
+
+  // FEAT-067: Send from composer overlay
+  const handleComposerSend = useCallback(async (files: File[], text: string) => {
+    // For now, just send the text message (attachment upload integration comes in Phase 6)
+    // TODO Phase 6: Process files through image pipeline, upload, include in transaction
+    if (text) {
+      await handleSend(text);
+    }
+    // Revoke preview URLs
+    for (const cf of composerFiles) {
+      URL.revokeObjectURL(cf.previewUrl);
+    }
+    setIsComposerOpen(false);
+    setComposerFiles([]);
+  }, [composerFiles, handleSend]);
+
+  // FEAT-067: Add more files to composer
+  const handleComposerAddMore = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  // FEAT-067: File input change handler (for paperclip and add-more)
+  const handleFileInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
+    // Reset input so same file can be selected again
+    e.target.value = "";
+
+    if (isComposerOpen) {
+      // Add to existing composer files (up to max)
+      const remaining = MAX_ATTACHMENTS_PER_MESSAGE - composerFiles.length;
+      const toAdd = files.slice(0, remaining);
+      const newComposerFiles: ComposerFile[] = toAdd.map(f => ({
+        file: f,
+        previewUrl: URL.createObjectURL(f),
+      }));
+      setComposerFiles(prev => [...prev, ...newComposerFiles]);
+    } else {
+      openComposer(files);
+    }
+  }, [isComposerOpen, composerFiles.length, openComposer]);
+
+  // FEAT-067: Paperclip button handler
+  const handleAttachClick = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  // FEAT-067: Image paste handler from MessageInput
+  const handleImagePaste = useCallback((files: File[]) => {
+    if (isComposerOpen) {
+      // Add to existing composer files
+      const remaining = MAX_ATTACHMENTS_PER_MESSAGE - composerFiles.length;
+      const toAdd = files.slice(0, remaining);
+      const newComposerFiles: ComposerFile[] = toAdd.map(f => ({
+        file: f,
+        previewUrl: URL.createObjectURL(f),
+      }));
+      setComposerFiles(prev => [...prev, ...newComposerFiles]);
+    } else {
+      openComposer(files);
+    }
+  }, [isComposerOpen, composerFiles.length, openComposer]);
+
+  // FEAT-067: Drag-and-drop handlers
+  const dragCounterRef = useRef(0);
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current++;
+    if (e.dataTransfer.types.includes("Files")) {
+      setIsDragOver(true);
+    }
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current--;
+    if (dragCounterRef.current === 0) {
+      setIsDragOver(false);
+    }
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback((files: File[]) => {
+    setIsDragOver(false);
+    dragCounterRef.current = 0;
+    if (files.length > 0) {
+      if (isComposerOpen) {
+        const remaining = MAX_ATTACHMENTS_PER_MESSAGE - composerFiles.length;
+        const toAdd = files.slice(0, remaining);
+        const newComposerFiles: ComposerFile[] = toAdd.map(f => ({
+          file: f,
+          previewUrl: URL.createObjectURL(f),
+        }));
+        setComposerFiles(prev => [...prev, ...newComposerFiles]);
+      } else {
+        openComposer(files);
+      }
+    }
+  }, [isComposerOpen, composerFiles.length, openComposer]);
+
   return (
-    <div className="flex-1 flex flex-col min-h-0 overflow-hidden" data-feed-id={feed.id}>
+    <div
+      className="flex-1 flex flex-col min-h-0 overflow-hidden"
+      data-feed-id={feed.id}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+    >
+      {/* FEAT-067: Hidden file input for paperclip/add-more */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept="image/*,application/pdf,video/*"
+        onChange={handleFileInputChange}
+        className="hidden"
+        data-testid="file-input"
+      />
+
+      {/* FEAT-067: Drop zone overlay */}
+      <DropZoneOverlay visible={isDragOver} onDrop={handleDrop} />
+
+      {/* FEAT-067: Composer overlay */}
+      {isComposerOpen && (
+        <ComposerOverlay
+          initialFiles={composerFiles}
+          initialText={composerInitialText}
+          onSend={handleComposerSend}
+          onClose={handleComposerClose}
+          onAddMore={handleComposerAddMore}
+          participants={mentionParticipants}
+        />
+      )}
       {/* Chat Header - compact mode when virtual keyboard visible on Android */}
       <div className={`flex-shrink-0 border-b border-hush-bg-hover bg-hush-bg-secondary transition-all duration-200 ease-in-out ${
         isKeyboardVisible ? 'px-2 py-1' : 'px-4 py-3'
@@ -1352,7 +1531,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
           </div>
         </div>
       ) : (
-        <MessageInput ref={messageInputRef} onSend={handleSend} onEscapeEmpty={onCloseFeed} participants={mentionParticipants} />
+        <MessageInput ref={messageInputRef} onSend={handleSend} onEscapeEmpty={onCloseFeed} participants={mentionParticipants} onAttach={handleAttachClick} onImagePaste={handleImagePaste} />
       )}
 
       {/* Member List Panel (Group feeds only) */}

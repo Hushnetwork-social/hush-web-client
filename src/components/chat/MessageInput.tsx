@@ -14,13 +14,19 @@ interface MessageInputProps {
   autoFocus?: boolean;
   /** Participants available for @mentions */
   participants?: MentionParticipant[];
+  /** FEAT-067: Callback when an image is pasted from clipboard */
+  onImagePaste?: (files: File[]) => void;
 }
 
 export interface MessageInputHandle {
   focus: () => void;
+  /** FEAT-067: Get current message text */
+  getText: () => string;
+  /** FEAT-067: Set message text (e.g., restore from composer overlay) */
+  setText: (text: string) => void;
 }
 
-export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(function MessageInput({ onSend, onAttach, onEscapeEmpty, disabled = false, autoFocus = true, participants = [] }, ref) {
+export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(function MessageInput({ onSend, onAttach, onEscapeEmpty, disabled = false, autoFocus = true, participants = [], onImagePaste }, ref) {
   const [message, setMessage] = useState("");
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -30,11 +36,13 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
   const [mentionFilterText, setMentionFilterText] = useState("");
   const [mentionTriggerPosition, setMentionTriggerPosition] = useState(0);
 
-  // Expose focus method to parent components
+  // Expose methods to parent components
   useImperativeHandle(ref, () => ({
     focus: () => {
       inputRef.current?.focus();
     },
+    getText: () => message,
+    setText: (text: string) => setMessage(text),
   }));
 
   // Auto-focus input when component mounts
@@ -150,6 +158,28 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
     inputRef.current?.focus();
   }, []);
 
+  // FEAT-067: Handle paste events to detect image clipboard data
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    if (!onImagePaste) return;
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    const imageFiles: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.startsWith("image/")) {
+        const file = item.getAsFile();
+        if (file) imageFiles.push(file);
+      }
+    }
+
+    if (imageFiles.length > 0) {
+      e.preventDefault();
+      onImagePaste(imageFiles);
+    }
+    // If no images, normal paste proceeds (text)
+  }, [onImagePaste]);
+
   // Close emoji picker when user starts typing and detect @ mention trigger
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = e.target.value;
@@ -231,6 +261,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
           value={message}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           placeholder="Type a message..." role="combobox" aria-haspopup="listbox" aria-expanded={isMentionOverlayOpen} aria-controls={isMentionOverlayOpen ? "mention-listbox" : undefined}
           disabled={disabled}
           data-testid="message-input"
