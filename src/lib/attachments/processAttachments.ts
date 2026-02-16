@@ -8,6 +8,7 @@
 import { isHeic, convertHeicToJpeg } from './heicConverter';
 import { compressImage } from './imageCompressor';
 import { generateThumbnail } from './thumbnailGenerator';
+import { isVideoType, isPdfType } from './fileTypeValidator';
 import { prepareAttachmentForUpload } from './attachmentService';
 import type { AttachmentUploadData } from './types';
 import type { ProcessedAttachment } from '@/modules/feeds/FeedsService';
@@ -71,7 +72,7 @@ async function processOneFile(
     }
   }
 
-  // Step 3: Generate thumbnail (images only)
+  // Step 3: Generate thumbnail (images, videos, and PDFs)
   let thumbnailBytes: Uint8Array | undefined;
   if (isImageType(mimeType)) {
     try {
@@ -80,7 +81,28 @@ async function processOneFile(
       thumbnailBytes = new Uint8Array(thumbBuffer);
     } catch (error) {
       console.warn(`[processAttachments] Thumbnail generation failed for ${fileName}, sending without thumbnail:`, error);
-      // Fall through - send image without thumbnail
+    }
+  } else if (isVideoType(mimeType)) {
+    try {
+      const { extractVideoFrames } = await import('./videoFrameExtractor');
+      const frames = await extractVideoFrames(blob);
+      if (frames.length > 0) {
+        const thumbBuffer = await frames[0].blob.arrayBuffer();
+        thumbnailBytes = new Uint8Array(thumbBuffer);
+      }
+    } catch (error) {
+      console.warn(`[processAttachments] Video thumbnail failed for ${fileName}, sending without thumbnail:`, error);
+    }
+  } else if (isPdfType(mimeType)) {
+    try {
+      const { generatePdfThumbnail } = await import('./pdfThumbnailGenerator');
+      const result = await generatePdfThumbnail(blob);
+      if (result) {
+        const thumbBuffer = await result.blob.arrayBuffer();
+        thumbnailBytes = new Uint8Array(thumbBuffer);
+      }
+    } catch (error) {
+      console.warn(`[processAttachments] PDF thumbnail failed for ${fileName}, sending without thumbnail:`, error);
     }
   }
 

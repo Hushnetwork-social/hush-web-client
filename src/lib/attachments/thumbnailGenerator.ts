@@ -1,10 +1,11 @@
 /**
- * FEAT-067: Thumbnail generation from images.
+ * FEAT-067/068: Thumbnail generation from images, videos, and PDFs.
  *
- * Generates 300px-width thumbnails with EXIF orientation correction
- * and format preservation. GIFs are passed through unchanged to
- * preserve animation (canvas rendering destroys animation frames).
- * Pure utility with no UI dependencies.
+ * Images: 300px-width thumbnails with EXIF orientation correction
+ * and format preservation. GIFs passed through unchanged.
+ * Videos: Routes to videoFrameExtractor for frame capture.
+ * PDFs: Routes to pdfThumbnailGenerator for first-page render.
+ * Other documents: Returns null (UI uses placeholder icon).
  */
 
 /** Target thumbnail width in pixels. No upscaling if original is smaller. */
@@ -220,4 +221,56 @@ function canvasToBlob(canvas: HTMLCanvasElement, mimeType: string, quality?: num
       quality,
     );
   });
+}
+
+/**
+ * FEAT-068: Result of file thumbnail generation including extra video frames.
+ */
+export interface FileThumbnailResult {
+  /** Primary thumbnail (first frame for video, first page for PDF). */
+  primary: ThumbnailResult;
+  /** All extracted video frames (for shuffle feature). Empty for non-video. */
+  videoFrames: import('./videoFrameExtractor').VideoFrame[];
+}
+
+/**
+ * FEAT-068: Generate a thumbnail for any supported file type.
+ *
+ * Routing:
+ * - Images: existing generateThumbnail()
+ * - Videos: extractVideoFrames() -> first frame as primary
+ * - PDFs: generatePdfThumbnail() -> first page render
+ * - Other documents: null (use placeholder icon)
+ */
+export async function generateThumbnailForFile(file: File): Promise<FileThumbnailResult | null> {
+  const mimeType = file.type || 'application/octet-stream';
+
+  // Images use existing path
+  if (mimeType.startsWith('image/')) {
+    const result = await generateThumbnail(file);
+    return { primary: result, videoFrames: [] };
+  }
+
+  // Videos use frame extraction
+  if (mimeType.startsWith('video/')) {
+    const { extractVideoFrames } = await import('./videoFrameExtractor');
+    const frames = await extractVideoFrames(file);
+    if (frames.length === 0) return null;
+    const first = frames[0];
+    return {
+      primary: { blob: first.blob, width: first.width, height: first.height },
+      videoFrames: frames,
+    };
+  }
+
+  // PDFs use first-page render
+  if (mimeType === 'application/pdf') {
+    const { generatePdfThumbnail } = await import('./pdfThumbnailGenerator');
+    const result = await generatePdfThumbnail(file);
+    if (!result) return null;
+    return { primary: result, videoFrames: [] };
+  }
+
+  // Other document types: no thumbnail
+  return null;
 }
