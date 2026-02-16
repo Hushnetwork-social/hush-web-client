@@ -80,9 +80,9 @@ describe('useAttachmentThumbnails', () => {
     });
   });
 
-  it('should NOT trigger download for non-image attachments', async () => {
+  it('should NOT trigger download for non-renderable document attachments', async () => {
     const messages = [
-      createMessage('msg-1', [{ id: 'att-1', mimeType: 'application/pdf' }]),
+      createMessage('msg-1', [{ id: 'att-1', mimeType: 'application/zip' }]),
     ];
 
     renderHook(() =>

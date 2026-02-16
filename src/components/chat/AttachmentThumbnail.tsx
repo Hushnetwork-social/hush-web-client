@@ -1,7 +1,9 @@
 "use client";
 
 import { memo } from "react";
-import { FileIcon, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
+import { DocumentCard } from "./DocumentCard";
+import { VideoThumbnail } from "./VideoThumbnail";
 import type { AttachmentRefMeta } from "@/types";
 
 /** Props for the AttachmentThumbnail component. */
@@ -18,28 +20,23 @@ export interface AttachmentThumbnailProps {
   onClick?: () => void;
 }
 
-/** Format bytes into a human-readable size string. */
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
 /** Check if a MIME type is an image type. */
 function isImageMimeType(mimeType: string): boolean {
   return mimeType.startsWith("image/");
 }
 
+/** Check if a MIME type is a video type. */
+function isVideoMimeType(mimeType: string): boolean {
+  return mimeType.startsWith("video/");
+}
+
 /**
- * FEAT-067: Attachment thumbnail component for message bubbles.
+ * FEAT-067/068: Attachment thumbnail component for message bubbles.
  *
- * Displays image thumbnails inline in message bubbles with:
- * - Skeleton shimmer while thumbnail is downloading
- * - Full bubble width with proportional height
- * - GIF auto-play (loops continuously)
- * - Click-to-open-lightbox
- * - Non-image file placeholders (icon + filename + size)
- * - Circular progress overlay during full-size download
+ * Routes rendering based on MIME type:
+ * - Images: inline thumbnail with skeleton shimmer and progress overlay
+ * - Videos: VideoThumbnail with play icon and duration badge (FEAT-068)
+ * - Documents: DocumentCard with file type icon and metadata (FEAT-068)
  */
 export const AttachmentThumbnail = memo(function AttachmentThumbnail({
   attachment,
@@ -49,29 +46,31 @@ export const AttachmentThumbnail = memo(function AttachmentThumbnail({
   onClick,
 }: AttachmentThumbnailProps) {
   const isImage = isImageMimeType(attachment.mimeType);
+  const isVideo = isVideoMimeType(attachment.mimeType);
 
-  // Non-image file: show generic icon + filename + size
+  // FEAT-068: Video attachment -> VideoThumbnail
+  if (isVideo) {
+    return (
+      <VideoThumbnail
+        attachment={attachment}
+        thumbnailUrl={thumbnailUrl}
+        isDownloading={isDownloading}
+        downloadProgress={downloadProgress}
+        onClick={onClick}
+      />
+    );
+  }
+
+  // FEAT-068: Non-image, non-video -> DocumentCard
   if (!isImage) {
     return (
-      <div
-        className="flex items-center gap-2 p-3 rounded-lg bg-white/5 cursor-pointer hover:bg-white/10 transition-colors"
+      <DocumentCard
+        attachment={attachment}
+        thumbnailUrl={thumbnailUrl}
+        isDownloading={isDownloading}
+        downloadProgress={downloadProgress}
         onClick={onClick}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onClick?.(); }}
-        aria-label={`Open file ${attachment.fileName}`}
-        data-testid="attachment-file"
-      >
-        <FileIcon className="w-8 h-8 text-hush-text-accent shrink-0" data-testid="file-icon" />
-        <div className="min-w-0">
-          <p className="text-sm text-hush-text-primary truncate" data-testid="file-name">
-            {attachment.fileName}
-          </p>
-          <p className="text-xs text-hush-text-accent" data-testid="file-size">
-            {formatSize(attachment.size)}
-          </p>
-        </div>
-      </div>
+      />
     );
   }
 
@@ -140,15 +139,19 @@ export const AttachmentThumbnail = memo(function AttachmentThumbnail({
 });
 
 /**
- * Generate a type hint text for attachment summaries (e.g., "[2 images]", "[1 image, 1 document]").
+ * FEAT-067/068: Generate a type hint text for attachment summaries.
+ * e.g., "[2 images]", "[1 image, 1 video, 1 file]"
  */
 export function getAttachmentTypeHint(attachments: AttachmentRefMeta[]): string {
   let imageCount = 0;
+  let videoCount = 0;
   let otherCount = 0;
 
   for (const att of attachments) {
     if (isImageMimeType(att.mimeType)) {
       imageCount++;
+    } else if (isVideoMimeType(att.mimeType)) {
+      videoCount++;
     } else {
       otherCount++;
     }
@@ -157,6 +160,9 @@ export function getAttachmentTypeHint(attachments: AttachmentRefMeta[]): string 
   const parts: string[] = [];
   if (imageCount > 0) {
     parts.push(`${imageCount} image${imageCount > 1 ? "s" : ""}`);
+  }
+  if (videoCount > 0) {
+    parts.push(`${videoCount} video${videoCount > 1 ? "s" : ""}`);
   }
   if (otherCount > 0) {
     parts.push(`${otherCount} file${otherCount > 1 ? "s" : ""}`);

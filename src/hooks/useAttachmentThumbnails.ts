@@ -1,9 +1,11 @@
 /**
- * FEAT-067: Hook to auto-download and cache attachment thumbnails for visible messages.
+ * FEAT-067/068: Hook to auto-download and cache attachment thumbnails for visible messages.
  *
  * Thumbnails are downloaded via FEAT-066 gRPC streaming, decrypted with the feed AES key,
  * and cached as blob URLs. The hook returns a Map<attachmentId, blobUrl> that updates
  * reactively as thumbnails are downloaded.
+ *
+ * FEAT-068: Extended to also download thumbnails for video and PDF attachments.
  */
 
 import { useEffect, useRef, useCallback, useState } from 'react';
@@ -48,8 +50,10 @@ export function useAttachmentThumbnails(
     // Skip if already downloaded or in flight
     if (blobUrlsRef.current.has(id) || inFlightRef.current.has(id)) return;
 
-    // Skip non-image attachments (no thumbnails for files)
-    if (!attachment.mimeType.startsWith('image/')) return;
+    // FEAT-068: Download thumbnails for images, videos, and PDFs (skip other document types)
+    const mime = attachment.mimeType;
+    const hasThumbnail = mime.startsWith('image/') || mime.startsWith('video/') || mime === 'application/pdf';
+    if (!hasThumbnail) return;
 
     inFlightRef.current.add(id);
 

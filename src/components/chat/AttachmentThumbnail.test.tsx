@@ -110,8 +110,8 @@ describe("AttachmentThumbnail", () => {
     });
   });
 
-  describe("Non-Image File", () => {
-    it("should render file icon for non-image attachment", () => {
+  describe("Non-Image File (routes to DocumentCard)", () => {
+    it("should render DocumentCard for PDF attachment", () => {
       render(
         <AttachmentThumbnail
           attachment={createAttachment({
@@ -123,11 +123,11 @@ describe("AttachmentThumbnail", () => {
         />
       );
 
-      expect(screen.getByTestId("attachment-file")).toBeInTheDocument();
-      expect(screen.getByTestId("file-icon")).toBeInTheDocument();
+      expect(screen.getByTestId("document-card")).toBeInTheDocument();
+      expect(screen.getByTestId("document-icon")).toBeInTheDocument();
     });
 
-    it("should display filename for non-image attachment", () => {
+    it("should display filename for document attachment", () => {
       render(
         <AttachmentThumbnail
           attachment={createAttachment({
@@ -141,7 +141,7 @@ describe("AttachmentThumbnail", () => {
       expect(screen.getByText("report.pdf")).toBeInTheDocument();
     });
 
-    it("should display file size for non-image attachment", () => {
+    it("should display file size for document attachment", () => {
       render(
         <AttachmentThumbnail
           attachment={createAttachment({
@@ -154,6 +154,64 @@ describe("AttachmentThumbnail", () => {
       );
 
       expect(screen.getByText("5.0 MB")).toBeInTheDocument();
+    });
+  });
+
+  describe("FEAT-068: Video routing", () => {
+    it("should route video attachment to VideoThumbnail", () => {
+      render(
+        <AttachmentThumbnail
+          attachment={createAttachment({ mimeType: "video/mp4", fileName: "clip.mp4" })}
+          thumbnailUrl="blob:video-frame"
+        />
+      );
+
+      expect(screen.getByTestId("video-thumbnail")).toBeInTheDocument();
+      expect(screen.queryByTestId("attachment-image")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("document-card")).not.toBeInTheDocument();
+    });
+
+    it("should show video skeleton when thumbnail is null", () => {
+      render(
+        <AttachmentThumbnail
+          attachment={createAttachment({ mimeType: "video/mp4", fileName: "clip.mp4" })}
+          thumbnailUrl={null}
+        />
+      );
+
+      expect(screen.getByTestId("video-skeleton")).toBeInTheDocument();
+    });
+  });
+
+  describe("FEAT-068: Document routing", () => {
+    it("should route document attachment to DocumentCard", () => {
+      render(
+        <AttachmentThumbnail
+          attachment={createAttachment({
+            mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            fileName: "doc.docx",
+          })}
+          thumbnailUrl={null}
+        />
+      );
+
+      expect(screen.getByTestId("document-card")).toBeInTheDocument();
+      expect(screen.queryByTestId("attachment-image")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("video-thumbnail")).not.toBeInTheDocument();
+    });
+
+    it("should route unknown MIME type to DocumentCard", () => {
+      render(
+        <AttachmentThumbnail
+          attachment={createAttachment({
+            mimeType: "application/octet-stream",
+            fileName: "unknown.bin",
+          })}
+          thumbnailUrl={null}
+        />
+      );
+
+      expect(screen.getByTestId("document-card")).toBeInTheDocument();
     });
   });
 
@@ -213,7 +271,7 @@ describe("getAttachmentTypeHint", () => {
     expect(getAttachmentTypeHint([createAttachment({ mimeType: "image/jpeg" })])).toBe("[1 image]");
   });
 
-  it("should return correct hint for mixed types", () => {
+  it("should return correct hint for mixed image and file", () => {
     const attachments = [
       createAttachment({ mimeType: "image/jpeg" }),
       createAttachment({ mimeType: "application/pdf" }),
@@ -232,5 +290,27 @@ describe("getAttachmentTypeHint", () => {
 
   it("should return empty string for no attachments", () => {
     expect(getAttachmentTypeHint([])).toBe("");
+  });
+
+  // FEAT-068: Video counting
+  it("should return correct hint for videos only", () => {
+    const attachments = [
+      createAttachment({ mimeType: "video/mp4" }),
+      createAttachment({ mimeType: "video/webm" }),
+    ];
+    expect(getAttachmentTypeHint(attachments)).toBe("[2 videos]");
+  });
+
+  it("should return correct hint for single video", () => {
+    expect(getAttachmentTypeHint([createAttachment({ mimeType: "video/mp4" })])).toBe("[1 video]");
+  });
+
+  it("should return correct hint for mixed image, video, and file", () => {
+    const attachments = [
+      createAttachment({ mimeType: "image/jpeg" }),
+      createAttachment({ mimeType: "video/mp4" }),
+      createAttachment({ mimeType: "application/pdf" }),
+    ];
+    expect(getAttachmentTypeHint(attachments)).toBe("[1 image, 1 video, 1 file]");
   });
 });
