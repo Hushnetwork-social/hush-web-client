@@ -1457,6 +1457,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
           attachments={lightboxAttachments}
           initialIndex={lightboxInitialIndex}
           imageUrls={lightboxImageUrls}
+          thumbnailUrls={thumbnailUrls}
           downloadProgress={lightboxDownloadProgress}
           onRequestDownload={handleLightboxRequestDownload}
           onClose={handleLightboxClose}

@@ -13,6 +13,32 @@ vi.mock("react-zoom-pan-pinch", () => ({
   ),
 }));
 
+// Mock fileTypeIcons to avoid importing lucide-react icons in tests
+vi.mock("@/lib/attachments/fileTypeIcons", () => ({
+  getFileTypeIcon: (fileName: string) => {
+    const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
+    const iconMap: Record<string, { colorClass: string; label: string }> = {
+      pdf: { colorClass: "text-red-400", label: "PDF Document" },
+      docx: { colorClass: "text-blue-400", label: "Word Document" },
+      zip: { colorClass: "text-yellow-400", label: "ZIP Archive" },
+    };
+    const entry = iconMap[ext] ?? { colorClass: "text-gray-500", label: "File" };
+    return {
+      icon: ({ className, ...props }: { className?: string; "data-testid"?: string }) => (
+        <span className={className} {...props}>FileIcon</span>
+      ),
+      colorClass: entry.colorClass,
+      label: entry.label,
+    };
+  },
+  formatFileSize: (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  },
+}));
+
 function makeAttachment(
   id: string,
   name: string,
@@ -374,6 +400,44 @@ describe("LightboxViewer", () => {
       expect(screen.getByText("report.pdf")).toBeInTheDocument();
       expect(screen.getByText("5.0 MB")).toBeInTheDocument();
     });
+
+    it("should show colored icon for non-PDF document", () => {
+      const docAttachment = [
+        makeAttachment("att-doc", "readme.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", 2048),
+      ];
+      render(
+        <LightboxViewer
+          attachments={docAttachment}
+          initialIndex={0}
+          imageUrls={new Map()}
+          downloadProgress={emptyProgress}
+          onClose={vi.fn()}
+        />,
+      );
+      expect(screen.getByTestId("lightbox-doc-icon")).toBeInTheDocument();
+      expect(screen.getByText("readme.docx")).toBeInTheDocument();
+      expect(screen.getByText("2.0 KB")).toBeInTheDocument();
+    });
+
+    it("should show PDF thumbnail when thumbnail URL available", () => {
+      const pdfAttachment = [
+        makeAttachment("att-pdf", "report.pdf", "application/pdf", 1024 * 1024),
+      ];
+      const thumbs = new Map([["att-pdf", "blob:pdf-thumb"]]);
+      render(
+        <LightboxViewer
+          attachments={pdfAttachment}
+          initialIndex={0}
+          imageUrls={new Map()}
+          thumbnailUrls={thumbs}
+          downloadProgress={emptyProgress}
+          onClose={vi.fn()}
+        />,
+      );
+      expect(screen.getByTestId("lightbox-doc-thumbnail")).toBeInTheDocument();
+      expect(screen.getByTestId("lightbox-doc-thumbnail")).toHaveAttribute("src", "blob:pdf-thumb");
+      expect(screen.getByText("report.pdf")).toBeInTheDocument();
+    });
   });
 
   describe("Auto-Download Request", () => {
@@ -426,6 +490,228 @@ describe("LightboxViewer", () => {
       // But no image and no progress - stuck in blank state
       expect(screen.queryByTestId("lightbox-image")).not.toBeInTheDocument();
       expect(screen.queryByTestId("lightbox-progress")).not.toBeInTheDocument();
+    });
+
+    it("should NOT auto-download for video attachments", () => {
+      const onRequestDownload = vi.fn();
+      const videoAttachment = [makeAttachment("att-v", "clip.mp4", "video/mp4")];
+      render(
+        <LightboxViewer
+          attachments={videoAttachment}
+          initialIndex={0}
+          imageUrls={new Map()}
+          downloadProgress={emptyProgress}
+          onRequestDownload={onRequestDownload}
+          onClose={vi.fn()}
+        />,
+      );
+      expect(onRequestDownload).not.toHaveBeenCalled();
+    });
+
+    it("should NOT auto-download for document attachments", () => {
+      const onRequestDownload = vi.fn();
+      const docAttachment = [makeAttachment("att-d", "report.pdf", "application/pdf")];
+      render(
+        <LightboxViewer
+          attachments={docAttachment}
+          initialIndex={0}
+          imageUrls={new Map()}
+          downloadProgress={emptyProgress}
+          onRequestDownload={onRequestDownload}
+          onClose={vi.fn()}
+        />,
+      );
+      expect(onRequestDownload).not.toHaveBeenCalled();
+    });
+  });
+
+  // FEAT-068: Video Lightbox
+  describe("Video Lightbox", () => {
+    it("should render video frame with play overlay when thumbnail available", () => {
+      const videoAtt = [makeAttachment("att-v", "clip.mp4", "video/mp4")];
+      const thumbs = new Map([["att-v", "blob:video-frame"]]);
+      render(
+        <LightboxViewer
+          attachments={videoAtt}
+          initialIndex={0}
+          imageUrls={new Map()}
+          thumbnailUrls={thumbs}
+          downloadProgress={emptyProgress}
+          onClose={vi.fn()}
+        />,
+      );
+      expect(screen.getByTestId("lightbox-video")).toBeInTheDocument();
+      expect(screen.getByTestId("lightbox-video-frame")).toHaveAttribute("src", "blob:video-frame");
+      expect(screen.getByTestId("lightbox-play-icon")).toBeInTheDocument();
+    });
+
+    it("should render video fallback when no thumbnail", () => {
+      const videoAtt = [makeAttachment("att-v", "clip.mp4", "video/mp4")];
+      render(
+        <LightboxViewer
+          attachments={videoAtt}
+          initialIndex={0}
+          imageUrls={new Map()}
+          downloadProgress={emptyProgress}
+          onClose={vi.fn()}
+        />,
+      );
+      expect(screen.getByTestId("lightbox-video-fallback")).toBeInTheDocument();
+      expect(screen.getByText("clip.mp4")).toBeInTheDocument();
+    });
+
+    it("should show download button for video attachment", () => {
+      const videoAtt = [makeAttachment("att-v", "clip.mp4", "video/mp4")];
+      render(
+        <LightboxViewer
+          attachments={videoAtt}
+          initialIndex={0}
+          imageUrls={new Map()}
+          downloadProgress={emptyProgress}
+          onClose={vi.fn()}
+        />,
+      );
+      expect(screen.getByTestId("lightbox-download")).toBeInTheDocument();
+    });
+
+    it("should call onRequestDownload when download button clicked for video without full URL", () => {
+      const onRequestDownload = vi.fn();
+      const videoAtt = [makeAttachment("att-v", "clip.mp4", "video/mp4")];
+      render(
+        <LightboxViewer
+          attachments={videoAtt}
+          initialIndex={0}
+          imageUrls={new Map()}
+          downloadProgress={emptyProgress}
+          onRequestDownload={onRequestDownload}
+          onClose={vi.fn()}
+        />,
+      );
+      fireEvent.click(screen.getByTestId("lightbox-download"));
+      expect(onRequestDownload).toHaveBeenCalledWith("att-v");
+    });
+
+    it("should not show zoom/pan wrapper for video", () => {
+      const videoAtt = [makeAttachment("att-v", "clip.mp4", "video/mp4")];
+      const thumbs = new Map([["att-v", "blob:video-frame"]]);
+      render(
+        <LightboxViewer
+          attachments={videoAtt}
+          initialIndex={0}
+          imageUrls={new Map()}
+          thumbnailUrls={thumbs}
+          downloadProgress={emptyProgress}
+          onClose={vi.fn()}
+        />,
+      );
+      expect(screen.queryByTestId("transform-wrapper")).not.toBeInTheDocument();
+    });
+  });
+
+  // FEAT-068: Document Download from Lightbox
+  describe("Document Download", () => {
+    it("should show download button for document attachment", () => {
+      const docAtt = [makeAttachment("att-d", "report.pdf", "application/pdf")];
+      render(
+        <LightboxViewer
+          attachments={docAtt}
+          initialIndex={0}
+          imageUrls={new Map()}
+          downloadProgress={emptyProgress}
+          onClose={vi.fn()}
+        />,
+      );
+      expect(screen.getByTestId("lightbox-download")).toBeInTheDocument();
+    });
+
+    it("should call onRequestDownload when download clicked for document", () => {
+      const onRequestDownload = vi.fn();
+      const docAtt = [makeAttachment("att-d", "archive.zip", "application/zip", 10240)];
+      render(
+        <LightboxViewer
+          attachments={docAtt}
+          initialIndex={0}
+          imageUrls={new Map()}
+          downloadProgress={emptyProgress}
+          onRequestDownload={onRequestDownload}
+          onClose={vi.fn()}
+        />,
+      );
+      fireEvent.click(screen.getByTestId("lightbox-download"));
+      expect(onRequestDownload).toHaveBeenCalledWith("att-d");
+    });
+  });
+
+  // FEAT-068: Mixed-type Carousel
+  describe("Mixed-Type Carousel", () => {
+    const mixedAttachments = [
+      makeAttachment("att-img", "photo.png", "image/png"),
+      makeAttachment("att-vid", "clip.mp4", "video/mp4"),
+      makeAttachment("att-doc", "report.pdf", "application/pdf"),
+    ];
+
+    it("should show image view at index 0", () => {
+      render(
+        <LightboxViewer
+          attachments={mixedAttachments}
+          initialIndex={0}
+          imageUrls={makeImageUrls("att-img")}
+          downloadProgress={emptyProgress}
+          onClose={vi.fn()}
+        />,
+      );
+      expect(screen.getByTestId("lightbox-image")).toBeInTheDocument();
+    });
+
+    it("should navigate from image to video view", () => {
+      const thumbs = new Map([["att-vid", "blob:vid-thumb"]]);
+      render(
+        <LightboxViewer
+          attachments={mixedAttachments}
+          initialIndex={0}
+          imageUrls={makeImageUrls("att-img")}
+          thumbnailUrls={thumbs}
+          downloadProgress={emptyProgress}
+          onClose={vi.fn()}
+        />,
+      );
+      expect(screen.getByTestId("lightbox-image")).toBeInTheDocument();
+      fireEvent.keyDown(window, { key: "ArrowRight" });
+      expect(screen.getByTestId("lightbox-video")).toBeInTheDocument();
+      expect(screen.queryByTestId("lightbox-image")).not.toBeInTheDocument();
+    });
+
+    it("should navigate from video to document view", () => {
+      const thumbs = new Map([["att-vid", "blob:vid-thumb"]]);
+      render(
+        <LightboxViewer
+          attachments={mixedAttachments}
+          initialIndex={1}
+          imageUrls={new Map()}
+          thumbnailUrls={thumbs}
+          downloadProgress={emptyProgress}
+          onClose={vi.fn()}
+        />,
+      );
+      expect(screen.getByTestId("lightbox-video")).toBeInTheDocument();
+      fireEvent.keyDown(window, { key: "ArrowRight" });
+      expect(screen.getByTestId("lightbox-file-info")).toBeInTheDocument();
+      expect(screen.queryByTestId("lightbox-video")).not.toBeInTheDocument();
+    });
+
+    it("should show correct page indicator for mixed types", () => {
+      render(
+        <LightboxViewer
+          attachments={mixedAttachments}
+          initialIndex={0}
+          imageUrls={makeImageUrls("att-img")}
+          downloadProgress={emptyProgress}
+          onClose={vi.fn()}
+        />,
+      );
+      expect(screen.getByTestId("lightbox-page-indicator")).toHaveTextContent("1 / 3");
+      fireEvent.keyDown(window, { key: "ArrowRight" });
+      expect(screen.getByTestId("lightbox-page-indicator")).toHaveTextContent("2 / 3");
     });
   });
 });

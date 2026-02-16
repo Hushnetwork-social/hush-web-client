@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef, memo } from "react";
-import { X, Download, ChevronLeft, ChevronRight } from "lucide-react";
+import { X, Download, ChevronLeft, ChevronRight, Play, Video } from "lucide-react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
+import { getFileTypeIcon, formatFileSize } from "@/lib/attachments/fileTypeIcons";
 import type { AttachmentRefMeta } from "@/types";
 
 interface LightboxViewerProps {
@@ -10,11 +11,13 @@ interface LightboxViewerProps {
   attachments: AttachmentRefMeta[];
   /** Index of the attachment to show first */
   initialIndex: number;
-  /** Map of attachment ID to blob URL for already-downloaded images */
+  /** Map of attachment ID to blob URL for already-downloaded full-size files */
   imageUrls: Map<string, string>;
+  /** Map of attachment ID to thumbnail blob URL (video frames, PDF first pages). Null values = still loading. */
+  thumbnailUrls?: Map<string, string | null>;
   /** Map of attachment ID to download progress (0-100) */
   downloadProgress: Map<string, number>;
-  /** Callback to request download of a full-size image */
+  /** Callback to request download of a full-size attachment */
   onRequestDownload?: (attachmentId: string) => void;
   /** Callback when lightbox is closed */
   onClose: () => void;
@@ -35,6 +38,7 @@ export const LightboxViewer = memo(function LightboxViewer({
   attachments,
   initialIndex,
   imageUrls,
+  thumbnailUrls,
   downloadProgress,
   onRequestDownload,
   onClose,
@@ -51,14 +55,16 @@ export const LightboxViewer = memo(function LightboxViewer({
     : undefined;
   const isDownloading = currentProgress !== undefined && currentProgress < 100;
   const isImage = currentAttachment?.mimeType.startsWith("image/");
+  const isVideo = currentAttachment?.mimeType.startsWith("video/");
+  const thumbnailUrl = currentAttachment ? thumbnailUrls?.get(currentAttachment.id) : undefined;
   const hasMultiple = attachments.length > 1;
 
-  // Request download of current image if not already available
+  // Auto-request download for images only (videos/documents download on user click)
   useEffect(() => {
-    if (currentAttachment && !currentUrl && onRequestDownload) {
+    if (currentAttachment && !currentUrl && isImage && onRequestDownload) {
       onRequestDownload(currentAttachment.id);
     }
-  }, [currentAttachment, currentUrl, onRequestDownload]);
+  }, [currentAttachment, currentUrl, isImage, onRequestDownload]);
 
   // Escape key handler
   useEffect(() => {
@@ -101,16 +107,20 @@ export const LightboxViewer = memo(function LightboxViewer({
     );
   }, [attachments.length]);
 
-  // Download handler
+  // Download handler: save to disk if full URL available, otherwise request download
   const handleDownload = useCallback(() => {
-    if (!currentUrl || !currentAttachment) return;
-    const a = document.createElement("a");
-    a.href = currentUrl;
-    a.download = currentAttachment.fileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  }, [currentUrl, currentAttachment]);
+    if (!currentAttachment) return;
+    if (currentUrl) {
+      const a = document.createElement("a");
+      a.href = currentUrl;
+      a.download = currentAttachment.fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } else if (onRequestDownload) {
+      onRequestDownload(currentAttachment.id);
+    }
+  }, [currentUrl, currentAttachment, onRequestDownload]);
 
   // Circular progress SVG for download indicator
   const renderProgress = () => {
@@ -174,8 +184,8 @@ export const LightboxViewer = memo(function LightboxViewer({
         {!hasMultiple && <div />}
 
         <div className="flex items-center gap-2">
-          {/* Download button - only when image is loaded */}
-          {currentUrl && isImage && (
+          {/* Download button: images when loaded, videos/documents always (when not downloading) */}
+          {currentAttachment && !isDownloading && (!isImage || currentUrl) && (
             <button
               onClick={handleDownload}
               className="w-8 h-8 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
@@ -253,27 +263,57 @@ export const LightboxViewer = memo(function LightboxViewer({
               />
             </TransformComponent>
           </TransformWrapper>
+        ) : isVideo && currentAttachment ? (
+          // FEAT-068: Video view - thumbnail frame with play overlay, or fallback
+          thumbnailUrl ? (
+            <div className="relative" data-testid="lightbox-video">
+              {/* eslint-disable-next-line @next/next/no-img-element -- blob URL from extracted video frame */}
+              <img
+                src={thumbnailUrl}
+                alt={currentAttachment.fileName}
+                className="max-w-[90vw] max-h-[85vh] object-contain select-none"
+                draggable={false}
+                data-testid="lightbox-video-frame"
+              />
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div
+                  className="w-16 h-16 rounded-full bg-black/50 flex items-center justify-center"
+                  data-testid="lightbox-play-icon"
+                >
+                  <Play className="w-8 h-8 text-white fill-white ml-0.5" />
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-3 text-white" data-testid="lightbox-video-fallback">
+              <Video className="w-16 h-16 text-purple-400" />
+              <p className="text-lg">{currentAttachment.fileName}</p>
+            </div>
+          )
         ) : !isImage && currentAttachment ? (
-          // Non-image file - show filename only
+          // FEAT-068: Document view - PDF thumbnail or colored icon with metadata
           <div className="flex flex-col items-center gap-3 text-white" data-testid="lightbox-file-info">
-            <p className="text-lg">{currentAttachment.fileName}</p>
-            <p className="text-sm text-white/60">
-              {(currentAttachment.size / (1024 * 1024)).toFixed(1)} MB
-            </p>
-            {currentUrl && (
-              <button
-                onClick={handleDownload}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors"
-                type="button"
-                data-testid="lightbox-file-download"
-              >
-                <Download size={16} />
-                <span>Download</span>
-              </button>
+            {thumbnailUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element -- blob URL from PDF first-page render
+              <img
+                src={thumbnailUrl}
+                alt={currentAttachment.fileName}
+                className="max-w-[90vw] max-h-[85vh] object-contain select-none"
+                draggable={false}
+                data-testid="lightbox-doc-thumbnail"
+              />
+            ) : (
+              (() => {
+                const iconInfo = getFileTypeIcon(currentAttachment.fileName);
+                const IconComp = iconInfo.icon;
+                return <IconComp className={`w-16 h-16 ${iconInfo.colorClass}`} data-testid="lightbox-doc-icon" />;
+              })()
             )}
+            <p className="text-lg">{currentAttachment.fileName}</p>
+            <p className="text-sm text-white/60">{formatFileSize(currentAttachment.size)}</p>
           </div>
         ) : (
-          // Loading state (no URL, not downloading)
+          // Loading state (no URL, not downloading) - images auto-download
           renderProgress()
         )}
       </div>
