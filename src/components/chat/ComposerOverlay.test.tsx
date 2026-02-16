@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { ComposerOverlay, ComposerFile } from "./ComposerOverlay";
 
 // Mock URL.createObjectURL / revokeObjectURL
@@ -8,6 +8,15 @@ vi.stubGlobal("URL", {
   createObjectURL: vi.fn(() => "blob:mock-url"),
   revokeObjectURL: vi.fn(),
 });
+
+// FEAT-068: Mock dynamic imports for video frame extractor and PDF generator
+vi.mock("@/lib/attachments/videoFrameExtractor", () => ({
+  extractVideoFrames: vi.fn(() => Promise.resolve([])),
+}));
+
+vi.mock("@/lib/attachments/pdfThumbnailGenerator", () => ({
+  generatePdfThumbnail: vi.fn(() => Promise.resolve(null)),
+}));
 
 function makeFile(name: string, type = "image/png", size = 1024): File {
   return new File(["x".repeat(size)], name, { type });
@@ -71,11 +80,11 @@ describe("ComposerOverlay", () => {
       expect(screen.getByTestId("composer-preview-image")).toBeInTheDocument();
     });
 
-    it("should render file preview for non-image files", () => {
-      const pdfFile = makeComposerFile("doc.pdf", "application/pdf", 2 * 1024 * 1024);
-      renderOverlay([pdfFile]);
+    it("should render file preview for non-image/non-video/non-PDF files", () => {
+      const docFile = makeComposerFile("report.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", 2 * 1024 * 1024);
+      renderOverlay([docFile]);
       expect(screen.getByTestId("composer-preview-file")).toBeInTheDocument();
-      expect(screen.getByText("doc.pdf")).toBeInTheDocument();
+      expect(screen.getByText("report.docx")).toBeInTheDocument();
       expect(screen.getByText("2.0 MB")).toBeInTheDocument();
     });
 
@@ -310,6 +319,130 @@ describe("ComposerOverlay", () => {
       );
 
       expect(screen.getByTestId("attachment-count")).toHaveTextContent("3/5");
+    });
+  });
+
+  // ---- FEAT-068: Video and Document Preview Tests ----
+
+  describe("FEAT-068: Video Preview", () => {
+    it("should show skeleton while video frames are being extracted", () => {
+      const videoFile = makeComposerFile("clip.mp4", "video/mp4");
+      renderOverlay([videoFile]);
+      // Video extraction is async, so skeleton should appear while loading
+      expect(screen.getByTestId("composer-video-skeleton")).toBeInTheDocument();
+    });
+
+    it("should show generic video icon when extraction fails (returns empty frames)", async () => {
+      vi.useRealTimers();
+      const videoFile = makeComposerFile("clip.mp4", "video/mp4");
+      renderOverlay([videoFile]);
+
+      // Wait for async extraction to resolve (empty frames from mock = failure)
+      await waitFor(() => {
+        expect(screen.getByTestId("composer-preview-file")).toBeInTheDocument();
+      });
+      expect(screen.getByText("clip.mp4")).toBeInTheDocument();
+    });
+
+    it("should show video frame with play overlay when frames are available", async () => {
+      vi.useRealTimers();
+      const { extractVideoFrames } = await import("@/lib/attachments/videoFrameExtractor");
+      const mockFrames = [
+        { blob: new Blob(["f1"], { type: "image/jpeg" }), width: 300, height: 169, timestamp: 5 },
+        { blob: new Blob(["f2"], { type: "image/jpeg" }), width: 300, height: 169, timestamp: 10 },
+        { blob: new Blob(["f3"], { type: "image/jpeg" }), width: 300, height: 169, timestamp: 15 },
+      ];
+      vi.mocked(extractVideoFrames).mockResolvedValueOnce(mockFrames);
+
+      const videoFile = makeComposerFile("clip.mp4", "video/mp4");
+      renderOverlay([videoFile]);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("composer-video-preview")).toBeInTheDocument();
+      });
+      expect(screen.getByTestId("composer-video-frame")).toBeInTheDocument();
+      expect(screen.getByTestId("video-play-overlay")).toBeInTheDocument();
+      expect(screen.getByTestId("video-shuffle-button")).toBeInTheDocument();
+    });
+
+    it("should cycle frames when shuffle button is clicked", async () => {
+      vi.useRealTimers();
+      const { extractVideoFrames } = await import("@/lib/attachments/videoFrameExtractor");
+      const mockFrames = [
+        { blob: new Blob(["f1"], { type: "image/jpeg" }), width: 300, height: 169, timestamp: 5 },
+        { blob: new Blob(["f2"], { type: "image/jpeg" }), width: 300, height: 169, timestamp: 10 },
+      ];
+      vi.mocked(extractVideoFrames).mockResolvedValueOnce(mockFrames);
+
+      const videoFile = makeComposerFile("clip.mp4", "video/mp4");
+      renderOverlay([videoFile]);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("video-shuffle-button")).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByTestId("video-shuffle-button"));
+
+      // Video preview should still be rendered after shuffle
+      expect(screen.getByTestId("composer-video-preview")).toBeInTheDocument();
+      expect(screen.getByTestId("composer-video-frame")).toBeInTheDocument();
+    });
+
+    it("should not show shuffle button when only one frame", async () => {
+      vi.useRealTimers();
+      const { extractVideoFrames } = await import("@/lib/attachments/videoFrameExtractor");
+      const singleFrame = [
+        { blob: new Blob(["f1"], { type: "image/jpeg" }), width: 300, height: 169, timestamp: 5 },
+      ];
+      vi.mocked(extractVideoFrames).mockResolvedValueOnce(singleFrame);
+
+      const videoFile = makeComposerFile("clip.mp4", "video/mp4");
+      renderOverlay([videoFile]);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("composer-video-preview")).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId("video-shuffle-button")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("FEAT-068: Document Preview", () => {
+    it("should show category icon with filename and size for DOCX", () => {
+      const docFile = makeComposerFile("report.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", 5 * 1024);
+      renderOverlay([docFile]);
+
+      expect(screen.getByTestId("composer-preview-file")).toBeInTheDocument();
+      expect(screen.getByText("report.docx")).toBeInTheDocument();
+      expect(screen.getByText("5.0 KB")).toBeInTheDocument();
+    });
+
+    it("should show category icon with filename and size for ZIP", () => {
+      const zipFile = makeComposerFile("archive.zip", "application/zip", 10 * 1024 * 1024);
+      renderOverlay([zipFile]);
+
+      expect(screen.getByTestId("composer-preview-file")).toBeInTheDocument();
+      expect(screen.getByText("archive.zip")).toBeInTheDocument();
+      expect(screen.getByText("10.0 MB")).toBeInTheDocument();
+    });
+
+    it("should show skeleton while PDF thumbnail is generating", () => {
+      const pdfFile = makeComposerFile("doc.pdf", "application/pdf");
+      renderOverlay([pdfFile]);
+
+      expect(screen.getByTestId("composer-pdf-skeleton")).toBeInTheDocument();
+    });
+
+    it("should show fallback icon when PDF thumbnail generation fails", async () => {
+      vi.useRealTimers();
+      const pdfFile = makeComposerFile("doc.pdf", "application/pdf", 2 * 1024 * 1024);
+      renderOverlay([pdfFile]);
+
+      // Wait for async PDF generation to resolve (null from mock = failure → fallback)
+      await waitFor(() => {
+        expect(screen.getByTestId("composer-preview-file")).toBeInTheDocument();
+      });
+      expect(screen.getByText("doc.pdf")).toBeInTheDocument();
+      expect(screen.getByText("2.0 MB")).toBeInTheDocument();
     });
   });
 });

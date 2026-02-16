@@ -18,6 +18,9 @@ import { MentionNavButton, getUnreadCount, getUnreadMentions, markMentionRead, u
 import { useAppStore } from "@/stores";
 import { useFeedsStore, sendMessage, markFeedAsRead, retryMessage, type ProcessedAttachment } from "@/modules/feeds";
 import { processAttachmentFiles } from "@/lib/attachments/processAttachments";
+import { isBlockedFileType, getBlockedFileMessage, FILE_PICKER_ACCEPT_ALL } from "@/lib/attachments/fileTypeValidator";
+import { MAX_ATTACHMENT_SIZE } from "@/lib/attachments/types";
+import { SystemToastContainer } from "@/components/notifications";
 import { LightboxViewer } from "./LightboxViewer";
 import { useFeedReactions } from "@/hooks/useFeedReactions";
 import { useAttachmentThumbnails } from "@/hooks/useAttachmentThumbnails";
@@ -1116,6 +1119,37 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // FEAT-068: System toast state for file rejection messages
+  const [systemToasts, setSystemToasts] = useState<Array<{ id: string; message: string }>>([]);
+  const dismissSystemToast = useCallback((id: string) => {
+    setSystemToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
+
+  // FEAT-068: Validate files, filter blocked types and oversized, return valid + toast messages
+  const validateFiles = useCallback((files: File[]): File[] => {
+    const valid: File[] = [];
+    const rejections: string[] = [];
+
+    for (const f of files) {
+      if (isBlockedFileType(f.name)) {
+        rejections.push(getBlockedFileMessage(f.name));
+      } else if (f.size > MAX_ATTACHMENT_SIZE) {
+        rejections.push(`"${f.name}" is too large (max 25 MB)`);
+      } else {
+        valid.push(f);
+      }
+    }
+
+    if (rejections.length > 0) {
+      const message = rejections.length === 1
+        ? rejections[0]
+        : `${rejections.length} files rejected:\n${rejections.join('\n')}`;
+      setSystemToasts(prev => [...prev, { id: `reject-${Date.now()}`, message }]);
+    }
+
+    return valid;
+  }, []);
+
   // FEAT-067: Lightbox state
   const [lightboxAttachments, setLightboxAttachments] = useState<AttachmentRefMeta[] | null>(null);
   const [lightboxInitialIndex, setLightboxInitialIndex] = useState(0);
@@ -1200,8 +1234,11 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   }, [credentials?.signingPublicKey, effectiveAesKey, feed.id, lightboxAttachments]);
 
   // FEAT-067: Open composer overlay with files
+  // FEAT-068: Added validateFiles to reject blocked/oversized files
   const openComposer = useCallback((files: File[]) => {
-    const limited = files.slice(0, MAX_ATTACHMENTS_PER_MESSAGE);
+    const validated = validateFiles(files);
+    if (validated.length === 0) return;
+    const limited = validated.slice(0, MAX_ATTACHMENTS_PER_MESSAGE);
     const composerFiles: ComposerFile[] = limited.map(f => ({
       file: f,
       previewUrl: URL.createObjectURL(f),
@@ -1214,7 +1251,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
     setComposerFiles(composerFiles);
     setComposerInitialText(currentText);
     setIsComposerOpen(true);
-  }, []);
+  }, [validateFiles]);
 
   // FEAT-067: Close composer overlay, return text to MessageInput
   const handleComposerClose = useCallback((returnedText: string) => {
@@ -1285,11 +1322,15 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   }, []);
 
   // FEAT-067: File input change handler (for paperclip and add-more)
+  // FEAT-068: Added validateFiles to reject blocked/oversized files
   const handleFileInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []);
-    if (files.length === 0) return;
+    const rawFiles = Array.from(e.target.files ?? []);
+    if (rawFiles.length === 0) return;
     // Reset input so same file can be selected again
     e.target.value = "";
+
+    const files = validateFiles(rawFiles);
+    if (files.length === 0) return;
 
     if (isComposerOpen) {
       // Add to existing composer files (up to max)
@@ -1303,7 +1344,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
     } else {
       openComposer(files);
     }
-  }, [isComposerOpen, composerFiles.length, openComposer]);
+  }, [isComposerOpen, composerFiles.length, openComposer, validateFiles]);
 
   // FEAT-067: Paperclip button handler
   const handleAttachClick = useCallback(() => {
@@ -1352,9 +1393,11 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
     e.stopPropagation();
   }, []);
 
-  const handleDrop = useCallback((files: File[]) => {
+  // FEAT-068: Added validateFiles to reject blocked/oversized files on drop
+  const handleDrop = useCallback((droppedFiles: File[]) => {
     setIsDragOver(false);
     dragCounterRef.current = 0;
+    const files = validateFiles(droppedFiles);
     if (files.length > 0) {
       if (isComposerOpen) {
         const remaining = MAX_ATTACHMENTS_PER_MESSAGE - composerFiles.length;
@@ -1368,7 +1411,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
         openComposer(files);
       }
     }
-  }, [isComposerOpen, composerFiles.length, openComposer]);
+  }, [isComposerOpen, composerFiles.length, openComposer, validateFiles]);
 
   return (
     <div
@@ -1378,12 +1421,15 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
     >
-      {/* FEAT-067: Hidden file input for paperclip/add-more */}
+      {/* FEAT-068: Toast notifications for blocked/oversized file rejections */}
+      <SystemToastContainer toasts={systemToasts} onDismiss={dismissSystemToast} />
+
+      {/* FEAT-067/068: Hidden file input for paperclip/add-more (all supported types) */}
       <input
         ref={fileInputRef}
         type="file"
         multiple
-        accept="image/*,application/pdf,video/*"
+        accept={FILE_PICKER_ACCEPT_ALL}
         onChange={handleFileInputChange}
         className="hidden"
         data-testid="file-input"
