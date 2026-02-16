@@ -406,5 +406,26 @@ describe("LightboxViewer", () => {
       );
       expect(onRequestDownload).not.toHaveBeenCalled();
     });
+
+    it("should be stuck with no image and no progress when onRequestDownload is not provided and no URL exists", () => {
+      // This documents the bug: if ChatView doesn't wire onRequestDownload,
+      // the lightbox opens but the full-size image download never starts.
+      // The lightbox renders the overlay but the content area is empty.
+      render(
+        <LightboxViewer
+          attachments={singleAttachment}
+          initialIndex={0}
+          imageUrls={new Map()}
+          downloadProgress={emptyProgress}
+          onClose={vi.fn()}
+        />,
+      );
+
+      // Overlay IS visible
+      expect(screen.getByTestId("lightbox-overlay")).toBeInTheDocument();
+      // But no image and no progress - stuck in blank state
+      expect(screen.queryByTestId("lightbox-image")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("lightbox-progress")).not.toBeInTheDocument();
+    });
   });
 });

@@ -163,3 +163,30 @@ export async function downloadAttachment(
   // Decrypt and return
   return aesDecryptBytes(encryptedBytes, aesKeyBase64);
 }
+
+/**
+ * FEAT-066: Client-side download function that calls the attachment-download API route.
+ * This implements the StreamingDownloadFn signature and can be passed to useAttachmentThumbnails.
+ */
+export async function fetchAttachmentFromApi(
+  attachmentId: string,
+  feedId: string,
+  requesterUserAddress: string,
+  thumbnailOnly: boolean,
+): Promise<Uint8Array> {
+  const params = new URLSearchParams({
+    attachmentId,
+    feedId,
+    userAddress: requesterUserAddress,
+    thumbnailOnly: thumbnailOnly.toString(),
+  });
+
+  const response = await fetch(`/api/feeds/attachment-download?${params}`);
+
+  if (!response.ok) {
+    throw new Error(`Attachment download failed: ${response.status}`);
+  }
+
+  const buffer = await response.arrayBuffer();
+  return new Uint8Array(buffer);
+}

@@ -11,7 +11,7 @@
  * 7. Badge icon path generation (getBadgeIconPath)
  * 8. Tauri overlay integration
  * 9. PWA Badging API integration
- * 10. Focus-aware behavior (include/exclude selected feed)
+ * 10. Total unread count across multiple feeds
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -21,29 +21,10 @@ import { useUnreadBadge, UNREAD_BADGE_CONSTANTS, getBadgeIconPath, isBadgingApiS
 // Mock feeds data - controls what the selector returns
 let mockFeeds: Array<{ id: string; unreadCount?: number }> = [];
 
-// Mock selected feed ID
-let mockSelectedFeedId: string | null = null;
-
 vi.mock('@/modules/feeds', () => ({
   useFeedsStore: (selector: (state: { feeds: Array<{ id: string; unreadCount?: number }> }) => unknown) => {
     return selector({ feeds: mockFeeds });
   },
-}));
-
-// Mock selectFeed function
-const mockSelectFeed = vi.fn((feedId: string | null) => {
-  mockSelectedFeedId = feedId;
-});
-
-vi.mock('@/stores/useAppStore', () => ({
-  useAppStore: Object.assign(
-    (selector: (state: { selectedFeedId: string | null; selectFeed: (feedId: string | null) => void }) => unknown) => {
-      return selector({ selectedFeedId: mockSelectedFeedId, selectFeed: mockSelectFeed });
-    },
-    {
-      getState: () => ({ selectedFeedId: mockSelectedFeedId, selectFeed: mockSelectFeed }),
-    }
-  ),
 }));
 
 // Helper to set mock feeds (creates feeds with specified unread counts)
@@ -56,11 +37,6 @@ const mockGetTotalUnreadCount = {
   mockReturnValue: (value: number) => {
     mockFeeds = value > 0 ? [{ id: 'feed-1', unreadCount: value }] : [];
   },
-};
-
-// Helper to set selected feed
-const setMockSelectedFeedId = (feedId: string | null) => {
-  mockSelectedFeedId = feedId;
 };
 
 // Mock platform detection - default to browser
@@ -81,9 +57,6 @@ describe('useUnreadBadge', () => {
     document.title = FULL_TITLE;
     // Reset mocks to default state
     mockGetTotalUnreadCount.mockReturnValue(0);
-    setMockSelectedFeedId(null);
-    // Mock document.hasFocus to return true by default (focused)
-    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
   });
 
   afterEach(() => {
@@ -92,8 +65,6 @@ describe('useUnreadBadge', () => {
     vi.restoreAllMocks();
     document.title = FULL_TITLE;
     mockFeeds = [];
-    mockSelectedFeedId = null;
-    mockSelectFeed.mockClear();
   });
 
   describe('Initial State', () => {
@@ -350,8 +321,8 @@ describe('useUnreadBadge', () => {
     });
   });
 
-  describe('Focus-Aware Behavior', () => {
-    it('should show all unread messages (total count from all feeds)', () => {
+  describe('Multiple Feeds', () => {
+    it('should show total unread count from all feeds', () => {
       // Set up multiple feeds with unread counts
       setMockFeeds([
         { id: 'feed-1', unreadCount: 3 },
@@ -361,73 +332,6 @@ describe('useUnreadBadge', () => {
       renderHook(() => useUnreadBadge());
 
       // Should show total (3 + 5 = 8)
-      expect(document.title).toBe('(8) Hush Feeds');
-    });
-
-    it('should deselect feed when window loses focus (via blur event)', () => {
-      // Set up feeds
-      setMockFeeds([
-        { id: 'feed-1', unreadCount: 3 },
-      ]);
-      setMockSelectedFeedId('feed-1');
-
-      // Start focused
-      vi.spyOn(document, 'hasFocus').mockReturnValue(true);
-
-      renderHook(() => useUnreadBadge());
-
-      // Simulate blur event - should call selectFeed(null)
-      act(() => {
-        window.dispatchEvent(new Event('blur'));
-      });
-
-      // After blur, selectedFeedId should be null (deselected)
-      // This is tested via the mock - the selectFeed function should have been called
-      expect(mockSelectedFeedId).toBe(null);
-    });
-
-    it('should deselect feed when tab becomes hidden (via visibilitychange)', () => {
-      // Set up feeds
-      setMockFeeds([
-        { id: 'feed-1', unreadCount: 3 },
-      ]);
-      setMockSelectedFeedId('feed-1');
-
-      // Start visible and focused
-      vi.spyOn(document, 'hasFocus').mockReturnValue(true);
-      Object.defineProperty(document, 'visibilityState', {
-        value: 'visible',
-        writable: true,
-      });
-
-      renderHook(() => useUnreadBadge());
-
-      // Simulate tab becoming hidden
-      Object.defineProperty(document, 'visibilityState', {
-        value: 'hidden',
-        writable: true,
-      });
-      vi.spyOn(document, 'hasFocus').mockReturnValue(false);
-
-      act(() => {
-        document.dispatchEvent(new Event('visibilitychange'));
-      });
-
-      // After visibility change, selectedFeedId should be null (deselected)
-      expect(mockSelectedFeedId).toBe(null);
-    });
-
-    it('should show correct count when feed is deselected', () => {
-      // Set up feeds - no feed selected (simulating after blur)
-      setMockFeeds([
-        { id: 'feed-1', unreadCount: 3 },
-        { id: 'feed-2', unreadCount: 5 },
-      ]);
-      setMockSelectedFeedId(null);
-
-      renderHook(() => useUnreadBadge());
-
-      // Should show total (8) because no feed is selected
       expect(document.title).toBe('(8) Hush Feeds');
     });
   });

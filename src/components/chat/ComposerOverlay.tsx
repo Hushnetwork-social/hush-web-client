@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { X, Plus, FileIcon } from "lucide-react";
+import { X, Plus, FileIcon, Paperclip, Smile, Send } from "lucide-react";
 import { ContentCarousel } from "./ContentCarousel";
+import { EmojiPicker } from "./EmojiPicker";
 import { MAX_ATTACHMENTS_PER_MESSAGE } from "@/lib/attachments/types";
 
 /** File with an object URL for previewing. */
@@ -23,6 +24,8 @@ interface ComposerOverlayProps {
   onClose: (currentText: string) => void;
   /** Callback to add more files from file picker */
   onAddMore: () => void;
+  /** Callback when images are pasted from clipboard */
+  onImagePaste?: (files: File[]) => void;
   /** Participants for @mentions (passed through to MessageInput) */
   participants?: Array<{ identityId: string; displayName: string; publicAddress: string }>;
 }
@@ -45,15 +48,23 @@ export function ComposerOverlay({
   onSend,
   onClose,
   onAddMore,
+  onImagePaste,
 }: ComposerOverlayProps) {
   const [files, setFiles] = useState<ComposerFile[]>(initialFiles);
   const [text, setText] = useState(initialText);
+  const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
+  const [carouselGoTo, setCarouselGoTo] = useState<number | undefined>(undefined);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Update files when initialFiles changes (e.g., more files added externally)
+  // Jump to last item when new files are added
   useEffect(() => {
+    const hadFiles = files.length;
     setFiles(initialFiles);
-  }, [initialFiles]);
+    if (initialFiles.length > hadFiles) {
+      setCarouselGoTo(initialFiles.length - 1);
+    }
+  }, [initialFiles]); // eslint-disable-line react-hooks/exhaustive-deps -- intentionally reading files.length without depending on it
 
   // Focus text input when overlay opens
   useEffect(() => {
@@ -102,6 +113,31 @@ export function ComposerOverlay({
 
   const isAtMax = files.length >= MAX_ATTACHMENTS_PER_MESSAGE;
 
+  // Handle paste events to detect image clipboard data
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    if (!onImagePaste) return;
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    const imageFiles: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith("image/")) {
+        const file = items[i].getAsFile();
+        if (file) imageFiles.push(file);
+      }
+    }
+
+    if (imageFiles.length > 0) {
+      e.preventDefault();
+      onImagePaste(imageFiles);
+    }
+  }, [onImagePaste]);
+
+  const handleEmojiSelect = useCallback((emoji: string) => {
+    setText(prev => prev + emoji);
+    inputRef.current?.focus();
+  }, []);
+
   // Build preview items for ContentCarousel
   const previewItems = files.map((cf, index) => {
     const isImage = cf.file.type.startsWith("image/");
@@ -124,7 +160,7 @@ export function ComposerOverlay({
           <img
             src={cf.previewUrl}
             alt={cf.file.name}
-            className="max-h-[60vh] max-w-full mx-auto rounded-lg object-contain"
+            className="max-h-[50vh] max-w-full mx-auto rounded-lg object-contain"
             data-testid="composer-preview-image"
           />
         ) : (
@@ -158,13 +194,14 @@ export function ComposerOverlay({
         </button>
       </div>
 
-      {/* Main preview area */}
+      {/* Centered content: preview + add more + input */}
       <div className="flex-1 flex flex-col items-center justify-center px-4 min-h-0">
+        {/* Image preview */}
         <div className="w-full max-w-lg">
           {previewItems.length === 1 ? (
             previewItems[0]
           ) : (
-            <ContentCarousel ariaLabel="Attachment previews">
+            <ContentCarousel ariaLabel="Attachment previews" goToIndex={carouselGoTo}>
               {previewItems}
             </ContentCarousel>
           )}
@@ -188,32 +225,67 @@ export function ComposerOverlay({
             <span data-testid="attachment-count">{files.length}/{MAX_ATTACHMENTS_PER_MESSAGE}</span>
           </button>
         </div>
-      </div>
 
-      {/* Bottom: text input */}
-      <div className="flex-shrink-0 p-4">
-        <form
-          onSubmit={handleSubmit}
-          className="flex items-center bg-hush-bg-dark rounded-xl p-2"
-        >
-          <input
-            ref={inputRef}
-            type="text"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="Add a caption..."
-            className="flex-1 bg-transparent border-none outline-none text-hush-text-primary placeholder-hush-text-accent text-sm px-3"
-            data-testid="composer-text-input"
-          />
-          <button
-            type="submit"
-            disabled={files.length === 0}
-            className="px-4 py-2 rounded-lg bg-hush-purple hover:bg-hush-purple-hover text-hush-bg-dark text-sm font-medium transition-colors disabled:opacity-50"
-            data-testid="composer-send"
+        {/* Caption input - styled like MessageInput */}
+        <div className="w-full max-w-lg mt-6">
+          <form
+            onSubmit={handleSubmit}
+            className="relative flex items-center bg-hush-bg-dark rounded-xl p-2"
           >
-            Send
-          </button>
-        </form>
+            {/* Emoji Picker Flyout */}
+            <EmojiPicker
+              isOpen={isEmojiPickerOpen}
+              onEmojiSelect={handleEmojiSelect}
+              onClose={() => setIsEmojiPickerOpen(false)}
+            />
+
+            {/* Add more button (paperclip) */}
+            <button
+              type="button"
+              onClick={onAddMore}
+              disabled={isAtMax}
+              className="p-2 text-hush-purple hover:text-hush-purple-hover transition-colors disabled:opacity-50"
+              aria-label="Add more files"
+            >
+              <Paperclip className="w-5 h-5" />
+            </button>
+
+            {/* Emoji button */}
+            <button
+              type="button"
+              onClick={() => setIsEmojiPickerOpen(prev => !prev)}
+              className={`p-2 transition-colors ${
+                isEmojiPickerOpen
+                  ? "text-hush-purple-hover"
+                  : "text-hush-purple hover:text-hush-purple-hover"
+              }`}
+            >
+              <Smile className="w-5 h-5" />
+            </button>
+
+            {/* Text input */}
+            <input
+              ref={inputRef}
+              type="text"
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onPaste={handlePaste}
+              placeholder="Add a caption..."
+              className="flex-1 bg-transparent border-none outline-none text-hush-text-primary placeholder-hush-text-accent text-sm px-2"
+              data-testid="composer-text-input"
+            />
+
+            {/* Send button - circular icon, matches MessageInput */}
+            <button
+              type="submit"
+              disabled={files.length === 0}
+              className="p-2 rounded-full bg-hush-purple hover:bg-hush-purple-hover transition-all disabled:opacity-50"
+              data-testid="composer-send"
+            >
+              <Send className="w-4 h-4 text-hush-bg-dark" />
+            </button>
+          </form>
+        </div>
       </div>
     </div>
   );

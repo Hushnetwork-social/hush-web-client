@@ -10,6 +10,8 @@ interface ContentCarouselProps {
   className?: string;
   /** Accessible label for the carousel region */
   ariaLabel?: string;
+  /** External index override — carousel jumps here when this value changes */
+  goToIndex?: number;
 }
 
 /**
@@ -24,6 +26,7 @@ export const ContentCarousel = memo(function ContentCarousel({
   children,
   className = "",
   ariaLabel = "Content carousel",
+  goToIndex,
 }: ContentCarouselProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -86,9 +89,16 @@ export const ContentCarousel = memo(function ContentCarousel({
     [goToNext, goToPrevious]
   );
 
-  // Reset to first item if children count changes
+  // Jump to external index when it changes
   useEffect(() => {
-    setCurrentIndex(0);
+    if (goToIndex !== undefined && goToIndex >= 0 && goToIndex < totalCount) {
+      setCurrentIndex(goToIndex);
+    }
+  }, [goToIndex, totalCount]);
+
+  // Clamp index if children shrink (e.g. item removed)
+  useEffect(() => {
+    setCurrentIndex(prev => Math.min(prev, Math.max(0, totalCount - 1)));
   }, [totalCount]);
 
   if (totalCount === 0) {

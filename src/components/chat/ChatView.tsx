@@ -20,6 +20,8 @@ import { useFeedsStore, sendMessage, markFeedAsRead, retryMessage, type Processe
 import { processAttachmentFiles } from "@/lib/attachments/processAttachments";
 import { LightboxViewer } from "./LightboxViewer";
 import { useFeedReactions } from "@/hooks/useFeedReactions";
+import { useAttachmentThumbnails } from "@/hooks/useAttachmentThumbnails";
+import { downloadAttachment, fetchAttachmentFromApi } from "@/lib/attachments/attachmentService";
 import { useVirtualKeyboard } from "@/hooks/useVirtualKeyboard";
 import type { Feed, FeedMessage, GroupFeedMember, SettingsChangeRecord, AttachmentRefMeta } from "@/types";
 import { onVisibilityChange, type SettingsChange } from "@/lib/events";
@@ -1118,10 +1120,14 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   const [lightboxAttachments, setLightboxAttachments] = useState<AttachmentRefMeta[] | null>(null);
   const [lightboxInitialIndex, setLightboxInitialIndex] = useState(0);
 
-  // FEAT-067: Thumbnail blob URLs for messages
-  // Managed by useAttachmentThumbnails hook when download function is available.
-  // For locally sent messages, thumbnails are added directly to the cache.
-  const [thumbnailUrls] = useState<Map<string, string | null>>(new Map());
+  // FEAT-067: Thumbnail blob URLs for messages via streaming download
+  const thumbnailUrls = useAttachmentThumbnails(
+    regularMessages,
+    feed.id,
+    credentials?.signingPublicKey,
+    effectiveAesKey,
+    fetchAttachmentFromApi,
+  );
 
   // FEAT-067: Lightbox image URLs and download progress
   const [lightboxImageUrls, setLightboxImageUrls] = useState<Map<string, string>>(new Map());
@@ -1145,6 +1151,53 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
     setLightboxImageUrls(new Map());
     setLightboxDownloadProgress(new Map());
   }, [lightboxImageUrls]);
+
+  // FEAT-067: Download full-size image for lightbox
+  const handleLightboxRequestDownload = useCallback(async (attachmentId: string) => {
+    if (!credentials?.signingPublicKey || !effectiveAesKey) return;
+
+    const attachment = lightboxAttachments?.find(a => a.id === attachmentId);
+    if (!attachment) return;
+
+    setLightboxDownloadProgress(prev => {
+      const next = new Map(prev);
+      next.set(attachmentId, 0);
+      return next;
+    });
+
+    try {
+      const decryptedBytes = await downloadAttachment(
+        attachmentId,
+        feed.id,
+        credentials.signingPublicKey,
+        effectiveAesKey,
+        fetchAttachmentFromApi,
+        false, // thumbnailOnly = false → full-size image
+      );
+
+      const mimeType = attachment.mimeType || 'image/jpeg';
+      const blob = new Blob([decryptedBytes as BlobPart], { type: mimeType });
+      const url = URL.createObjectURL(blob);
+
+      setLightboxImageUrls(prev => {
+        const next = new Map(prev);
+        next.set(attachmentId, url);
+        return next;
+      });
+      setLightboxDownloadProgress(prev => {
+        const next = new Map(prev);
+        next.set(attachmentId, 100);
+        return next;
+      });
+    } catch (error) {
+      console.error(`[ChatView] Failed to download full-size attachment ${attachmentId}:`, error);
+      setLightboxDownloadProgress(prev => {
+        const next = new Map(prev);
+        next.delete(attachmentId);
+        return next;
+      });
+    }
+  }, [credentials?.signingPublicKey, effectiveAesKey, feed.id, lightboxAttachments]);
 
   // FEAT-067: Open composer overlay with files
   const openComposer = useCallback((files: File[]) => {
@@ -1347,6 +1400,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
           onSend={handleComposerSend}
           onClose={handleComposerClose}
           onAddMore={handleComposerAddMore}
+          onImagePaste={handleImagePaste}
           participants={mentionParticipants}
         />
       )}
@@ -1358,6 +1412,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
           initialIndex={lightboxInitialIndex}
           imageUrls={lightboxImageUrls}
           downloadProgress={lightboxDownloadProgress}
+          onRequestDownload={handleLightboxRequestDownload}
           onClose={handleLightboxClose}
         />
       )}

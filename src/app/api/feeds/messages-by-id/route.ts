@@ -70,6 +70,7 @@ export async function GET(request: NextRequest) {
         blockIndex: msg.blockIndex,
         replyToMessageId: msg.replyToMessageId || undefined,
         keyGeneration: msg.keyGeneration,
+        attachments: msg.attachments,  // FEAT-066: Attachment metadata references
       })),
       hasMoreMessages: response.hasMoreMessages,
       oldestBlockIndex: response.oldestBlockIndex,

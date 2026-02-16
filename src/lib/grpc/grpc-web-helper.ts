@@ -138,6 +138,76 @@ export function parseGrpcResponse(responseBytes: Uint8Array): Uint8Array | null 
   return null;
 }
 
+// Parse ALL data frames from a gRPC-Web streaming response (server-streaming calls)
+export function parseAllGrpcDataFrames(responseBytes: Uint8Array): Uint8Array[] {
+  const frames: Uint8Array[] = [];
+  let offset = 0;
+
+  while (offset < responseBytes.length) {
+    if (offset + 5 > responseBytes.length) break;
+
+    const flag = responseBytes[offset];
+    const messageLength =
+      (responseBytes[offset + 1] << 24) |
+      (responseBytes[offset + 2] << 16) |
+      (responseBytes[offset + 3] << 8) |
+      responseBytes[offset + 4];
+    offset += 5;
+
+    // Data frame (flag = 0)
+    if (flag === 0 && messageLength > 0) {
+      frames.push(responseBytes.slice(offset, offset + messageLength));
+    }
+
+    offset += messageLength;
+  }
+
+  return frames;
+}
+
+// FEAT-066: Build DownloadAttachmentRequest protobuf
+export function buildDownloadAttachmentRequest(
+  attachmentId: string,
+  feedId: string,
+  requesterUserAddress: string,
+  thumbnailOnly: boolean,
+): Uint8Array {
+  const bytes = [
+    ...encodeString(1, attachmentId),
+    ...encodeString(2, feedId),
+    ...encodeString(3, requesterUserAddress),
+    ...(thumbnailOnly ? encodeBoolField(4, true) : []),
+  ];
+  return new Uint8Array(bytes);
+}
+
+// FEAT-066: Parse AttachmentChunk protobuf message -> extract Data bytes (field 1)
+export function parseAttachmentChunkData(chunkBytes: Uint8Array): Uint8Array | null {
+  let offset = 0;
+  while (offset < chunkBytes.length) {
+    const tagResult = parseVarint(chunkBytes, offset);
+    offset += tagResult.bytesRead;
+    const fieldNumber = tagResult.value >>> 3;
+    const wireType = tagResult.value & 0x07;
+
+    if (wireType === 2) { // length-delimited
+      const lenResult = parseVarint(chunkBytes, offset);
+      offset += lenResult.bytesRead;
+      if (fieldNumber === 1) {
+        // Data field
+        return chunkBytes.slice(offset, offset + lenResult.value);
+      }
+      offset += lenResult.value;
+    } else if (wireType === 0) { // varint
+      const valResult = parseVarint(chunkBytes, offset);
+      offset += valResult.bytesRead;
+    } else {
+      break; // unknown wire type
+    }
+  }
+  return null;
+}
+
 // Protobuf message builders for Identity service
 
 export function buildGetIdentityRequest(publicSigningAddress: string): Uint8Array {
@@ -183,6 +253,47 @@ function encodeMessage(fieldNumber: number, messageBytes: number[]): number[] {
   return [...encodeVarint(tag), ...encodeVarint(messageBytes.length), ...messageBytes];
 }
 
+/**
+ * Encode a binary field as Uint8Array (avoids number[] spreading for large data).
+ * Safe for multi-MB attachments unlike encodeBytes() which uses Array.from().
+ */
+function encodeBytesAsUint8Array(fieldNumber: number, data: Uint8Array): Uint8Array {
+  const header = new Uint8Array([...encodeVarint((fieldNumber << 3) | 2), ...encodeVarint(data.length)]);
+  const result = new Uint8Array(header.length + data.length);
+  result.set(header, 0);
+  result.set(data, header.length);
+  return result;
+}
+
+/**
+ * Wrap Uint8Array chunks as a length-delimited protobuf sub-message.
+ * Calculates total length from chunks, then prepends tag + length header.
+ */
+function encodeMessageFromChunks(fieldNumber: number, chunks: Uint8Array[]): Uint8Array {
+  const totalLength = chunks.reduce((sum, c) => sum + c.length, 0);
+  const header = new Uint8Array([...encodeVarint((fieldNumber << 3) | 2), ...encodeVarint(totalLength)]);
+  const result = new Uint8Array(header.length + totalLength);
+  result.set(header, 0);
+  let offset = header.length;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return result;
+}
+
+/** Concatenate multiple Uint8Array chunks into a single Uint8Array. */
+function concatUint8Arrays(chunks: Uint8Array[]): Uint8Array {
+  const totalLength = chunks.reduce((sum, c) => sum + c.length, 0);
+  const result = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return result;
+}
+
 /** FEAT-067: Attachment blob data for submit request. */
 export interface SubmitAttachmentBlob {
   attachmentId: string;
@@ -194,25 +305,29 @@ export function buildSubmitTransactionRequest(
   signedTransaction: string,
   attachments?: SubmitAttachmentBlob[],
 ): Uint8Array {
-  const bytes: number[] = [
-    ...encodeString(1, signedTransaction),
-  ];
+  // For messages with large binary attachments, we must avoid number[] spreading
+  // which causes call stack overflow. Instead, collect Uint8Array chunks and
+  // concatenate them at the end.
+  const chunks: Uint8Array[] = [];
+
+  // Field 1: signedTransaction (string)
+  chunks.push(new Uint8Array(encodeString(1, signedTransaction)));
 
   // FEAT-067: Encode attachment blobs (field 2, repeated message)
   if (attachments) {
     for (const att of attachments) {
-      const attFields: number[] = [
-        ...encodeString(1, att.attachmentId),
-        ...encodeBytes(2, att.encryptedOriginal),
-      ];
+      // Build sub-message fields as chunks, then wrap in length-delimited message
+      const attChunks: Uint8Array[] = [];
+      attChunks.push(new Uint8Array(encodeString(1, att.attachmentId)));
+      attChunks.push(encodeBytesAsUint8Array(2, att.encryptedOriginal));
       if (att.encryptedThumbnail) {
-        attFields.push(...encodeBytes(3, att.encryptedThumbnail));
+        attChunks.push(encodeBytesAsUint8Array(3, att.encryptedThumbnail));
       }
-      bytes.push(...encodeMessage(2, attFields));
+      chunks.push(encodeMessageFromChunks(2, attChunks));
     }
   }
 
-  return new Uint8Array(bytes);
+  return concatUint8Arrays(chunks);
 }
 
 export function buildSearchByDisplayNameRequest(partialDisplayName: string): Uint8Array {
@@ -442,6 +557,15 @@ function parseParticipant(bytes: Uint8Array): FeedParticipant {
   return participant;
 }
 
+// FEAT-066: Parsed attachment reference from proto AttachmentRef
+export interface ParsedAttachmentRef {
+  id: string;
+  hash: string;
+  mimeType: string;
+  size: number;
+  fileName: string;
+}
+
 export interface FeedMessage {
   feedId: string;
   feedMessageId: string;
@@ -453,6 +577,7 @@ export interface FeedMessage {
   authorCommitment?: Uint8Array;  // Protocol Omega: Poseidon(author_secret)
   replyToMessageId?: string;  // Reply to Message: parent message reference
   keyGeneration?: number;  // Group Feeds: Key generation used to encrypt this message
+  attachments?: ParsedAttachmentRef[];  // FEAT-066: Attachment metadata references
 }
 
 // Protocol Omega: EC Point for reaction tallies
@@ -577,6 +702,12 @@ function parseSingleMessage(bytes: Uint8Array): FeedMessage {
         // ReplyToMessageId (optional string) - Reply to Message
         const strValue = parseString(bytes, offset, lenResult.value);
         if (strValue) msg.replyToMessageId = strValue;
+      } else if (fieldNumber === 11) {
+        // FEAT-066: AttachmentRef (repeated embedded message)
+        const attBytes = bytes.slice(offset, offset + lenResult.value);
+        const att = parseAttachmentRef(attBytes);
+        if (!msg.attachments) msg.attachments = [];
+        msg.attachments.push(att);
       } else {
         const strValue = parseString(bytes, offset, lenResult.value);
         if (fieldNumber === 1) msg.feedId = strValue;
@@ -592,6 +723,42 @@ function parseSingleMessage(bytes: Uint8Array): FeedMessage {
   }
 
   return msg;
+}
+
+/**
+ * FEAT-066: Parse a single AttachmentRef proto message.
+ * Proto fields: Id=1(string), Hash=2(string), MimeType=3(string), Size=4(int64), FileName=5(string)
+ */
+function parseAttachmentRef(bytes: Uint8Array): ParsedAttachmentRef {
+  const ref: ParsedAttachmentRef = { id: '', hash: '', mimeType: '', size: 0, fileName: '' };
+  let offset = 0;
+
+  while (offset < bytes.length) {
+    const tagResult = parseVarint(bytes, offset);
+    const tag = tagResult.value;
+    offset += tagResult.bytesRead;
+    const fieldNumber = tag >> 3;
+    const wireType = tag & 0x07;
+
+    if (wireType === 0) {
+      const valueResult = parseVarint(bytes, offset);
+      offset += valueResult.bytesRead;
+      if (fieldNumber === 4) ref.size = valueResult.value;
+    } else if (wireType === 2) {
+      const lenResult = parseVarint(bytes, offset);
+      offset += lenResult.bytesRead;
+      const strValue = parseString(bytes, offset, lenResult.value);
+      if (fieldNumber === 1) ref.id = strValue;
+      if (fieldNumber === 2) ref.hash = strValue;
+      if (fieldNumber === 3) ref.mimeType = strValue;
+      if (fieldNumber === 5) ref.fileName = strValue;
+      offset += lenResult.value;
+    } else {
+      break;
+    }
+  }
+
+  return ref;
 }
 
 function parseTimestamp(bytes: Uint8Array): Date | null {

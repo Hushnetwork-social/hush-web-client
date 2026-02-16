@@ -26,6 +26,7 @@ export {
 export {
   prepareAttachmentForUpload,
   downloadAttachment,
+  fetchAttachmentFromApi,
   validateAttachments,
   getAttachmentCache,
   setAttachmentCache,

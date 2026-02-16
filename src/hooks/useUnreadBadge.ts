@@ -5,19 +5,12 @@
  * - Browser: Flashing tab title showing unread count
  * - Tauri (Windows): Taskbar overlay icon with numeric badge
  * - iOS PWA: App icon numeric badge using Web App Badging API
- *
- * Focus behavior:
- * When the browser tab loses focus (user switches to another tab or app),
- * this hook deselects the current feed. This ensures that any incoming
- * messages are treated as "unread" by the notification system, and the
- * badge indicator will show the count.
  */
 
 'use client';
 
 import { useEffect, useRef, useCallback } from 'react';
 import { useFeedsStore } from '@/modules/feeds';
-import { useAppStore } from '@/stores/useAppStore';
 import { detectPlatform, type Platform } from '@/lib/platform';
 
 // Constants
@@ -134,68 +127,17 @@ async function clearPwaBadge(): Promise<void> {
 /**
  * Hook that updates visual badge indicators based on unread message count.
  * Implements browser tab title flashing, Tauri taskbar overlay, and PWA app badge.
- *
- * When the tab loses focus, this hook deselects the current feed so that
- * incoming messages are treated as unread by the notification system.
  */
 export function useUnreadBadge(): void {
-  // Get the action to deselect the feed
-  const selectFeed = useAppStore((state) => state.selectFeed);
-
-  // Store the feed ID that was selected before losing focus (to restore on regain focus)
-  const previousSelectedFeedRef = useRef<string | null>(null);
-
   // Subscribe to feeds for computing unread count
   const feeds = useFeedsStore((state) => state.feeds);
 
-  // Compute total unread count from all feeds
-  // Note: When tab loses focus, we deselect the feed so incoming messages
-  // are treated as unread by the notification system. This means we can
-  // simply sum all unread counts without complex focus-based logic.
   const unreadCount = feeds.reduce((total, feed) => {
     return total + (feed.unreadCount || 0);
   }, 0);
 
   const flashIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const showingCountRef = useRef(true);
-
-  // Set up focus/blur event listeners
-  // When tab loses focus, deselect the feed so incoming messages are marked as unread
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    const handleBlur = () => {
-      // Save current selection and deselect feed
-      // This ensures incoming messages are treated as "unread" by the notification system
-      const currentSelectedFeed = useAppStore.getState().selectedFeedId;
-      if (currentSelectedFeed) {
-        previousSelectedFeedRef.current = currentSelectedFeed;
-        selectFeed(null);
-      }
-    };
-
-    const handleVisibilityChange = () => {
-      const isVisible = document.visibilityState === 'visible' && document.hasFocus();
-
-      if (!isVisible) {
-        // Tab became hidden - deselect feed
-        const currentSelectedFeed = useAppStore.getState().selectedFeedId;
-        if (currentSelectedFeed) {
-          previousSelectedFeedRef.current = currentSelectedFeed;
-          selectFeed(null);
-        }
-      }
-    };
-
-    // Use both window and document events for better cross-platform support
-    window.addEventListener('blur', handleBlur);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      window.removeEventListener('blur', handleBlur);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [selectFeed]);
 
   // Clear any existing flash interval
   const clearFlashInterval = useCallback(() => {
