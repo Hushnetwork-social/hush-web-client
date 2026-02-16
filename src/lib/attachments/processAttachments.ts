@@ -49,24 +49,39 @@ async function processOneFile(
 
   // Step 1: HEIC conversion (images only)
   if (isHeic(file)) {
-    const result = await convertHeicToJpeg(file, fileName);
-    blob = result.blob;
-    fileName = result.fileName;
-    mimeType = 'image/jpeg';
+    try {
+      const result = await convertHeicToJpeg(file, fileName);
+      blob = result.blob;
+      fileName = result.fileName;
+      mimeType = 'image/jpeg';
+    } catch (error) {
+      console.warn(`[processAttachments] HEIC conversion failed for ${fileName}, sending as-is:`, error);
+      // Fall through - send original file without conversion
+    }
   }
 
   // Step 2: Compress (images only, if over size limit)
   if (isImageType(mimeType)) {
-    const compressed = await compressImage(blob);
-    blob = compressed.blob;
+    try {
+      const compressed = await compressImage(blob);
+      blob = compressed.blob;
+    } catch (error) {
+      console.warn(`[processAttachments] Compression failed for ${fileName}, using original:`, error);
+      // Fall through - use uncompressed image
+    }
   }
 
   // Step 3: Generate thumbnail (images only)
   let thumbnailBytes: Uint8Array | undefined;
   if (isImageType(mimeType)) {
-    const thumbResult = await generateThumbnail(blob);
-    const thumbBuffer = await thumbResult.blob.arrayBuffer();
-    thumbnailBytes = new Uint8Array(thumbBuffer);
+    try {
+      const thumbResult = await generateThumbnail(blob);
+      const thumbBuffer = await thumbResult.blob.arrayBuffer();
+      thumbnailBytes = new Uint8Array(thumbBuffer);
+    } catch (error) {
+      console.warn(`[processAttachments] Thumbnail generation failed for ${fileName}, sending without thumbnail:`, error);
+      // Fall through - send image without thumbnail
+    }
   }
 
   // Step 4: Read file bytes

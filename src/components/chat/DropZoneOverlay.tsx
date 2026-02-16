@@ -41,6 +41,8 @@ export const DropZoneOverlay = memo(function DropZoneOverlay({
       className="absolute inset-0 z-40 flex items-center justify-center bg-black/50 backdrop-blur-sm"
       onDragOver={handleDragOver}
       onDrop={handleDrop}
+      role="region"
+      aria-label="Drop files here to attach"
       data-testid="drop-zone-overlay"
     >
       <div className="flex flex-col items-center gap-3 p-8 border-2 border-dashed border-hush-purple rounded-2xl">

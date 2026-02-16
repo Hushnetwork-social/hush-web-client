@@ -193,4 +193,45 @@ describe('processAttachmentFiles', () => {
     expect(result).toHaveLength(0);
     expect(prepareAttachmentForUpload).not.toHaveBeenCalled();
   });
+
+  it('should gracefully handle HEIC conversion failure', async () => {
+    vi.mocked(isHeic).mockReturnValue(true);
+    vi.mocked(convertHeicToJpeg).mockRejectedValue(new Error('HEIC conversion failed'));
+
+    const file = createMockFile('photo.heic', 'image/heic', 1024);
+    const result = await processAttachmentFiles([file], 'key');
+
+    // Should still succeed - sends original file without conversion
+    expect(result).toHaveLength(1);
+    expect(prepareAttachmentForUpload).toHaveBeenCalled();
+  });
+
+  it('should gracefully handle compression failure', async () => {
+    vi.mocked(compressImage).mockRejectedValue(new Error('Compression failed'));
+
+    const file = createMockFile('photo.jpg', 'image/jpeg', 2048);
+    const result = await processAttachmentFiles([file], 'key');
+
+    // Should still succeed - sends uncompressed image
+    expect(result).toHaveLength(1);
+    expect(prepareAttachmentForUpload).toHaveBeenCalled();
+  });
+
+  it('should gracefully handle thumbnail generation failure', async () => {
+    vi.mocked(generateThumbnail).mockRejectedValue(new Error('Thumbnail generation failed'));
+
+    const file = createMockFile('photo.jpg', 'image/jpeg', 2048);
+    const result = await processAttachmentFiles([file], 'key');
+
+    // Should still succeed - sends image without thumbnail
+    expect(result).toHaveLength(1);
+    // prepareAttachmentForUpload called without thumbnail bytes
+    expect(prepareAttachmentForUpload).toHaveBeenCalledWith(
+      expect.any(Uint8Array),
+      'photo.jpg',
+      'image/jpeg',
+      'key',
+      undefined, // no thumbnail due to failure
+    );
+  });
 });

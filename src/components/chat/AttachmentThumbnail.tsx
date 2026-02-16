@@ -59,6 +59,7 @@ export const AttachmentThumbnail = memo(function AttachmentThumbnail({
         role="button"
         tabIndex={0}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onClick?.(); }}
+        aria-label={`Open file ${attachment.fileName}`}
         data-testid="attachment-file"
       >
         <FileIcon className="w-8 h-8 text-hush-text-accent shrink-0" data-testid="file-icon" />
@@ -93,6 +94,7 @@ export const AttachmentThumbnail = memo(function AttachmentThumbnail({
       role="button"
       tabIndex={0}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onClick?.(); }}
+      aria-label={`View image ${attachment.fileName}`}
       data-testid="attachment-image"
     >
       {/* eslint-disable-next-line @next/next/no-img-element -- blob URLs from decrypted thumbnails can't use next/image */}

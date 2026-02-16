@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, memo } from "react";
 import { X, Download, ChevronLeft, ChevronRight } from "lucide-react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import type { AttachmentRefMeta } from "@/types";
@@ -31,7 +31,7 @@ interface LightboxViewerProps {
  * - Progress indicator during full-size image download
  * - Close via X button, backdrop click, or Escape key
  */
-export function LightboxViewer({
+export const LightboxViewer = memo(function LightboxViewer({
   attachments,
   initialIndex,
   imageUrls,
@@ -279,4 +279,4 @@ export function LightboxViewer({
       </div>
     </div>
   );
-}
+});
