@@ -46,6 +46,7 @@ export {
   type ChatFeedParticipant,
   type NewChatFeedPayload,
   type NewReactionPayload,
+  type AttachmentRefPayload,
 } from './transactions';
 
 export {

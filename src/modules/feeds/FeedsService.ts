@@ -7,7 +7,7 @@
  */
 
 import type { Feed, FeedMessage, ProfileSearchResult, AttachmentRefMeta } from '@/types';
-import { createFeedMessageTransaction, createChatFeedTransaction, hexToBytes } from '@/lib/crypto';
+import { createFeedMessageTransaction, createChatFeedTransaction, hexToBytes, type AttachmentRefPayload } from '@/lib/crypto';
 import { FEED_TYPE_MAP, useFeedsStore } from './useFeedsStore';
 import { useAppStore } from '@/stores';
 import { buildApiUrl } from '@/lib/api-config';
@@ -215,11 +215,23 @@ export enum TransactionStatus {
   REJECTED = 4,         // Transaction validation failed
 }
 
+/** FEAT-067: Base64-encoded attachment blob for JSON transport to the API route. */
+export interface AttachmentBlobPayload {
+  attachmentId: string;
+  encryptedOriginal: string; // base64
+  encryptedThumbnail?: string; // base64
+}
+
 /**
  * Submits a transaction to the blockchain.
  * Returns transaction status for idempotency handling (FEAT-057/FEAT-058).
+ * @param signedTransaction The signed transaction JSON string
+ * @param attachments FEAT-067: Optional base64-encoded attachment blobs
  */
-export async function submitTransaction(signedTransaction: string): Promise<{
+export async function submitTransaction(
+  signedTransaction: string,
+  attachments?: AttachmentBlobPayload[],
+): Promise<{
   successful: boolean;
   message: string;
   status: TransactionStatus;
@@ -227,7 +239,10 @@ export async function submitTransaction(signedTransaction: string): Promise<{
   const response = await fetch(buildApiUrl('/api/blockchain/submit'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ signedTransaction }),
+    body: JSON.stringify({
+      signedTransaction,
+      ...(attachments && attachments.length > 0 && { attachments }),
+    }),
   });
 
   if (!response.ok) {
@@ -243,6 +258,14 @@ export async function submitTransaction(signedTransaction: string): Promise<{
   };
 }
 
+/** FEAT-067: Pre-processed attachment data ready for submission. */
+export interface ProcessedAttachment {
+  ref: AttachmentRefPayload;
+  blobPayload: AttachmentBlobPayload;
+  /** Attachment metadata for optimistic message display */
+  meta: AttachmentRefMeta;
+}
+
 /**
  * Sends a message to a feed.
  * Implements optimistic UI - message appears immediately, then gets confirmed on sync.
@@ -250,12 +273,14 @@ export async function submitTransaction(signedTransaction: string): Promise<{
  * @param feedId The feed to send the message to
  * @param messageContent The message text (will be encrypted)
  * @param replyToMessageId Optional: ID of the message being replied to
+ * @param processedAttachments Optional: FEAT-067 pre-processed attachment data
  * @returns The message ID (GUID) for tracking
  */
 export async function sendMessage(
   feedId: string,
   messageContent: string,
-  replyToMessageId?: string
+  replyToMessageId?: string,
+  processedAttachments?: ProcessedAttachment[],
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
   const credentials = useAppStore.getState().credentials;
   const feed = useFeedsStore.getState().getFeed(feedId);
@@ -304,6 +329,9 @@ export async function sendMessage(
     // Convert private key from hex to bytes
     const privateKeyBytes = hexToBytes(credentials.signingPrivateKey);
 
+    // FEAT-067: Extract attachment refs for the signed payload
+    const attachmentRefs = processedAttachments?.map(a => a.ref);
+
     // Create and sign the transaction
     const { signedTransaction, messageId } = await createFeedMessageTransaction(
       feedId,
@@ -312,7 +340,9 @@ export async function sendMessage(
       privateKeyBytes,
       credentials.signingPublicKey,
       replyToMessageId,
-      keyGeneration
+      keyGeneration,
+      undefined, // existingMessageId
+      attachmentRefs,
     );
 
     // FEAT-058: Create optimistic message with retry tracking fields
@@ -325,6 +355,10 @@ export async function sendMessage(
       timestamp: now,
       isConfirmed: false, // Not yet confirmed - will show single checkmark
       replyToMessageId: replyToMessageId || undefined,  // Reply to Message: pass through parent reference
+      // FEAT-067: Include attachment metadata for immediate thumbnail display
+      ...(processedAttachments && processedAttachments.length > 0 && {
+        attachments: processedAttachments.map(a => a.meta),
+      }),
       // FEAT-058: Retry tracking fields
       status: 'pending',
       retryCount: 0,
@@ -338,8 +372,11 @@ export async function sendMessage(
 
     debugLog(`[FeedsService] Sending message ${messageId} to feed ${feedId}`);
 
-    // Submit to blockchain
-    const result = await submitTransaction(signedTransaction);
+    // FEAT-067: Extract blob payloads for submission
+    const attachmentBlobs = processedAttachments?.map(a => a.blobPayload);
+
+    // Submit to blockchain (with attachment blobs if present)
+    const result = await submitTransaction(signedTransaction, attachmentBlobs);
 
     // FEAT-058: Update message status based on transaction result
     if (!result.successful) {

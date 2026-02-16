@@ -7,13 +7,14 @@ import {
   parseGrpcResponse,
   buildSubmitTransactionRequest,
   parseSubmitTransactionResponse,
+  type SubmitAttachmentBlob,
 } from '@/lib/grpc/grpc-web-helper';
 
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { signedTransaction } = body;
+    const { signedTransaction, attachments: rawAttachments } = body;
 
     if (!signedTransaction) {
       return NextResponse.json(
@@ -22,7 +23,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const requestBytes = buildSubmitTransactionRequest(signedTransaction);
+    // FEAT-067: Decode base64 attachment blobs if present
+    let attachments: SubmitAttachmentBlob[] | undefined;
+    if (Array.isArray(rawAttachments) && rawAttachments.length > 0) {
+      attachments = rawAttachments.map((att: { attachmentId: string; encryptedOriginal: string; encryptedThumbnail?: string }) => ({
+        attachmentId: att.attachmentId,
+        encryptedOriginal: Uint8Array.from(Buffer.from(att.encryptedOriginal, 'base64')),
+        encryptedThumbnail: att.encryptedThumbnail
+          ? Uint8Array.from(Buffer.from(att.encryptedThumbnail, 'base64'))
+          : null,
+      }));
+    }
+
+    const requestBytes = buildSubmitTransactionRequest(signedTransaction, attachments);
     const responseBytes = await grpcCall(
       'rpcHush.HushBlockchain',
       'SubmitSignedTransaction',

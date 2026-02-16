@@ -26,6 +26,8 @@ export {
   markFeedAsRead,  // FEAT-051: Cross-device read sync
   retryMessage,    // FEAT-058: Retry unconfirmed messages
   TransactionStatus,  // FEAT-057: Transaction status enum
+  type ProcessedAttachment,  // FEAT-067: Pre-processed attachment type
+  type AttachmentBlobPayload,  // FEAT-067: Base64 attachment blob for submission
 } from './FeedsService';
 
 /**

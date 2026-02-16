@@ -101,6 +101,16 @@ export interface NewFeedMessagePayload {
   ReplyToMessageId?: string; // Reply to Message: parent message reference
   KeyGeneration?: number; // Group feeds: which key generation was used for encryption
   AuthorCommitment?: string; // Protocol Omega: anonymous reactions commitment (base64)
+  Attachments?: AttachmentRefPayload[]; // FEAT-067: On-chain attachment metadata
+}
+
+// FEAT-067: Attachment reference in signed transaction payload (matches server AttachmentReference)
+export interface AttachmentRefPayload {
+  Id: string;
+  Hash: string;
+  MimeType: string;
+  Size: number;
+  FileName: string;
 }
 
 // ChatFeedParticipant - matches server's ChatFeedParticipant record
@@ -372,6 +382,7 @@ export async function createPersonalFeedTransaction(
  * @param replyToMessageId - Optional: ID of the message being replied to
  * @param keyGeneration - Optional: Key generation for group feed encryption
  * @param existingMessageId - Optional: Existing message ID for retry (FEAT-058 idempotency)
+ * @param attachmentRefs - Optional: FEAT-067 attachment metadata to include in the signed payload
  */
 export async function createFeedMessageTransaction(
   feedId: string,
@@ -381,7 +392,8 @@ export async function createFeedMessageTransaction(
   signingPublicAddress: string,
   replyToMessageId?: string,
   keyGeneration?: number,
-  existingMessageId?: string
+  existingMessageId?: string,
+  attachmentRefs?: AttachmentRefPayload[],
 ): Promise<{ signedTransaction: string; messageId: string }> {
   // FEAT-058: Use existing messageId for retry idempotency, or generate new one
   const messageId = existingMessageId ?? generateGuid();
@@ -396,6 +408,7 @@ export async function createFeedMessageTransaction(
     MessageContent: encryptedContent,
     ...(replyToMessageId && { ReplyToMessageId: replyToMessageId }),
     ...(keyGeneration !== undefined && { KeyGeneration: keyGeneration }),
+    ...(attachmentRefs && attachmentRefs.length > 0 && { Attachments: attachmentRefs }),
   };
 
   // Create unsigned transaction

@@ -16,10 +16,12 @@ import { GroupSettingsPanel } from "@/components/groups/GroupSettingsPanel";
 import { JumpToBottomButton } from "./JumpToBottomButton";
 import { MentionNavButton, getUnreadCount, getUnreadMentions, markMentionRead, useMessageHighlight } from "@/lib/mentions";
 import { useAppStore } from "@/stores";
-import { useFeedsStore, sendMessage, markFeedAsRead, retryMessage } from "@/modules/feeds";
+import { useFeedsStore, sendMessage, markFeedAsRead, retryMessage, type ProcessedAttachment } from "@/modules/feeds";
+import { processAttachmentFiles } from "@/lib/attachments/processAttachments";
+import { LightboxViewer } from "./LightboxViewer";
 import { useFeedReactions } from "@/hooks/useFeedReactions";
 import { useVirtualKeyboard } from "@/hooks/useVirtualKeyboard";
-import type { Feed, FeedMessage, GroupFeedMember, SettingsChangeRecord } from "@/types";
+import type { Feed, FeedMessage, GroupFeedMember, SettingsChangeRecord, AttachmentRefMeta } from "@/types";
 import { onVisibilityChange, type SettingsChange } from "@/lib/events";
 import { debugLog } from "@/lib/debug-logger";
 import { announceMentionNavigation } from "@/lib/a11y";
@@ -1112,6 +1114,38 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // FEAT-067: Lightbox state
+  const [lightboxAttachments, setLightboxAttachments] = useState<AttachmentRefMeta[] | null>(null);
+  const [lightboxInitialIndex, setLightboxInitialIndex] = useState(0);
+
+  // FEAT-067: Thumbnail blob URLs for messages
+  // Managed by useAttachmentThumbnails hook when download function is available.
+  // For locally sent messages, thumbnails are added directly to the cache.
+  const [thumbnailUrls] = useState<Map<string, string | null>>(new Map());
+
+  // FEAT-067: Lightbox image URLs and download progress
+  const [lightboxImageUrls, setLightboxImageUrls] = useState<Map<string, string>>(new Map());
+  const [lightboxDownloadProgress, setLightboxDownloadProgress] = useState<Map<string, number>>(new Map());
+
+  // FEAT-067: Open lightbox for a message's attachments
+  const handleAttachmentClick = useCallback((messageId: string, attachmentId: string, index: number) => {
+    const message = regularMessages.find(m => m.id === messageId);
+    if (!message?.attachments) return;
+    setLightboxAttachments(message.attachments);
+    setLightboxInitialIndex(index);
+  }, [regularMessages]);
+
+  // FEAT-067: Close lightbox
+  const handleLightboxClose = useCallback(() => {
+    // Revoke lightbox image URLs
+    for (const url of lightboxImageUrls.values()) {
+      URL.revokeObjectURL(url);
+    }
+    setLightboxAttachments(null);
+    setLightboxImageUrls(new Map());
+    setLightboxDownloadProgress(new Map());
+  }, [lightboxImageUrls]);
+
   // FEAT-067: Open composer overlay with files
   const openComposer = useCallback((files: File[]) => {
     const limited = files.slice(0, MAX_ATTACHMENTS_PER_MESSAGE);
@@ -1144,20 +1178,53 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
     messageInputRef.current?.focus();
   }, [composerFiles]);
 
-  // FEAT-067: Send from composer overlay
+  // FEAT-067: Send from composer overlay (with attachment processing pipeline)
   const handleComposerSend = useCallback(async (files: File[], text: string) => {
-    // For now, just send the text message (attachment upload integration comes in Phase 6)
-    // TODO Phase 6: Process files through image pipeline, upload, include in transaction
-    if (text) {
-      await handleSend(text);
-    }
+    // Close overlay immediately for responsive UX
+    setIsComposerOpen(false);
+
     // Revoke preview URLs
     for (const cf of composerFiles) {
       URL.revokeObjectURL(cf.previewUrl);
     }
-    setIsComposerOpen(false);
     setComposerFiles([]);
-  }, [composerFiles, handleSend]);
+
+    // Determine the AES key for encryption
+    const aesKey = effectiveAesKey;
+    if (!aesKey) {
+      console.error('[ChatView] No AES key available for attachment encryption');
+      if (text) await handleSend(text);
+      return;
+    }
+
+    let processedAttachments: ProcessedAttachment[] | undefined;
+
+    // Process files through the image pipeline if there are any
+    if (files.length > 0) {
+      try {
+        processedAttachments = await processAttachmentFiles(files, aesKey);
+      } catch (error) {
+        console.error('[ChatView] Attachment processing failed:', error);
+        // Still send the text if processing fails
+        if (text) await handleSend(text);
+        return;
+      }
+    }
+
+    // Send message with attachments (or just text if no files)
+    const messageContent = text || '';
+    const result = await sendMessage(feed.id, messageContent, replyingTo?.id, processedAttachments);
+
+    if (!result.success) {
+      console.error('[ChatView] Failed to send message with attachments:', result.error);
+    } else {
+      setReplyingTo(null);
+    }
+
+    if (onSendMessage) {
+      onSendMessage(messageContent);
+    }
+  }, [composerFiles, effectiveAesKey, feed.id, handleSend, onSendMessage, replyingTo?.id]);
 
   // FEAT-067: Add more files to composer
   const handleComposerAddMore = useCallback(() => {
@@ -1281,6 +1348,17 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
           onClose={handleComposerClose}
           onAddMore={handleComposerAddMore}
           participants={mentionParticipants}
+        />
+      )}
+
+      {/* FEAT-067: Lightbox viewer */}
+      {lightboxAttachments && (
+        <LightboxViewer
+          attachments={lightboxAttachments}
+          initialIndex={lightboxInitialIndex}
+          imageUrls={lightboxImageUrls}
+          downloadProgress={lightboxDownloadProgress}
+          onClose={handleLightboxClose}
         />
       )}
       {/* Chat Header - compact mode when virtual keyboard visible on Android */}
@@ -1496,6 +1574,9 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
                     senderName={getSenderDisplayName(item.senderPublicKey, item.senderName)}
                     senderRole={getSenderRole(item.senderPublicKey)}
                     onRetryClick={item.status === 'failed' ? () => retryMessage(item.feedId, item.id, true) : undefined}
+                    attachments={item.attachments}
+                    attachmentThumbnails={thumbnailUrls}
+                    onAttachmentClick={(attId, idx) => handleAttachmentClick(item.id, attId, idx)}
                   />
                 )}
               </div>

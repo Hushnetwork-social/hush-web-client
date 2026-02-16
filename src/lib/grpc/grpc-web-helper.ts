@@ -171,8 +171,47 @@ export function buildGetFeedMessagesRequest(
   return new Uint8Array(bytes);
 }
 
-export function buildSubmitTransactionRequest(signedTransaction: string): Uint8Array {
-  const bytes = encodeString(1, signedTransaction);
+// FEAT-067: Encode raw bytes as a length-delimited protobuf field
+export function encodeBytes(fieldNumber: number, data: Uint8Array): number[] {
+  const tag = (fieldNumber << 3) | 2; // wire type 2 = length-delimited
+  return [...encodeVarint(tag), ...encodeVarint(data.length), ...Array.from(data)];
+}
+
+// FEAT-067: Encode a sub-message as a length-delimited protobuf field
+function encodeMessage(fieldNumber: number, messageBytes: number[]): number[] {
+  const tag = (fieldNumber << 3) | 2; // wire type 2 = length-delimited
+  return [...encodeVarint(tag), ...encodeVarint(messageBytes.length), ...messageBytes];
+}
+
+/** FEAT-067: Attachment blob data for submit request. */
+export interface SubmitAttachmentBlob {
+  attachmentId: string;
+  encryptedOriginal: Uint8Array;
+  encryptedThumbnail: Uint8Array | null;
+}
+
+export function buildSubmitTransactionRequest(
+  signedTransaction: string,
+  attachments?: SubmitAttachmentBlob[],
+): Uint8Array {
+  const bytes: number[] = [
+    ...encodeString(1, signedTransaction),
+  ];
+
+  // FEAT-067: Encode attachment blobs (field 2, repeated message)
+  if (attachments) {
+    for (const att of attachments) {
+      const attFields: number[] = [
+        ...encodeString(1, att.attachmentId),
+        ...encodeBytes(2, att.encryptedOriginal),
+      ];
+      if (att.encryptedThumbnail) {
+        attFields.push(...encodeBytes(3, att.encryptedThumbnail));
+      }
+      bytes.push(...encodeMessage(2, attFields));
+    }
+  }
+
   return new Uint8Array(bytes);
 }
 
@@ -1067,12 +1106,6 @@ export function parseGetUnreadCountsResponse(messageBytes: Uint8Array): GetUnrea
 }
 
 // ============= Reactions Service Builders & Parsers =============
-
-// Encode bytes field for protobuf (wire type 2)
-function encodeBytes(fieldNumber: number, value: Uint8Array): number[] {
-  const tag = (fieldNumber << 3) | 2; // wire type 2 = length-delimited
-  return [...encodeVarint(tag), ...encodeVarint(value.length), ...value];
-}
 
 /**
  * Build GetTalliesRequest for binary gRPC
