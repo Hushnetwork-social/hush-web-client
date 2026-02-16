@@ -72,6 +72,13 @@ export async function compressImage(
     return { blob: file, wasCompressed: false };
   }
 
+  // Skip compression for animated GIFs — Canvas rendering destroys animation frames.
+  // GIFs are already LZW-compressed; re-encoding through Canvas produces a single
+  // static frame, which is strictly worse. Pass through as-is.
+  if (file.type === 'image/gif') {
+    return { blob: file, wasCompressed: false };
+  }
+
   const mimeType = file.type || 'image/jpeg';
   const supportsQuality = mimeType === 'image/jpeg' || mimeType === 'image/webp';
 
