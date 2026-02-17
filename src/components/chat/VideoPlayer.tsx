@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect, memo } from "react";
-import { Play } from "lucide-react";
+import { Play, Pause } from "lucide-react";
 import { formatDuration } from "./VideoThumbnail";
 
 interface VideoPlayerProps {
@@ -171,6 +171,7 @@ export const VideoPlayer = memo(function VideoPlayer({
         src={src}
         poster={poster}
         className="max-w-[90vw] max-h-[85vh] object-contain rounded-lg"
+        preload="metadata"
         playsInline
         onClick={(e) => {
           e.stopPropagation();
@@ -181,14 +182,37 @@ export const VideoPlayer = memo(function VideoPlayer({
         data-testid="video-player-element"
       />
 
-      {/* Center play/pause overlay */}
+      {/* Center play/pause overlay - container is pointer-events-none,
+           but the icon button itself is pointer-events-auto so Playwright
+           (and users) can click it directly without fighting autoplay policy. */}
       <div
-        className={`absolute inset-0 flex items-center justify-center pointer-events-none transition-opacity duration-200 ${
+        className={`absolute inset-0 z-10 flex items-center justify-center pointer-events-none transition-opacity duration-200 ${
           controlsVisible ? "opacity-100" : "opacity-0"
         }`}
+        data-testid={isPlaying ? "video-state-playing" : "video-state-paused"}
       >
-        {!isPlaying && (
-          <div className="w-16 h-16 rounded-full bg-black/50 flex items-center justify-center">
+        {isPlaying ? (
+          <div
+            className="w-16 h-16 rounded-full bg-black/50 flex items-center justify-center pointer-events-auto cursor-pointer"
+            data-testid="video-pause-icon"
+            onClick={(e) => {
+              e.stopPropagation();
+              togglePlay();
+              resetHideTimer();
+            }}
+          >
+            <Pause className="w-8 h-8 text-white fill-white" />
+          </div>
+        ) : (
+          <div
+            className="w-16 h-16 rounded-full bg-black/50 flex items-center justify-center pointer-events-auto cursor-pointer"
+            data-testid="video-play-icon"
+            onClick={(e) => {
+              e.stopPropagation();
+              togglePlay();
+              resetHideTimer();
+            }}
+          >
             <Play className="w-8 h-8 text-white fill-white ml-0.5" />
           </div>
         )}
