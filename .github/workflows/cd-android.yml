@@ -133,10 +133,34 @@ jobs:
           echo "Updated tauri.conf.json version to ${VERSION}"
 
       - name: Setup Android signing
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           # Decode keystore from base64 secret
           echo "${{ secrets.ANDROID_KEYSTORE }}" | base64 -d > /tmp/release.keystore
           echo "Keystore decoded to /tmp/release.keystore"
+
+          # Verify keystore is valid and credentials match
+          echo "Verifying keystore..."
+          FILESIZE=$(stat -f%z /tmp/release.keystore 2>/dev/null || stat --printf="%s" /tmp/release.keystore 2>/dev/null)
+          echo "Keystore file size: ${FILESIZE} bytes"
+
+          # Test that store password works
+          keytool -list -keystore /tmp/release.keystore -storepass "${ANDROID_KEYSTORE_PASSWORD}" > /dev/null 2>&1 \
+            && echo "Store password: OK" \
+            || { echo "ERROR: Store password does not match keystore"; exit 1; }
+
+          # Show alias (masked password)
+          ALIASES=$(keytool -list -keystore /tmp/release.keystore -storepass "${ANDROID_KEYSTORE_PASSWORD}" 2>/dev/null | grep "PrivateKeyEntry" || true)
+          echo "Key entries found: ${ALIASES}"
+          echo "Expected alias: ${ANDROID_KEY_ALIAS}"
+
+          # Test key password
+          keytool -exportcert -keystore /tmp/release.keystore -alias "${ANDROID_KEY_ALIAS}" -storepass "${ANDROID_KEYSTORE_PASSWORD}" -keypass "${ANDROID_KEY_PASSWORD}" > /dev/null 2>&1 \
+            && echo "Key password: OK" \
+            || echo "WARNING: Key password may not match (this is OK if storepass==keypass)"
 
       - name: Setup Google Services
         run: |
