@@ -1,6 +1,11 @@
 /**
  * FEAT-066 / F2-006: Client-side AES encryption of attachments
  * Tests binary AES-256-GCM encrypt/decrypt roundtrip.
+ *
+ * @vitest-environment node
+ * Node environment required: crypto.subtle and ArrayBuffer must share the same
+ * realm. In jsdom, ArrayBuffer is from jsdom's realm but crypto.subtle is native,
+ * causing "not instance of ArrayBuffer" errors.
  */
 
 import { describe, it, expect } from 'vitest';
