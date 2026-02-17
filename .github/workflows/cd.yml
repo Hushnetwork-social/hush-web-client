@@ -152,7 +152,7 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
           GHCR_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
         run: |
-          ssh -i ~/.ssh/lightsail.pem ${SSH_USER}@${SSH_HOST} "IMAGE_TAG=${IMAGE_TAG}" "GRPC_SERVER_URL=${GRPC_SERVER_URL}" "GHCR_TOKEN=${GHCR_TOKEN}" "GHCR_IMAGE=${GHCR_IMAGE}" 'bash -s' << 'DEPLOY_SCRIPT'
+          ssh -i ~/.ssh/lightsail.pem -o ServerAliveInterval=30 -o ServerAliveCountMax=10 ${SSH_USER}@${SSH_HOST} "IMAGE_TAG=${IMAGE_TAG}" "GRPC_SERVER_URL=${GRPC_SERVER_URL}" "GHCR_TOKEN=${GHCR_TOKEN}" "GHCR_IMAGE=${GHCR_IMAGE}" 'bash -s' << 'DEPLOY_SCRIPT'
             set -e
 
             echo "Starting Hush Web Client deployment of version ${IMAGE_TAG}..."
