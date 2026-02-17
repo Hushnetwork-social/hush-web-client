@@ -20,7 +20,6 @@
 /build
 
 # misc
-.DS_Store
 *.pem
 
 # debug
@@ -42,3 +41,28 @@ google-services.json
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+## Operating System Files
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+## IDE
+.vs/
+.idea
+.vscode
+
+## Tools
+.qodo/
+.claude/settings.local.json

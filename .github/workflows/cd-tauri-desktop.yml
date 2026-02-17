@@ -1,0 +1,281 @@
+name: CD - Tauri Desktop App
+
+on:
+  # Trigger on version tags
+  push:
+    tags:
+      - 'TauriDesktop-v[0-9]+.[0-9]+.[0-9]+'
+
+  # Trigger from WebClient deployment
+  repository_dispatch:
+    types: [build-tauri]
+
+  # Manual trigger option
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (e.g., 0.2.0). Leave empty to use latest commit.'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows only for now - uncomment others when needed
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            name: windows
+          # - platform: ubuntu-22.04
+          #   target: x86_64-unknown-linux-gnu
+          #   name: linux
+          # - platform: macos-latest
+          #   target: x86_64-apple-darwin
+          #   name: macos-intel
+          # - platform: macos-latest
+          #   target: aarch64-apple-darwin
+          #   name: macos-arm
+
+    runs-on: ${{ matrix.platform }}
+    environment: HushServerNode AWS CD
+
+    steps:
+      # ============================================
+      # CHECKOUT & VERSION EXTRACTION
+      # ============================================
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
+            # Triggered by WebClient deployment
+            VERSION="${{ github.event.client_payload.version }}"
+            # Remove 'v' prefix if present
+            VERSION="${VERSION#v}"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            if [[ -n "${{ inputs.version }}" ]]; then
+              VERSION="${{ inputs.version }}"
+            else
+              VERSION="manual-$(date +%Y%m%d-%H%M%S)"
+            fi
+          else
+            # Extract version from tag: TauriDesktop-v0.2.0 -> 0.2.0
+            VERSION=${GITHUB_REF#refs/tags/TauriDesktop-v}
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      # ============================================
+      # SETUP BUILD ENVIRONMENT
+      # ============================================
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          cache-on-failure: true
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      # ============================================
+      # BUILD FRONTEND
+      # ============================================
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm run test:run
+
+      - name: Create production environment file
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          # Create .env.production with production URLs and version
+          cat > .env.production << EOF
+          # Production environment - HushNetwork API server
+          NEXT_PUBLIC_GRPC_URL=https://api.hushnetwork.social
+          NEXT_PUBLIC_API_URL=https://chat.hushnetwork.social
+          NEXT_PUBLIC_APP_VERSION=v${VERSION}
+          EOF
+
+          # Also set in .env.local to ensure it's picked up
+          cp .env.production .env.local
+
+          echo "Created production environment with version v${VERSION}:"
+          cat .env.production
+
+      - name: Remove API routes for static export
+        shell: bash
+        run: |
+          # API routes cannot be used with static export
+          # Tauri app calls production server API directly, so we don't need them
+          rm -rf src/app/api
+          echo "Removed API routes for static export"
+
+      - name: Update version in tauri.conf.json
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          # Update version in tauri.conf.json (determines MSI filename)
+          jq ".version = \"${VERSION}\"" src-tauri/tauri.conf.json > tmp.json && mv tmp.json src-tauri/tauri.conf.json
+          echo "Updated tauri.conf.json version to ${VERSION}"
+          grep '"version"' src-tauri/tauri.conf.json
+
+      # ============================================
+      # BUILD TAURI APP
+      # ============================================
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Production environment variables
+          NEXT_PUBLIC_GRPC_URL: https://api.hushnetwork.social
+          NEXT_PUBLIC_API_URL: https://chat.hushnetwork.social
+          NEXT_PUBLIC_APP_VERSION: v${{ steps.version.outputs.version }}
+          # Update signing keys (required for auto-update)
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: TauriDesktop-v${{ steps.version.outputs.version }}
+          releaseName: 'Hush Feeds Desktop v${{ steps.version.outputs.version }}'
+          includeRelease: true
+          includeUpdaterJson: true
+          releaseBody: |
+            ## Hush Feeds Desktop Application v${{ steps.version.outputs.version }}
+
+            Secure, decentralized messaging on the HushNetwork blockchain.
+
+            ### Download
+
+            Choose the installer for your platform from the assets below.
+
+            ### Auto-Update
+
+            Existing installations will automatically notify you of this update.
+
+            ### Security Notes
+
+            - **Windows**: You may see a SmartScreen warning. Click "More info" -> "Run anyway"
+            - **macOS**: Right-click the app -> "Open" to bypass Gatekeeper on first launch
+            - **Linux**: AppImage needs execute permission: `chmod +x filename.AppImage`
+
+            ### What's New
+
+            See the [commit history](https://github.com/Hushnetwork-social/hush-web-client/commits/master) for detailed changes.
+          releaseDraft: true
+          prerelease: false
+          args: --target ${{ matrix.target }}
+
+      # ============================================
+      # BUILD SUMMARY
+      # ============================================
+
+      - name: Build Summary
+        shell: bash
+        run: |
+          echo "### Tauri Desktop Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Platform:** ${{ matrix.name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Target:** \`${{ matrix.target }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** \`${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:**" >> $GITHUB_STEP_SUMMARY
+          echo "- gRPC URL: \`https://api.hushnetwork.social\`" >> $GITHUB_STEP_SUMMARY
+          echo "- API URL: \`https://chat.hushnetwork.social\`" >> $GITHUB_STEP_SUMMARY
+
+      # ============================================
+      # UPLOAD TO DOWNLOADS SERVER
+      # ============================================
+
+      - name: Setup SSH key
+        if: matrix.name == 'windows'
+        shell: bash
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.AWS_SSH_PRIVATE_KEY }}" > ~/.ssh/lightsail.pem
+          chmod 600 ~/.ssh/lightsail.pem
+          ssh-keyscan -H ${{ secrets.AWS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Upload MSI to downloads server
+        if: matrix.name == 'windows'
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.AWS_HOST }}
+          SSH_USER: ${{ secrets.AWS_SSH_USER }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # Find the MSI file
+          echo "Searching for MSI file..."
+          find src-tauri/target -name "*.msi" 2>/dev/null || echo "No MSI files found"
+
+          MSI_FILE=$(find src-tauri/target -name "*.msi" 2>/dev/null | head -1)
+
+          if [ -z "$MSI_FILE" ]; then
+            echo "MSI file not found!"
+            echo "Listing target directory structure:"
+            find src-tauri/target -type d -name "bundle" 2>/dev/null | head -10
+            exit 1
+          fi
+
+          MSI_FILENAME=$(basename "$MSI_FILE")
+          echo "Found MSI: $MSI_FILENAME"
+
+          # Calculate SHA256
+          SHA256=$(sha256sum "$MSI_FILE" | cut -d' ' -f1)
+          SIZE=$(ls -lh "$MSI_FILE" | awk '{print $5}')
+
+          echo "Size: $SIZE, SHA256: ${SHA256:0:16}..."
+
+          # Upload MSI file
+          echo "Uploading to downloads server..."
+          scp -i ~/.ssh/lightsail.pem "$MSI_FILE" ${SSH_USER}@${SSH_HOST}:/mnt/hush_db_data/downloads/windows/
+
+          # Update releases.json
+          echo "Updating releases.json..."
+          ssh -i ~/.ssh/lightsail.pem ${SSH_USER}@${SSH_HOST} << UPDATEJSON
+            cd /mnt/hush_db_data/downloads
+            jq '.windows.version = "${VERSION}" |
+                .windows.filename = "${MSI_FILENAME}" |
+                .windows.url = "https://downloads.hushnetwork.social/windows/${MSI_FILENAME}" |
+                .windows.size = "${SIZE}" |
+                .windows.sha256 = "${SHA256}" |
+                .lastUpdated = "$(date -u +%Y-%m-%dT%H:%M:%SZ)"' \
+              releases.json > tmp.json && mv tmp.json releases.json
+            echo "releases.json updated"
+            cat releases.json
+          UPDATEJSON
+
+          echo "Uploaded ${MSI_FILENAME} to downloads.hushnetwork.social"
+
+      - name: Cleanup SSH key
+        if: always() && matrix.name == 'windows'
+        shell: bash
+        run: rm -f ~/.ssh/lightsail.pem

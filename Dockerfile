@@ -6,7 +6,7 @@ FROM node:20-alpine AS deps
 WORKDIR /app
 
 # Copy package files
-COPY hush-web-client/package.json hush-web-client/package-lock.json ./
+COPY package.json package-lock.json ./
 
 # Install dependencies
 RUN npm ci
@@ -24,7 +24,7 @@ ARG NEXT_PUBLIC_DEBUG_LOGGING=false
 COPY --from=deps /app/node_modules ./node_modules
 
 # Copy source code
-COPY hush-web-client/ ./
+COPY . ./
 
 # Set environment variables for build
 # NEXT_PUBLIC_* variables are baked into client-side JS at build time

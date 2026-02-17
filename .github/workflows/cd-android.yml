@@ -1,0 +1,252 @@
+name: CD - Android App
+
+on:
+  # Trigger on version tags
+  push:
+    tags:
+      - 'Android-v[0-9]+.[0-9]+.[0-9]+'
+
+  # Trigger from WebClient deployment
+  repository_dispatch:
+    types: [build-android]
+
+  # Manual trigger option
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (e.g., 0.2.10)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    environment: HushServerNode AWS CD
+
+    steps:
+      # ============================================
+      # CHECKOUT & VERSION EXTRACTION
+      # ============================================
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
+            # Triggered by WebClient deployment
+            VERSION="${{ github.event.client_payload.version }}"
+            # Remove 'v' prefix if present
+            VERSION="${VERSION#v}"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.version }}" ]]; then
+            VERSION="${{ inputs.version }}"
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
+            # Extract version from tag: Android-v0.2.10 -> 0.2.10
+            VERSION=${GITHUB_REF#refs/tags/Android-v}
+          else
+            VERSION="manual-$(date +%Y%m%d-%H%M%S)"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      # ============================================
+      # SETUP BUILD ENVIRONMENT
+      # ============================================
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Android NDK
+        run: |
+          sdkmanager --install "ndk;27.0.11902837"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.11902837" >> $GITHUB_ENV
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          cache-on-failure: true
+
+      # ============================================
+      # BUILD FRONTEND
+      # ============================================
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Create production environment file
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          cat > .env.production << EOF
+          NEXT_PUBLIC_GRPC_URL=https://api.hushnetwork.social
+          NEXT_PUBLIC_API_URL=https://chat.hushnetwork.social
+          NEXT_PUBLIC_APP_VERSION=v${VERSION}
+          EOF
+          cp .env.production .env.local
+          echo "Created production environment with version v${VERSION}"
+          cat .env.production
+
+      - name: Remove API routes for static export
+        run: |
+          rm -rf src/app/api
+          echo "Removed API routes for static export"
+
+      # ============================================
+      # BUILD ANDROID APK
+      # ============================================
+
+      - name: Initialize Android project
+        run: |
+          npm run tauri android init || true
+          echo "Android project initialized"
+
+      - name: Update version in tauri.conf.json
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          # Update version in tauri.conf.json
+          jq ".version = \"${VERSION}\"" src-tauri/tauri.conf.json > tmp.json && mv tmp.json src-tauri/tauri.conf.json
+          echo "Updated tauri.conf.json version to ${VERSION}"
+
+      - name: Setup Android signing
+        run: |
+          # Decode keystore from base64 secret
+          echo "${{ secrets.ANDROID_KEYSTORE }}" | base64 -d > /tmp/release.keystore
+          echo "Keystore decoded to /tmp/release.keystore"
+
+      - name: Setup Google Services
+        run: |
+          # Decode google-services.json from base64 secret
+          echo "${{ secrets.GOOGLE_SERVICES_JSON }}" | base64 -d > src-tauri/gen/android/app/google-services.json
+          echo "google-services.json placed"
+
+      - name: Build Android APK
+        env:
+          NEXT_PUBLIC_GRPC_URL: https://api.hushnetwork.social
+          NEXT_PUBLIC_API_URL: https://chat.hushnetwork.social
+          NEXT_PUBLIC_APP_VERSION: v${{ steps.version.outputs.version }}
+          NEXT_PUBLIC_DEBUG_LOGGING: 'true'
+          # Signing environment variables
+          ANDROID_KEYSTORE_PATH: /tmp/release.keystore
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          npm run tauri android build -- --apk true
+          echo "Android APK built"
+
+      - name: Cleanup keystore
+        if: always()
+        run: rm -f /tmp/release.keystore
+
+      - name: Find and rename APK
+        id: apk
+        run: |
+          # Find the release APK
+          APK_PATH=$(find src-tauri/gen/android -name "*.apk" -path "*/release/*" 2>/dev/null | head -1)
+
+          if [ -z "$APK_PATH" ]; then
+            # Fallback: look for any APK
+            APK_PATH=$(find src-tauri/gen/android -name "*.apk" 2>/dev/null | head -1)
+          fi
+
+          if [ -z "$APK_PATH" ]; then
+            echo "APK file not found!"
+            find src-tauri/gen/android -name "*.apk" -o -name "*.aab" 2>/dev/null || echo "No APK/AAB files found"
+            exit 1
+          fi
+
+          VERSION="${{ steps.version.outputs.version }}"
+          NEW_NAME="HushFeeds-v${VERSION}-release.apk"
+          cp "$APK_PATH" "./${NEW_NAME}"
+
+          echo "path=./${NEW_NAME}" >> $GITHUB_OUTPUT
+          echo "filename=${NEW_NAME}" >> $GITHUB_OUTPUT
+          echo "APK: ${NEW_NAME}"
+
+      # ============================================
+      # UPLOAD TO DOWNLOADS SERVER
+      # ============================================
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.AWS_SSH_PRIVATE_KEY }}" > ~/.ssh/lightsail.pem
+          chmod 600 ~/.ssh/lightsail.pem
+          ssh-keyscan -H ${{ secrets.AWS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Upload APK to downloads server
+        env:
+          SSH_HOST: ${{ secrets.AWS_HOST }}
+          SSH_USER: ${{ secrets.AWS_SSH_USER }}
+          VERSION: ${{ steps.version.outputs.version }}
+          APK_FILE: ${{ steps.apk.outputs.path }}
+          APK_FILENAME: ${{ steps.apk.outputs.filename }}
+        run: |
+          # Calculate SHA256
+          SHA256=$(sha256sum "$APK_FILE" | cut -d' ' -f1)
+          SIZE=$(ls -lh "$APK_FILE" | awk '{print $5}')
+
+          echo "Size: $SIZE, SHA256: ${SHA256:0:16}..."
+
+          # Upload APK file
+          echo "Uploading to downloads server..."
+          scp -i ~/.ssh/lightsail.pem "$APK_FILE" ${SSH_USER}@${SSH_HOST}:/mnt/hush_db_data/downloads/android/
+
+          # Update releases.json
+          echo "Updating releases.json..."
+          ssh -i ~/.ssh/lightsail.pem ${SSH_USER}@${SSH_HOST} << UPDATEJSON
+            cd /mnt/hush_db_data/downloads
+            jq '.android.version = "${VERSION}" |
+                .android.filename = "${APK_FILENAME}" |
+                .android.url = "https://downloads.hushnetwork.social/android/${APK_FILENAME}" |
+                .android.size = "${SIZE}" |
+                .android.sha256 = "${SHA256}" |
+                .lastUpdated = "$(date -u +%Y-%m-%dT%H:%M:%SZ)"' \
+              releases.json > tmp.json && mv tmp.json releases.json
+            echo "releases.json updated"
+            cat releases.json
+          UPDATEJSON
+
+          echo "Uploaded ${APK_FILENAME} to downloads.hushnetwork.social"
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/lightsail.pem
+
+      # ============================================
+      # BUILD SUMMARY
+      # ============================================
+
+      - name: Build Summary
+        run: |
+          echo "### Android APK Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** \`${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**APK:** \`${{ steps.apk.outputs.filename }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Download:** [downloads.hushnetwork.social/android/${{ steps.apk.outputs.filename }}](https://downloads.hushnetwork.social/android/${{ steps.apk.outputs.filename }})" >> $GITHUB_STEP_SUMMARY
