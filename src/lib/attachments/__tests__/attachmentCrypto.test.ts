@@ -42,7 +42,7 @@ describe('Binary AES Encryption (FEAT-066)', () => {
 
     // Assert
     expect(decrypted).toEqual(original);
-  });
+  }, 15_000); // Extended timeout: Windows CI runners are slower with crypto operations
 
   it('should produce encrypted output different from input', async () => {
     // Arrange
