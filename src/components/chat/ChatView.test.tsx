@@ -434,6 +434,10 @@ describe('ChatView', () => {
     });
 
     it('should show unavailable message placeholder for reply to non-existent message', async () => {
+      // Mock fetchMessageById to return null immediately (avoids flaky gRPC timeout in CI)
+      const originalFetchMessageById = useFeedsStore.getState().fetchMessageById;
+      useFeedsStore.setState({ fetchMessageById: vi.fn().mockResolvedValue(null) });
+
       useFeedsStore.getState().addMessages('feed-123', [
         {
           id: 'reply-to-deleted',
@@ -452,6 +456,9 @@ describe('ChatView', () => {
       await waitFor(() => {
         expect(screen.getByText('Original message unavailable')).toBeInTheDocument();
       });
+
+      // Restore original
+      useFeedsStore.setState({ fetchMessageById: originalFetchMessageById });
     });
   });
 
