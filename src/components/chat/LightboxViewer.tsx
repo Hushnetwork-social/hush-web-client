@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useRef, memo } from "react";
 import { X, Download, ChevronLeft, ChevronRight, Play, Video } from "lucide-react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import { getFileTypeIcon, formatFileSize } from "@/lib/attachments/fileTypeIcons";
+import { VideoPlayer } from "./VideoPlayer";
 import type { AttachmentRefMeta } from "@/types";
 
 interface LightboxViewerProps {
@@ -59,12 +60,12 @@ export const LightboxViewer = memo(function LightboxViewer({
   const thumbnailUrl = currentAttachment ? thumbnailUrls?.get(currentAttachment.id) : undefined;
   const hasMultiple = attachments.length > 1;
 
-  // Auto-request download for images only (videos/documents download on user click)
+  // Auto-request download for images and videos (documents download on user click)
   useEffect(() => {
-    if (currentAttachment && !currentUrl && isImage && onRequestDownload) {
+    if (currentAttachment && !currentUrl && (isImage || isVideo) && onRequestDownload) {
       onRequestDownload(currentAttachment.id);
     }
-  }, [currentAttachment, currentUrl, isImage, onRequestDownload]);
+  }, [currentAttachment, currentUrl, isImage, isVideo, onRequestDownload]);
 
   // Escape key handler
   useEffect(() => {
@@ -264,8 +265,14 @@ export const LightboxViewer = memo(function LightboxViewer({
             </TransformComponent>
           </TransformWrapper>
         ) : isVideo && currentAttachment ? (
-          // FEAT-068: Video view - thumbnail frame with play overlay, or fallback
-          thumbnailUrl ? (
+          // FEAT-068: Video view - full player when downloaded, or thumbnail/fallback while loading
+          currentUrl ? (
+            <VideoPlayer
+              src={currentUrl}
+              poster={thumbnailUrl ?? undefined}
+              fileName={currentAttachment.fileName}
+            />
+          ) : thumbnailUrl ? (
             <div className="relative" data-testid="lightbox-video">
               {/* eslint-disable-next-line @next/next/no-img-element -- blob URL from extracted video frame */}
               <img

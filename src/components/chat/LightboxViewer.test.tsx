@@ -492,7 +492,7 @@ describe("LightboxViewer", () => {
       expect(screen.queryByTestId("lightbox-progress")).not.toBeInTheDocument();
     });
 
-    it("should NOT auto-download for video attachments", () => {
+    it("should auto-download for video attachments (for video player)", () => {
       const onRequestDownload = vi.fn();
       const videoAttachment = [makeAttachment("att-v", "clip.mp4", "video/mp4")];
       render(
@@ -505,7 +505,7 @@ describe("LightboxViewer", () => {
           onClose={vi.fn()}
         />,
       );
-      expect(onRequestDownload).not.toHaveBeenCalled();
+      expect(onRequestDownload).toHaveBeenCalledWith("att-v");
     });
 
     it("should NOT auto-download for document attachments", () => {
@@ -527,7 +527,23 @@ describe("LightboxViewer", () => {
 
   // FEAT-068: Video Lightbox
   describe("Video Lightbox", () => {
-    it("should render video frame with play overlay when thumbnail available", () => {
+    it("should render video player when video URL is available", () => {
+      const videoAtt = [makeAttachment("att-v", "clip.mp4", "video/mp4")];
+      const videoUrls = new Map([["att-v", "blob:video-full"]]);
+      render(
+        <LightboxViewer
+          attachments={videoAtt}
+          initialIndex={0}
+          imageUrls={videoUrls}
+          downloadProgress={emptyProgress}
+          onClose={vi.fn()}
+        />,
+      );
+      expect(screen.getByTestId("video-player")).toBeInTheDocument();
+      expect(screen.getByTestId("video-player-element")).toHaveAttribute("src", "blob:video-full");
+    });
+
+    it("should render video frame with play overlay when only thumbnail available", () => {
       const videoAtt = [makeAttachment("att-v", "clip.mp4", "video/mp4")];
       const thumbs = new Map([["att-v", "blob:video-frame"]]);
       render(

@@ -79,8 +79,13 @@ export function useAttachmentThumbnails(
         return next;
       });
     } catch (error) {
-      // Silent failure - thumbnail will show skeleton
+      // Set empty string to trigger fallback UI instead of staying in skeleton state
       console.warn(`[useAttachmentThumbnails] Failed to download thumbnail for ${id}:`, error);
+      setThumbnailUrls(prev => {
+        const next = new Map(prev);
+        next.set(id, '');
+        return next;
+      });
     } finally {
       inFlightRef.current.delete(id);
     }
