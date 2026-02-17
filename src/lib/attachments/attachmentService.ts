@@ -5,6 +5,7 @@
  * Download: check cache -> if miss, fetch via streaming -> cache result -> return
  */
 
+import { buildApiUrl } from '@/lib/api-config';
 import { aesEncryptBytes, aesDecryptBytes } from '../crypto/encryption';
 import { computeSha256 } from './attachmentHash';
 import { AttachmentCache } from './attachmentCache';
@@ -181,7 +182,7 @@ export async function fetchAttachmentFromApi(
     thumbnailOnly: thumbnailOnly.toString(),
   });
 
-  const response = await fetch(`/api/feeds/attachment-download?${params}`);
+  const response = await fetch(buildApiUrl(`/api/feeds/attachment-download?${params}`));
 
   if (!response.ok) {
     throw new Error(`Attachment download failed: ${response.status}`);

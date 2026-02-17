@@ -3,9 +3,14 @@
  *
  * Tests for the api-config module that handles API URL construction
  * for both browser and Tauri desktop environments.
+ *
+ * Includes a static analysis guard that ensures ALL fetch() calls to /api/
+ * endpoints use buildApiUrl() - required for Tauri desktop/Android compatibility.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
 
 // We need to mock window before importing the module
 const originalWindow = global.window;
@@ -252,6 +257,68 @@ describe('api-config', () => {
 
       const { buildAssetUrl } = await import('./api-config');
       expect(buildAssetUrl('/crypto/bsgs-table.bin')).toBe('http://localhost:3100/crypto/bsgs-table.bin');
+    });
+  });
+
+  describe('Tauri compatibility: all fetch() to /api/ must use buildApiUrl()', () => {
+    /**
+     * Static analysis guard: scans ALL source files to ensure no fetch() call
+     * uses a hardcoded /api/ URL without buildApiUrl().
+     *
+     * WHY: In the browser, relative URLs like fetch('/api/foo') work because
+     * they resolve to the same origin. In Tauri (desktop/Android), the app is
+     * a static export served from tauri://localhost/ — relative /api/ URLs
+     * hit non-existent local files and return 404.
+     *
+     * buildApiUrl() returns the correct absolute URL in Tauri and relative URL
+     * in the browser. Every fetch() to /api/ MUST use it.
+     *
+     * LESSON LEARNED: FEAT-066/067 missed this for attachment downloads, causing
+     * all images/videos to render as blank gray boxes in the Tauri app.
+     */
+
+    function collectTsFiles(dir: string): string[] {
+      const results: string[] = [];
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          // Skip: node_modules, test dirs, API route handlers (server-side)
+          if (entry.name === 'node_modules' || entry.name === '__tests__') continue;
+          results.push(...collectTsFiles(fullPath));
+        } else if (/\.(ts|tsx)$/.test(entry.name) && !entry.name.endsWith('.test.ts') && !entry.name.endsWith('.test.tsx')) {
+          results.push(fullPath);
+        }
+      }
+      return results;
+    }
+
+    it('no fetch() calls use hardcoded /api/ URLs without buildApiUrl()', () => {
+      const srcDir = path.resolve(__dirname, '..');
+      const allFiles = collectTsFiles(srcDir);
+
+      // Pattern: fetch( followed by a string/template literal starting with /api/
+      // This catches: fetch('/api/...'), fetch("/api/..."), fetch(`/api/...`)
+      const bareApiFetchPattern = /fetch\(\s*[`'"]\s*\/api\//g;
+
+      const violations: string[] = [];
+
+      for (const filePath of allFiles) {
+        // Skip API route handlers - they are server-side Next.js code
+        // and use their own gRPC URLs, not /api/ paths
+        const relativePath = path.relative(srcDir, filePath);
+        if (relativePath.startsWith(`app${path.sep}api${path.sep}`)) continue;
+
+        const content = fs.readFileSync(filePath, 'utf-8');
+        const matches = content.match(bareApiFetchPattern);
+        if (matches) {
+          violations.push(
+            `${relativePath}: ${matches.length} bare fetch('/api/...') call(s) — must use buildApiUrl()`
+          );
+        }
+      }
+
+      expect(violations).toEqual([]);
     });
   });
 });

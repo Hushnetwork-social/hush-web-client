@@ -1,3 +1,4 @@
+import { buildApiUrl } from '@/lib/api-config';
 import { getGrpcClient } from '../client';
 import type {
   GetBlockchainHeightRequest,
@@ -29,7 +30,7 @@ export const blockchainService = {
   async submitSignedTransaction(
     signedTransaction: string
   ): Promise<SubmitSignedTransactionReply> {
-    const response = await fetch('/api/blockchain/submit', {
+    const response = await fetch(buildApiUrl('/api/blockchain/submit'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
