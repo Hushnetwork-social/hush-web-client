@@ -100,7 +100,7 @@ export const AttachmentThumbnail = memo(function AttachmentThumbnail({
       <img
         src={thumbnailUrl}
         alt={attachment.fileName}
-        className="w-full h-auto rounded-lg"
+        className="w-full h-auto max-h-80 object-contain rounded-lg"
         data-testid="attachment-img"
       />
 
