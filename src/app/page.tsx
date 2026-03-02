@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Lock } from "lucide-react";
 import { useAppStore } from "@/stores";
+import { resolveEntryRoute } from "@/lib/navigation/appRoutes";
 
 export default function SplashPage() {
   const router = useRouter();
@@ -33,11 +34,7 @@ export default function SplashPage() {
         clearInterval(interval);
         // Navigate based on authentication status
         setTimeout(() => {
-          if (isAuthenticated) {
-            router.push("/dashboard");
-          } else {
-            router.push("/auth");
-          }
+          router.push(resolveEntryRoute(isAuthenticated));
         }, 300);
       }
     }, 200);

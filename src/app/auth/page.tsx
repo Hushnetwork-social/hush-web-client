@@ -18,6 +18,7 @@ import {
 import { markIdentityCreatedByAuthPage } from "@/modules/identity";
 import { buildApiUrl } from "@/lib/api-config";
 import { getVersionDisplay } from "@/lib/version";
+import { FEEDS_HOME_ROUTE } from "@/lib/navigation/appRoutes";
 
 type Tab = "create" | "import";
 type ImportSubTab = "words" | "file";
@@ -213,8 +214,8 @@ export default function AuthPage() {
       setLoading(false);
       setAuthenticated(true);
 
-      // Navigate to dashboard
-      router.push("/dashboard");
+      // Navigate to feeds home
+      router.push(FEEDS_HOME_ROUTE);
     } catch (err) {
       console.error("[Auth] Account creation failed:", err);
       setLoading(false);
@@ -301,8 +302,8 @@ export default function AuthPage() {
       setLoading(false);
       setAuthenticated(true);
 
-      // Navigate to dashboard
-      router.push("/dashboard");
+      // Navigate to feeds home
+      router.push(FEEDS_HOME_ROUTE);
     } catch (err) {
       console.error("[Auth] Import failed:", err);
       setLoading(false);
@@ -496,8 +497,8 @@ export default function AuthPage() {
       setLoading(false);
       setAuthenticated(true);
 
-      // Navigate to dashboard
-      router.push("/dashboard");
+      // Navigate to feeds home
+      router.push(FEEDS_HOME_ROUTE);
     } catch (err) {
       console.error("[Auth] Import from file failed:", err);
       setLoading(false);

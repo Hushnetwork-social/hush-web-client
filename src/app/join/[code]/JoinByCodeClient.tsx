@@ -12,6 +12,7 @@ import { useFeedsStore } from "@/modules/feeds";
 import type { PublicGroupInfo } from "@/types";
 import { debugLog, debugError } from "@/lib/debug-logger";
 import { ensureCommitmentRegistered, isReactionsInitialized } from "@/modules/reactions/initializeReactions";
+import { FEEDS_HOME_ROUTE, getFeedNavigationRoute } from "@/lib/navigation/appRoutes";
 
 // Storage key for pending invite code (used when user needs to authenticate first)
 const PENDING_INVITE_CODE_KEY = "hush_pending_invite_code";
@@ -117,7 +118,7 @@ export function JoinByCodeClient({ initialGroupInfo }: JoinByCodeClientProps) {
         }
         // Redirect to dashboard after a short delay
         setTimeout(() => {
-          router.push(`/dashboard?feed=${groupInfo.feedId}`);
+          router.push(getFeedNavigationRoute(groupInfo.feedId));
         }, 1500);
       } else {
         debugLog("[JoinByCode] Failed to join group:", result.error);
@@ -161,7 +162,7 @@ export function JoinByCodeClient({ initialGroupInfo }: JoinByCodeClientProps) {
 
   // Navigate to dashboard
   const handleGoToDashboard = useCallback(() => {
-    router.push("/dashboard");
+    router.push(FEEDS_HOME_ROUTE);
   }, [router]);
 
   return (

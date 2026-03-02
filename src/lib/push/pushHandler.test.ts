@@ -101,7 +101,7 @@ describe('pushHandler', () => {
       expect(result).toBe(true);
       expect(invoke).toHaveBeenCalledWith('get_pending_navigation');
       expect(invoke).toHaveBeenCalledWith('clear_pending_navigation');
-      expect(window.location.href).toBe(`/dashboard?feed=${encodeURIComponent(mockFeedId)}`);
+      expect(window.location.href).toBe(`/feeds?feed=${encodeURIComponent(mockFeedId)}`);
     });
 
     it('navigates to feed when pending navigation exists on iOS', async () => {
@@ -120,7 +120,7 @@ describe('pushHandler', () => {
       const result = await checkPendingNavigation();
 
       expect(result).toBe(true);
-      expect(window.location.href).toBe(`/dashboard?feed=${encodeURIComponent(mockFeedId)}`);
+      expect(window.location.href).toBe(`/feeds?feed=${encodeURIComponent(mockFeedId)}`);
     });
 
     it('clears pending navigation before navigating', async () => {
@@ -173,7 +173,7 @@ describe('pushHandler', () => {
 
       await checkPendingNavigation();
 
-      expect(window.location.href).toBe(`/dashboard?feed=${encodeURIComponent(mockFeedId)}`);
+      expect(window.location.href).toBe(`/feeds?feed=${encodeURIComponent(mockFeedId)}`);
     });
   });
 

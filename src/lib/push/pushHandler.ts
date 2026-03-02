@@ -17,6 +17,7 @@
 import { detectPlatformAsync } from '@/lib/platform';
 import { debugLog, debugError } from '@/lib/debug-logger';
 import { getPendingDeepLink, clearPendingDeepLink } from './pushManager';
+import { getFeedNavigationRoute } from '@/lib/navigation/appRoutes';
 
 // Type matching Rust PendingNavigationResult
 interface PendingNavigationResult {
@@ -101,7 +102,7 @@ async function checkPendingDeepLinkNavigation(): Promise<boolean> {
  * Should be called on app startup and resume (visibility change).
  *
  * Navigation behavior:
- * - If feedId exists (from notification): Navigate to /dashboard?feed={feedId}
+ * - If feedId exists (from notification): Navigate to feeds route with feed query
  * - If deep link path exists: Navigate to that path (e.g., /join/ABC123)
  * - If neither: No navigation occurs
  *
@@ -135,8 +136,8 @@ export async function checkPendingNavigation(): Promise<boolean> {
   // Navigate to the feed
   try {
     // Use window.location for simplicity and reliability
-    // This ensures the dashboard loads with the feed parameter
-    window.location.href = `/dashboard?feed=${encodeURIComponent(feedId)}`;
+    // This ensures the feeds shell loads with the feed parameter
+    window.location.href = getFeedNavigationRoute(feedId);
     return true;
   } catch (error) {
     debugError('[PushHandler] Navigation failed:', error);
