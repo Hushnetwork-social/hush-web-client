@@ -2304,11 +2304,9 @@ describe('decryptGroupMessages (via FeedsSyncable)', () => {
   // These tests verify the private decryptGroupMessages function through FeedsSyncable.syncTask()
   // The function is responsible for decrypting group feed messages using available KeyGenerations
 
-  let syncable: FeedsSyncable;
   const groupFeedId = 'group-feed-123';
 
   beforeEach(async () => {
-    syncable = new FeedsSyncable();
     useFeedsStore.getState().reset();
     useAppStore.getState().setCredentials(null);
     mockFetch.mockReset();

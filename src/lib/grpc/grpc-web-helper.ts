@@ -247,12 +247,6 @@ export function encodeBytes(fieldNumber: number, data: Uint8Array): number[] {
   return [...encodeVarint(tag), ...encodeVarint(data.length), ...Array.from(data)];
 }
 
-// FEAT-067: Encode a sub-message as a length-delimited protobuf field
-function encodeMessage(fieldNumber: number, messageBytes: number[]): number[] {
-  const tag = (fieldNumber << 3) | 2; // wire type 2 = length-delimited
-  return [...encodeVarint(tag), ...encodeVarint(messageBytes.length), ...messageBytes];
-}
-
 /**
  * Encode a binary field as Uint8Array (avoids number[] spreading for large data).
  * Safe for multi-MB attachments unlike encodeBytes() which uses Array.from().
