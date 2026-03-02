@@ -13,6 +13,32 @@ import { persist } from 'zustand/middleware';
 import type { User, Credentials, Balance } from '@/types';
 import { debugLog, debugError } from '@/lib/debug-logger';
 
+export type AppId = 'feeds' | 'social';
+
+export interface AppContextState {
+  selectedNav: string;
+  selectedFeedId: string | null;
+  scrollOffset: number;
+}
+
+export const DEFAULT_ACTIVE_APP: AppId = 'feeds';
+export const DEFAULT_APP_CONTEXTS: Record<AppId, AppContextState> = {
+  feeds: {
+    selectedNav: 'feeds',
+    selectedFeedId: null,
+    scrollOffset: 0,
+  },
+  social: {
+    selectedNav: 'feed-wall',
+    selectedFeedId: null,
+    scrollOffset: 0,
+  },
+};
+export const DEFAULT_CROSS_APP_BADGES: Record<AppId, number> = {
+  feeds: 0,
+  social: 0,
+};
+
 interface AppStore {
   // Auth state
   isAuthenticated: boolean;
@@ -26,6 +52,9 @@ interface AppStore {
   // UI state
   selectedFeedId: string | null;
   selectedNav: string;
+  activeApp: AppId;
+  appContexts: Record<AppId, AppContextState>;
+  crossAppBadges: Record<AppId, number>;
 
   // Auth actions
   setAuthenticated: (isAuth: boolean) => void;
@@ -38,8 +67,13 @@ interface AppStore {
   setBalance: (balance: Balance) => void;
 
   // UI actions
+  setActiveApp: (app: AppId) => void;
   selectFeed: (feedId: string | null) => void;
   setSelectedNav: (nav: string) => void;
+  setAppContextNav: (app: AppId, nav: string) => void;
+  setAppContextFeed: (app: AppId, feedId: string | null) => void;
+  setAppContextScroll: (app: AppId, scrollOffset: number) => void;
+  setCrossAppBadge: (app: AppId, count: number) => void;
 }
 
 // FEAT-059: Expose store to window for E2E test verification (same pattern as useFeedsStore)
@@ -56,6 +90,9 @@ export const useAppStore = create<AppStore>()(
       balance: { available: 0, pending: 0, currency: 'HUSH' },
       selectedFeedId: null,
       selectedNav: 'feeds',
+      activeApp: DEFAULT_ACTIVE_APP,
+      appContexts: DEFAULT_APP_CONTEXTS,
+      crossAppBadges: DEFAULT_CROSS_APP_BADGES,
 
       // Auth actions
       setAuthenticated: (isAuth) => set({ isAuthenticated: isAuth }),
@@ -67,23 +104,93 @@ export const useAppStore = create<AppStore>()(
         currentUser: null,
         credentials: null,
         selectedFeedId: null,
+        selectedNav: 'feeds',
+        activeApp: DEFAULT_ACTIVE_APP,
+        appContexts: DEFAULT_APP_CONTEXTS,
+        crossAppBadges: DEFAULT_CROSS_APP_BADGES,
       }),
 
       // Bank actions
       setBalance: (balance) => set({ balance }),
 
       // UI actions
-      selectFeed: (feedId) => set({ selectedFeedId: feedId }),
-      setSelectedNav: (nav) => set({ selectedNav: nav }),
+      setActiveApp: (app) => set((state) => {
+        const targetContext = state.appContexts[app];
+        return {
+          activeApp: app,
+          selectedNav: targetContext.selectedNav,
+          selectedFeedId: targetContext.selectedFeedId,
+        };
+      }),
+      selectFeed: (feedId) => set((state) => ({
+        selectedFeedId: feedId,
+        appContexts: {
+          ...state.appContexts,
+          [state.activeApp]: {
+            ...state.appContexts[state.activeApp],
+            selectedFeedId: feedId,
+          },
+        },
+      })),
+      setSelectedNav: (nav) => set((state) => ({
+        selectedNav: nav,
+        appContexts: {
+          ...state.appContexts,
+          [state.activeApp]: {
+            ...state.appContexts[state.activeApp],
+            selectedNav: nav,
+          },
+        },
+      })),
+      setAppContextNav: (app, nav) => set((state) => ({
+        appContexts: {
+          ...state.appContexts,
+          [app]: {
+            ...state.appContexts[app],
+            selectedNav: nav,
+          },
+        },
+        ...(state.activeApp === app ? { selectedNav: nav } : {}),
+      })),
+      setAppContextFeed: (app, feedId) => set((state) => ({
+        appContexts: {
+          ...state.appContexts,
+          [app]: {
+            ...state.appContexts[app],
+            selectedFeedId: feedId,
+          },
+        },
+        ...(state.activeApp === app ? { selectedFeedId: feedId } : {}),
+      })),
+      setAppContextScroll: (app, scrollOffset) => set((state) => ({
+        appContexts: {
+          ...state.appContexts,
+          [app]: {
+            ...state.appContexts[app],
+            scrollOffset,
+          },
+        },
+      })),
+      setCrossAppBadge: (app, count) => set((state) => ({
+        crossAppBadges: {
+          ...state.crossAppBadges,
+          [app]: Math.max(0, count),
+        },
+      })),
     }),
     {
       name: 'hush-app-storage',
       partialize: (state) => ({
-        // Persist auth data only
-        // Feeds/messages are persisted in useFeedsStore
+        // Persist auth and shell context state.
+        // Feeds/messages payloads remain in useFeedsStore.
         isAuthenticated: state.isAuthenticated,
         currentUser: state.currentUser,
         credentials: state.credentials,
+        selectedFeedId: state.selectedFeedId,
+        selectedNav: state.selectedNav,
+        activeApp: state.activeApp,
+        appContexts: state.appContexts,
+        crossAppBadges: state.crossAppBadges,
       }),
       // Handle corrupt localStorage gracefully
       onRehydrateStorage: () => (state, error) => {
