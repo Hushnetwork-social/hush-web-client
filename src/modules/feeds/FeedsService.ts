@@ -7,11 +7,20 @@
  */
 
 import type { Feed, FeedMessage, ProfileSearchResult, AttachmentRefMeta } from '@/types';
-import { createFeedMessageTransaction, createChatFeedTransaction, hexToBytes, type AttachmentRefPayload } from '@/lib/crypto';
+import {
+  createFeedMessageTransaction,
+  createChatFeedTransaction,
+  createCreateInnerCircleTransaction,
+  createAddMembersToInnerCircleTransaction,
+  hexToBytes,
+  type AttachmentRefPayload,
+} from '@/lib/crypto';
 import { FEED_TYPE_MAP, useFeedsStore } from './useFeedsStore';
 import { useAppStore } from '@/stores';
 import { buildApiUrl } from '@/lib/api-config';
 import { debugLog, debugError } from '@/lib/debug-logger';
+import { checkIdentityExists } from '../identity/IdentityService';
+import { groupService } from '@/lib/grpc/services/group';
 
 // Server feed response type
 interface ServerFeed {
@@ -45,6 +54,13 @@ interface ServerMessage {
   replyToMessageId?: string;  // Reply to Message: parent message reference
   keyGeneration?: number;     // Group Feeds: Key generation used to encrypt this message
   attachments?: ServerAttachmentRef[];  // FEAT-066: Attachment metadata
+}
+
+interface InnerCircleResponse {
+  success: boolean;
+  message?: string;
+  exists: boolean;
+  feedId?: string;
 }
 
 // Server reaction tally response type (Protocol Omega)
@@ -202,6 +218,134 @@ export async function checkHasPersonalFeed(address: string): Promise<boolean> {
 
   const data = await response.json();
   return data.hasPersonalFeed === true;
+}
+
+export async function getInnerCircle(ownerAddress: string): Promise<InnerCircleResponse> {
+  const response = await fetch(
+    buildApiUrl(`/api/feeds/inner-circle?ownerAddress=${encodeURIComponent(ownerAddress)}`)
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to get inner circle: HTTP ${response.status}`);
+  }
+
+  const data = await response.json();
+  return {
+    success: data.success === true,
+    message: data.message,
+    exists: data.exists === true,
+    feedId: data.feedId,
+  };
+}
+
+export async function ensureInnerCircleForOwner(
+  ownerAddress: string,
+  signingPrivateKeyHex: string
+): Promise<{ success: boolean; retryable: boolean; message: string }> {
+  const signingPrivateKey = hexToBytes(signingPrivateKeyHex);
+
+  let innerCircle = await getInnerCircle(ownerAddress);
+  if (!innerCircle.exists) {
+    debugLog('[FeedsService] Inner circle not found, submitting create transaction');
+    const { signedTransaction } = await createCreateInnerCircleTransaction(ownerAddress, signingPrivateKey);
+    const createResult = await submitTransaction(signedTransaction);
+
+    if (!createResult.successful && createResult.status !== TransactionStatus.ALREADY_EXISTS) {
+      return {
+        success: false,
+        retryable: true,
+        message: createResult.message || 'Failed to create inner circle',
+      };
+    }
+
+    innerCircle = await getInnerCircle(ownerAddress);
+    if (!innerCircle.exists || !innerCircle.feedId) {
+      return {
+        success: false,
+        retryable: true,
+        message: 'Inner circle creation pending confirmation',
+      };
+    }
+  }
+
+  if (!innerCircle.feedId) {
+    return {
+      success: false,
+      retryable: true,
+      message: 'Inner circle feed id is unavailable',
+    };
+  }
+
+  const existingMembers = new Set(
+    (await groupService.getGroupMembers(innerCircle.feedId)).map((member) => member.publicAddress)
+  );
+
+  const chatFeeds = useFeedsStore
+    .getState()
+    .feeds.filter((feed) => feed.type === 'chat');
+
+  const targetAddresses = Array.from(
+    new Set(
+      chatFeeds
+        .map((feed) => feed.otherParticipantPublicSigningAddress || feed.participants.find((p) => p !== ownerAddress))
+        .filter((address): address is string => typeof address === 'string' && address.length > 0)
+    )
+  )
+    .filter((address) => address !== ownerAddress)
+    .filter((address) => !existingMembers.has(address))
+    .slice(0, 100);
+
+  if (targetAddresses.length === 0) {
+    return {
+      success: true,
+      retryable: false,
+      message: 'Inner circle is up to date',
+    };
+  }
+
+  const resolvedMembers = await Promise.all(
+    targetAddresses.map(async (address) => {
+      const identity = await checkIdentityExists(address);
+      if (!identity.exists || !identity.publicEncryptAddress) {
+        return null;
+      }
+      return {
+        PublicAddress: address,
+        PublicEncryptAddress: identity.publicEncryptAddress,
+      };
+    })
+  );
+
+  const validMembers = resolvedMembers.filter((member): member is { PublicAddress: string; PublicEncryptAddress: string } => member !== null);
+  if (validMembers.length === 0) {
+    return {
+      success: true,
+      retryable: false,
+      message: 'No valid members to add to inner circle',
+    };
+  }
+
+  const { signedTransaction } = await createAddMembersToInnerCircleTransaction(
+    ownerAddress,
+    validMembers,
+    signingPrivateKey
+  );
+  const addResult = await submitTransaction(signedTransaction);
+
+  if (!addResult.successful && addResult.status !== TransactionStatus.ALREADY_EXISTS && addResult.status !== TransactionStatus.PENDING) {
+    const unauthorized = (addResult.message || '').includes('UNAUTHORIZED');
+    return {
+      success: false,
+      retryable: !unauthorized,
+      message: addResult.message || 'Failed to add members to inner circle',
+    };
+  }
+
+  return {
+    success: true,
+    retryable: false,
+    message: `Inner circle synced (${validMembers.length} member(s) processed)`,
+  };
 }
 
 /**
@@ -511,6 +655,10 @@ export async function createChatFeed(
     };
 
     useFeedsStore.getState().addFeeds([optimisticFeed]);
+    const requestInnerCircleRetry = (
+      useAppStore.getState() as { requestInnerCircleRetry?: () => void }
+    ).requestInnerCircleRetry;
+    requestInnerCircleRetry?.();
 
     debugLog(`[FeedsService] Feed ${feedId} created successfully`);
     return { success: true, feedId, isExisting: false };

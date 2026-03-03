@@ -21,6 +21,13 @@ export interface AppContextState {
   scrollOffset: number;
 }
 
+export interface InnerCircleSyncState {
+  status: 'idle' | 'syncing' | 'retrying' | 'error';
+  message: string | null;
+  attemptCount: number;
+  nextRetryAt: number | null;
+}
+
 export const DEFAULT_ACTIVE_APP: AppId = 'feeds';
 export const DEFAULT_APP_CONTEXTS: Record<AppId, AppContextState> = {
   feeds: {
@@ -37,6 +44,12 @@ export const DEFAULT_APP_CONTEXTS: Record<AppId, AppContextState> = {
 export const DEFAULT_CROSS_APP_BADGES: Record<AppId, number> = {
   feeds: 0,
   social: 0,
+};
+export const DEFAULT_INNER_CIRCLE_SYNC_STATE: InnerCircleSyncState = {
+  status: 'idle',
+  message: null,
+  attemptCount: 0,
+  nextRetryAt: null,
 };
 
 interface AppStore {
@@ -55,6 +68,8 @@ interface AppStore {
   activeApp: AppId;
   appContexts: Record<AppId, AppContextState>;
   crossAppBadges: Record<AppId, number>;
+  innerCircleSync: InnerCircleSyncState;
+  innerCircleRetryNonce: number;
 
   // Auth actions
   setAuthenticated: (isAuth: boolean) => void;
@@ -74,6 +89,8 @@ interface AppStore {
   setAppContextFeed: (app: AppId, feedId: string | null) => void;
   setAppContextScroll: (app: AppId, scrollOffset: number) => void;
   setCrossAppBadge: (app: AppId, count: number) => void;
+  setInnerCircleSync: (state: Partial<InnerCircleSyncState>) => void;
+  requestInnerCircleRetry: () => void;
 }
 
 // FEAT-059: Expose store to window for E2E test verification (same pattern as useFeedsStore)
@@ -93,6 +110,8 @@ export const useAppStore = create<AppStore>()(
       activeApp: DEFAULT_ACTIVE_APP,
       appContexts: DEFAULT_APP_CONTEXTS,
       crossAppBadges: DEFAULT_CROSS_APP_BADGES,
+      innerCircleSync: DEFAULT_INNER_CIRCLE_SYNC_STATE,
+      innerCircleRetryNonce: 0,
 
       // Auth actions
       setAuthenticated: (isAuth) => set({ isAuthenticated: isAuth }),
@@ -108,6 +127,8 @@ export const useAppStore = create<AppStore>()(
         activeApp: DEFAULT_ACTIVE_APP,
         appContexts: DEFAULT_APP_CONTEXTS,
         crossAppBadges: DEFAULT_CROSS_APP_BADGES,
+        innerCircleSync: DEFAULT_INNER_CIRCLE_SYNC_STATE,
+        innerCircleRetryNonce: 0,
       }),
 
       // Bank actions
@@ -176,6 +197,28 @@ export const useAppStore = create<AppStore>()(
           ...state.crossAppBadges,
           [app]: Math.max(0, count),
         },
+      })),
+      setInnerCircleSync: (innerCircleSyncState) => set((state) => {
+        const nextInnerCircleSync = {
+          ...state.innerCircleSync,
+          ...innerCircleSyncState,
+        };
+
+        if (
+          nextInnerCircleSync.status === state.innerCircleSync.status &&
+          nextInnerCircleSync.message === state.innerCircleSync.message &&
+          nextInnerCircleSync.attemptCount === state.innerCircleSync.attemptCount &&
+          nextInnerCircleSync.nextRetryAt === state.innerCircleSync.nextRetryAt
+        ) {
+          return state;
+        }
+
+        return {
+          innerCircleSync: nextInnerCircleSync,
+        };
+      }),
+      requestInnerCircleRetry: () => set((state) => ({
+        innerCircleRetryNonce: state.innerCircleRetryNonce + 1,
       })),
     }),
     {
