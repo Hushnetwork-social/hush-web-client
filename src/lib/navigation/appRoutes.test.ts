@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AUTH_ROUTE,
   FEEDS_HOME_ROUTE,
+  getAppDisplayName,
   LEGACY_COMMUNITY_ROUTE,
   LEGACY_DASHBOARD_ROUTE,
   SOCIAL_HOME_ROUTE,
@@ -17,6 +18,11 @@ describe('appRoutes', () => {
   it('resolves app home routes by app id', () => {
     expect(getAppHomeRoute('feeds')).toBe(FEEDS_HOME_ROUTE);
     expect(getAppHomeRoute('social')).toBe(SOCIAL_HOME_ROUTE);
+  });
+
+  it('returns exact app display names', () => {
+    expect(getAppDisplayName('feeds')).toBe('HushFeeds!');
+    expect(getAppDisplayName('social')).toBe('HushSocial!');
   });
 
   it('builds feed navigation route with encoded feed id', () => {

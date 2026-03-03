@@ -1,26 +1,16 @@
 "use client";
 
-import { MessageSquare, PlusCircle, UsersRound, Palette, Users, Download, LogOut, UserCircle } from "lucide-react";
+import { Download, LogOut, UserCircle } from "lucide-react";
 import { useState } from "react";
-
-interface NavItem {
-  id: string;
-  label: string;
-  icon: React.ReactNode;
-  comingSoon?: boolean;
-}
-
-const navItems: NavItem[] = [
-  { id: "feeds", label: "Feeds", icon: <MessageSquare className="w-5 h-5" /> },
-  { id: "new-chat", label: "New Feed", icon: <PlusCircle className="w-5 h-5" /> },
-  { id: "create-group", label: "Create Group", icon: <UsersRound className="w-5 h-5" /> },
-  { id: "memes", label: "Memes", icon: <Palette className="w-5 h-5" />, comingSoon: true },
-  { id: "community", label: "Community", icon: <Users className="w-5 h-5" />, comingSoon: true },
-];
+import type { AppId } from "@/stores/useAppStore";
+import { DEFAULT_CROSS_APP_BADGES } from "@/stores/useAppStore";
+import { getAppNavItems } from "./appNavConfig";
 
 interface SidebarProps {
   selectedNav: string;
   onNavSelect: (id: string) => void;
+  activeApp?: AppId;
+  crossAppBadges?: Record<AppId, number>;
   userDisplayName?: string;
   userInitials?: string;
   children?: React.ReactNode;
@@ -32,6 +22,8 @@ interface SidebarProps {
 export function Sidebar({
   selectedNav,
   onNavSelect,
+  activeApp = "feeds",
+  crossAppBadges = DEFAULT_CROSS_APP_BADGES,
   userDisplayName = "User",
   userInitials = "U",
   children,
@@ -40,6 +32,7 @@ export function Sidebar({
   onLogout,
 }: SidebarProps) {
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const navItems = getAppNavItems(activeApp, crossAppBadges);
 
   return (
     <aside className="w-[280px] flex-shrink-0 flex flex-col min-h-0 max-h-full overflow-hidden">
@@ -64,6 +57,14 @@ export function Sidebar({
           >
             {item.icon}
             <span className="text-sm font-medium">{item.label}</span>
+            {!!item.badgeCount && item.badgeCount > 0 && (
+              <span
+                data-testid={`nav-badge-${item.id}`}
+                className="ml-auto px-1.5 py-0.5 rounded text-[10px] font-semibold bg-hush-purple text-hush-bg-dark"
+              >
+                {item.badgeCount}
+              </span>
+            )}
             {item.comingSoon && (
               <span className="ml-auto px-1.5 py-0.5 rounded text-[9px] font-semibold bg-hush-text-accent/20 text-hush-text-accent">
                 Soon

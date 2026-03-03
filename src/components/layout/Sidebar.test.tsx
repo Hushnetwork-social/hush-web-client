@@ -111,14 +111,46 @@ describe('Sidebar', () => {
   });
 
   describe('Navigation', () => {
-    it('should render navigation items', () => {
+    it('should render feeds-app navigation with HushSocial switch item last', () => {
       render(<Sidebar {...defaultProps} />);
 
       expect(screen.getByText('Feeds')).toBeInTheDocument();
       expect(screen.getByText('New Feed')).toBeInTheDocument();
       expect(screen.getByText('Create Group')).toBeInTheDocument();
-      expect(screen.getByText('Memes')).toBeInTheDocument();
-      expect(screen.getByText('Community')).toBeInTheDocument();
+      expect(screen.getByText('Members')).toBeInTheDocument();
+      expect(screen.getByText('HushSocial!')).toBeInTheDocument();
+
+      const navButtons = screen.getAllByRole('button').filter((button) =>
+        button.getAttribute('data-testid')?.startsWith('nav-')
+      );
+      expect(navButtons[navButtons.length - 1]).toHaveTextContent('HushSocial!');
+    });
+
+    it('should render social-app navigation and keep Feed Wall social-only', () => {
+      render(
+        <Sidebar
+          {...defaultProps}
+          activeApp="social"
+          selectedNav="feed-wall"
+        />
+      );
+
+      expect(screen.getByText('Feed Wall')).toBeInTheDocument();
+      expect(screen.getByText('Search')).toBeInTheDocument();
+      expect(screen.getByText('New Post')).toBeInTheDocument();
+      expect(screen.getByText('HushFeeds!')).toBeInTheDocument();
+      expect(screen.queryByText('Feeds')).not.toBeInTheDocument();
+    });
+
+    it('should render cross-app badge on switch item', () => {
+      render(
+        <Sidebar
+          {...defaultProps}
+          crossAppBadges={{ feeds: 0, social: 4 }}
+        />
+      );
+
+      expect(screen.getByTestId('nav-badge-switch-social')).toHaveTextContent('4');
     });
 
     it('should call onNavSelect when nav item is clicked', () => {

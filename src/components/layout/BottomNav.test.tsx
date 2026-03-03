@@ -127,14 +127,50 @@ describe('BottomNav', () => {
   });
 
   describe('Navigation', () => {
-    it('should render navigation items', () => {
+    it('should render feeds-app navigation with HushSocial switch item last', () => {
       render(<BottomNav {...defaultProps} />);
 
       expect(screen.getByText('Feeds')).toBeInTheDocument();
       expect(screen.getByText('New Feed')).toBeInTheDocument();
-      expect(screen.getByText('New Group')).toBeInTheDocument();
-      expect(screen.getByText('Memes')).toBeInTheDocument();
-      expect(screen.getByText('Community')).toBeInTheDocument();
+      expect(screen.getByText('Create Group')).toBeInTheDocument();
+      expect(screen.getByText('Members')).toBeInTheDocument();
+      expect(screen.getByText('HushSocial!')).toBeInTheDocument();
+
+      const navButtons = screen.getAllByRole('button').filter((button) =>
+        button.textContent?.includes('Feeds') ||
+        button.textContent?.includes('New Feed') ||
+        button.textContent?.includes('Create Group') ||
+        button.textContent?.includes('Members') ||
+        button.textContent?.includes('HushSocial!')
+      );
+      expect(navButtons[navButtons.length - 1]).toHaveTextContent('HushSocial!');
+    });
+
+    it('should render social-app navigation and keep Feed Wall social-only', () => {
+      render(
+        <BottomNav
+          {...defaultProps}
+          activeApp="social"
+          selectedNav="feed-wall"
+        />
+      );
+
+      expect(screen.getByText('Feed Wall')).toBeInTheDocument();
+      expect(screen.getByText('Search')).toBeInTheDocument();
+      expect(screen.getByText('New Post')).toBeInTheDocument();
+      expect(screen.getByText('HushFeeds!')).toBeInTheDocument();
+      expect(screen.queryByText('Feeds')).not.toBeInTheDocument();
+    });
+
+    it('should render cross-app badge on switch item', () => {
+      render(
+        <BottomNav
+          {...defaultProps}
+          crossAppBadges={{ feeds: 0, social: 2 }}
+        />
+      );
+
+      expect(screen.getByTestId('nav-badge-switch-social')).toHaveTextContent('2');
     });
 
     it('should call onNavSelect when nav item is clicked', () => {
@@ -145,10 +181,10 @@ describe('BottomNav', () => {
       expect(defaultProps.onNavSelect).toHaveBeenCalledWith('feeds');
     });
 
-    it('should call onNavSelect with create-group when New Group is clicked', () => {
+    it('should call onNavSelect with create-group when Create Group is clicked', () => {
       render(<BottomNav {...defaultProps} />);
 
-      fireEvent.click(screen.getByText('New Group'));
+      fireEvent.click(screen.getByText('Create Group'));
 
       expect(defaultProps.onNavSelect).toHaveBeenCalledWith('create-group');
     });

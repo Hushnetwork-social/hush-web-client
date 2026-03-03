@@ -12,10 +12,12 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useFeedsStore } from '@/modules/feeds';
 import { detectPlatform, type Platform } from '@/lib/platform';
+import { useAppStore } from '@/stores/useAppStore';
+import { getAppDisplayName } from '@/lib/navigation/appRoutes';
 
 // Constants
-const BASE_TITLE = 'Hush Feeds';
-const FULL_TITLE = 'Hush Feeds - Decentralized Messaging';
+const BASE_TITLE = 'HushFeeds!';
+const FULL_TITLE = 'HushFeeds! - Decentralized Messaging';
 const FLASH_INTERVAL_MS = 2000;
 
 /**
@@ -131,10 +133,13 @@ async function clearPwaBadge(): Promise<void> {
 export function useUnreadBadge(): void {
   // Subscribe to feeds for computing unread count
   const feeds = useFeedsStore((state) => state.feeds);
+  const activeApp = useAppStore((state) => state.activeApp);
 
   const unreadCount = feeds.reduce((total, feed) => {
     return total + (feed.unreadCount || 0);
   }, 0);
+  const baseTitle = getAppDisplayName(activeApp);
+  const fullTitle = `${baseTitle} - Decentralized Messaging`;
 
   const flashIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const showingCountRef = useRef(true);
@@ -148,45 +153,45 @@ export function useUnreadBadge(): void {
   }, []);
 
   // Update browser tab title with flashing effect
-  const updateBrowserTitle = useCallback((count: number) => {
+  const updateBrowserTitle = useCallback((count: number, unreadTitle: string, defaultTitle: string) => {
     // Clear previous interval
     clearFlashInterval();
 
     if (count === 0) {
-      document.title = FULL_TITLE;
+      document.title = defaultTitle;
       return;
     }
 
     // Set initial title with count
     showingCountRef.current = true;
-    document.title = `(${count}) ${BASE_TITLE}`;
+    document.title = `(${count}) ${unreadTitle}`;
 
     // Start flashing interval
     flashIntervalRef.current = setInterval(() => {
       showingCountRef.current = !showingCountRef.current;
       document.title = showingCountRef.current
-        ? `(${count}) ${BASE_TITLE}`
-        : BASE_TITLE;
+        ? `(${count}) ${unreadTitle}`
+        : unreadTitle;
     }, FLASH_INTERVAL_MS);
   }, [clearFlashInterval]);
 
   // Clear all badges for a given platform
-  const clearAllBadges = useCallback((platform: Platform) => {
+  const clearAllBadges = useCallback((platform: Platform, defaultTitle: string) => {
     switch (platform) {
       case 'browser':
-        document.title = FULL_TITLE;
+        document.title = defaultTitle;
         break;
       case 'tauri':
         // Clear Tauri overlay icon
         clearTauriOverlay();
         // Also clear browser title as fallback
-        document.title = FULL_TITLE;
+        document.title = defaultTitle;
         break;
       case 'mobile-pwa':
         // Clear PWA app badge
         clearPwaBadge();
         // Also clear browser title as fallback
-        document.title = FULL_TITLE;
+        document.title = defaultTitle;
         break;
     }
   }, []);
@@ -201,35 +206,35 @@ export function useUnreadBadge(): void {
 
     if (unreadCount === 0) {
       clearFlashInterval();
-      clearAllBadges(platform);
+      clearAllBadges(platform, fullTitle);
       return;
     }
 
     // Platform-specific badge updates
     switch (platform) {
       case 'browser':
-        updateBrowserTitle(unreadCount);
+        updateBrowserTitle(unreadCount, baseTitle, fullTitle);
         break;
       case 'tauri':
         // Update Tauri taskbar overlay icon
         updateTauriOverlay(unreadCount);
         // Also update browser title as secondary indicator
-        updateBrowserTitle(unreadCount);
+        updateBrowserTitle(unreadCount, baseTitle, fullTitle);
         break;
       case 'mobile-pwa':
         // Update PWA app badge (iOS 16.4+)
         updatePwaBadge(unreadCount);
         // Also update browser title as fallback for unsupported platforms
-        updateBrowserTitle(unreadCount);
+        updateBrowserTitle(unreadCount, baseTitle, fullTitle);
         break;
     }
 
     // Cleanup function
     return () => {
       clearFlashInterval();
-      document.title = FULL_TITLE;
+      document.title = fullTitle;
     };
-  }, [unreadCount, clearFlashInterval, clearAllBadges, updateBrowserTitle]);
+  }, [activeApp, unreadCount, baseTitle, fullTitle, clearFlashInterval, clearAllBadges, updateBrowserTitle]);
 }
 
 // Export constants for testing

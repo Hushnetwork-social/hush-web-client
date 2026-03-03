@@ -247,7 +247,7 @@ export default function DashboardPage() {
               <MessageSquare className="w-10 h-10 text-hush-purple" />
             </div>
             <h2 className="text-xl font-semibold text-hush-text-primary mb-2">
-              Welcome to Hush Feeds
+              Welcome to HushFeeds!
             </h2>
             <p className="text-hush-text-accent text-sm max-w-md">
               Select a conversation from the sidebar or start a new chat to begin

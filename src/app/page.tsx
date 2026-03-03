@@ -51,9 +51,7 @@ export default function SplashPage() {
         </div>
 
         {/* App name */}
-        <h1 className="text-3xl font-bold text-hush-purple">
-          Hush Feeds
-        </h1>
+        <h1 className="text-3xl font-bold text-hush-purple">HushFeeds!</h1>
 
         {/* Loading indicator */}
         <div className="flex items-center space-x-3">

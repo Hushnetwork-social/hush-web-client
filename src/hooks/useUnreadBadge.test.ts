@@ -3,7 +3,7 @@
  *
  * Tests for:
  * 1. Tab title updates when unread count changes
- * 2. Tab title format is correct "(N) Hush Feeds"
+ * 2. Tab title format is correct "(N) HushFeeds!"
  * 3. Flashing interval alternates title correctly
  * 4. Title restores when count becomes 0
  * 5. Interval is cleaned up on unmount
@@ -83,10 +83,10 @@ describe('useUnreadBadge', () => {
 
       renderHook(() => useUnreadBadge());
 
-      expect(document.title).toBe('(5) Hush Feeds');
+      expect(document.title).toBe('(5) HushFeeds!');
     });
 
-    it('should use correct format "(N) Hush Feeds"', () => {
+    it('should use correct format "(N) HushFeeds!"', () => {
       mockGetTotalUnreadCount.mockReturnValue(3);
 
       renderHook(() => useUnreadBadge());
@@ -99,14 +99,14 @@ describe('useUnreadBadge', () => {
       mockGetTotalUnreadCount.mockReturnValue(5);
       const { rerender } = renderHook(() => useUnreadBadge());
 
-      expect(document.title).toBe('(5) Hush Feeds');
+      expect(document.title).toBe('(5) HushFeeds!');
 
       // Simulate count change
       mockGetTotalUnreadCount.mockReturnValue(3);
       rerender();
 
       // After rerender, the title should update
-      expect(document.title).toBe('(3) Hush Feeds');
+      expect(document.title).toBe('(3) HushFeeds!');
     });
 
     it('should handle large unread counts', () => {
@@ -114,7 +114,7 @@ describe('useUnreadBadge', () => {
 
       renderHook(() => useUnreadBadge());
 
-      expect(document.title).toBe('(99) Hush Feeds');
+      expect(document.title).toBe('(99) HushFeeds!');
     });
 
     it('should handle count of 1', () => {
@@ -122,7 +122,7 @@ describe('useUnreadBadge', () => {
 
       renderHook(() => useUnreadBadge());
 
-      expect(document.title).toBe('(1) Hush Feeds');
+      expect(document.title).toBe('(1) HushFeeds!');
     });
   });
 
@@ -133,7 +133,7 @@ describe('useUnreadBadge', () => {
       renderHook(() => useUnreadBadge());
 
       // Initial state shows count
-      expect(document.title).toBe('(5) Hush Feeds');
+      expect(document.title).toBe('(5) HushFeeds!');
 
       // After one interval, title should show without count
       act(() => {
@@ -147,7 +147,7 @@ describe('useUnreadBadge', () => {
         vi.advanceTimersByTime(FLASH_INTERVAL_MS);
       });
 
-      expect(document.title).toBe('(5) Hush Feeds');
+      expect(document.title).toBe('(5) HushFeeds!');
     });
 
     it('should continue flashing every 2 seconds', () => {
@@ -156,7 +156,7 @@ describe('useUnreadBadge', () => {
       renderHook(() => useUnreadBadge());
 
       // Initial
-      expect(document.title).toBe('(3) Hush Feeds');
+      expect(document.title).toBe('(3) HushFeeds!');
 
       // After 2s
       act(() => {
@@ -168,7 +168,7 @@ describe('useUnreadBadge', () => {
       act(() => {
         vi.advanceTimersByTime(FLASH_INTERVAL_MS);
       });
-      expect(document.title).toBe('(3) Hush Feeds');
+      expect(document.title).toBe('(3) HushFeeds!');
 
       // After 6s
       act(() => {
@@ -182,7 +182,7 @@ describe('useUnreadBadge', () => {
 
       renderHook(() => useUnreadBadge());
 
-      expect(document.title).toBe('(5) Hush Feeds');
+      expect(document.title).toBe('(5) HushFeeds!');
 
       // Advance less than the interval
       act(() => {
@@ -190,7 +190,7 @@ describe('useUnreadBadge', () => {
       });
 
       // Should still show the count
-      expect(document.title).toBe('(5) Hush Feeds');
+      expect(document.title).toBe('(5) HushFeeds!');
     });
   });
 
@@ -199,7 +199,7 @@ describe('useUnreadBadge', () => {
       mockGetTotalUnreadCount.mockReturnValue(5);
       const { rerender } = renderHook(() => useUnreadBadge());
 
-      expect(document.title).toBe('(5) Hush Feeds');
+      expect(document.title).toBe('(5) HushFeeds!');
 
       // Count becomes 0
       mockGetTotalUnreadCount.mockReturnValue(0);
@@ -237,7 +237,7 @@ describe('useUnreadBadge', () => {
       mockGetTotalUnreadCount.mockReturnValue(5);
       const { unmount } = renderHook(() => useUnreadBadge());
 
-      expect(document.title).toBe('(5) Hush Feeds');
+      expect(document.title).toBe('(5) HushFeeds!');
 
       unmount();
 
@@ -280,7 +280,7 @@ describe('useUnreadBadge', () => {
       rerender();
 
       // After count change, title should show new count immediately
-      expect(document.title).toBe('(10) Hush Feeds');
+      expect(document.title).toBe('(10) HushFeeds!');
 
       // Flash should restart from the new count
       act(() => {
@@ -295,7 +295,7 @@ describe('useUnreadBadge', () => {
       mockGetTotalUnreadCount.mockReturnValue(1);
       const { rerender } = renderHook(() => useUnreadBadge());
 
-      expect(document.title).toBe('(1) Hush Feeds');
+      expect(document.title).toBe('(1) HushFeeds!');
 
       // Rapid changes
       mockGetTotalUnreadCount.mockReturnValue(2);
@@ -305,7 +305,7 @@ describe('useUnreadBadge', () => {
       mockGetTotalUnreadCount.mockReturnValue(4);
       rerender();
 
-      expect(document.title).toBe('(4) Hush Feeds');
+      expect(document.title).toBe('(4) HushFeeds!');
     });
 
     it('should handle count going from 0 to positive', () => {
@@ -317,7 +317,7 @@ describe('useUnreadBadge', () => {
       mockGetTotalUnreadCount.mockReturnValue(5);
       rerender();
 
-      expect(document.title).toBe('(5) Hush Feeds');
+      expect(document.title).toBe('(5) HushFeeds!');
     });
   });
 
@@ -332,7 +332,7 @@ describe('useUnreadBadge', () => {
       renderHook(() => useUnreadBadge());
 
       // Should show total (3 + 5 = 8)
-      expect(document.title).toBe('(8) Hush Feeds');
+      expect(document.title).toBe('(8) HushFeeds!');
     });
   });
 });
@@ -413,7 +413,7 @@ describe('Tauri Platform Integration', () => {
     renderHook(() => useUnreadBadge());
 
     // Browser title should be updated as secondary indicator
-    expect(document.title).toBe('(5) Hush Feeds');
+    expect(document.title).toBe('(5) HushFeeds!');
   });
 
   it('should still update browser title when platform is mobile-pwa', () => {
@@ -423,7 +423,7 @@ describe('Tauri Platform Integration', () => {
     renderHook(() => useUnreadBadge());
 
     // Browser title should be updated as fallback
-    expect(document.title).toBe('(3) Hush Feeds');
+    expect(document.title).toBe('(3) HushFeeds!');
   });
 
   it('should restore title when count becomes 0 on tauri', () => {
@@ -431,7 +431,7 @@ describe('Tauri Platform Integration', () => {
     mockGetTotalUnreadCount.mockReturnValue(5);
     const { rerender } = renderHook(() => useUnreadBadge());
 
-    expect(document.title).toBe('(5) Hush Feeds');
+    expect(document.title).toBe('(5) HushFeeds!');
 
     mockGetTotalUnreadCount.mockReturnValue(0);
     rerender();
@@ -571,7 +571,7 @@ describe('PWA Badge Integration', () => {
 
     renderHook(() => useUnreadBadge());
 
-    expect(document.title).toBe('(3) Hush Feeds');
+    expect(document.title).toBe('(3) HushFeeds!');
   });
 
   it('should not throw when Badging API is not available', () => {
@@ -608,7 +608,7 @@ describe('PWA Badge Integration', () => {
     mockGetTotalUnreadCount.mockReturnValue(5);
     const { rerender } = renderHook(() => useUnreadBadge());
 
-    expect(document.title).toBe('(5) Hush Feeds');
+    expect(document.title).toBe('(5) HushFeeds!');
 
     mockGetTotalUnreadCount.mockReturnValue(0);
     rerender();

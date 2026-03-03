@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { Header, Footer, Sidebar, BottomNav } from "@/components/layout";
 import { InAppToastContainer, SystemToastContainer } from "@/components/notifications";
@@ -15,6 +15,7 @@ import { Loader2 } from "lucide-react";
 import { debugLog, debugError } from "@/lib/debug-logger";
 import { GroupCreationWizard } from "@/components/groups/GroupCreationWizard";
 import { checkPendingNavigation, setupVisibilityChangeListener } from "@/lib/push";
+import { getActiveAppFromPath, getAppDisplayName, getAppHomeRoute } from "@/lib/navigation/appRoutes";
 
 // Dynamic imports to prevent dev mode race condition
 const FeedList = dynamic(
@@ -45,7 +46,21 @@ interface DashboardLayoutProps {
 
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const router = useRouter();
-  const { isAuthenticated, balance, currentUser, credentials, logout, selectedFeedId, selectedNav, setSelectedNav, selectFeed } = useAppStore();
+  const pathname = usePathname();
+  const {
+    isAuthenticated,
+    balance,
+    currentUser,
+    credentials,
+    logout,
+    selectedFeedId,
+    selectedNav,
+    activeApp,
+    crossAppBadges,
+    setSelectedNav,
+    setActiveApp,
+    selectFeed,
+  } = useAppStore();
   const blockHeight = useBlockchainStore((state) => state.blockHeight);
   const [isMobile, setIsMobile] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
@@ -95,6 +110,15 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
 
+  useEffect(() => {
+    const routeApp = getActiveAppFromPath(pathname);
+    if (routeApp !== activeApp) {
+      setActiveApp(routeApp);
+    }
+
+    document.title = `${getAppDisplayName(routeApp)} - Decentralized Messaging`;
+  }, [pathname, activeApp, setActiveApp]);
+
   // Handle pending navigation from push notification tap
   useEffect(() => {
     // Check on mount (app startup)
@@ -108,13 +132,25 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
   // Define all callbacks before any early return
   const handleNavSelect = useCallback((id: string) => {
+    if (id === "switch-social") {
+      setActiveApp("social");
+      router.push(getAppHomeRoute("social"));
+      return;
+    }
+
+    if (id === "switch-feeds") {
+      setActiveApp("feeds");
+      router.push(getAppHomeRoute("feeds"));
+      return;
+    }
+
     if (id === "create-group") {
       // Open wizard modal instead of changing view
       setShowGroupWizard(true);
     } else {
       setSelectedNav(id);
     }
-  }, [setSelectedNav]);
+  }, [router, setActiveApp, setSelectedNav]);
 
   // Handle group created from wizard
   const handleGroupCreated = useCallback((feedId: string) => {
@@ -219,6 +255,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         <div className="flex-1 min-h-0 flex flex-col p-2 gap-1">
           {/* Header */}
           <Header
+            title={getAppDisplayName(activeApp)}
             balance={balance?.available || 0}
             blockHeight={blockHeight}
           />
@@ -228,6 +265,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             {/* Sidebar */}
             <Sidebar
               selectedNav={selectedNav}
+              activeApp={activeApp}
+              crossAppBadges={crossAppBadges}
               onNavSelect={handleNavSelect}
               userDisplayName={userDisplayName}
               userInitials={userInitials}
@@ -253,6 +292,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       {isMobile && (
         <div className="flex-1 min-h-0 flex flex-col p-2 gap-1 safe-area-top safe-area-bottom">
           <Header
+            title={getAppDisplayName(activeApp)}
             balance={balance?.available || 0}
             blockHeight={blockHeight}
           />
@@ -263,6 +303,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           {!selectedFeedId && (
             <BottomNav
               selectedNav={selectedNav}
+              activeApp={activeApp}
+              crossAppBadges={crossAppBadges}
               onNavSelect={handleNavSelect}
               userInitials={userInitials}
               onDownloadKeys={handleDownloadKeys}

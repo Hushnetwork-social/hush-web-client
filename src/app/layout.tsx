@@ -9,13 +9,13 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Hush Feeds - Decentralized Messaging",
+  title: "HushFeeds! - Decentralized Messaging",
   description: "Secure, decentralized messaging powered by HushNetwork blockchain",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "Hush Feeds",
+    title: "HushFeeds!",
   },
   icons: {
     icon: [

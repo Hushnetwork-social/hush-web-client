@@ -10,6 +10,10 @@ export function getAppHomeRoute(app: AppId): string {
   return app === 'social' ? SOCIAL_HOME_ROUTE : FEEDS_HOME_ROUTE;
 }
 
+export function getAppDisplayName(app: AppId): string {
+  return app === 'social' ? 'HushSocial!' : 'HushFeeds!';
+}
+
 export function getFeedNavigationRoute(feedId: string): string {
   return `${FEEDS_HOME_ROUTE}?feed=${encodeURIComponent(feedId)}`;
 }
@@ -35,4 +39,3 @@ export function getActiveAppFromPath(pathname: string): AppId {
 export function shouldClearBadgesOnAppSwitch(): boolean {
   return false;
 }
-
