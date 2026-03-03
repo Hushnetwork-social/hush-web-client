@@ -17,6 +17,8 @@ export const PAYLOAD_GUIDS = {
   NEW_CHAT_FEED: '033c61f5-c6e3-4e43-9eb0-ac9c615110e3',
   NEW_GROUP_FEED: 'a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d',
   JOIN_GROUP_FEED: 'b2c3d4e5-f6a7-5b6c-9d0e-1f2a3b4c5d6e',
+  CREATE_INNER_CIRCLE: '98e2518b-9e5b-4be5-b0d3-e2a57a86d601',
+  ADD_MEMBERS_TO_INNER_CIRCLE: 'f1baf6ab-cd4f-4d95-a0f2-7d1abcc4f8e4',
   NEW_FEED_MESSAGE: '3309d79b-92e9-4435-9b23-0de0b3d24264',
   NEW_REACTION: 'a7b3c2d1-e4f5-6789-abcd-ef0123456789',
 };
@@ -150,6 +152,20 @@ export interface JoinGroupFeedPayload {
   FeedId: string;
   JoiningUserPublicAddress: string;
   InvitationSignature?: string;  // Required for private groups (future)
+}
+
+export interface CreateInnerCirclePayload {
+  OwnerPublicAddress: string;
+}
+
+export interface InnerCircleMemberPayload {
+  PublicAddress: string;
+  PublicEncryptAddress: string;
+}
+
+export interface AddMembersToInnerCirclePayload {
+  OwnerPublicAddress: string;
+  Members: InnerCircleMemberPayload[];
 }
 
 // =============================================================================
@@ -610,6 +626,48 @@ export async function createJoinGroupFeedTransaction(
   const signedTx = await signByUser(unsignedTx, {
     privateKey: signingPrivateKey,
     publicSigningAddress: joiningUserPublicAddress,
+  });
+
+  return {
+    signedTransaction: JSON.stringify(signedTx),
+  };
+}
+
+export async function createCreateInnerCircleTransaction(
+  ownerPublicAddress: string,
+  signingPrivateKey: Uint8Array
+): Promise<{ signedTransaction: string }> {
+  const payload: CreateInnerCirclePayload = {
+    OwnerPublicAddress: ownerPublicAddress,
+  };
+
+  const unsignedTx = createUnsignedTransaction(PAYLOAD_GUIDS.CREATE_INNER_CIRCLE, payload);
+
+  const signedTx = await signByUser(unsignedTx, {
+    privateKey: signingPrivateKey,
+    publicSigningAddress: ownerPublicAddress,
+  });
+
+  return {
+    signedTransaction: JSON.stringify(signedTx),
+  };
+}
+
+export async function createAddMembersToInnerCircleTransaction(
+  ownerPublicAddress: string,
+  members: InnerCircleMemberPayload[],
+  signingPrivateKey: Uint8Array
+): Promise<{ signedTransaction: string }> {
+  const payload: AddMembersToInnerCirclePayload = {
+    OwnerPublicAddress: ownerPublicAddress,
+    Members: members,
+  };
+
+  const unsignedTx = createUnsignedTransaction(PAYLOAD_GUIDS.ADD_MEMBERS_TO_INNER_CIRCLE, payload);
+
+  const signedTx = await signByUser(unsignedTx, {
+    privateKey: signingPrivateKey,
+    publicSigningAddress: ownerPublicAddress,
   });
 
   return {
