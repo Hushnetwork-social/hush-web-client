@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import SocialPage from './page';
 
 const setSelectedNavMock = vi.fn();
+const setAppContextScrollMock = vi.fn();
 let selectedNav = 'feed-wall';
 let stateParam: string | null = null;
 
@@ -13,10 +14,19 @@ vi.mock('next/navigation', () => ({
 }));
 
 vi.mock('@/stores', () => ({
-  useAppStore: (selector: (state: { selectedNav: string; setSelectedNav: (value: string) => void }) => unknown) =>
+  useAppStore: (
+    selector: (state: {
+      selectedNav: string;
+      setSelectedNav: (value: string) => void;
+      appContexts: { social: { scrollOffset: number } };
+      setAppContextScroll: (app: 'social', scroll: number) => void;
+    }) => unknown
+  ) =>
     selector({
       selectedNav,
       setSelectedNav: setSelectedNavMock,
+      appContexts: { social: { scrollOffset: 0 } },
+      setAppContextScroll: setAppContextScrollMock,
     }),
 }));
 
@@ -25,6 +35,7 @@ describe('SocialPage', () => {
     selectedNav = 'feed-wall';
     stateParam = null;
     setSelectedNavMock.mockReset();
+    setAppContextScrollMock.mockReset();
     sessionStorage.clear();
   });
 
@@ -68,5 +79,15 @@ describe('SocialPage', () => {
     render(<SocialPage />);
 
     expect(screen.getByTestId('social-subview-placeholder')).toBeInTheDocument();
+  });
+
+  it('persists scroll position into social app context', () => {
+    render(<SocialPage />);
+
+    const region = screen.getByTestId('feed-wall-region');
+    Object.defineProperty(region, 'scrollTop', { value: 120, writable: true });
+    region.dispatchEvent(new Event('scroll'));
+
+    expect(setAppContextScrollMock).toHaveBeenCalledWith('social', 120);
   });
 });

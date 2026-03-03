@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { AlertCircle, Loader2, Sparkles } from "lucide-react";
 import { useAppStore } from "@/stores";
@@ -44,9 +44,12 @@ function resolveViewState(rawState: string | null): ViewState {
 
 export default function SocialPage() {
   const searchParams = useSearchParams();
+  const appContexts = useAppStore((state) => state.appContexts);
   const selectedNav = useAppStore((state) => state.selectedNav);
   const setSelectedNav = useAppStore((state) => state.setSelectedNav);
+  const setAppContextScroll = useAppStore((state) => state.setAppContextScroll);
   const [showSwitchIndicator, setShowSwitchIndicator] = useState(false);
+  const feedWallRegionRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (!SOCIAL_MENU_IDS.has(selectedNav)) {
@@ -67,6 +70,15 @@ export default function SocialPage() {
       return () => window.clearTimeout(timer);
     }
   }, []);
+
+  useEffect(() => {
+    const region = feedWallRegionRef.current;
+    if (!region) {
+      return;
+    }
+
+    region.scrollTop = appContexts.social.scrollOffset;
+  }, [appContexts.social.scrollOffset]);
 
   const viewState = useMemo(() => resolveViewState(searchParams.get("state")), [searchParams]);
 
@@ -126,7 +138,14 @@ export default function SocialPage() {
         </div>
       )}
 
-      <section className="flex-1 min-h-0 overflow-y-auto p-4" data-testid="feed-wall-region">
+      <section
+        ref={feedWallRegionRef}
+        className="flex-1 min-h-0 overflow-y-auto p-4"
+        data-testid="feed-wall-region"
+        onScroll={(event) => {
+          setAppContextScroll("social", event.currentTarget.scrollTop);
+        }}
+      >
         <div className="max-w-3xl mx-auto">
           <div className="mb-3">
             <h2 className="text-xl font-semibold text-hush-text-primary">Feed Wall</h2>
