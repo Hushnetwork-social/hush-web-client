@@ -26,6 +26,20 @@ describe('SocialMenuPanel', () => {
     expect(screen.getByTestId('social-menu-feed-wall').className).toContain('bg-hush-purple');
   });
 
+  it('renders FEAT-084 social operation menu contract', () => {
+    render(<SocialMenuPanel />);
+
+    expect(screen.getByTestId('social-menu-following')).toHaveTextContent('Following');
+    expect(screen.getByTestId('social-menu-my-posts')).toHaveTextContent('My Posts');
+    expect(screen.getByTestId('social-menu-my-replies')).toHaveTextContent('My Replies');
+    expect(screen.getByTestId('social-menu-notifications')).toHaveTextContent('Notifications');
+    expect(screen.getByTestId('social-menu-profile')).toHaveTextContent('Profile');
+    expect(screen.getByTestId('social-menu-settings')).toHaveTextContent('Settings');
+    expect(screen.getByTestId('social-menu-logout')).toHaveTextContent('Logout');
+    expect(screen.queryByTestId('social-menu-mentions')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('social-menu-users')).not.toBeInTheDocument();
+  });
+
   it('forces feed-wall when selected nav is not a social menu item', () => {
     selectedNav = 'new-post';
     render(<SocialMenuPanel />);

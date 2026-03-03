@@ -8,11 +8,10 @@ const SOCIAL_MENU_ITEMS = [
   { id: "following", label: "Following" },
   { id: "my-posts", label: "My Posts" },
   { id: "my-replies", label: "My Replies" },
-  { id: "mentions", label: "Mentions" },
   { id: "notifications", label: "Notifications" },
-  { id: "users", label: "Users" },
   { id: "profile", label: "Profile" },
   { id: "settings", label: "Settings" },
+  { id: "logout", label: "Logout" },
 ];
 
 const SOCIAL_MENU_IDS = new Set(SOCIAL_MENU_ITEMS.map((item) => item.id));

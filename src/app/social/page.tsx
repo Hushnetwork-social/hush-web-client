@@ -11,11 +11,10 @@ const SOCIAL_MENU_IDS = new Set([
   "following",
   "my-posts",
   "my-replies",
-  "mentions",
   "notifications",
-  "users",
   "profile",
   "settings",
+  "logout",
 ]);
 
 type ViewState = "loading" | "empty" | "error" | "populated";

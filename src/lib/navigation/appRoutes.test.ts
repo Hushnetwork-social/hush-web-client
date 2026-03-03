@@ -3,7 +3,6 @@ import {
   AUTH_ROUTE,
   FEEDS_HOME_ROUTE,
   getAppDisplayName,
-  LEGACY_COMMUNITY_ROUTE,
   LEGACY_DASHBOARD_ROUTE,
   SOCIAL_HOME_ROUTE,
   getActiveAppFromPath,
@@ -34,9 +33,9 @@ describe('appRoutes', () => {
     expect(resolveEntryRoute(false)).toBe(AUTH_ROUTE);
   });
 
-  it('normalizes legacy dashboard/community to feeds home', () => {
+  it('normalizes legacy dashboard to feeds home only', () => {
     expect(normalizeLegacyAppRoute(LEGACY_DASHBOARD_ROUTE)).toBe(FEEDS_HOME_ROUTE);
-    expect(normalizeLegacyAppRoute(LEGACY_COMMUNITY_ROUTE)).toBe(FEEDS_HOME_ROUTE);
+    expect(normalizeLegacyAppRoute('/community')).toBe('/community');
     expect(normalizeLegacyAppRoute('/social')).toBe('/social');
   });
 

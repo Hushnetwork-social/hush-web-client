@@ -4,7 +4,6 @@ export const FEEDS_HOME_ROUTE = '/feeds';
 export const SOCIAL_HOME_ROUTE = '/social';
 export const AUTH_ROUTE = '/auth';
 export const LEGACY_DASHBOARD_ROUTE = '/dashboard';
-export const LEGACY_COMMUNITY_ROUTE = '/community';
 
 export function getAppHomeRoute(app: AppId): string {
   return app === 'social' ? SOCIAL_HOME_ROUTE : FEEDS_HOME_ROUTE;
@@ -23,7 +22,7 @@ export function resolveEntryRoute(isAuthenticated: boolean): string {
 }
 
 export function normalizeLegacyAppRoute(pathname: string): string {
-  if (pathname === LEGACY_DASHBOARD_ROUTE || pathname === LEGACY_COMMUNITY_ROUTE) {
+  if (pathname === LEGACY_DASHBOARD_ROUTE) {
     return FEEDS_HOME_ROUTE;
   }
   return pathname;

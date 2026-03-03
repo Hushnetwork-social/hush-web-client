@@ -75,12 +75,12 @@ describe('app shell integration', () => {
     expect(state.crossAppBadges.feeds).toBe(7);
   });
 
-  it('keeps route hand-off stable for root, legacy, and app trees', () => {
+  it('keeps route hand-off stable for root, dashboard legacy, and app trees', () => {
     expect(resolveEntryRoute(true)).toBe(FEEDS_HOME_ROUTE);
     expect(resolveEntryRoute(false)).toBe('/auth');
 
     expect(normalizeLegacyAppRoute('/dashboard')).toBe(FEEDS_HOME_ROUTE);
-    expect(normalizeLegacyAppRoute('/community')).toBe(FEEDS_HOME_ROUTE);
+    expect(normalizeLegacyAppRoute('/community')).toBe('/community');
     expect(normalizeLegacyAppRoute('/social')).toBe('/social');
 
     expect(getActiveAppFromPath('/social')).toBe('social');
