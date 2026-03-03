@@ -19,7 +19,6 @@ const membersItem: AppNavItem = {
 export function getAppNavItems(activeApp: AppId, crossAppBadges: Record<AppId, number>): AppNavItem[] {
   if (activeApp === "social") {
     return [
-      { id: "feed-wall", label: "Feed Wall", icon: <Globe className="w-5 h-5" /> },
       { id: "search", label: "Search", icon: <Search className="w-5 h-5" /> },
       { id: "new-post", label: "New Post", icon: <PlusSquare className="w-5 h-5" /> },
       membersItem,

@@ -146,16 +146,15 @@ describe('BottomNav', () => {
       expect(navButtons[navButtons.length - 1]).toHaveTextContent('HushSocial!');
     });
 
-    it('should render social-app navigation and keep Feed Wall social-only', () => {
+    it('should render social-app action navigation', () => {
       render(
         <BottomNav
           {...defaultProps}
           activeApp="social"
-          selectedNav="feed-wall"
+          selectedNav="search"
         />
       );
 
-      expect(screen.getByText('Feed Wall')).toBeInTheDocument();
       expect(screen.getByText('Search')).toBeInTheDocument();
       expect(screen.getByText('New Post')).toBeInTheDocument();
       expect(screen.getByText('HushFeeds!')).toBeInTheDocument();

@@ -16,6 +16,7 @@ import { debugLog, debugError } from "@/lib/debug-logger";
 import { GroupCreationWizard } from "@/components/groups/GroupCreationWizard";
 import { checkPendingNavigation, setupVisibilityChangeListener } from "@/lib/push";
 import { getActiveAppFromPath, getAppDisplayName, getAppHomeRoute } from "@/lib/navigation/appRoutes";
+import { SocialMenuPanel } from "@/components/social/SocialMenuPanel";
 
 // Dynamic imports to prevent dev mode race condition
 const FeedList = dynamic(
@@ -133,12 +134,14 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   // Define all callbacks before any early return
   const handleNavSelect = useCallback((id: string) => {
     if (id === "switch-social") {
+      sessionStorage.setItem("hush_app_switch_to", "social");
       setActiveApp("social");
       router.push(getAppHomeRoute("social"));
       return;
     }
 
     if (id === "switch-feeds") {
+      sessionStorage.setItem("hush_app_switch_to", "feeds");
       setActiveApp("feeds");
       router.push(getAppHomeRoute("feeds"));
       return;
@@ -274,7 +277,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               onAccountDetails={handleAccountDetails}
               onLogout={handleLogout}
             >
-              <FeedList />
+              {activeApp === "social" ? <SocialMenuPanel /> : <FeedList />}
             </Sidebar>
 
             {/* Center Content */}
