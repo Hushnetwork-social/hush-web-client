@@ -51,6 +51,7 @@ const SyncContext = createContext<SyncContextValue>({
   isPaused: false,
   consecutiveFailures: 0,
   lastError: null,
+  triggerSyncNow: async () => false,
   registerSyncable: () => {},
 });
 
@@ -121,6 +122,7 @@ export function SyncProvider({ children, config }: SyncProviderProps) {
         isPaused,
         consecutiveFailures,
         lastError,
+        triggerSyncNow: async () => false,
       }),
     };
 
@@ -170,6 +172,25 @@ export function SyncProvider({ children, config }: SyncProviderProps) {
     },
     [isPaused, consecutiveFailures, maxConsecutiveFailures]
   );
+
+  const triggerSyncNow = useCallback(async (): Promise<boolean> => {
+    if (isPaused || !isMountedRef.current) {
+      return false;
+    }
+
+    const alwaysSyncables = syncablesRef.current.filter((s) => !s.requiresAuth);
+    const authSyncables = syncablesRef.current.filter((s) => s.requiresAuth);
+
+    if (alwaysSyncables.length > 0) {
+      await runSyncTasks(alwaysSyncables, 'Manual');
+    }
+
+    if (isAuthenticated && authSyncables.length > 0) {
+      await runSyncTasks(authSyncables, 'Manual');
+    }
+
+    return true;
+  }, [isAuthenticated, isPaused, runSyncTasks]);
 
   // =============================================================================
   // Always-Running Loop (requiresAuth = false)
@@ -327,18 +348,7 @@ export function SyncProvider({ children, config }: SyncProviderProps) {
         console.log(`[E2E] Previous sync completed after ${waitedMs}ms`);
       }
 
-      const alwaysSyncables = syncablesRef.current.filter((s) => !s.requiresAuth);
-      const authSyncables = syncablesRef.current.filter((s) => s.requiresAuth);
-
-      // Run always-running syncables
-      if (alwaysSyncables.length > 0) {
-        await runSyncTasks(alwaysSyncables, 'E2E-Manual');
-      }
-
-      // Run auth-dependent syncables if authenticated
-      if (isAuthenticated && authSyncables.length > 0) {
-        await runSyncTasks(authSyncables, 'E2E-Manual');
-      }
+      await triggerSyncNow();
 
       // Wait for sync to actually complete (not just be triggered)
       // The runSyncTasks call above might return while sync is still in progress
@@ -375,7 +385,7 @@ export function SyncProvider({ children, config }: SyncProviderProps) {
     return () => {
       delete (window as unknown as Record<string, unknown>).__e2e_triggerSync;
     };
-  }, [isAuthenticated, runSyncTasks]);
+  }, [triggerSyncNow]);
 
   // =============================================================================
   // Context Value
@@ -387,6 +397,7 @@ export function SyncProvider({ children, config }: SyncProviderProps) {
     isPaused,
     consecutiveFailures,
     lastError,
+    triggerSyncNow,
     registerSyncable,
   };
 
@@ -416,6 +427,7 @@ export function createSyncProviderAPI(
       isPaused: false,
       consecutiveFailures: 0,
       lastError: null,
+      triggerSyncNow: async () => false,
     }),
   };
 }

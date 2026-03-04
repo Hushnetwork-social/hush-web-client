@@ -69,6 +69,9 @@ export interface SyncStatus {
 
   /** Last error message, if any */
   lastError: string | null;
+
+  /** Manually triggers one full sync cycle (always-running + auth-dependent when authenticated). */
+  triggerSyncNow: () => Promise<boolean>;
 }
 
 /**

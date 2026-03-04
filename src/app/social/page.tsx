@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { AlertCircle, Link2, Loader2, MessageCircle, SmilePlus, Sparkles, X } from "lucide-react";
 import { useAppStore } from "@/stores";
 import { useFeedsStore } from "@/modules/feeds/useFeedsStore";
+import { useSyncContext } from "@/lib/sync";
 import { SystemToastContainer } from "@/components/notifications/SystemToast";
 import { addMembersToCustomCircle, createCustomCircle } from "@/modules/feeds/FeedsService";
 import { checkIdentityExists } from "@/modules/identity/IdentityService";
@@ -63,6 +64,14 @@ type CircleItem = {
 type UiToast = {
   id: string;
   message: string;
+};
+
+type PendingCircleAssignment = {
+  circleFeedId: string;
+  circleName: string;
+  memberAddress: string;
+  memberDisplayName: string;
+  createdAtMs: number;
 };
 
 const LONG_POST_TEXT =
@@ -152,6 +161,7 @@ export default function SocialPage() {
   const innerCircleSync = useAppStore((state) => state.innerCircleSync);
   const requestInnerCircleRetry = useAppStore((state) => state.requestInnerCircleRetry);
   const credentials = useAppStore((state) => state.credentials);
+  const { triggerSyncNow } = useSyncContext();
   const feeds = useFeedsStore((state) => state.feeds);
   const groupMembers = useFeedsStore((state) => state.groupMembers);
   const memberRoles = useFeedsStore((state) => state.memberRoles);
@@ -169,7 +179,7 @@ export default function SocialPage() {
   const [createCircleNameDraft, setCreateCircleNameDraft] = useState("");
   const [createCircleError, setCreateCircleError] = useState<string | null>(null);
   const [pendingCircleMembers, setPendingCircleMembers] = useState<Record<string, string[]>>({});
-  const [optimisticCircleMembers, setOptimisticCircleMembers] = useState<Record<string, string[]>>({});
+  const [pendingAssignments, setPendingAssignments] = useState<Record<string, PendingCircleAssignment>>({});
   const [uiToasts, setUiToasts] = useState<UiToast[]>([]);
   const [renderFollowingItems, setRenderFollowingItems] = useState<FollowingItem[]>([]);
   const [renderCircleItems, setRenderCircleItems] = useState<CircleItem[]>([]);
@@ -275,16 +285,14 @@ export default function SocialPage() {
         groupMembers[feed.id]?.map((member) => member.publicAddress) ??
         feed.participants.filter((participant) => participant !== ownAddress);
       const uniqueMembers = Array.from(new Set(members.filter((member) => member !== ownAddress)));
-      const optimisticMembers = optimisticCircleMembers[feed.id] ?? [];
-      const mergedMembers = Array.from(new Set([...uniqueMembers, ...optimisticMembers]));
       const isInnerCircle = normalizeCircleName(feed.name) === "inner circle";
 
       return {
         feedId: feed.id,
         name: feed.name,
         isInnerCircle,
-        members: mergedMembers,
-        memberCount: mergedMembers.length,
+        members: uniqueMembers,
+        memberCount: uniqueMembers.length,
       };
     });
 
@@ -308,7 +316,7 @@ export default function SocialPage() {
       }
       return left.name.localeCompare(right.name);
     });
-  }, [credentials?.signingPublicKey, feeds, groupMembers, memberRoles, optimisticCircleMembers]);
+  }, [credentials?.signingPublicKey, feeds, groupMembers, memberRoles]);
 
   const followingSignature = useMemo(
     () =>
@@ -348,6 +356,97 @@ export default function SocialPage() {
       return currentSignature === circlesSignature ? current : circleItems;
     });
   }, [circleItems, circlesSignature]);
+
+  useEffect(() => {
+    setPendingAssignments((current) => {
+      const entries = Object.entries(current);
+      if (entries.length === 0) {
+        return current;
+      }
+
+      let changed = false;
+      const nextAssignments: Record<string, PendingCircleAssignment> = {};
+      const confirmed: PendingCircleAssignment[] = [];
+
+      for (const [assignmentKey, assignment] of entries) {
+        const circle = renderCircleItems.find((item) => item.feedId === assignment.circleFeedId);
+        if (circle?.members.includes(assignment.memberAddress)) {
+          changed = true;
+          confirmed.push(assignment);
+          continue;
+        }
+        nextAssignments[assignmentKey] = assignment;
+      }
+
+      if (confirmed.length > 0) {
+        setPendingCircleMembers((pendingCurrent) => {
+          const pendingNext = { ...pendingCurrent };
+          for (const assignment of confirmed) {
+            pendingNext[assignment.circleFeedId] = (pendingCurrent[assignment.circleFeedId] ?? []).filter(
+              (address) => address !== assignment.memberAddress
+            );
+          }
+          return pendingNext;
+        });
+
+        for (const assignment of confirmed) {
+          addUiToast(`Member ${assignment.memberDisplayName} added to Circle ${assignment.circleName}`);
+        }
+      }
+
+      return changed ? nextAssignments : current;
+    });
+  }, [renderCircleItems]);
+
+  useEffect(() => {
+    if (Object.keys(pendingAssignments).length === 0) {
+      return;
+    }
+
+    const timeoutMs = 45000;
+    const intervalId = window.setInterval(() => {
+      const now = Date.now();
+      setPendingAssignments((current) => {
+        const entries = Object.entries(current);
+        if (entries.length === 0) {
+          return current;
+        }
+
+        let changed = false;
+        const nextAssignments: Record<string, PendingCircleAssignment> = {};
+        const expired: PendingCircleAssignment[] = [];
+
+        for (const [assignmentKey, assignment] of entries) {
+          if (now - assignment.createdAtMs > timeoutMs) {
+            changed = true;
+            expired.push(assignment);
+            continue;
+          }
+          nextAssignments[assignmentKey] = assignment;
+        }
+
+        if (expired.length > 0) {
+          setPendingCircleMembers((pendingCurrent) => {
+            const pendingNext = { ...pendingCurrent };
+            for (const assignment of expired) {
+              pendingNext[assignment.circleFeedId] = (pendingCurrent[assignment.circleFeedId] ?? []).filter(
+                (address) => address !== assignment.memberAddress
+              );
+            }
+            return pendingNext;
+          });
+
+          for (const assignment of expired) {
+            addUiToast(`Transaction failed: timed out while adding ${assignment.memberDisplayName} to ${assignment.circleName}`);
+          }
+        }
+
+        return changed ? nextAssignments : current;
+      });
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [pendingAssignments]);
 
   useEffect(() => {
     if (!activePost) {
@@ -482,11 +581,23 @@ export default function SocialPage() {
       return;
     }
 
+    const memberDisplayName = getDisplayNameForAddress(memberAddress);
+    const assignmentKey = `${circle.feedId}:${memberAddress}`;
     setPendingCircleMembers((current) => ({
       ...current,
       [circle.feedId]: [...(current[circle.feedId] ?? []), memberAddress],
     }));
-    addUiToast(`${getDisplayNameForAddress(memberAddress)} is being added to Circle ${circle.name}`);
+    setPendingAssignments((current) => ({
+      ...current,
+      [assignmentKey]: {
+        circleFeedId: circle.feedId,
+        circleName: circle.name,
+        memberAddress,
+        memberDisplayName,
+        createdAtMs: Date.now(),
+      },
+    }));
+    addUiToast(`${memberDisplayName} is being added to Circle ${circle.name}`);
 
     try {
       const identity = await checkIdentityExists(memberAddress);
@@ -511,20 +622,20 @@ export default function SocialPage() {
       if (!result.success) {
         throw new Error(result.message || "backend rejected assignment");
       }
-
-      setOptimisticCircleMembers((current) => ({
-        ...current,
-        [circle.feedId]: Array.from(new Set([...(current[circle.feedId] ?? []), memberAddress])),
-      }));
-      addUiToast(`Member ${getDisplayNameForAddress(memberAddress)} added to Circle ${circle.name}`);
+      await triggerSyncNow();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       addUiToast(`Transaction failed: ${message}`);
-    } finally {
+      setPendingAssignments((current) => {
+        const next = { ...current };
+        delete next[assignmentKey];
+        return next;
+      });
       setPendingCircleMembers((current) => ({
         ...current,
         [circle.feedId]: (current[circle.feedId] ?? []).filter((address) => address !== memberAddress),
       }));
+    } finally {
       setSelectedMemberAddress(null);
       setDragMemberAddress(null);
     }
@@ -553,6 +664,7 @@ export default function SocialPage() {
 
     addUiToast(`Circle ${createCircleNameDraft.trim()} creation transaction submitted`);
     setCreateCircleNameDraft("");
+    await triggerSyncNow();
     setCreatingCircle(false);
     setIsCreateDialogOpen(false);
   };

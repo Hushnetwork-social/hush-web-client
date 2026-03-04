@@ -8,6 +8,7 @@ const requestInnerCircleRetryMock = vi.fn();
 const createCustomCircleMock = vi.fn();
 const addMembersToCustomCircleMock = vi.fn();
 const checkIdentityExistsMock = vi.fn();
+const triggerSyncNowMock = vi.fn();
 let selectedNav = 'feed-wall';
 let stateParam: string | null = null;
 let mockFeeds = [
@@ -116,6 +117,12 @@ vi.mock('@/modules/identity/IdentityService', () => ({
   checkIdentityExists: (...args: unknown[]) => checkIdentityExistsMock(...args),
 }));
 
+vi.mock('@/lib/sync', () => ({
+  useSyncContext: () => ({
+    triggerSyncNow: triggerSyncNowMock,
+  }),
+}));
+
 describe('SocialPage', () => {
   beforeEach(() => {
     selectedNav = 'feed-wall';
@@ -126,12 +133,14 @@ describe('SocialPage', () => {
     createCustomCircleMock.mockReset();
     addMembersToCustomCircleMock.mockReset();
     checkIdentityExistsMock.mockReset();
+    triggerSyncNowMock.mockReset();
     createCustomCircleMock.mockResolvedValue({ success: true, message: 'ok' });
     addMembersToCustomCircleMock.mockResolvedValue({ success: true, message: 'ok' });
     checkIdentityExistsMock.mockResolvedValue({
       exists: true,
       publicEncryptAddress: 'alice-encrypt-address',
     });
+    triggerSyncNowMock.mockResolvedValue(true);
     mockFeeds = [
       {
         id: 'chat-alice',
@@ -230,13 +239,14 @@ describe('SocialPage', () => {
 
     await waitFor(() => {
       expect(createCustomCircleMock).toHaveBeenCalledWith('me-address', 'Friends', 'private');
+      expect(triggerSyncNowMock).toHaveBeenCalled();
     });
     expect(screen.queryByTestId('social-create-circle-modal')).not.toBeInTheDocument();
   });
 
-  it('assigns selected member to circle through mobile tap flow', async () => {
+  it('assigns selected member to circle through mobile tap flow and confirms after projection refresh', async () => {
     selectedNav = 'following';
-    render(<SocialPage />);
+    const { rerender } = render(<SocialPage />);
 
     fireEvent.click(screen.getByTestId('social-following-item-bob-address'));
     fireEvent.click(screen.getByTestId('social-circle-card-inner-circle'));
@@ -244,8 +254,24 @@ describe('SocialPage', () => {
     await waitFor(() => {
       expect(checkIdentityExistsMock).toHaveBeenCalledWith('bob-address');
       expect(addMembersToCustomCircleMock).toHaveBeenCalled();
+      expect(triggerSyncNowMock).toHaveBeenCalled();
     });
-    expect(screen.getByText('Member Bob added to Circle Inner Circle')).toBeInTheDocument();
+    expect(screen.getByText('Bob is being added to Circle Inner Circle')).toBeInTheDocument();
+    expect(screen.getByTestId('social-circle-pending-inner-circle-bob-address')).toBeInTheDocument();
+
+    mockGroupMembers = {
+      ...mockGroupMembers,
+      'inner-circle': [
+        { publicAddress: 'me-address' },
+        { publicAddress: 'alice-address' },
+        { publicAddress: 'bob-address' },
+      ],
+    };
+    rerender(<SocialPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Member Bob added to Circle Inner Circle')).toBeInTheDocument();
+    });
   });
 
   it('blocks duplicate assignment before submission', async () => {
