@@ -10,6 +10,8 @@ import { SystemToastContainer } from "@/components/notifications/SystemToast";
 import { addMembersToCustomCircle, createCustomCircle } from "@/modules/feeds/FeedsService";
 import { checkIdentityExists } from "@/modules/identity/IdentityService";
 import type { CustomCircleMemberPayload } from "@/lib/crypto";
+import { SocialPostComposerCard } from "./components/SocialPostComposerCard";
+import { usePostPermalink } from "./hooks/usePostPermalink";
 
 const SOCIAL_MENU_IDS = new Set([
   "search",
@@ -73,6 +75,16 @@ type PendingCircleAssignment = {
   memberDisplayName: string;
   createdAtMs: number;
 };
+
+type DraftMediaItem = {
+  id: string;
+  kind: "image" | "video";
+  label: string;
+  sizeMb: number;
+};
+
+const MAX_MEDIA_ATTACHMENTS = 4;
+const MAX_MEDIA_SIZE_MB = 25;
 
 const LONG_POST_TEXT =
   "Kaspa is reentering the GPU era and proving real utility with GPU workstations. " +
@@ -208,6 +220,9 @@ export default function SocialPage() {
   const [includeInnerCircleForPost, setIncludeInnerCircleForPost] = useState(true);
   const [selectedCustomCircleIdForPost, setSelectedCustomCircleIdForPost] = useState<string | null>(null);
   const [newPostAudienceError, setNewPostAudienceError] = useState<string | null>(null);
+  const [isFeedComposerExpanded, setIsFeedComposerExpanded] = useState(false);
+  const [draftMediaItems, setDraftMediaItems] = useState<DraftMediaItem[]>([]);
+  const [newPostMediaError, setNewPostMediaError] = useState<string | null>(null);
   const feedWallRegionRef = useRef<HTMLElement | null>(null);
   const hasInitializedSocialNavRef = useRef(false);
 
@@ -570,6 +585,7 @@ export default function SocialPage() {
     const toastId = `toast-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
     setUiToasts((current) => [...current, { id: toastId, message }]);
   };
+  const { copyPostPermalink } = usePostPermalink({ onToast: addUiToast });
 
   const removeUiToast = (toastId: string) => {
     setUiToasts((current) => current.filter((toast) => toast.id !== toastId));
@@ -767,146 +783,102 @@ export default function SocialPage() {
       return;
     }
 
+    if (draftMediaItems.some((item) => item.sizeMb > MAX_MEDIA_SIZE_MB)) {
+      setNewPostMediaError(`Each attachment must be ${MAX_MEDIA_SIZE_MB}MB or less.`);
+      return;
+    }
+
     setNewPostAudienceError(null);
+    setNewPostMediaError(null);
     addUiToast("Post composer validation passed (publish flow is out of scope in this phase).");
   };
 
-  const renderNewPostContent = () => {
-    const selectedCircleNames = resolveSelectedCircleNamesForPost();
+  const addDraftMediaItem = (kind: "image" | "video") => {
+    if (draftMediaItems.length >= MAX_MEDIA_ATTACHMENTS) {
+      setNewPostMediaError(`You can attach up to ${MAX_MEDIA_ATTACHMENTS} items.`);
+      return;
+    }
 
-    return (
-      <section data-testid="social-new-post" className="rounded-xl border border-hush-bg-hover bg-hush-bg-dark p-4">
-        <h3 className="text-sm font-semibold text-hush-text-primary">New Post</h3>
-        <p className="mt-1 text-xs text-hush-text-accent">Choose audience before publishing.</p>
-
-        <textarea
-          data-testid="social-new-post-draft"
-          value={newPostDraft}
-          onChange={(event) => setNewPostDraft(event.currentTarget.value)}
-          placeholder="Share something..."
-          className="mt-3 w-full min-h-28 rounded-md border border-hush-bg-hover bg-hush-bg-dark px-3 py-2 text-sm text-hush-text-primary outline-none focus:border-hush-purple"
-        />
-
-        <div className="mt-4 space-y-3 rounded-lg border border-hush-bg-hover p-3">
-          <p className="text-xs font-semibold text-hush-text-primary">Audience</p>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              data-testid="social-new-post-audience-public"
-              onClick={() => {
-                setPostAudience("public");
-                setNewPostAudienceError(null);
-              }}
-              className={`rounded-full border px-3 py-1 text-xs ${
-                postAudience === "public"
-                  ? "border-hush-purple bg-hush-purple/10 text-hush-purple"
-                  : "border-hush-bg-hover text-hush-text-accent"
-              }`}
-            >
-              Public
-            </button>
-            <button
-              type="button"
-              data-testid="social-new-post-audience-close"
-              onClick={() => {
-                setPostAudience("close");
-                if (!includeInnerCircleForPost && !selectedCustomCircleIdForPost) {
-                  setIncludeInnerCircleForPost(true);
-                }
-                setNewPostAudienceError(null);
-              }}
-              className={`rounded-full border px-3 py-1 text-xs ${
-                postAudience === "close"
-                  ? "border-hush-purple bg-hush-purple/10 text-hush-purple"
-                  : "border-hush-bg-hover text-hush-text-accent"
-              }`}
-            >
-              Close (Private)
-            </button>
-          </div>
-
-          {postAudience === "close" && (
-            <div className="space-y-2" data-testid="social-new-post-private-options">
-              <label className="flex items-center gap-2 text-xs text-hush-text-primary">
-                <input
-                  type="checkbox"
-                  checked={includeInnerCircleForPost}
-                  data-testid="social-new-post-inner-circle-toggle"
-                  onChange={() => {
-                    if (includeInnerCircleForPost && !selectedCustomCircleIdForPost) {
-                      setNewPostAudienceError("Inner Circle cannot be removed unless another private circle is selected.");
-                      return;
-                    }
-                    setIncludeInnerCircleForPost((current) => !current);
-                    setNewPostAudienceError(null);
-                  }}
-                />
-                Inner Circle (default)
-              </label>
-
-              <div className="space-y-1">
-                <p className="text-[11px] text-hush-text-accent">Select at most one custom circle:</p>
-                {availableCustomCirclesForPost.length === 0 ? (
-                  <p className="text-[11px] text-hush-text-accent">No custom circles available yet.</p>
-                ) : (
-                  availableCustomCirclesForPost.map((circle) => (
-                    <label key={circle.feedId} className="flex items-center gap-2 text-xs text-hush-text-primary">
-                      <input
-                        type="radio"
-                        name="new-post-custom-circle"
-                        checked={selectedCustomCircleIdForPost === circle.feedId}
-                        data-testid={`social-new-post-custom-circle-${circle.feedId}`}
-                        onChange={() => {
-                          setSelectedCustomCircleIdForPost(circle.feedId);
-                          setNewPostAudienceError(null);
-                        }}
-                      />
-                      {circle.name}
-                    </label>
-                  ))
-                )}
-                {selectedCustomCircleIdForPost && (
-                  <button
-                    type="button"
-                    data-testid="social-new-post-clear-custom-circle"
-                    onClick={() => {
-                      setSelectedCustomCircleIdForPost(null);
-                      setNewPostAudienceError(null);
-                    }}
-                    className="rounded border border-hush-bg-hover px-2 py-1 text-[11px] text-hush-text-accent hover:bg-hush-bg-hover"
-                  >
-                    Clear custom circle
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
-          <div data-testid="social-new-post-selected-circles" className="text-[11px] text-hush-text-accent">
-            {postAudience === "public"
-              ? "Selected: Public"
-              : `Selected circles: ${selectedCircleNames.length > 0 ? selectedCircleNames.join(", ") : "none"}`}
-          </div>
-          {newPostAudienceError && (
-            <p className="text-xs text-red-400" data-testid="social-new-post-audience-error">
-              {newPostAudienceError}
-            </p>
-          )}
-        </div>
-
-        <div className="mt-3 flex justify-end">
-          <button
-            type="button"
-            data-testid="social-new-post-publish"
-            onClick={handlePublishPost}
-            className="rounded-md bg-hush-purple px-3 py-1.5 text-xs font-semibold text-hush-bg-dark"
-          >
-            Publish
-          </button>
-        </div>
-      </section>
-    );
+    const nextCount = draftMediaItems.length + 1;
+    const sizeMb = kind === "image" ? 3 : 12;
+    setDraftMediaItems((current) => [
+      ...current,
+      {
+        id: `${kind}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+        kind,
+        label: `${kind === "image" ? "Image" : "Video"} ${nextCount}`,
+        sizeMb,
+      },
+    ]);
+    setNewPostMediaError(null);
   };
+
+  const removeDraftMediaItem = (id: string) => {
+    setDraftMediaItems((current) => current.filter((item) => item.id !== id));
+    setNewPostMediaError(null);
+  };
+
+  const handleSelectPublicAudience = () => {
+    setPostAudience("public");
+    setNewPostAudienceError(null);
+  };
+
+  const handleSelectPrivateAudience = () => {
+    setPostAudience("close");
+    if (!includeInnerCircleForPost && !selectedCustomCircleIdForPost) {
+      setIncludeInnerCircleForPost(true);
+    }
+    setNewPostAudienceError(null);
+  };
+
+  const handleToggleInnerCircleForPost = () => {
+    if (includeInnerCircleForPost && !selectedCustomCircleIdForPost) {
+      setNewPostAudienceError("Inner Circle cannot be removed unless another private circle is selected.");
+      return;
+    }
+    setIncludeInnerCircleForPost((current) => !current);
+    setNewPostAudienceError(null);
+  };
+
+  const handleSelectCustomCircleForPost = (feedId: string) => {
+    setSelectedCustomCircleIdForPost(feedId);
+    setNewPostAudienceError(null);
+  };
+
+  const handleClearCustomCircleForPost = () => {
+    setSelectedCustomCircleIdForPost(null);
+    setNewPostAudienceError(null);
+  };
+
+  const renderPostComposerCard = (mode: "full" | "compact") => (
+    <SocialPostComposerCard
+      mode={mode}
+      isExpanded={isFeedComposerExpanded}
+      onExpand={() => setIsFeedComposerExpanded(true)}
+      onCollapse={() => setIsFeedComposerExpanded(false)}
+      newPostDraft={newPostDraft}
+      onDraftChange={setNewPostDraft}
+      postAudience={postAudience}
+      onSelectPublicAudience={handleSelectPublicAudience}
+      onSelectPrivateAudience={handleSelectPrivateAudience}
+      includeInnerCircleForPost={includeInnerCircleForPost}
+      onToggleInnerCircle={handleToggleInnerCircleForPost}
+      availableCustomCirclesForPost={availableCustomCirclesForPost}
+      selectedCustomCircleIdForPost={selectedCustomCircleIdForPost}
+      onSelectCustomCircle={handleSelectCustomCircleForPost}
+      onClearCustomCircle={handleClearCustomCircleForPost}
+      selectedCircleNames={resolveSelectedCircleNamesForPost()}
+      newPostAudienceError={newPostAudienceError}
+      draftMediaItems={draftMediaItems}
+      newPostMediaError={newPostMediaError}
+      maxMediaAttachments={MAX_MEDIA_ATTACHMENTS}
+      maxMediaSizeMb={MAX_MEDIA_SIZE_MB}
+      onAddImage={() => addDraftMediaItem("image")}
+      onAddVideo={() => addDraftMediaItem("video")}
+      onRemoveMedia={removeDraftMediaItem}
+      onPublish={handlePublishPost}
+    />
+  );
 
   const renderFeedWallContent = () => {
     if (viewState === "loading") {
@@ -940,6 +912,7 @@ export default function SocialPage() {
 
     return (
       <div data-testid="social-populated" className="space-y-3">
+        <section data-testid="social-feedwall-composer">{renderPostComposerCard("compact")}</section>
         {DEMO_POSTS.map((post) => (
           <article
             key={post.id}
@@ -978,6 +951,7 @@ export default function SocialPage() {
                 type="button"
                 className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-hush-text-accent hover:bg-hush-bg-hover"
                 data-testid={`post-action-link-${post.id}`}
+                onClick={() => void copyPostPermalink(post.id)}
               >
                 <Link2 className="w-3.5 h-3.5" />
                 Get Link
@@ -1353,7 +1327,7 @@ export default function SocialPage() {
 
           {selectedNav === "feed-wall" ? renderFeedWallContent() : null}
           {selectedNav === "following" ? renderFollowingContent() : null}
-          {selectedNav === "new-post" ? renderNewPostContent() : null}
+          {selectedNav === "new-post" ? renderPostComposerCard("full") : null}
           {selectedNav !== "feed-wall" && selectedNav !== "following" && selectedNav !== "new-post" ? (
             <div data-testid="social-subview-placeholder" className="py-16 text-center">
               <p className="text-hush-text-primary font-semibold mb-1">{selectedNav.replace(/-/g, " ")}</p>
@@ -1406,6 +1380,7 @@ export default function SocialPage() {
                 type="button"
                 className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-hush-text-accent hover:bg-hush-bg-hover"
                 data-testid={`post-detail-action-link-${activePost.id}`}
+                onClick={() => void copyPostPermalink(activePost.id)}
               >
                 <Link2 className="w-3.5 h-3.5" />
                 Get Link

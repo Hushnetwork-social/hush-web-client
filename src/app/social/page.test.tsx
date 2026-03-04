@@ -9,6 +9,7 @@ const createCustomCircleMock = vi.fn();
 const addMembersToCustomCircleMock = vi.fn();
 const checkIdentityExistsMock = vi.fn();
 const triggerSyncNowMock = vi.fn();
+const clipboardWriteTextMock = vi.fn();
 let selectedNav = 'feed-wall';
 let stateParam: string | null = null;
 let mockFeeds = [
@@ -143,6 +144,12 @@ describe('SocialPage', () => {
       publicEncryptAddress: 'alice-encrypt-address',
     });
     triggerSyncNowMock.mockResolvedValue(true);
+    clipboardWriteTextMock.mockResolvedValue(undefined);
+    Object.assign(navigator, {
+      clipboard: {
+        writeText: clipboardWriteTextMock,
+      },
+    });
     mockFeeds = [
       {
         id: 'chat-alice',
@@ -208,6 +215,8 @@ describe('SocialPage', () => {
 
     expect(screen.getByTestId('social-populated')).toBeInTheDocument();
     expect(screen.getByTestId('feed-wall-region')).toBeInTheDocument();
+    expect(screen.getByTestId('social-feedwall-composer')).toBeInTheDocument();
+    expect(screen.getByTestId('social-new-post-compact-trigger')).toHaveTextContent('What do you want to show us?');
     expect(screen.getByTestId('post-action-reply-post-1')).toHaveTextContent('Reply (2)');
     expect(screen.getByTestId('post-action-link-post-1')).toHaveTextContent('Get Link');
     expect(screen.getByTestId('post-reaction-strip-post-1')).toBeInTheDocument();
@@ -332,6 +341,29 @@ describe('SocialPage', () => {
 
     expect(screen.getByTestId('social-new-post')).toBeInTheDocument();
     expect(screen.getByTestId('social-new-post-selected-circles')).toHaveTextContent('Selected circles: Inner Circle');
+  });
+
+  it('expands compact feed-wall composer and allows collapse', () => {
+    render(<SocialPage />);
+
+    fireEvent.click(screen.getByTestId('social-new-post-compact-trigger'));
+    expect(screen.getByTestId('social-new-post-draft')).toBeInTheDocument();
+    expect(screen.getByTestId('social-new-post-collapse')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('social-new-post-collapse'));
+    expect(screen.getByTestId('social-new-post-compact-trigger')).toBeInTheDocument();
+  });
+
+  it('enforces media attachment cap in composer', () => {
+    selectedNav = 'new-post';
+    render(<SocialPage />);
+
+    for (let i = 0; i < 4; i += 1) {
+      fireEvent.click(screen.getByTestId('social-new-post-add-image'));
+    }
+    fireEvent.click(screen.getByTestId('social-new-post-add-image'));
+
+    expect(screen.getByTestId('social-new-post-media-error')).toHaveTextContent('You can attach up to 4 items.');
   });
 
   it('keeps private post valid with at most one custom circle plus Inner Circle', () => {
@@ -469,6 +501,22 @@ describe('SocialPage', () => {
 
     fireEvent.click(screen.getByTestId('close-post-detail'));
     expect(screen.queryByTestId('post-detail-overlay')).not.toBeInTheDocument();
+  });
+
+  it('copies post permalink from feed card and detail actions', async () => {
+    render(<SocialPage />);
+
+    fireEvent.click(screen.getByTestId('post-action-link-post-1'));
+    await waitFor(() => {
+      expect(clipboardWriteTextMock).toHaveBeenCalledWith(expect.stringContaining('/social/post/post-1'));
+    });
+    expect(screen.getByText('Post permalink copied.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('open-post-detail-post-1'));
+    fireEvent.click(screen.getByTestId('post-detail-action-link-post-1'));
+    await waitFor(() => {
+      expect(clipboardWriteTextMock).toHaveBeenCalledWith(expect.stringContaining('/social/post/post-1'));
+    });
   });
 
   it('adds a reply with Enter and places it at top of reply list', () => {
