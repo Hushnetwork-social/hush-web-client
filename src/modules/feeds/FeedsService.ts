@@ -12,8 +12,12 @@ import {
   createChatFeedTransaction,
   createCreateInnerCircleTransaction,
   createAddMembersToInnerCircleTransaction,
+  createCreateCustomCircleTransaction,
+  createAddMembersToCustomCircleTransaction,
+  generateGuid,
   hexToBytes,
   type AttachmentRefPayload,
+  type CustomCircleMemberPayload,
 } from '@/lib/crypto';
 import { FEED_TYPE_MAP, useFeedsStore } from './useFeedsStore';
 import { useAppStore } from '@/stores';
@@ -60,6 +64,26 @@ interface InnerCircleResponse {
   success: boolean;
   message?: string;
   exists: boolean;
+  feedId?: string;
+}
+
+export enum CircleOperationErrorCode {
+  NONE = 'NONE',
+  DUPLICATE = 'DUPLICATE',
+  ELIGIBILITY = 'ELIGIBILITY',
+  OWNERSHIP = 'OWNERSHIP',
+  NAME = 'NAME',
+  LIMIT = 'LIMIT',
+  REJECTED = 'REJECTED',
+  UNKNOWN = 'UNKNOWN',
+}
+
+export interface CircleOperationResult {
+  success: boolean;
+  message: string;
+  errorCode: CircleOperationErrorCode;
+  retryable: boolean;
+  status: TransactionStatus;
   feedId?: string;
 }
 
@@ -345,6 +369,168 @@ export async function ensureInnerCircleForOwner(
     success: true,
     retryable: false,
     message: `Inner circle synced (${validMembers.length} member(s) processed)`,
+  };
+}
+
+function normalizeCircleError(
+  status: TransactionStatus,
+  message: string | undefined
+): CircleOperationErrorCode {
+  const normalized = (message || '').toLowerCase();
+  if (normalized.includes('duplicate') || normalized.includes('already exists')) {
+    return CircleOperationErrorCode.DUPLICATE;
+  }
+  if (normalized.includes('follow') || normalized.includes('eligible') || normalized.includes('chat feed')) {
+    return CircleOperationErrorCode.ELIGIBILITY;
+  }
+  if (normalized.includes('owner') || normalized.includes('unauthorized')) {
+    return CircleOperationErrorCode.OWNERSHIP;
+  }
+  if (normalized.includes('name') || normalized.includes('circle')) {
+    return CircleOperationErrorCode.NAME;
+  }
+  if (normalized.includes('limit') || normalized.includes('max') || normalized.includes('between 1 and 100')) {
+    return CircleOperationErrorCode.LIMIT;
+  }
+  if (status === TransactionStatus.REJECTED) {
+    return CircleOperationErrorCode.REJECTED;
+  }
+  return CircleOperationErrorCode.UNKNOWN;
+}
+
+function validateCustomCircleName(circleName: string): CircleOperationResult | null {
+  const trimmed = circleName.trim();
+  if (trimmed.length < 3 || trimmed.length > 40 || !/^[A-Za-z0-9 _-]+$/.test(trimmed)) {
+    return {
+      success: false,
+      message: 'Circle name must be 3-40 chars and use letters, numbers, spaces, hyphen, underscore',
+      errorCode: CircleOperationErrorCode.NAME,
+      retryable: false,
+      status: TransactionStatus.REJECTED,
+    };
+  }
+
+  return null;
+}
+
+export async function createCustomCircle(
+  ownerPublicAddress: string,
+  circleName: string,
+  signingPrivateKeyHex: string,
+  feedId: string = generateGuid()
+): Promise<CircleOperationResult> {
+  const nameValidation = validateCustomCircleName(circleName);
+  if (nameValidation) {
+    return nameValidation;
+  }
+
+  const signingPrivateKey = hexToBytes(signingPrivateKeyHex);
+  const { signedTransaction } = await createCreateCustomCircleTransaction(
+    feedId,
+    ownerPublicAddress,
+    circleName.trim(),
+    signingPrivateKey
+  );
+  const result = await submitTransaction(signedTransaction);
+
+  if (result.successful || result.status === TransactionStatus.ALREADY_EXISTS) {
+    return {
+      success: true,
+      message: result.message || 'Custom circle transaction accepted',
+      errorCode: CircleOperationErrorCode.NONE,
+      retryable: false,
+      status: result.status,
+      feedId,
+    };
+  }
+
+  const errorCode = normalizeCircleError(result.status, result.message);
+  const retryable = result.status === TransactionStatus.PENDING || errorCode === CircleOperationErrorCode.UNKNOWN;
+  return {
+    success: false,
+    message: result.message || 'Failed to create custom circle',
+    errorCode,
+    retryable,
+    status: result.status,
+  };
+}
+
+function validateCustomCircleMembers(members: CustomCircleMemberPayload[]): CircleOperationResult | null {
+  if (members.length === 0 || members.length > 100) {
+    return {
+      success: false,
+      message: 'Members must contain between 1 and 100 users',
+      errorCode: CircleOperationErrorCode.LIMIT,
+      retryable: false,
+      status: TransactionStatus.REJECTED,
+    };
+  }
+
+  const addresses = members.map((member) => member.PublicAddress.trim());
+  if (addresses.some((address) => address.length === 0)) {
+    return {
+      success: false,
+      message: 'All members must include a valid address',
+      errorCode: CircleOperationErrorCode.ELIGIBILITY,
+      retryable: false,
+      status: TransactionStatus.REJECTED,
+    };
+  }
+
+  const uniqueCount = new Set(addresses).size;
+  if (uniqueCount !== addresses.length) {
+    return {
+      success: false,
+      message: 'Duplicate members are not allowed in the same request',
+      errorCode: CircleOperationErrorCode.DUPLICATE,
+      retryable: false,
+      status: TransactionStatus.REJECTED,
+    };
+  }
+
+  return null;
+}
+
+export async function addMembersToCustomCircle(
+  feedId: string,
+  ownerPublicAddress: string,
+  members: CustomCircleMemberPayload[],
+  signingPrivateKeyHex: string
+): Promise<CircleOperationResult> {
+  const membersValidation = validateCustomCircleMembers(members);
+  if (membersValidation) {
+    return membersValidation;
+  }
+
+  const signingPrivateKey = hexToBytes(signingPrivateKeyHex);
+  const { signedTransaction } = await createAddMembersToCustomCircleTransaction(
+    feedId,
+    ownerPublicAddress,
+    members,
+    signingPrivateKey
+  );
+  const result = await submitTransaction(signedTransaction);
+
+  if (result.successful || result.status === TransactionStatus.ALREADY_EXISTS) {
+    return {
+      success: true,
+      message: result.message || 'Custom circle add-members transaction accepted',
+      errorCode: CircleOperationErrorCode.NONE,
+      retryable: false,
+      status: result.status,
+      feedId,
+    };
+  }
+
+  const errorCode = normalizeCircleError(result.status, result.message);
+  const retryable = result.status === TransactionStatus.PENDING || errorCode === CircleOperationErrorCode.UNKNOWN;
+  return {
+    success: false,
+    message: result.message || 'Failed to add members to custom circle',
+    errorCode,
+    retryable,
+    status: result.status,
+    feedId,
   };
 }
 

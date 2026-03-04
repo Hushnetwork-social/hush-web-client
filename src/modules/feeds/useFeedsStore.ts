@@ -617,6 +617,78 @@ function sortFeeds(feeds: Feed[]): Feed[] {
   });
 }
 
+function areStringArraysEqual(left: string[] | undefined, right: string[] | undefined): boolean {
+  const leftList = left ?? [];
+  const rightList = right ?? [];
+  if (leftList.length !== rightList.length) {
+    return false;
+  }
+
+  for (let index = 0; index < leftList.length; index += 1) {
+    if (leftList[index] !== rightList[index]) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function areFeedsEquivalent(left: Feed, right: Feed): boolean {
+  return left.id === right.id &&
+    left.type === right.type &&
+    left.name === right.name &&
+    left.description === right.description &&
+    left.isPublic === right.isPublic &&
+    left.inviteCode === right.inviteCode &&
+    left.unreadCount === right.unreadCount &&
+    left.createdAt === right.createdAt &&
+    left.updatedAt === right.updatedAt &&
+    left.blockIndex === right.blockIndex &&
+    left.encryptedFeedKey === right.encryptedFeedKey &&
+    left.aesKey === right.aesKey &&
+    left.otherParticipantPublicSigningAddress === right.otherParticipantPublicSigningAddress &&
+    left.lastReadBlockIndex === right.lastReadBlockIndex &&
+    left.hasPendingMessages === right.hasPendingMessages &&
+    left.needsSync === right.needsSync &&
+    areStringArraysEqual(left.participants, right.participants);
+}
+
+function areFeedListsEquivalent(left: Feed[], right: Feed[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  for (let index = 0; index < left.length; index += 1) {
+    if (!areFeedsEquivalent(left[index], right[index])) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function areGroupMembersEqual(left: GroupFeedMember[] | undefined, right: GroupFeedMember[]): boolean {
+  const current = left ?? [];
+  if (current.length !== right.length) {
+    return false;
+  }
+
+  for (let index = 0; index < current.length; index += 1) {
+    const currentMember = current[index];
+    const nextMember = right[index];
+    if (
+      currentMember.publicAddress !== nextMember.publicAddress ||
+      currentMember.displayName !== nextMember.displayName ||
+      currentMember.role !== nextMember.role ||
+      currentMember.joinedAtBlock !== nextMember.joinedAtBlock
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 /**
  * FEAT-059: Helper to decrypt messages based on feed type.
  * - Chat feeds: use feed's AES key
@@ -823,13 +895,21 @@ export const useFeedsStore = create<FeedsStore>()(
     (set, get) => ({
       ...initialState,
 
-      setFeeds: (feeds) => set({ feeds: sortFeeds(feeds) }),
+      setFeeds: (feeds) => set((state) => {
+        const sortedFeeds = sortFeeds(feeds);
+        if (areFeedListsEquivalent(state.feeds, sortedFeeds)) {
+          return state;
+        }
+
+        return { feeds: sortedFeeds };
+      }),
 
       addFeeds: (newFeeds) => {
         const currentFeeds = get().feeds;
         const currentMessages = get().messages;
         const existingIds = new Set(currentFeeds.map((f) => f.id));
         const newFeedsMap = new Map(newFeeds.map((f) => [f.id, f]));
+        let hasChanges = false;
 
         // Update existing feeds with new data (e.g., encryptedFeedKey from server)
         const updatedFeeds = currentFeeds.map((existingFeed) => {
@@ -859,7 +939,7 @@ export const useFeedsStore = create<FeedsStore>()(
             }
 
             // Merge server data, preserving local-only data like decrypted aesKey
-            return {
+            const mergedFeed: Feed = {
               ...existingFeed,
               ...serverFeed,
               // Keep the decrypted aesKey if we have it AND the encryptedFeedKey hasn't changed
@@ -873,13 +953,27 @@ export const useFeedsStore = create<FeedsStore>()(
               // (stale) blockIndex. Always keep the higher value to maintain correct sort order.
               blockIndex: Math.max(existingFeed.blockIndex ?? 0, serverFeed.blockIndex ?? 0),
             };
+
+            if (areFeedsEquivalent(existingFeed, mergedFeed)) {
+              return existingFeed;
+            }
+
+            hasChanges = true;
+            return mergedFeed;
           }
           return existingFeed;
         });
 
         // Add truly new feeds
         const uniqueNewFeeds = newFeeds.filter((f) => !existingIds.has(f.id));
+        if (uniqueNewFeeds.length > 0) {
+          hasChanges = true;
+        }
         const mergedFeeds = sortFeeds([...updatedFeeds, ...uniqueNewFeeds]);
+
+        if (!hasChanges || areFeedListsEquivalent(currentFeeds, mergedFeeds)) {
+          return;
+        }
 
         set({ feeds: mergedFeeds });
       },
@@ -1348,19 +1442,43 @@ export const useFeedsStore = create<FeedsStore>()(
       // ============= Per-Feed Sync Tracking Implementations =============
 
       markFeedNeedsSync: (feedId, needsSync) => {
-        set((state) => ({
-          feeds: state.feeds.map((f) =>
-            f.id === feedId ? { ...f, needsSync } : f
-          ),
-        }));
+        set((state) => {
+          let hasChanges = false;
+          const feeds = state.feeds.map((feed) => {
+            if (feed.id !== feedId || feed.needsSync === needsSync) {
+              return feed;
+            }
+
+            hasChanges = true;
+            return { ...feed, needsSync };
+          });
+
+          if (!hasChanges) {
+            return state;
+          }
+
+          return { feeds };
+        });
       },
 
       clearFeedNeedsSync: (feedId) => {
-        set((state) => ({
-          feeds: state.feeds.map((f) =>
-            f.id === feedId ? { ...f, needsSync: false } : f
-          ),
-        }));
+        set((state) => {
+          let hasChanges = false;
+          const feeds = state.feeds.map((feed) => {
+            if (feed.id !== feedId || feed.needsSync === false) {
+              return feed;
+            }
+
+            hasChanges = true;
+            return { ...feed, needsSync: false };
+          });
+
+          if (!hasChanges) {
+            return state;
+          }
+
+          return { feeds };
+        });
       },
 
       getFeedsNeedingSync: () => {
@@ -1371,12 +1489,18 @@ export const useFeedsStore = create<FeedsStore>()(
 
       setGroupMembers: (feedId, members) => {
         debugLog(`[FeedsStore] setGroupMembers: feedId=${feedId}, count=${members.length}`);
-        set((state) => ({
-          groupMembers: {
-            ...state.groupMembers,
-            [feedId]: members,
-          },
-        }));
+        set((state) => {
+          if (areGroupMembersEqual(state.groupMembers[feedId], members)) {
+            return state;
+          }
+
+          return {
+            groupMembers: {
+              ...state.groupMembers,
+              [feedId]: members,
+            },
+          };
+        });
       },
 
       addGroupMember: (feedId, member) => {

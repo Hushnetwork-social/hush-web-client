@@ -19,6 +19,8 @@ export const PAYLOAD_GUIDS = {
   JOIN_GROUP_FEED: 'b2c3d4e5-f6a7-5b6c-9d0e-1f2a3b4c5d6e',
   CREATE_INNER_CIRCLE: '98e2518b-9e5b-4be5-b0d3-e2a57a86d601',
   ADD_MEMBERS_TO_INNER_CIRCLE: 'f1baf6ab-cd4f-4d95-a0f2-7d1abcc4f8e4',
+  CREATE_CUSTOM_CIRCLE: '8f7d8cc0-f8fb-4f8f-b2d6-7e51db96f351',
+  ADD_MEMBERS_TO_CUSTOM_CIRCLE: '4d27a7d3-693f-4306-93cc-f4e3a562cdd4',
   NEW_FEED_MESSAGE: '3309d79b-92e9-4435-9b23-0de0b3d24264',
   NEW_REACTION: 'a7b3c2d1-e4f5-6789-abcd-ef0123456789',
 };
@@ -166,6 +168,23 @@ export interface InnerCircleMemberPayload {
 export interface AddMembersToInnerCirclePayload {
   OwnerPublicAddress: string;
   Members: InnerCircleMemberPayload[];
+}
+
+export interface CreateCustomCirclePayload {
+  FeedId: string;
+  OwnerPublicAddress: string;
+  CircleName: string;
+}
+
+export interface CustomCircleMemberPayload {
+  PublicAddress: string;
+  PublicEncryptAddress: string;
+}
+
+export interface AddMembersToCustomCirclePayload {
+  FeedId: string;
+  OwnerPublicAddress: string;
+  Members: CustomCircleMemberPayload[];
 }
 
 // =============================================================================
@@ -664,6 +683,54 @@ export async function createAddMembersToInnerCircleTransaction(
   };
 
   const unsignedTx = createUnsignedTransaction(PAYLOAD_GUIDS.ADD_MEMBERS_TO_INNER_CIRCLE, payload);
+
+  const signedTx = await signByUser(unsignedTx, {
+    privateKey: signingPrivateKey,
+    publicSigningAddress: ownerPublicAddress,
+  });
+
+  return {
+    signedTransaction: JSON.stringify(signedTx),
+  };
+}
+
+export async function createCreateCustomCircleTransaction(
+  feedId: string,
+  ownerPublicAddress: string,
+  circleName: string,
+  signingPrivateKey: Uint8Array
+): Promise<{ signedTransaction: string }> {
+  const payload: CreateCustomCirclePayload = {
+    FeedId: feedId,
+    OwnerPublicAddress: ownerPublicAddress,
+    CircleName: circleName,
+  };
+
+  const unsignedTx = createUnsignedTransaction(PAYLOAD_GUIDS.CREATE_CUSTOM_CIRCLE, payload);
+
+  const signedTx = await signByUser(unsignedTx, {
+    privateKey: signingPrivateKey,
+    publicSigningAddress: ownerPublicAddress,
+  });
+
+  return {
+    signedTransaction: JSON.stringify(signedTx),
+  };
+}
+
+export async function createAddMembersToCustomCircleTransaction(
+  feedId: string,
+  ownerPublicAddress: string,
+  members: CustomCircleMemberPayload[],
+  signingPrivateKey: Uint8Array
+): Promise<{ signedTransaction: string }> {
+  const payload: AddMembersToCustomCirclePayload = {
+    FeedId: feedId,
+    OwnerPublicAddress: ownerPublicAddress,
+    Members: members,
+  };
+
+  const unsignedTx = createUnsignedTransaction(PAYLOAD_GUIDS.ADD_MEMBERS_TO_CUSTOM_CIRCLE, payload);
 
   const signedTx = await signByUser(unsignedTx, {
     privateKey: signingPrivateKey,

@@ -35,6 +35,8 @@ export {
   createChatFeedTransaction,
   createCreateInnerCircleTransaction,
   createAddMembersToInnerCircleTransaction,
+  createCreateCustomCircleTransaction,
+  createAddMembersToCustomCircleTransaction,
   createReactionTransaction,
   // Types
   type SignatureInfo,
@@ -47,6 +49,9 @@ export {
   type NewFeedMessagePayload,
   type ChatFeedParticipant,
   type NewChatFeedPayload,
+  type CreateCustomCirclePayload,
+  type CustomCircleMemberPayload,
+  type AddMembersToCustomCirclePayload,
   type NewReactionPayload,
   type AttachmentRefPayload,
 } from './transactions';
