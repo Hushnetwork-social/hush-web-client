@@ -106,6 +106,41 @@ describe('SystemToast', () => {
       });
       expect(onDismiss).toHaveBeenCalledTimes(1);
     });
+
+    it('does not reset auto-dismiss timer across rerenders with new onDismiss callback identity', () => {
+      const firstDismiss = vi.fn();
+      const { rerender } = render(
+        <SystemToast
+          message="Test message"
+          onDismiss={firstDismiss}
+          autoDismissMs={5000}
+        />
+      );
+
+      act(() => {
+        vi.advanceTimersByTime(2500);
+      });
+
+      const secondDismiss = vi.fn();
+      rerender(
+        <SystemToast
+          message="Test message"
+          onDismiss={secondDismiss}
+          autoDismissMs={5000}
+        />
+      );
+
+      act(() => {
+        vi.advanceTimersByTime(2499);
+      });
+      expect(secondDismiss).not.toHaveBeenCalled();
+
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(secondDismiss).toHaveBeenCalledTimes(1);
+      expect(firstDismiss).not.toHaveBeenCalled();
+    });
   });
 });
 

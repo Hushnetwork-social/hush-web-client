@@ -152,6 +152,27 @@ function normalizeCircleName(name: string): string {
   return name.trim().toLowerCase();
 }
 
+function normalizePublicAddress(address: string): string {
+  return address.trim().toLowerCase();
+}
+
+function isCircleFeed(feedName: string, feedDescription?: string): boolean {
+  const normalizedName = normalizeCircleName(feedName);
+  if (normalizedName === "inner circle") {
+    return true;
+  }
+
+  const normalizedDescription = (feedDescription ?? "").trim().toLowerCase();
+  return (
+    normalizedDescription === "owner-managed custom circle" ||
+    normalizedDescription === "auto-managed inner circle"
+  );
+}
+
+function logSocialDrag(event: string, payload: Record<string, unknown>): void {
+  console.info(`[SocialDnD] ${event}`, payload);
+}
+
 export default function SocialPage() {
   const searchParams = useSearchParams();
   const appContexts = useAppStore((state) => state.appContexts);
@@ -164,7 +185,6 @@ export default function SocialPage() {
   const { triggerSyncNow } = useSyncContext();
   const feeds = useFeedsStore((state) => state.feeds);
   const groupMembers = useFeedsStore((state) => state.groupMembers);
-  const memberRoles = useFeedsStore((state) => state.memberRoles);
   const [activePostId, setActivePostId] = useState<string | null>(null);
   const [topReplyDraft, setTopReplyDraft] = useState("");
   const [isTopComposerOpen, setIsTopComposerOpen] = useState(false);
@@ -172,7 +192,7 @@ export default function SocialPage() {
   const [inlineComposerTargetId, setInlineComposerTargetId] = useState<string | null>(null);
   const [inlineComposerRootId, setInlineComposerRootId] = useState<string | null>(null);
   const [overlayReplies, setOverlayReplies] = useState<ReplyItem[]>([]);
-  const [dragMemberAddress, setDragMemberAddress] = useState<string | null>(null);
+  const [pointerDragMemberAddress, setPointerDragMemberAddress] = useState<string | null>(null);
   const [selectedMemberAddress, setSelectedMemberAddress] = useState<string | null>(null);
   const [creatingCircle, setCreatingCircle] = useState(false);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -221,9 +241,7 @@ export default function SocialPage() {
   const activePost = useMemo(() => DEMO_POSTS.find((post) => post.id === activePostId) ?? null, [activePostId]);
   const followingItems = useMemo<FollowingItem[]>(() => {
     const ownAddress = credentials?.signingPublicKey;
-    const circleFeeds = feeds.filter(
-      (feed) => feed.type === "group" && feed.name?.trim().toLowerCase() === "inner circle"
-    );
+    const circleFeeds = feeds.filter((feed) => feed.type === "group" && isCircleFeed(feed.name, feed.description));
     const followedByAddress = new Map<string, FollowingItem>();
 
     for (const feed of feeds) {
@@ -237,15 +255,19 @@ export default function SocialPage() {
       if (!otherParticipant) {
         continue;
       }
+      const normalizedOtherParticipant = normalizePublicAddress(otherParticipant);
 
       const circleNames = circleFeeds
         .filter((circleFeed) => {
-          const members = groupMembers[circleFeed.id]?.map((member) => member.publicAddress) ?? circleFeed.participants;
-          return members.includes(otherParticipant);
+          const members =
+            groupMembers[circleFeed.id]?.map((member) => normalizePublicAddress(member.publicAddress)) ??
+            circleFeed.participants.map((participant) => normalizePublicAddress(participant));
+          return members.includes(normalizedOtherParticipant);
         })
-        .map(() => "Inner Circle");
+        .map((circleFeed) => circleFeed.name)
+        .filter((name): name is string => Boolean(name));
 
-      const entry = followedByAddress.get(otherParticipant);
+      const entry = followedByAddress.get(normalizedOtherParticipant);
       if (entry) {
         for (const circleName of circleNames) {
           if (!entry.circles.includes(circleName)) {
@@ -255,9 +277,9 @@ export default function SocialPage() {
         continue;
       }
 
-      followedByAddress.set(otherParticipant, {
-        publicAddress: otherParticipant,
-        displayName: feed.name || `${otherParticipant.slice(0, 8)}...${otherParticipant.slice(-6)}`,
+      followedByAddress.set(normalizedOtherParticipant, {
+        publicAddress: normalizedOtherParticipant,
+        displayName: feed.name || `${normalizedOtherParticipant.slice(0, 8)}...${normalizedOtherParticipant.slice(-6)}`,
         circles: circleNames.length > 0 ? circleNames : ["Not in circle yet"],
       });
     }
@@ -267,24 +289,24 @@ export default function SocialPage() {
 
   const circleItems = useMemo<CircleItem[]>(() => {
     const ownAddress = credentials?.signingPublicKey;
+    const normalizedOwnAddress = ownAddress ? normalizePublicAddress(ownAddress) : null;
     const groupFeeds = feeds.filter((feed) => {
       if (feed.type !== "group") {
         return false;
       }
 
-      const normalizedName = normalizeCircleName(feed.name);
-      if (normalizedName === "inner circle") {
+      if (isCircleFeed(feed.name, feed.description)) {
         return true;
       }
 
-      return memberRoles[feed.id] === "Admin";
+      return false;
     });
 
     const allCircles = groupFeeds.map((feed) => {
       const members =
-        groupMembers[feed.id]?.map((member) => member.publicAddress) ??
-        feed.participants.filter((participant) => participant !== ownAddress);
-      const uniqueMembers = Array.from(new Set(members.filter((member) => member !== ownAddress)));
+        groupMembers[feed.id]?.map((member) => normalizePublicAddress(member.publicAddress)) ??
+        feed.participants.map((participant) => normalizePublicAddress(participant));
+      const uniqueMembers = Array.from(new Set(members.filter((member) => member !== normalizedOwnAddress)));
       const isInnerCircle = normalizeCircleName(feed.name) === "inner circle";
 
       return {
@@ -316,7 +338,7 @@ export default function SocialPage() {
       }
       return left.name.localeCompare(right.name);
     });
-  }, [credentials?.signingPublicKey, feeds, groupMembers, memberRoles]);
+  }, [credentials?.signingPublicKey, feeds, groupMembers]);
 
   const followingSignature = useMemo(
     () =>
@@ -554,49 +576,84 @@ export default function SocialPage() {
   };
 
   const getDisplayNameForAddress = (address: string) => {
+    const normalizedAddress = normalizePublicAddress(address);
     return (
-      renderFollowingItems.find((item) => item.publicAddress === address)?.displayName ??
-      `${address.slice(0, 8)}...${address.slice(-6)}`
+      renderFollowingItems.find((item) => normalizePublicAddress(item.publicAddress) === normalizedAddress)?.displayName ??
+      `${normalizedAddress.slice(0, 8)}...${normalizedAddress.slice(-6)}`
     );
   };
 
   const isCircleAssignmentBlocked = (circle: CircleItem, memberAddress: string) => {
-    const pending = pendingCircleMembers[circle.feedId] ?? [];
-    return circle.members.includes(memberAddress) || pending.includes(memberAddress);
+    const normalizedMemberAddress = normalizePublicAddress(memberAddress);
+    const normalizedCircleMembers = circle.members.map((address) => normalizePublicAddress(address));
+    const pending = (pendingCircleMembers[circle.feedId] ?? []).map((address) => normalizePublicAddress(address));
+    return normalizedCircleMembers.includes(normalizedMemberAddress) || pending.includes(normalizedMemberAddress);
+  };
+
+  const resolveAnyDraggedMemberAddress = (): string | null => {
+    if (pointerDragMemberAddress) {
+      return pointerDragMemberAddress;
+    }
+    return null;
   };
 
   const assignMemberToCircle = async (memberAddress: string, circle: CircleItem) => {
+    const normalizedMemberAddress = normalizePublicAddress(memberAddress);
+    logSocialDrag("assign.start", {
+      memberAddress: normalizedMemberAddress,
+      circleFeedId: circle.feedId,
+      circleName: circle.name,
+    });
     if (circle.feedId === "inner-circle-pending") {
+      logSocialDrag("assign.blocked.inner_circle_pending", {
+        memberAddress: normalizedMemberAddress,
+        circleFeedId: circle.feedId,
+      });
       addUiToast("Transaction failed: Inner Circle is not available yet");
       return;
     }
 
     if (!credentials?.signingPublicKey || !credentials.signingPrivateKey) {
+      logSocialDrag("assign.blocked.missing_credentials", {
+        hasSigningPublicKey: Boolean(credentials?.signingPublicKey),
+        hasSigningPrivateKey: Boolean(credentials?.signingPrivateKey),
+      });
       addUiToast("Transaction failed: missing credentials");
       return;
     }
 
-    if (isCircleAssignmentBlocked(circle, memberAddress)) {
-      addUiToast(`Transaction failed: ${getDisplayNameForAddress(memberAddress)} is already in ${circle.name}`);
+    if (isCircleAssignmentBlocked(circle, normalizedMemberAddress)) {
+      logSocialDrag("assign.blocked.already_member_or_pending", {
+        memberAddress: normalizedMemberAddress,
+        circleFeedId: circle.feedId,
+      });
+      addUiToast(`Transaction failed: ${getDisplayNameForAddress(normalizedMemberAddress)} is already in ${circle.name}`);
       return;
     }
 
-    const memberDisplayName = getDisplayNameForAddress(memberAddress);
-    const assignmentKey = `${circle.feedId}:${memberAddress}`;
+    const memberDisplayName = getDisplayNameForAddress(normalizedMemberAddress);
+    const assignmentKey = `${circle.feedId}:${normalizedMemberAddress}`;
     setPendingCircleMembers((current) => ({
       ...current,
-      [circle.feedId]: [...(current[circle.feedId] ?? []), memberAddress],
+      [circle.feedId]: [...(current[circle.feedId] ?? []), normalizedMemberAddress],
     }));
     setPendingAssignments((current) => ({
       ...current,
       [assignmentKey]: {
         circleFeedId: circle.feedId,
         circleName: circle.name,
-        memberAddress,
+        memberAddress: normalizedMemberAddress,
         memberDisplayName,
         createdAtMs: Date.now(),
       },
     }));
+    logSocialDrag("assign.submit_transaction", {
+      memberAddress: normalizedMemberAddress,
+      memberDisplayName,
+      circleFeedId: circle.feedId,
+      circleName: circle.name,
+      assignmentKey,
+    });
     addUiToast(`${memberDisplayName} is being added to Circle ${circle.name}`);
 
     try {
@@ -607,7 +664,7 @@ export default function SocialPage() {
 
       const membersPayload: CustomCircleMemberPayload[] = [
         {
-          PublicAddress: memberAddress,
+          PublicAddress: normalizedMemberAddress,
           PublicEncryptAddress: identity.publicEncryptAddress,
         },
       ];
@@ -633,13 +690,28 @@ export default function SocialPage() {
       });
       setPendingCircleMembers((current) => ({
         ...current,
-        [circle.feedId]: (current[circle.feedId] ?? []).filter((address) => address !== memberAddress),
+        [circle.feedId]: (current[circle.feedId] ?? []).filter(
+          (address) => normalizePublicAddress(address) !== normalizedMemberAddress
+        ),
       }));
     } finally {
       setSelectedMemberAddress(null);
-      setDragMemberAddress(null);
+      setPointerDragMemberAddress(null);
     }
   };
+
+  useEffect(() => {
+    if (!pointerDragMemberAddress) {
+      return;
+    }
+
+    const clearPointerDrag = () => {
+      setPointerDragMemberAddress(null);
+    };
+
+    window.addEventListener("mouseup", clearPointerDrag);
+    return () => window.removeEventListener("mouseup", clearPointerDrag);
+  }, [pointerDragMemberAddress]);
 
   const submitCreateCircle = async () => {
     if (!credentials?.signingPublicKey || !credentials.signingPrivateKey) {
@@ -970,19 +1042,21 @@ export default function SocialPage() {
     }
 
     return (
-      <div className="space-y-6">
-        <div data-testid="social-following-list" className="space-y-3">
+      <div className="flex min-h-0 flex-1 flex-col gap-6">
+        <div data-testid="social-following-list" className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
           {renderFollowingItems.map((item) => {
             const isSelectedOnMobile = selectedMemberAddress === item.publicAddress;
             return (
               <article
                 key={item.publicAddress}
                 data-testid={`social-following-item-${item.publicAddress}`}
-                draggable
-                onDragStart={() => setDragMemberAddress(item.publicAddress)}
-                onDragEnd={() => setDragMemberAddress(null)}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  setPointerDragMemberAddress(item.publicAddress);
+                  logSocialDrag("pointerdrag.start", { memberAddress: item.publicAddress });
+                }}
                 onClick={() => setSelectedMemberAddress(item.publicAddress)}
-                className={`rounded-xl border bg-hush-bg-dark p-4 transition ${
+                className={`select-none cursor-grab rounded-xl border bg-hush-bg-dark p-4 transition active:cursor-grabbing ${
                   isSelectedOnMobile
                     ? "border-hush-purple shadow-[0_0_0_1px_rgba(149,98,255,0.3)]"
                     : "border-hush-bg-hover"
@@ -1032,9 +1106,10 @@ export default function SocialPage() {
           <div className="flex snap-x gap-3 overflow-x-auto pb-2" data-testid="social-circles-strip">
             {renderCircleItems.map((circle) => {
               const pendingMembers = pendingCircleMembers[circle.feedId] ?? [];
+              const draggedAddressForStyle = resolveAnyDraggedMemberAddress();
               const canDrop =
-                !!dragMemberAddress &&
-                !isCircleAssignmentBlocked(circle, dragMemberAddress) &&
+                !!draggedAddressForStyle &&
+                !isCircleAssignmentBlocked(circle, draggedAddressForStyle) &&
                 circle.feedId !== "inner-circle-pending";
 
               return (
@@ -1042,17 +1117,40 @@ export default function SocialPage() {
                   key={circle.feedId}
                   type="button"
                   data-testid={`social-circle-card-${circle.feedId}`}
-                  onDragOver={(event) => {
-                    if (canDrop) {
-                      event.preventDefault();
-                    }
-                  }}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    if (!dragMemberAddress) {
+                  style={{ userSelect: "none", WebkitUserSelect: "none" }}
+                  onMouseUp={() => {
+                    const draggedAddress = resolveAnyDraggedMemberAddress();
+                    if (!draggedAddress) {
                       return;
                     }
-                    void assignMemberToCircle(dragMemberAddress, circle);
+                    const normalizedDraggedAddress = normalizePublicAddress(draggedAddress);
+
+                    const blockedByMembership = isCircleAssignmentBlocked(circle, normalizedDraggedAddress);
+                    const blockedByPendingInnerCircle = circle.feedId === "inner-circle-pending";
+                    const eligible = !blockedByMembership && !blockedByPendingInnerCircle;
+                    logSocialDrag("pointerdrag.drop", {
+                      circleFeedId: circle.feedId,
+                      circleName: circle.name,
+                      draggedAddress: normalizedDraggedAddress,
+                      eligible,
+                      blockedByMembership,
+                      blockedByPendingInnerCircle,
+                      existingMembers: circle.members.map((address) => normalizePublicAddress(address)),
+                      pendingMembers: (pendingCircleMembers[circle.feedId] ?? []).map((address) =>
+                        normalizePublicAddress(address)
+                      ),
+                    });
+                    if (!eligible) {
+                      if (blockedByPendingInnerCircle) {
+                        addUiToast("Transaction failed: Inner Circle is not available yet");
+                      } else if (blockedByMembership) {
+                        addUiToast(
+                          `Transaction failed: ${getDisplayNameForAddress(normalizedDraggedAddress)} is already in ${circle.name}`
+                        );
+                      }
+                      return;
+                    }
+                    void assignMemberToCircle(normalizedDraggedAddress, circle);
                   }}
                   onClick={() => {
                     if (!selectedMemberAddress) {
@@ -1060,10 +1158,12 @@ export default function SocialPage() {
                     }
                     void assignMemberToCircle(selectedMemberAddress, circle);
                   }}
-                  className={`min-w-[190px] snap-start rounded-xl border p-3 text-left transition ${
+                  className={`min-w-[190px] snap-start rounded-xl border p-3 text-left transition select-none ${
                     canDrop
-                      ? "border-hush-purple bg-hush-purple/10"
-                      : "border-hush-bg-hover bg-hush-bg-dark/70 hover:border-hush-purple/40"
+                      ? "cursor-pointer border-hush-purple bg-hush-purple/10"
+                      : draggedAddressForStyle
+                        ? "cursor-not-allowed border-hush-bg-hover bg-hush-bg-dark/70"
+                        : "cursor-pointer border-hush-bg-hover bg-hush-bg-dark/70 hover:border-hush-purple/40"
                   }`}
                 >
                   <div className="mb-2 flex items-center justify-between gap-2">
@@ -1198,13 +1298,15 @@ export default function SocialPage() {
     <div className="flex-1 min-h-0 flex flex-col overflow-hidden" data-testid="social-shell">
       <section
         ref={feedWallRegionRef}
-        className="flex-1 min-h-0 overflow-y-auto p-4"
+        className={`flex-1 min-h-0 p-4 ${
+          selectedNav === "following" ? "flex flex-col overflow-hidden" : "overflow-y-auto"
+        }`}
         data-testid="feed-wall-region"
         onScroll={(event) => {
           setAppContextScroll("social", event.currentTarget.scrollTop);
         }}
       >
-        <div className="max-w-3xl mx-auto">
+        <div className={`w-full ${selectedNav === "following" ? "min-h-0 flex flex-1 flex-col" : ""}`}>
           <div className="mb-3">
             <h2 className="text-xl font-semibold text-hush-text-primary">
               {selectedNav === "following"

@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { AlertTriangle, X } from 'lucide-react';
+import { debugError, debugLog } from '@/lib/debug-logger';
 
 interface SystemToastProps {
   message: string;
@@ -23,13 +24,19 @@ export function SystemToast({
   onDismiss,
   autoDismissMs = 5000,
 }: SystemToastProps) {
+  const onDismissRef = useRef(onDismiss);
+
+  useEffect(() => {
+    onDismissRef.current = onDismiss;
+  }, [onDismiss]);
+
   useEffect(() => {
     const timer = setTimeout(() => {
-      onDismiss();
+      onDismissRef.current();
     }, autoDismissMs);
 
     return () => clearTimeout(timer);
-  }, [onDismiss, autoDismissMs]);
+  }, [autoDismissMs]);
 
   return (
     <div
@@ -72,10 +79,81 @@ interface SystemToastContainerProps {
   onDismiss: (id: string) => void;
 }
 
+function isTauriRuntime(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return '__TAURI__' in window || '__TAURI_INTERNALS__' in window;
+}
+
+let tauriNotificationPermissionPromise: Promise<boolean> | null = null;
+
+async function ensureTauriNotificationPermission(): Promise<boolean> {
+  if (!tauriNotificationPermissionPromise) {
+    tauriNotificationPermissionPromise = (async () => {
+      try {
+        const notification = await import('@tauri-apps/plugin-notification');
+        let granted = await notification.isPermissionGranted();
+        if (!granted) {
+          granted = (await notification.requestPermission()) === 'granted';
+        }
+        return granted;
+      } catch (error) {
+        debugError('[SystemToastContainer] Failed to initialize Tauri notifications:', error);
+        return false;
+      }
+    })();
+  }
+  return tauriNotificationPermissionPromise;
+}
+
+async function showTauriSystemNotification(message: string): Promise<void> {
+  const granted = await ensureTauriNotificationPermission();
+  if (!granted) {
+    debugLog('[SystemToastContainer] Tauri notification permission not granted');
+    return;
+  }
+
+  try {
+    const notification = await import('@tauri-apps/plugin-notification');
+    await notification.sendNotification({
+      title: 'Hush Feeds',
+      body: message,
+    });
+  } catch (error) {
+    debugError('[SystemToastContainer] Failed to send Tauri system toast:', error);
+  }
+}
+
 export function SystemToastContainer({
   toasts,
   onDismiss,
 }: SystemToastContainerProps) {
+  const isTauri = isTauriRuntime();
+  const sentToastIdsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!isTauri || toasts.length === 0) {
+      return;
+    }
+
+    for (const toast of toasts) {
+      if (sentToastIdsRef.current.has(toast.id)) {
+        continue;
+      }
+
+      sentToastIdsRef.current.add(toast.id);
+      void showTauriSystemNotification(toast.message).finally(() => {
+        onDismiss(toast.id);
+      });
+    }
+  }, [isTauri, toasts, onDismiss]);
+
+  if (isTauri) {
+    return null;
+  }
+
   if (toasts.length === 0) return null;
 
   return (

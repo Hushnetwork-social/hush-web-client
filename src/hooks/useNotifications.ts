@@ -89,8 +89,9 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
       return [...prev, toast];
     });
 
-    // Auto-dismiss: 5 seconds in production, 30 seconds in E2E mode (for screenshots/video)
-    const isE2E = typeof window !== 'undefined' && !!(window as unknown as Record<string, unknown>).__e2e_triggerSync;
+    // Auto-dismiss in 5 seconds for normal runtime.
+    // E2E long-toasts must be explicitly enabled via env flag.
+    const isE2E = process.env.NEXT_PUBLIC_E2E_MODE === 'true';
     const dismissTimeout = isE2E ? 30000 : 5000;
 
     setTimeout(() => {

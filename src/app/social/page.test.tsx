@@ -30,12 +30,14 @@ let mockFeeds = [
     id: 'inner-circle',
     type: 'group',
     name: 'Inner Circle',
+    description: 'Auto-managed inner circle',
     participants: ['me-address', 'alice-address'],
   },
   {
     id: 'support-group',
     type: 'group',
     name: 'HushNetwork Support',
+    description: 'Generic group feed',
     participants: ['me-address', 'alice-address'],
   },
 ];
@@ -340,6 +342,7 @@ describe('SocialPage', () => {
         id: 'friends-circle',
         type: 'group',
         name: 'Friends',
+        description: 'Owner-managed custom circle',
         participants: ['me-address', 'alice-address'],
       },
     ];
@@ -366,6 +369,7 @@ describe('SocialPage', () => {
         id: 'friends-circle',
         type: 'group',
         name: 'Friends',
+        description: 'Owner-managed custom circle',
         participants: ['me-address', 'alice-address'],
       },
     ];
@@ -388,6 +392,55 @@ describe('SocialPage', () => {
     expect(screen.getByTestId('social-new-post-audience-error')).toHaveTextContent(
       'Private post requires at least one selected circle.'
     );
+  });
+
+  it('does not treat regular admin group feeds as circles', () => {
+    selectedNav = 'following';
+    mockFeeds = [
+      ...mockFeeds,
+      {
+        id: 'admin-group',
+        type: 'group',
+        name: 'myPrivateGroup',
+        description: 'Regular group feed',
+        participants: ['me-address', 'alice-address'],
+      },
+    ];
+    mockGroupMembers = {
+      ...mockGroupMembers,
+      'admin-group': [{ publicAddress: 'alice-address' }],
+    };
+    mockMemberRoles = {
+      ...mockMemberRoles,
+      'admin-group': 'Admin',
+    };
+
+    render(<SocialPage />);
+
+    expect(screen.queryByText('myPrivateGroup')).not.toBeInTheDocument();
+  });
+
+  it('shows custom circle badges in following list when user belongs to custom circles', () => {
+    selectedNav = 'following';
+    mockFeeds = [
+      ...mockFeeds,
+      {
+        id: 'friends-circle',
+        type: 'group',
+        name: 'Friends',
+        description: 'Owner-managed custom circle',
+        participants: ['me-address', 'alice-address'],
+      },
+    ];
+    mockGroupMembers = {
+      ...mockGroupMembers,
+      'friends-circle': [{ publicAddress: 'me-address' }, { publicAddress: 'alice-address' }],
+    };
+
+    render(<SocialPage />);
+
+    expect(screen.getByTestId('social-following-circle-alice-address-Inner Circle')).toBeInTheDocument();
+    expect(screen.getByTestId('social-following-circle-alice-address-Friends')).toBeInTheDocument();
   });
 
   it('persists scroll position into social app context', () => {
