@@ -287,6 +287,36 @@ describe('SocialPage', () => {
     expect(screen.getByText('Transaction failed: Alice is already in Inner Circle')).toBeInTheDocument();
   });
 
+  it('shows failure toast when add-to-circle transaction is rejected by backend', async () => {
+    selectedNav = 'following';
+    addMembersToCustomCircleMock.mockResolvedValueOnce({ success: false, message: 'backend rejected assignment' });
+    render(<SocialPage />);
+
+    fireEvent.click(screen.getByTestId('social-following-item-bob-address'));
+    fireEvent.click(screen.getByTestId('social-circle-card-inner-circle'));
+
+    await waitFor(() => {
+      expect(addMembersToCustomCircleMock).toHaveBeenCalled();
+    });
+    expect(screen.getByText('Transaction failed: backend rejected assignment')).toBeInTheDocument();
+  });
+
+  it('preserves rendered following rows and circle cards on no-change rerender', () => {
+    selectedNav = 'following';
+    const { rerender } = render(<SocialPage />);
+
+    const rowBefore = screen.getByTestId('social-following-item-alice-address');
+    const circleBefore = screen.getByTestId('social-circle-card-inner-circle');
+
+    rerender(<SocialPage />);
+
+    const rowAfter = screen.getByTestId('social-following-item-alice-address');
+    const circleAfter = screen.getByTestId('social-circle-card-inner-circle');
+
+    expect(rowAfter).toBe(rowBefore);
+    expect(circleAfter).toBe(circleBefore);
+  });
+
   it('shows placeholder for non-feed-wall social subviews', () => {
     selectedNav = 'my-posts';
     render(<SocialPage />);
