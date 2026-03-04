@@ -5,8 +5,14 @@ import { useSearchParams } from "next/navigation";
 import { AlertCircle, Link2, Loader2, MessageCircle, SmilePlus, Sparkles, X } from "lucide-react";
 import { useAppStore } from "@/stores";
 import { useFeedsStore } from "@/modules/feeds/useFeedsStore";
+import { SystemToastContainer } from "@/components/notifications/SystemToast";
+import { addMembersToCustomCircle, createCustomCircle } from "@/modules/feeds/FeedsService";
+import { checkIdentityExists } from "@/modules/identity/IdentityService";
+import type { CustomCircleMemberPayload } from "@/lib/crypto";
 
 const SOCIAL_MENU_IDS = new Set([
+  "search",
+  "new-post",
   "feed-wall",
   "following",
   "my-posts",
@@ -44,6 +50,19 @@ type FollowingItem = {
   publicAddress: string;
   displayName: string;
   circles: string[];
+};
+
+type CircleItem = {
+  feedId: string;
+  name: string;
+  isInnerCircle: boolean;
+  members: string[];
+  memberCount: number;
+};
+
+type UiToast = {
+  id: string;
+  message: string;
 };
 
 const LONG_POST_TEXT =
@@ -106,6 +125,24 @@ function resolveViewState(rawState: string | null): ViewState {
   return "populated";
 }
 
+function getDisplayInitials(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "?";
+  }
+
+  const parts = trimmed.split(/\s+/).filter(Boolean);
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+
+  return `${parts[0][0] ?? ""}${parts[1][0] ?? ""}`.toUpperCase();
+}
+
+function normalizeCircleName(name: string): string {
+  return name.trim().toLowerCase();
+}
+
 export default function SocialPage() {
   const searchParams = useSearchParams();
   const appContexts = useAppStore((state) => state.appContexts);
@@ -117,6 +154,7 @@ export default function SocialPage() {
   const credentials = useAppStore((state) => state.credentials);
   const feeds = useFeedsStore((state) => state.feeds);
   const groupMembers = useFeedsStore((state) => state.groupMembers);
+  const memberRoles = useFeedsStore((state) => state.memberRoles);
   const [activePostId, setActivePostId] = useState<string | null>(null);
   const [topReplyDraft, setTopReplyDraft] = useState("");
   const [isTopComposerOpen, setIsTopComposerOpen] = useState(false);
@@ -124,6 +162,22 @@ export default function SocialPage() {
   const [inlineComposerTargetId, setInlineComposerTargetId] = useState<string | null>(null);
   const [inlineComposerRootId, setInlineComposerRootId] = useState<string | null>(null);
   const [overlayReplies, setOverlayReplies] = useState<ReplyItem[]>([]);
+  const [dragMemberAddress, setDragMemberAddress] = useState<string | null>(null);
+  const [selectedMemberAddress, setSelectedMemberAddress] = useState<string | null>(null);
+  const [creatingCircle, setCreatingCircle] = useState(false);
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [createCircleNameDraft, setCreateCircleNameDraft] = useState("");
+  const [createCircleError, setCreateCircleError] = useState<string | null>(null);
+  const [pendingCircleMembers, setPendingCircleMembers] = useState<Record<string, string[]>>({});
+  const [optimisticCircleMembers, setOptimisticCircleMembers] = useState<Record<string, string[]>>({});
+  const [uiToasts, setUiToasts] = useState<UiToast[]>([]);
+  const [renderFollowingItems, setRenderFollowingItems] = useState<FollowingItem[]>([]);
+  const [renderCircleItems, setRenderCircleItems] = useState<CircleItem[]>([]);
+  const [newPostDraft, setNewPostDraft] = useState("");
+  const [postAudience, setPostAudience] = useState<"public" | "close">("close");
+  const [includeInnerCircleForPost, setIncludeInnerCircleForPost] = useState(true);
+  const [selectedCustomCircleIdForPost, setSelectedCustomCircleIdForPost] = useState<string | null>(null);
+  const [newPostAudienceError, setNewPostAudienceError] = useState<string | null>(null);
   const feedWallRegionRef = useRef<HTMLElement | null>(null);
   const hasInitializedSocialNavRef = useRef(false);
 
@@ -133,7 +187,7 @@ export default function SocialPage() {
     }
 
     hasInitializedSocialNavRef.current = true;
-    if (selectedNav !== "feed-wall") {
+    if (!SOCIAL_MENU_IDS.has(selectedNav)) {
       setSelectedNav("feed-wall");
     }
   }, [selectedNav, setSelectedNav]);
@@ -200,6 +254,100 @@ export default function SocialPage() {
 
     return Array.from(followedByAddress.values()).sort((a, b) => a.displayName.localeCompare(b.displayName));
   }, [credentials?.signingPublicKey, feeds, groupMembers]);
+
+  const circleItems = useMemo<CircleItem[]>(() => {
+    const ownAddress = credentials?.signingPublicKey;
+    const groupFeeds = feeds.filter((feed) => {
+      if (feed.type !== "group") {
+        return false;
+      }
+
+      const normalizedName = normalizeCircleName(feed.name);
+      if (normalizedName === "inner circle") {
+        return true;
+      }
+
+      return memberRoles[feed.id] === "Admin";
+    });
+
+    const allCircles = groupFeeds.map((feed) => {
+      const members =
+        groupMembers[feed.id]?.map((member) => member.publicAddress) ??
+        feed.participants.filter((participant) => participant !== ownAddress);
+      const uniqueMembers = Array.from(new Set(members.filter((member) => member !== ownAddress)));
+      const optimisticMembers = optimisticCircleMembers[feed.id] ?? [];
+      const mergedMembers = Array.from(new Set([...uniqueMembers, ...optimisticMembers]));
+      const isInnerCircle = normalizeCircleName(feed.name) === "inner circle";
+
+      return {
+        feedId: feed.id,
+        name: feed.name,
+        isInnerCircle,
+        members: mergedMembers,
+        memberCount: mergedMembers.length,
+      };
+    });
+
+    const hasInnerCircle = allCircles.some((circle) => circle.isInnerCircle);
+    if (!hasInnerCircle) {
+      allCircles.push({
+        feedId: "inner-circle-pending",
+        name: "Inner Circle",
+        isInnerCircle: true,
+        members: [],
+        memberCount: 0,
+      });
+    }
+
+    return allCircles.sort((left, right) => {
+      if (left.memberCount !== right.memberCount) {
+        return right.memberCount - left.memberCount;
+      }
+      if (left.isInnerCircle !== right.isInnerCircle) {
+        return left.isInnerCircle ? -1 : 1;
+      }
+      return left.name.localeCompare(right.name);
+    });
+  }, [credentials?.signingPublicKey, feeds, groupMembers, memberRoles, optimisticCircleMembers]);
+
+  const followingSignature = useMemo(
+    () =>
+      followingItems
+        .map((item) => `${item.publicAddress}:${item.displayName}:${item.circles.join(",")}`)
+        .join("|"),
+    [followingItems]
+  );
+
+  const circlesSignature = useMemo(
+    () =>
+      circleItems
+        .map((circle) => `${circle.feedId}:${circle.name}:${circle.memberCount}:${circle.members.join(",")}`)
+        .join("|"),
+    [circleItems]
+  );
+
+  const availableCustomCirclesForPost = useMemo(
+    () => renderCircleItems.filter((circle) => !circle.isInnerCircle && circle.feedId !== "inner-circle-pending"),
+    [renderCircleItems]
+  );
+
+  useEffect(() => {
+    setRenderFollowingItems((current) => {
+      const currentSignature = current
+        .map((item) => `${item.publicAddress}:${item.displayName}:${item.circles.join(",")}`)
+        .join("|");
+      return currentSignature === followingSignature ? current : followingItems;
+    });
+  }, [followingItems, followingSignature]);
+
+  useEffect(() => {
+    setRenderCircleItems((current) => {
+      const currentSignature = current
+        .map((circle) => `${circle.feedId}:${circle.name}:${circle.memberCount}:${circle.members.join(",")}`)
+        .join("|");
+      return currentSignature === circlesSignature ? current : circleItems;
+    });
+  }, [circleItems, circlesSignature]);
 
   useEffect(() => {
     if (!activePost) {
@@ -295,6 +443,285 @@ export default function SocialPage() {
     setInlineReplyDraft("");
     setInlineComposerTargetId(null);
     setInlineComposerRootId(null);
+  };
+
+  const addUiToast = (message: string) => {
+    const toastId = `toast-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+    setUiToasts((current) => [...current, { id: toastId, message }]);
+  };
+
+  const removeUiToast = (toastId: string) => {
+    setUiToasts((current) => current.filter((toast) => toast.id !== toastId));
+  };
+
+  const getDisplayNameForAddress = (address: string) => {
+    return (
+      renderFollowingItems.find((item) => item.publicAddress === address)?.displayName ??
+      `${address.slice(0, 8)}...${address.slice(-6)}`
+    );
+  };
+
+  const isCircleAssignmentBlocked = (circle: CircleItem, memberAddress: string) => {
+    const pending = pendingCircleMembers[circle.feedId] ?? [];
+    return circle.members.includes(memberAddress) || pending.includes(memberAddress);
+  };
+
+  const assignMemberToCircle = async (memberAddress: string, circle: CircleItem) => {
+    if (circle.feedId === "inner-circle-pending") {
+      addUiToast("Transaction failed: Inner Circle is not available yet");
+      return;
+    }
+
+    if (!credentials?.signingPublicKey || !credentials.signingPrivateKey) {
+      addUiToast("Transaction failed: missing credentials");
+      return;
+    }
+
+    if (isCircleAssignmentBlocked(circle, memberAddress)) {
+      addUiToast(`Transaction failed: ${getDisplayNameForAddress(memberAddress)} is already in ${circle.name}`);
+      return;
+    }
+
+    setPendingCircleMembers((current) => ({
+      ...current,
+      [circle.feedId]: [...(current[circle.feedId] ?? []), memberAddress],
+    }));
+    addUiToast(`${getDisplayNameForAddress(memberAddress)} is being added to Circle ${circle.name}`);
+
+    try {
+      const identity = await checkIdentityExists(memberAddress);
+      if (!identity.exists || !identity.publicEncryptAddress) {
+        throw new Error("member identity is missing encryption key");
+      }
+
+      const membersPayload: CustomCircleMemberPayload[] = [
+        {
+          PublicAddress: memberAddress,
+          PublicEncryptAddress: identity.publicEncryptAddress,
+        },
+      ];
+
+      const result = await addMembersToCustomCircle(
+        circle.feedId,
+        credentials.signingPublicKey,
+        membersPayload,
+        credentials.signingPrivateKey
+      );
+
+      if (!result.success) {
+        throw new Error(result.message || "backend rejected assignment");
+      }
+
+      setOptimisticCircleMembers((current) => ({
+        ...current,
+        [circle.feedId]: Array.from(new Set([...(current[circle.feedId] ?? []), memberAddress])),
+      }));
+      addUiToast(`Member ${getDisplayNameForAddress(memberAddress)} added to Circle ${circle.name}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      addUiToast(`Transaction failed: ${message}`);
+    } finally {
+      setPendingCircleMembers((current) => ({
+        ...current,
+        [circle.feedId]: (current[circle.feedId] ?? []).filter((address) => address !== memberAddress),
+      }));
+      setSelectedMemberAddress(null);
+      setDragMemberAddress(null);
+    }
+  };
+
+  const submitCreateCircle = async () => {
+    if (!credentials?.signingPublicKey || !credentials.signingPrivateKey) {
+      setCreateCircleError("Missing credentials");
+      return;
+    }
+
+    setCreatingCircle(true);
+    setCreateCircleError(null);
+    const result = await createCustomCircle(
+      credentials.signingPublicKey,
+      createCircleNameDraft,
+      credentials.signingPrivateKey
+    );
+
+    if (!result.success) {
+      setCreateCircleError(result.message);
+      addUiToast(`Transaction failed: ${result.message}`);
+      setCreatingCircle(false);
+      return;
+    }
+
+    addUiToast(`Circle ${createCircleNameDraft.trim()} creation transaction submitted`);
+    setCreateCircleNameDraft("");
+    setCreatingCircle(false);
+    setIsCreateDialogOpen(false);
+  };
+
+  const resolveSelectedCircleNamesForPost = () => {
+    if (postAudience === "public") {
+      return [] as string[];
+    }
+
+    const selectedNames: string[] = [];
+    if (includeInnerCircleForPost) {
+      selectedNames.push("Inner Circle");
+    }
+
+    if (selectedCustomCircleIdForPost) {
+      const customCircle = availableCustomCirclesForPost.find((circle) => circle.feedId === selectedCustomCircleIdForPost);
+      if (customCircle) {
+        selectedNames.push(customCircle.name);
+      }
+    }
+
+    return selectedNames;
+  };
+
+  const handlePublishPost = () => {
+    if (postAudience === "close" && resolveSelectedCircleNamesForPost().length === 0) {
+      setNewPostAudienceError("Private post requires at least one selected circle.");
+      return;
+    }
+
+    setNewPostAudienceError(null);
+    addUiToast("Post composer validation passed (publish flow is out of scope in this phase).");
+  };
+
+  const renderNewPostContent = () => {
+    const selectedCircleNames = resolveSelectedCircleNamesForPost();
+
+    return (
+      <section data-testid="social-new-post" className="rounded-xl border border-hush-bg-hover bg-hush-bg-dark p-4">
+        <h3 className="text-sm font-semibold text-hush-text-primary">New Post</h3>
+        <p className="mt-1 text-xs text-hush-text-accent">Choose audience before publishing.</p>
+
+        <textarea
+          data-testid="social-new-post-draft"
+          value={newPostDraft}
+          onChange={(event) => setNewPostDraft(event.currentTarget.value)}
+          placeholder="Share something..."
+          className="mt-3 w-full min-h-28 rounded-md border border-hush-bg-hover bg-hush-bg-dark px-3 py-2 text-sm text-hush-text-primary outline-none focus:border-hush-purple"
+        />
+
+        <div className="mt-4 space-y-3 rounded-lg border border-hush-bg-hover p-3">
+          <p className="text-xs font-semibold text-hush-text-primary">Audience</p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              data-testid="social-new-post-audience-public"
+              onClick={() => {
+                setPostAudience("public");
+                setNewPostAudienceError(null);
+              }}
+              className={`rounded-full border px-3 py-1 text-xs ${
+                postAudience === "public"
+                  ? "border-hush-purple bg-hush-purple/10 text-hush-purple"
+                  : "border-hush-bg-hover text-hush-text-accent"
+              }`}
+            >
+              Public
+            </button>
+            <button
+              type="button"
+              data-testid="social-new-post-audience-close"
+              onClick={() => {
+                setPostAudience("close");
+                if (!includeInnerCircleForPost && !selectedCustomCircleIdForPost) {
+                  setIncludeInnerCircleForPost(true);
+                }
+                setNewPostAudienceError(null);
+              }}
+              className={`rounded-full border px-3 py-1 text-xs ${
+                postAudience === "close"
+                  ? "border-hush-purple bg-hush-purple/10 text-hush-purple"
+                  : "border-hush-bg-hover text-hush-text-accent"
+              }`}
+            >
+              Close (Private)
+            </button>
+          </div>
+
+          {postAudience === "close" && (
+            <div className="space-y-2" data-testid="social-new-post-private-options">
+              <label className="flex items-center gap-2 text-xs text-hush-text-primary">
+                <input
+                  type="checkbox"
+                  checked={includeInnerCircleForPost}
+                  data-testid="social-new-post-inner-circle-toggle"
+                  onChange={() => {
+                    if (includeInnerCircleForPost && !selectedCustomCircleIdForPost) {
+                      setNewPostAudienceError("Inner Circle cannot be removed unless another private circle is selected.");
+                      return;
+                    }
+                    setIncludeInnerCircleForPost((current) => !current);
+                    setNewPostAudienceError(null);
+                  }}
+                />
+                Inner Circle (default)
+              </label>
+
+              <div className="space-y-1">
+                <p className="text-[11px] text-hush-text-accent">Select at most one custom circle:</p>
+                {availableCustomCirclesForPost.length === 0 ? (
+                  <p className="text-[11px] text-hush-text-accent">No custom circles available yet.</p>
+                ) : (
+                  availableCustomCirclesForPost.map((circle) => (
+                    <label key={circle.feedId} className="flex items-center gap-2 text-xs text-hush-text-primary">
+                      <input
+                        type="radio"
+                        name="new-post-custom-circle"
+                        checked={selectedCustomCircleIdForPost === circle.feedId}
+                        data-testid={`social-new-post-custom-circle-${circle.feedId}`}
+                        onChange={() => {
+                          setSelectedCustomCircleIdForPost(circle.feedId);
+                          setNewPostAudienceError(null);
+                        }}
+                      />
+                      {circle.name}
+                    </label>
+                  ))
+                )}
+                {selectedCustomCircleIdForPost && (
+                  <button
+                    type="button"
+                    data-testid="social-new-post-clear-custom-circle"
+                    onClick={() => {
+                      setSelectedCustomCircleIdForPost(null);
+                      setNewPostAudienceError(null);
+                    }}
+                    className="rounded border border-hush-bg-hover px-2 py-1 text-[11px] text-hush-text-accent hover:bg-hush-bg-hover"
+                  >
+                    Clear custom circle
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div data-testid="social-new-post-selected-circles" className="text-[11px] text-hush-text-accent">
+            {postAudience === "public"
+              ? "Selected: Public"
+              : `Selected circles: ${selectedCircleNames.length > 0 ? selectedCircleNames.join(", ") : "none"}`}
+          </div>
+          {newPostAudienceError && (
+            <p className="text-xs text-red-400" data-testid="social-new-post-audience-error">
+              {newPostAudienceError}
+            </p>
+          )}
+        </div>
+
+        <div className="mt-3 flex justify-end">
+          <button
+            type="button"
+            data-testid="social-new-post-publish"
+            onClick={handlePublishPost}
+            className="rounded-md bg-hush-purple px-3 py-1.5 text-xs font-semibold text-hush-bg-dark"
+          >
+            Publish
+          </button>
+        </div>
+      </section>
+    );
   };
 
   const renderFeedWallContent = () => {
@@ -406,41 +833,251 @@ export default function SocialPage() {
   };
 
   const renderFollowingContent = () => {
-    if (followingItems.length === 0) {
+    if (renderFollowingItems.length === 0) {
       return (
-        <div data-testid="social-following-empty" className="rounded-xl border border-hush-bg-hover bg-hush-bg-dark p-4 text-sm text-hush-text-accent">
-          You are not following anyone yet.
-        </div>
+        <>
+          <div data-testid="social-following-empty" className="rounded-xl border border-hush-bg-hover bg-hush-bg-dark p-4 text-sm text-hush-text-accent">
+            You are not following anyone yet.
+          </div>
+          <div className="mt-6 rounded-xl border border-hush-bg-hover bg-hush-bg-dark p-4">
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-hush-text-primary">Circles</h3>
+              <button
+                type="button"
+                onClick={() => setIsCreateDialogOpen(true)}
+                className="rounded-md border border-hush-purple/40 px-2 py-1 text-xs text-hush-purple hover:bg-hush-purple/10"
+                data-testid="social-create-circle-button"
+              >
+                Create Circle
+              </button>
+            </div>
+            <div className="text-xs text-hush-text-accent">No followed users to assign yet.</div>
+          </div>
+        </>
       );
     }
 
     return (
-      <div data-testid="social-following-list" className="space-y-3">
-        {followingItems.map((item) => (
-          <article
-            key={item.publicAddress}
-            data-testid={`social-following-item-${item.publicAddress}`}
-            className="rounded-xl border border-hush-bg-hover bg-hush-bg-dark p-4"
-          >
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-sm font-semibold text-hush-text-primary">{item.displayName}</p>
-              <p className="text-[11px] text-hush-text-accent">
-                {item.publicAddress.slice(0, 8)}...{item.publicAddress.slice(-6)}
-              </p>
-            </div>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              {item.circles.map((circle) => (
-                <span
-                  key={`${item.publicAddress}-${circle}`}
-                  data-testid={`social-following-circle-${item.publicAddress}-${circle}`}
-                  className="rounded-full border border-hush-purple/40 px-2 py-1 text-[11px] text-hush-purple"
+      <div className="space-y-6">
+        <div data-testid="social-following-list" className="space-y-3">
+          {renderFollowingItems.map((item) => {
+            const isSelectedOnMobile = selectedMemberAddress === item.publicAddress;
+            return (
+              <article
+                key={item.publicAddress}
+                data-testid={`social-following-item-${item.publicAddress}`}
+                draggable
+                onDragStart={() => setDragMemberAddress(item.publicAddress)}
+                onDragEnd={() => setDragMemberAddress(null)}
+                onClick={() => setSelectedMemberAddress(item.publicAddress)}
+                className={`rounded-xl border bg-hush-bg-dark p-4 transition ${
+                  isSelectedOnMobile
+                    ? "border-hush-purple shadow-[0_0_0_1px_rgba(149,98,255,0.3)]"
+                    : "border-hush-bg-hover"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-hush-text-primary">{item.displayName}</p>
+                  <p className="text-[11px] text-hush-text-accent">
+                    {item.publicAddress.slice(0, 8)}...{item.publicAddress.slice(-6)}
+                  </p>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {item.circles.map((circle) => (
+                    <span
+                      key={`${item.publicAddress}-${circle}`}
+                      data-testid={`social-following-circle-${item.publicAddress}-${circle}`}
+                      className="rounded-full border border-hush-purple/40 px-2 py-1 text-[11px] text-hush-purple"
+                    >
+                      {circle}
+                    </span>
+                  ))}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+
+        <section className="rounded-xl border border-hush-bg-hover bg-hush-bg-dark p-4" data-testid="social-circles-panel">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-hush-text-primary">Circles</h3>
+            <button
+              type="button"
+              onClick={() => setIsCreateDialogOpen(true)}
+              className="rounded-md border border-hush-purple/40 px-2 py-1 text-xs text-hush-purple hover:bg-hush-purple/10"
+              data-testid="social-create-circle-button"
+            >
+              Create Circle
+            </button>
+          </div>
+
+          <p className="mb-3 text-xs text-hush-text-accent">
+            {selectedMemberAddress
+              ? `Selected member: ${getDisplayNameForAddress(selectedMemberAddress)}. Tap a circle to add.`
+              : "Drag a member into a circle on desktop or tap a member first on mobile."}
+          </p>
+
+          <div className="flex snap-x gap-3 overflow-x-auto pb-2" data-testid="social-circles-strip">
+            {renderCircleItems.map((circle) => {
+              const pendingMembers = pendingCircleMembers[circle.feedId] ?? [];
+              const canDrop =
+                !!dragMemberAddress &&
+                !isCircleAssignmentBlocked(circle, dragMemberAddress) &&
+                circle.feedId !== "inner-circle-pending";
+
+              return (
+                <button
+                  key={circle.feedId}
+                  type="button"
+                  data-testid={`social-circle-card-${circle.feedId}`}
+                  onDragOver={(event) => {
+                    if (canDrop) {
+                      event.preventDefault();
+                    }
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    if (!dragMemberAddress) {
+                      return;
+                    }
+                    void assignMemberToCircle(dragMemberAddress, circle);
+                  }}
+                  onClick={() => {
+                    if (!selectedMemberAddress) {
+                      return;
+                    }
+                    void assignMemberToCircle(selectedMemberAddress, circle);
+                  }}
+                  className={`min-w-[190px] snap-start rounded-xl border p-3 text-left transition ${
+                    canDrop
+                      ? "border-hush-purple bg-hush-purple/10"
+                      : "border-hush-bg-hover bg-hush-bg-dark/70 hover:border-hush-purple/40"
+                  }`}
                 >
-                  {circle}
-                </span>
-              ))}
-            </div>
-          </article>
-        ))}
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-hush-text-primary">{circle.name}</p>
+                    <span className="text-[11px] text-hush-text-accent">{circle.memberCount}</span>
+                  </div>
+
+                  <div className="flex min-h-8 flex-wrap items-center gap-1">
+                    {circle.members.slice(0, 8).map((memberAddress) => (
+                      <span
+                        key={`${circle.feedId}-${memberAddress}`}
+                        className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-hush-purple/40 text-[10px] text-hush-purple"
+                        title={getDisplayNameForAddress(memberAddress)}
+                      >
+                        {getDisplayInitials(getDisplayNameForAddress(memberAddress))}
+                      </span>
+                    ))}
+                    {pendingMembers.map((memberAddress) => (
+                      <span
+                        key={`${circle.feedId}-pending-${memberAddress}`}
+                        data-testid={`social-circle-pending-${circle.feedId}-${memberAddress}`}
+                        className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-400 text-[10px] text-slate-300"
+                        title={`${getDisplayNameForAddress(memberAddress)} pending`}
+                      >
+                        {getDisplayInitials(getDisplayNameForAddress(memberAddress))}
+                      </span>
+                    ))}
+                  </div>
+
+                  <div className="mt-2 text-[11px] text-hush-text-accent">
+                    {circle.isInnerCircle ? "Default private circle" : "Custom circle"}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      </div>
+    );
+  };
+
+  const renderCreateCircleDialog = () => {
+    if (!isCreateDialogOpen) {
+      return null;
+    }
+
+    return (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+        onClick={() => {
+          if (!creatingCircle) {
+            setIsCreateDialogOpen(false);
+            setCreateCircleError(null);
+          }
+        }}
+        data-testid="social-create-circle-modal"
+      >
+        <div
+          className="w-full max-w-md rounded-xl border border-hush-bg-hover bg-hush-bg-dark p-4"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-hush-text-primary">Create Circle</h3>
+            <button
+              type="button"
+              onClick={() => {
+                if (!creatingCircle) {
+                  setIsCreateDialogOpen(false);
+                  setCreateCircleError(null);
+                }
+              }}
+              className="rounded-md px-2 py-1 text-xs text-hush-text-accent hover:bg-hush-bg-hover"
+              data-testid="social-create-circle-close"
+            >
+              Close
+            </button>
+          </div>
+
+          <label className="text-xs text-hush-text-accent" htmlFor="create-circle-input">
+            Circle name
+          </label>
+          <input
+            id="create-circle-input"
+            value={createCircleNameDraft}
+            onChange={(event) => {
+              setCreateCircleNameDraft(event.currentTarget.value);
+              setCreateCircleError(null);
+            }}
+            className="mt-1 w-full rounded-md border border-hush-bg-hover bg-hush-bg-dark px-3 py-2 text-sm text-hush-text-primary outline-none focus:border-hush-purple"
+            placeholder="Friends"
+            data-testid="social-create-circle-input"
+          />
+          <p className="mt-1 text-[11px] text-hush-text-accent">3-40 chars, letters/numbers/spaces/_/-</p>
+
+          {createCircleError && (
+            <p className="mt-2 text-xs text-red-400" data-testid="social-create-circle-error">
+              {createCircleError}
+            </p>
+          )}
+
+          <div className="mt-4 flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                if (!creatingCircle) {
+                  setIsCreateDialogOpen(false);
+                  setCreateCircleError(null);
+                }
+              }}
+              className="rounded-md border border-hush-bg-hover px-3 py-1.5 text-xs text-hush-text-accent hover:bg-hush-bg-hover"
+              data-testid="social-create-circle-cancel"
+              disabled={creatingCircle}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void submitCreateCircle()}
+              className="rounded-md bg-hush-purple px-3 py-1.5 text-xs font-semibold text-hush-bg-dark disabled:opacity-50"
+              data-testid="social-create-circle-submit"
+              disabled={creatingCircle || createCircleNameDraft.trim().length < 3}
+            >
+              {creatingCircle ? "Creating..." : "Create"}
+            </button>
+          </div>
+        </div>
       </div>
     );
   };
@@ -458,11 +1095,21 @@ export default function SocialPage() {
         <div className="max-w-3xl mx-auto">
           <div className="mb-3">
             <h2 className="text-xl font-semibold text-hush-text-primary">
-              {selectedNav === "following" ? "Following" : "Feed Wall"}
+              {selectedNav === "following"
+                ? "Following"
+                : selectedNav === "new-post"
+                  ? "New Post"
+                  : selectedNav === "search"
+                    ? "Search"
+                    : "Feed Wall"}
             </h2>
             <p className="text-xs text-hush-text-accent">
               {selectedNav === "following"
                 ? "People you follow and their current circle memberships."
+                : selectedNav === "new-post"
+                  ? "Compose a post with explicit audience targeting rules."
+                  : selectedNav === "search"
+                    ? "Profile discovery is being prepared."
                 : "Public posts from people you follow and nearby circles."}
             </p>
             {innerCircleSync.status !== "idle" && (
@@ -492,7 +1139,8 @@ export default function SocialPage() {
 
           {selectedNav === "feed-wall" ? renderFeedWallContent() : null}
           {selectedNav === "following" ? renderFollowingContent() : null}
-          {selectedNav !== "feed-wall" && selectedNav !== "following" ? (
+          {selectedNav === "new-post" ? renderNewPostContent() : null}
+          {selectedNav !== "feed-wall" && selectedNav !== "following" && selectedNav !== "new-post" ? (
             <div data-testid="social-subview-placeholder" className="py-16 text-center">
               <p className="text-hush-text-primary font-semibold mb-1">{selectedNav.replace(/-/g, " ")}</p>
               <p className="text-hush-text-accent text-sm">This section will be expanded in the next phases.</p>
@@ -500,6 +1148,9 @@ export default function SocialPage() {
           ) : null}
         </div>
       </section>
+
+      <SystemToastContainer toasts={uiToasts} onDismiss={removeUiToast} />
+      {renderCreateCircleDialog()}
 
       {activePost && (
         <div

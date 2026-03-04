@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import SocialPage from './page';
 
 const setSelectedNavMock = vi.fn();
 const setAppContextScrollMock = vi.fn();
 const requestInnerCircleRetryMock = vi.fn();
+const createCustomCircleMock = vi.fn();
+const addMembersToCustomCircleMock = vi.fn();
+const checkIdentityExistsMock = vi.fn();
 let selectedNav = 'feed-wall';
 let stateParam: string | null = null;
 let mockFeeds = [
@@ -38,6 +41,10 @@ let mockFeeds = [
 let mockGroupMembers: Record<string, { publicAddress: string }[]> = {
   'inner-circle': [{ publicAddress: 'me-address' }, { publicAddress: 'alice-address' }],
   'support-group': [{ publicAddress: 'me-address' }, { publicAddress: 'alice-address' }],
+};
+let mockMemberRoles: Record<string, string> = {
+  'inner-circle': 'Admin',
+  'support-group': 'Member',
 };
 
 vi.mock('next/navigation', () => ({
@@ -91,12 +98,22 @@ vi.mock('@/stores', () => ({
 
 vi.mock('@/modules/feeds/useFeedsStore', () => ({
   useFeedsStore: (
-    selector: (state: { feeds: unknown[]; groupMembers: Record<string, { publicAddress: string }[]> }) => unknown
+    selector: (state: { feeds: unknown[]; groupMembers: Record<string, { publicAddress: string }[]>; memberRoles: Record<string, string> }) => unknown
   ) =>
     selector({
       feeds: mockFeeds,
       groupMembers: mockGroupMembers,
+      memberRoles: mockMemberRoles,
     }),
+}));
+
+vi.mock('@/modules/feeds/FeedsService', () => ({
+  createCustomCircle: (...args: unknown[]) => createCustomCircleMock(...args),
+  addMembersToCustomCircle: (...args: unknown[]) => addMembersToCustomCircleMock(...args),
+}));
+
+vi.mock('@/modules/identity/IdentityService', () => ({
+  checkIdentityExists: (...args: unknown[]) => checkIdentityExistsMock(...args),
 }));
 
 describe('SocialPage', () => {
@@ -106,6 +123,15 @@ describe('SocialPage', () => {
     setSelectedNavMock.mockReset();
     setAppContextScrollMock.mockReset();
     requestInnerCircleRetryMock.mockReset();
+    createCustomCircleMock.mockReset();
+    addMembersToCustomCircleMock.mockReset();
+    checkIdentityExistsMock.mockReset();
+    createCustomCircleMock.mockResolvedValue({ success: true, message: 'ok' });
+    addMembersToCustomCircleMock.mockResolvedValue({ success: true, message: 'ok' });
+    checkIdentityExistsMock.mockResolvedValue({
+      exists: true,
+      publicEncryptAddress: 'alice-encrypt-address',
+    });
     mockFeeds = [
       {
         id: 'chat-alice',
@@ -137,6 +163,10 @@ describe('SocialPage', () => {
     mockGroupMembers = {
       'inner-circle': [{ publicAddress: 'me-address' }, { publicAddress: 'alice-address' }],
       'support-group': [{ publicAddress: 'me-address' }, { publicAddress: 'alice-address' }],
+    };
+    mockMemberRoles = {
+      'inner-circle': 'Admin',
+      'support-group': 'Member',
     };
     sessionStorage.clear();
   });
@@ -185,6 +215,50 @@ describe('SocialPage', () => {
     expect(screen.getByTestId('social-following-circle-alice-address-Inner Circle')).toBeInTheDocument();
     expect(screen.queryByText('HushNetwork Support')).not.toBeInTheDocument();
     expect(screen.getByTestId('social-following-circle-bob-address-Not in circle yet')).toBeInTheDocument();
+    expect(screen.getByTestId('social-circles-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('social-circles-strip')).toBeInTheDocument();
+    expect(screen.getByTestId('social-circle-card-inner-circle')).toBeInTheDocument();
+  });
+
+  it('opens create-circle modal and submits transaction', async () => {
+    selectedNav = 'following';
+    render(<SocialPage />);
+
+    fireEvent.click(screen.getByTestId('social-create-circle-button'));
+    fireEvent.change(screen.getByTestId('social-create-circle-input'), { target: { value: 'Friends' } });
+    fireEvent.click(screen.getByTestId('social-create-circle-submit'));
+
+    await waitFor(() => {
+      expect(createCustomCircleMock).toHaveBeenCalledWith('me-address', 'Friends', 'private');
+    });
+    expect(screen.queryByTestId('social-create-circle-modal')).not.toBeInTheDocument();
+  });
+
+  it('assigns selected member to circle through mobile tap flow', async () => {
+    selectedNav = 'following';
+    render(<SocialPage />);
+
+    fireEvent.click(screen.getByTestId('social-following-item-bob-address'));
+    fireEvent.click(screen.getByTestId('social-circle-card-inner-circle'));
+
+    await waitFor(() => {
+      expect(checkIdentityExistsMock).toHaveBeenCalledWith('bob-address');
+      expect(addMembersToCustomCircleMock).toHaveBeenCalled();
+    });
+    expect(screen.getByText('Member Bob added to Circle Inner Circle')).toBeInTheDocument();
+  });
+
+  it('blocks duplicate assignment before submission', async () => {
+    selectedNav = 'following';
+    render(<SocialPage />);
+
+    fireEvent.click(screen.getByTestId('social-following-item-alice-address'));
+    fireEvent.click(screen.getByTestId('social-circle-card-inner-circle'));
+
+    await waitFor(() => {
+      expect(addMembersToCustomCircleMock).not.toHaveBeenCalled();
+    });
+    expect(screen.getByText('Transaction failed: Alice is already in Inner Circle')).toBeInTheDocument();
   });
 
   it('shows placeholder for non-feed-wall social subviews', () => {
@@ -192,6 +266,72 @@ describe('SocialPage', () => {
     render(<SocialPage />);
 
     expect(screen.getByTestId('social-subview-placeholder')).toBeInTheDocument();
+  });
+
+  it('defaults private post audience to Inner Circle in new-post composer', () => {
+    selectedNav = 'new-post';
+    render(<SocialPage />);
+
+    expect(screen.getByTestId('social-new-post')).toBeInTheDocument();
+    expect(screen.getByTestId('social-new-post-selected-circles')).toHaveTextContent('Selected circles: Inner Circle');
+  });
+
+  it('keeps private post valid with at most one custom circle plus Inner Circle', () => {
+    selectedNav = 'new-post';
+    mockFeeds = [
+      ...mockFeeds,
+      {
+        id: 'friends-circle',
+        type: 'group',
+        name: 'Friends',
+        participants: ['me-address', 'alice-address'],
+      },
+    ];
+    mockGroupMembers = {
+      ...mockGroupMembers,
+      'friends-circle': [{ publicAddress: 'alice-address' }],
+    };
+    mockMemberRoles = {
+      ...mockMemberRoles,
+      'friends-circle': 'Admin',
+    };
+
+    render(<SocialPage />);
+
+    fireEvent.click(screen.getByTestId('social-new-post-custom-circle-friends-circle'));
+    expect(screen.getByTestId('social-new-post-selected-circles')).toHaveTextContent('Inner Circle, Friends');
+  });
+
+  it('rejects publish when private post has zero selected circles', () => {
+    selectedNav = 'new-post';
+    mockFeeds = [
+      ...mockFeeds,
+      {
+        id: 'friends-circle',
+        type: 'group',
+        name: 'Friends',
+        participants: ['me-address', 'alice-address'],
+      },
+    ];
+    mockGroupMembers = {
+      ...mockGroupMembers,
+      'friends-circle': [{ publicAddress: 'alice-address' }],
+    };
+    mockMemberRoles = {
+      ...mockMemberRoles,
+      'friends-circle': 'Admin',
+    };
+
+    render(<SocialPage />);
+
+    fireEvent.click(screen.getByTestId('social-new-post-custom-circle-friends-circle'));
+    fireEvent.click(screen.getByTestId('social-new-post-inner-circle-toggle'));
+    fireEvent.click(screen.getByTestId('social-new-post-clear-custom-circle'));
+    fireEvent.click(screen.getByTestId('social-new-post-publish'));
+
+    expect(screen.getByTestId('social-new-post-audience-error')).toHaveTextContent(
+      'Private post requires at least one selected circle.'
+    );
   });
 
   it('persists scroll position into social app context', () => {
