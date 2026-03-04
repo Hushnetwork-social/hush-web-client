@@ -22,7 +22,15 @@ import {
   aesDecrypt,
 } from '@/lib/crypto';
 import { decryptReactionTally, initializeBsgs } from '@/lib/crypto/reactions';
-import { fetchFeeds, fetchMessages, submitTransaction, retryMessage, TransactionStatus, type FetchMessagesResponse } from './FeedsService';
+import {
+  fetchFeeds,
+  fetchMessages,
+  submitTransaction,
+  retryMessage,
+  ensureInnerCircleForOwner,
+  TransactionStatus,
+  type FetchMessagesResponse,
+} from './FeedsService';
 import { getUnreadCounts } from '@/lib/grpc/services/notification';
 import { shouldRetry, isMaxAttemptsReached, MESSAGE_RETRY_CONFIG } from '@/lib/retry';
 import { checkIdentityExists } from '../identity/IdentityService';
@@ -37,6 +45,7 @@ import { debugLog, debugWarn, debugError } from '@/lib/debug-logger';
 
 // Minimum blocks to wait before resetting pending personal feed creation
 const MIN_BLOCKS_BEFORE_RESET = 5;
+const INNER_CIRCLE_RETRY_DELAYS_MS = [2000, 4000, 8000, 16000, 32000] as const;
 
 // Session storage key to detect page reload/refresh
 // We use a unique page load ID to detect when the page has been refreshed
@@ -68,6 +77,32 @@ export class FeedsSyncable implements ISyncable {
   // Track previous group settings for each group feed (for change detection)
   // This is captured at the START of each sync cycle, BEFORE any updates
   private previousGroupSettings = new Map<string, PreviousGroupSettings>();
+  private innerCircleRetryAttempt = 0;
+  private nextInnerCircleRetryAt = 0;
+  private lastInnerCircleRetryNonce = -1;
+
+  private updateInnerCircleSyncState(
+    state: Partial<{
+      status: 'idle' | 'syncing' | 'retrying' | 'error';
+      message: string | null;
+      attemptCount: number;
+      nextRetryAt: number | null;
+    }>
+  ): void {
+    const appStore = useAppStore.getState();
+    const current = appStore.innerCircleSync;
+    const next = { ...current, ...state };
+    if (
+      next.status === current.status &&
+      next.message === current.message &&
+      next.attemptCount === current.attemptCount &&
+      next.nextRetryAt === current.nextRetryAt
+    ) {
+      return;
+    }
+
+    appStore.setInnerCircleSync(state);
+  }
 
   async syncTask(): Promise<void> {
     // Prevent concurrent syncs
@@ -135,6 +170,7 @@ export class FeedsSyncable implements ISyncable {
 
       // Check for personal feed and create if missing
       await this.ensurePersonalFeed(credentials);
+      await this.syncInnerCircle(credentials);
 
       // FEAT-058: Retry unconfirmed messages
       await this.retryUnconfirmedMessages();
@@ -157,6 +193,110 @@ export class FeedsSyncable implements ISyncable {
       useFeedsStore.getState().setSyncing(false);
       // Clear the flag after sync completes
       this.shouldResetReactionTallyVersion = false;
+    }
+  }
+
+  private async syncInnerCircle(credentials: {
+    signingPublicKey?: string;
+    signingPrivateKey?: string;
+  }): Promise<void> {
+    if (!credentials.signingPublicKey || !credentials.signingPrivateKey) {
+      return;
+    }
+
+    const appStore = useAppStore.getState();
+    const hasPersonalFeed = useFeedsStore.getState().hasPersonalFeed();
+    if (!hasPersonalFeed) {
+      return;
+    }
+
+    if (appStore.innerCircleRetryNonce !== this.lastInnerCircleRetryNonce) {
+      this.lastInnerCircleRetryNonce = appStore.innerCircleRetryNonce;
+      this.innerCircleRetryAttempt = 0;
+      this.nextInnerCircleRetryAt = 0;
+    }
+
+    const now = Date.now();
+    if (this.nextInnerCircleRetryAt > now) {
+      this.updateInnerCircleSyncState({
+        status: 'retrying',
+        nextRetryAt: this.nextInnerCircleRetryAt,
+        attemptCount: this.innerCircleRetryAttempt,
+      });
+      return;
+    }
+
+    try {
+      const result = await ensureInnerCircleForOwner(
+        credentials.signingPublicKey,
+        credentials.signingPrivateKey
+      );
+
+      if (result.success) {
+        this.innerCircleRetryAttempt = 0;
+        this.nextInnerCircleRetryAt = 0;
+        this.updateInnerCircleSyncState({
+          status: 'idle',
+          message: null,
+          attemptCount: 0,
+          nextRetryAt: null,
+        });
+        return;
+      }
+
+      if (!result.retryable) {
+        this.nextInnerCircleRetryAt = 0;
+        this.updateInnerCircleSyncState({
+          status: 'error',
+          message: result.message,
+          attemptCount: this.innerCircleRetryAttempt,
+          nextRetryAt: null,
+        });
+        return;
+      }
+
+      if (this.innerCircleRetryAttempt >= INNER_CIRCLE_RETRY_DELAYS_MS.length) {
+        this.updateInnerCircleSyncState({
+          status: 'error',
+          message: result.message || 'Inner-circle sync reached max retry attempts',
+          attemptCount: this.innerCircleRetryAttempt,
+          nextRetryAt: null,
+        });
+        return;
+      }
+
+      const retryDelayMs = INNER_CIRCLE_RETRY_DELAYS_MS[this.innerCircleRetryAttempt];
+      this.innerCircleRetryAttempt += 1;
+      this.nextInnerCircleRetryAt = now + retryDelayMs;
+      this.updateInnerCircleSyncState({
+        status: 'retrying',
+        message: result.message,
+        attemptCount: this.innerCircleRetryAttempt,
+        nextRetryAt: this.nextInnerCircleRetryAt,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Inner-circle sync failed';
+
+      if (this.innerCircleRetryAttempt >= INNER_CIRCLE_RETRY_DELAYS_MS.length) {
+        this.updateInnerCircleSyncState({
+          status: 'error',
+          message,
+          attemptCount: this.innerCircleRetryAttempt,
+          nextRetryAt: null,
+        });
+        return;
+      }
+
+      const retryDelayMs = INNER_CIRCLE_RETRY_DELAYS_MS[this.innerCircleRetryAttempt];
+      this.innerCircleRetryAttempt += 1;
+      this.nextInnerCircleRetryAt = now + retryDelayMs;
+
+      this.updateInnerCircleSyncState({
+        status: 'retrying',
+        message,
+        attemptCount: this.innerCircleRetryAttempt,
+        nextRetryAt: this.nextInnerCircleRetryAt,
+      });
     }
   }
 

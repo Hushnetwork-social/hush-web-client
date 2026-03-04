@@ -33,6 +33,8 @@ export {
   createPersonalFeedTransaction,
   createFeedMessageTransaction,
   createChatFeedTransaction,
+  createCreateInnerCircleTransaction,
+  createAddMembersToInnerCircleTransaction,
   createReactionTransaction,
   // Types
   type SignatureInfo,

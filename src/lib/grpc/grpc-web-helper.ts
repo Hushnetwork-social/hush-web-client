@@ -220,6 +220,11 @@ export function buildHasPersonalFeedRequest(publicKey: string): Uint8Array {
   return new Uint8Array(bytes);
 }
 
+export function buildGetInnerCircleRequest(ownerPublicAddress: string): Uint8Array {
+  const bytes = encodeString(1, ownerPublicAddress);
+  return new Uint8Array(bytes);
+}
+
 export function buildGetFeedsForAddressRequest(profilePublicKey: string, blockIndex: number): Uint8Array {
   const bytes = [
     ...encodeString(1, profilePublicKey),
@@ -389,6 +394,13 @@ export interface HasPersonalFeedResponse {
   feedAvailable: boolean;
 }
 
+export interface GetInnerCircleResult {
+  success: boolean;
+  message: string;
+  exists: boolean;
+  feedId?: string;
+}
+
 export function parseHasPersonalFeedResponse(messageBytes: Uint8Array): HasPersonalFeedResponse {
   const result: HasPersonalFeedResponse = { feedAvailable: false };
 
@@ -405,6 +417,42 @@ export function parseHasPersonalFeedResponse(messageBytes: Uint8Array): HasPerso
       const valueResult = parseVarint(messageBytes, offset);
       result.feedAvailable = valueResult.value === 1;
       break;
+    } else {
+      break;
+    }
+  }
+
+  return result;
+}
+
+export function parseGetInnerCircleResponse(messageBytes: Uint8Array): GetInnerCircleResult {
+  const result: GetInnerCircleResult = {
+    success: false,
+    message: '',
+    exists: false,
+  };
+
+  let offset = 0;
+  while (offset < messageBytes.length) {
+    const tagResult = parseVarint(messageBytes, offset);
+    const tag = tagResult.value;
+    offset += tagResult.bytesRead;
+
+    const fieldNumber = tag >> 3;
+    const wireType = tag & 0x07;
+
+    if (wireType === 0) {
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+      if (fieldNumber === 1) result.success = valueResult.value === 1;
+      if (fieldNumber === 4) result.exists = valueResult.value === 1;
+    } else if (wireType === 2) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead;
+      const strValue = parseString(messageBytes, offset, lenResult.value);
+      offset += lenResult.value;
+      if (fieldNumber === 2) result.message = strValue;
+      if (fieldNumber === 3) result.feedId = strValue;
     } else {
       break;
     }

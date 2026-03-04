@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { AlertCircle, Link2, Loader2, MessageCircle, SmilePlus, Sparkles, X } from "lucide-react";
 import { useAppStore } from "@/stores";
+import { useFeedsStore } from "@/modules/feeds/useFeedsStore";
 
 const SOCIAL_MENU_IDS = new Set([
   "feed-wall",
@@ -37,6 +38,12 @@ type PostItem = {
   replyCount: number;
   reactions: Record<string, number>;
   replies: ReplyItem[];
+};
+
+type FollowingItem = {
+  publicAddress: string;
+  displayName: string;
+  circles: string[];
 };
 
 const LONG_POST_TEXT =
@@ -105,6 +112,11 @@ export default function SocialPage() {
   const selectedNav = useAppStore((state) => state.selectedNav);
   const setSelectedNav = useAppStore((state) => state.setSelectedNav);
   const setAppContextScroll = useAppStore((state) => state.setAppContextScroll);
+  const innerCircleSync = useAppStore((state) => state.innerCircleSync);
+  const requestInnerCircleRetry = useAppStore((state) => state.requestInnerCircleRetry);
+  const credentials = useAppStore((state) => state.credentials);
+  const feeds = useFeedsStore((state) => state.feeds);
+  const groupMembers = useFeedsStore((state) => state.groupMembers);
   const [activePostId, setActivePostId] = useState<string | null>(null);
   const [topReplyDraft, setTopReplyDraft] = useState("");
   const [isTopComposerOpen, setIsTopComposerOpen] = useState(false);
@@ -113,6 +125,18 @@ export default function SocialPage() {
   const [inlineComposerRootId, setInlineComposerRootId] = useState<string | null>(null);
   const [overlayReplies, setOverlayReplies] = useState<ReplyItem[]>([]);
   const feedWallRegionRef = useRef<HTMLElement | null>(null);
+  const hasInitializedSocialNavRef = useRef(false);
+
+  useEffect(() => {
+    if (hasInitializedSocialNavRef.current) {
+      return;
+    }
+
+    hasInitializedSocialNavRef.current = true;
+    if (selectedNav !== "feed-wall") {
+      setSelectedNav("feed-wall");
+    }
+  }, [selectedNav, setSelectedNav]);
 
   useEffect(() => {
     if (!SOCIAL_MENU_IDS.has(selectedNav)) {
@@ -131,6 +155,51 @@ export default function SocialPage() {
 
   const viewState = useMemo(() => resolveViewState(searchParams.get("state")), [searchParams]);
   const activePost = useMemo(() => DEMO_POSTS.find((post) => post.id === activePostId) ?? null, [activePostId]);
+  const followingItems = useMemo<FollowingItem[]>(() => {
+    const ownAddress = credentials?.signingPublicKey;
+    const circleFeeds = feeds.filter(
+      (feed) => feed.type === "group" && feed.name?.trim().toLowerCase() === "inner circle"
+    );
+    const followedByAddress = new Map<string, FollowingItem>();
+
+    for (const feed of feeds) {
+      if (feed.type !== "chat") {
+        continue;
+      }
+
+      const otherParticipant =
+        feed.otherParticipantPublicSigningAddress ??
+        feed.participants.find((participant) => participant !== ownAddress);
+      if (!otherParticipant) {
+        continue;
+      }
+
+      const circleNames = circleFeeds
+        .filter((circleFeed) => {
+          const members = groupMembers[circleFeed.id]?.map((member) => member.publicAddress) ?? circleFeed.participants;
+          return members.includes(otherParticipant);
+        })
+        .map(() => "Inner Circle");
+
+      const entry = followedByAddress.get(otherParticipant);
+      if (entry) {
+        for (const circleName of circleNames) {
+          if (!entry.circles.includes(circleName)) {
+            entry.circles.push(circleName);
+          }
+        }
+        continue;
+      }
+
+      followedByAddress.set(otherParticipant, {
+        publicAddress: otherParticipant,
+        displayName: feed.name || `${otherParticipant.slice(0, 8)}...${otherParticipant.slice(-6)}`,
+        circles: circleNames.length > 0 ? circleNames : ["Not in circle yet"],
+      });
+    }
+
+    return Array.from(followedByAddress.values()).sort((a, b) => a.displayName.localeCompare(b.displayName));
+  }, [credentials?.signingPublicKey, feeds, groupMembers]);
 
   useEffect(() => {
     if (!activePost) {
@@ -336,6 +405,46 @@ export default function SocialPage() {
     );
   };
 
+  const renderFollowingContent = () => {
+    if (followingItems.length === 0) {
+      return (
+        <div data-testid="social-following-empty" className="rounded-xl border border-hush-bg-hover bg-hush-bg-dark p-4 text-sm text-hush-text-accent">
+          You are not following anyone yet.
+        </div>
+      );
+    }
+
+    return (
+      <div data-testid="social-following-list" className="space-y-3">
+        {followingItems.map((item) => (
+          <article
+            key={item.publicAddress}
+            data-testid={`social-following-item-${item.publicAddress}`}
+            className="rounded-xl border border-hush-bg-hover bg-hush-bg-dark p-4"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm font-semibold text-hush-text-primary">{item.displayName}</p>
+              <p className="text-[11px] text-hush-text-accent">
+                {item.publicAddress.slice(0, 8)}...{item.publicAddress.slice(-6)}
+              </p>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              {item.circles.map((circle) => (
+                <span
+                  key={`${item.publicAddress}-${circle}`}
+                  data-testid={`social-following-circle-${item.publicAddress}-${circle}`}
+                  className="rounded-full border border-hush-purple/40 px-2 py-1 text-[11px] text-hush-purple"
+                >
+                  {circle}
+                </span>
+              ))}
+            </div>
+          </article>
+        ))}
+      </div>
+    );
+  };
+
   return (
     <div className="flex-1 min-h-0 flex flex-col overflow-hidden" data-testid="social-shell">
       <section
@@ -348,18 +457,47 @@ export default function SocialPage() {
       >
         <div className="max-w-3xl mx-auto">
           <div className="mb-3">
-            <h2 className="text-xl font-semibold text-hush-text-primary">Feed Wall</h2>
-            <p className="text-xs text-hush-text-accent">Public posts from people you follow and nearby circles.</p>
+            <h2 className="text-xl font-semibold text-hush-text-primary">
+              {selectedNav === "following" ? "Following" : "Feed Wall"}
+            </h2>
+            <p className="text-xs text-hush-text-accent">
+              {selectedNav === "following"
+                ? "People you follow and their current circle memberships."
+                : "Public posts from people you follow and nearby circles."}
+            </p>
+            {innerCircleSync.status !== "idle" && (
+              <div
+                data-testid="inner-circle-sync-status"
+                className="mt-2 inline-flex items-center gap-2 rounded-md border border-hush-bg-hover bg-hush-bg-dark px-2 py-1 text-[11px] text-hush-text-accent"
+              >
+                <span>
+                  {innerCircleSync.status === "syncing" && "Syncing Inner Circle..."}
+                  {innerCircleSync.status === "retrying" &&
+                    `Inner Circle retry ${innerCircleSync.attemptCount}/5`}
+                  {innerCircleSync.status === "error" && "Inner Circle sync needs attention"}
+                </span>
+                {innerCircleSync.status === "error" && (
+                  <button
+                    type="button"
+                    onClick={() => requestInnerCircleRetry()}
+                    className="rounded border border-hush-purple/40 px-2 py-0.5 text-[10px] text-hush-purple hover:bg-hush-purple/10"
+                    data-testid="inner-circle-sync-retry"
+                  >
+                    Retry now
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
-          {selectedNav === "feed-wall" ? (
-            renderFeedWallContent()
-          ) : (
+          {selectedNav === "feed-wall" ? renderFeedWallContent() : null}
+          {selectedNav === "following" ? renderFollowingContent() : null}
+          {selectedNav !== "feed-wall" && selectedNav !== "following" ? (
             <div data-testid="social-subview-placeholder" className="py-16 text-center">
               <p className="text-hush-text-primary font-semibold mb-1">{selectedNav.replace(/-/g, " ")}</p>
               <p className="text-hush-text-accent text-sm">This section will be expanded in the next phases.</p>
             </div>
-          )}
+          ) : null}
         </div>
       </section>
 
