@@ -216,6 +216,7 @@ export function SocialPostComposerCard({
                         data-testid="social-new-post-media-preview-video"
                       />
                     ) : (
+                      // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={draftMediaItems[0].previewUrl}
                         alt={draftMediaItems[0].label}
@@ -239,6 +240,7 @@ export function SocialPostComposerCard({
                             data-testid={`social-new-post-media-preview-video-${item.id}`}
                           />
                         ) : (
+                          // eslint-disable-next-line @next/next/no-img-element
                           <img
                             src={item.previewUrl}
                             alt={item.label}

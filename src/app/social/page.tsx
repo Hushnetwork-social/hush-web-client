@@ -400,11 +400,12 @@ export default function SocialPage() {
   }, [renderCircleItems, feeds]);
 
   useEffect(() => {
+    const previewUrls = mediaPreviewUrlsRef.current;
     return () => {
-      for (const previewUrl of mediaPreviewUrlsRef.current) {
+      for (const previewUrl of previewUrls) {
         URL.revokeObjectURL(previewUrl);
       }
-      mediaPreviewUrlsRef.current.clear();
+      previewUrls.clear();
     };
   }, []);
 
@@ -1237,6 +1238,7 @@ export default function SocialPage() {
             data-testid={`${testIdPrefix}-video-${attachment.id}`}
           />
         ) : (
+          // eslint-disable-next-line @next/next/no-img-element
           <img
             src={attachment.previewUrl}
             alt={attachment.fileName}

@@ -337,6 +337,7 @@ export default function SocialPostPermalinkPage() {
                     data-testid={`social-permalink-video-${permalink.attachments[0].attachmentId}`}
                   />
                 ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={buildApiUrl(
                       `/api/social/posts/attachment?attachmentId=${encodeURIComponent(permalink.attachments[0].attachmentId)}&postId=${encodeURIComponent(permalink.postId ?? routePostId)}&isAuthenticated=${encodeURIComponent(String(!!requesterForMedia))}&requesterPublicAddress=${encodeURIComponent(requesterForMedia ?? "")}&mimeType=${encodeURIComponent(permalink.attachments[0].mimeType)}`
@@ -364,6 +365,7 @@ export default function SocialPostPermalinkPage() {
                           data-testid={`social-permalink-video-${attachment.attachmentId}`}
                         />
                       ) : (
+                        // eslint-disable-next-line @next/next/no-img-element
                         <img
                           src={buildApiUrl(
                             `/api/social/posts/attachment?attachmentId=${encodeURIComponent(attachment.attachmentId)}&postId=${encodeURIComponent(permalink.postId ?? routePostId)}&isAuthenticated=${encodeURIComponent(String(!!requesterForMedia))}&requesterPublicAddress=${encodeURIComponent(requesterForMedia ?? "")}&mimeType=${encodeURIComponent(attachment.mimeType)}`
