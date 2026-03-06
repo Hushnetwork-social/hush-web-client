@@ -1,5 +1,8 @@
 "use client";
 
+import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent } from "react";
+import { ContentCarousel } from "@/components/chat/ContentCarousel";
+
 type ComposerMode = "full" | "compact";
 
 type ComposerCircle = {
@@ -12,6 +15,7 @@ type DraftMediaItem = {
   kind: "image" | "video";
   label: string;
   sizeMb: number;
+  previewUrl?: string;
 };
 
 type SocialPostComposerCardProps = {
@@ -27,9 +31,8 @@ type SocialPostComposerCardProps = {
   includeInnerCircleForPost: boolean;
   onToggleInnerCircle: () => void;
   availableCustomCirclesForPost: ComposerCircle[];
-  selectedCustomCircleIdForPost: string | null;
-  onSelectCustomCircle: (feedId: string) => void;
-  onClearCustomCircle: () => void;
+  selectedCustomCircleIdsForPost: string[];
+  onToggleCustomCircle: (feedId: string) => void;
   selectedCircleNames: string[];
   newPostAudienceError: string | null;
   draftMediaItems: DraftMediaItem[];
@@ -38,6 +41,7 @@ type SocialPostComposerCardProps = {
   maxMediaSizeMb: number;
   onAddImage: () => void;
   onAddVideo: () => void;
+  onAddFiles: (files: File[] | FileList | null) => void;
   onRemoveMedia: (id: string) => void;
   onPublish: () => void;
 };
@@ -55,9 +59,8 @@ export function SocialPostComposerCard({
   includeInnerCircleForPost,
   onToggleInnerCircle,
   availableCustomCirclesForPost,
-  selectedCustomCircleIdForPost,
-  onSelectCustomCircle,
-  onClearCustomCircle,
+  selectedCustomCircleIdsForPost,
+  onToggleCustomCircle,
   selectedCircleNames,
   newPostAudienceError,
   draftMediaItems,
@@ -66,11 +69,60 @@ export function SocialPostComposerCard({
   maxMediaSizeMb,
   onAddImage,
   onAddVideo,
+  onAddFiles,
   onRemoveMedia,
   onPublish,
 }: SocialPostComposerCardProps) {
   const showCompactHeader = mode === "compact" && !isExpanded;
   const showComposerBody = mode === "full" || isExpanded;
+  const draftRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [isCirclePickerOpen, setIsCirclePickerOpen] = useState(false);
+  const [pickerAccept, setPickerAccept] = useState<"image/*" | "video/*" | "image/*,video/*">("image/*,video/*");
+
+  useEffect(() => {
+    if (!showComposerBody) {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      draftRef.current?.focus();
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [showComposerBody]);
+
+  useEffect(() => {
+    if (postAudience !== "close") {
+      setIsCirclePickerOpen(false);
+    }
+  }, [postAudience]);
+
+  const selectedCircleCount = (includeInnerCircleForPost ? 1 : 0) + selectedCustomCircleIdsForPost.length;
+
+  const openFilePicker = (accept: "image/*" | "video/*" | "image/*,video/*") => {
+    setPickerAccept(accept);
+    fileInputRef.current?.click();
+  };
+
+  const handleFileInputChange = (event: ChangeEvent<HTMLInputElement>) => {
+    onAddFiles(event.currentTarget.files);
+    event.currentTarget.value = "";
+  };
+
+  const handleDraftPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = Array.from(event.clipboardData.items)
+      .filter((item) => item.kind === "file")
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => !!file);
+
+    if (files.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    onAddFiles(files);
+  };
 
   return (
     <section data-testid="social-new-post" className="rounded-xl border border-hush-bg-hover bg-hush-bg-dark p-4">
@@ -93,20 +145,43 @@ export function SocialPostComposerCard({
       {showComposerBody ? (
         <>
           <textarea
+            ref={draftRef}
             data-testid="social-new-post-draft"
             value={newPostDraft}
             onChange={(event) => onDraftChange(event.currentTarget.value)}
+            onPaste={handleDraftPaste}
             placeholder="What do you want to show us?"
             className="mt-3 w-full min-h-28 rounded-md border border-hush-bg-hover bg-hush-bg-dark px-3 py-2 text-sm text-hush-text-primary outline-none focus:border-hush-purple"
           />
 
-          <div className="mt-3 rounded-lg border border-hush-bg-hover p-3" data-testid="social-new-post-media">
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept={pickerAccept}
+            className="hidden"
+            data-testid="social-new-post-file-input"
+            onChange={handleFileInputChange}
+          />
+
+          <div
+            className="mt-3 rounded-lg border border-hush-bg-hover p-3"
+            data-testid="social-new-post-media"
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault();
+              onAddFiles(event.dataTransfer.files);
+            }}
+          >
             <p className="text-xs font-semibold text-hush-text-primary">Media</p>
             <div className="mt-2 flex flex-wrap gap-2">
               <button
                 type="button"
                 data-testid="social-new-post-add-image"
-                onClick={onAddImage}
+                onClick={() => {
+                  onAddImage();
+                  openFilePicker("image/*");
+                }}
                 className="rounded-full border border-hush-bg-hover px-3 py-1 text-xs text-hush-text-accent hover:border-hush-purple/40"
               >
                 + Image
@@ -114,7 +189,10 @@ export function SocialPostComposerCard({
               <button
                 type="button"
                 data-testid="social-new-post-add-video"
-                onClick={onAddVideo}
+                onClick={() => {
+                  onAddVideo();
+                  openFilePicker("video/*");
+                }}
                 className="rounded-full border border-hush-bg-hover px-3 py-1 text-xs text-hush-text-accent hover:border-hush-purple/40"
               >
                 + Video
@@ -123,10 +201,65 @@ export function SocialPostComposerCard({
             <p className="mt-2 text-[11px] text-hush-text-accent">
               Limits: up to {maxMediaAttachments} attachments, each up to {maxMediaSizeMb}MB.
             </p>
+            <p className="mt-1 text-[11px] text-hush-text-accent" data-testid="social-new-post-drop-zone">
+              Paste with Ctrl+V, drag and drop files, or use + Image/+ Video.
+            </p>
+            {draftMediaItems.length > 0 && (
+              <div className="mt-2" data-testid="social-new-post-media-preview">
+                {draftMediaItems.length === 1 ? (
+                  <div className="overflow-hidden rounded-md border border-hush-bg-hover bg-hush-bg-dark/40 p-1">
+                    {draftMediaItems[0].kind === "video" ? (
+                      <video
+                        src={draftMediaItems[0].previewUrl}
+                        controls
+                        className="max-h-64 w-full rounded-md object-contain"
+                        data-testid="social-new-post-media-preview-video"
+                      />
+                    ) : (
+                      <img
+                        src={draftMediaItems[0].previewUrl}
+                        alt={draftMediaItems[0].label}
+                        className="max-h-64 w-full rounded-md object-contain"
+                        data-testid="social-new-post-media-preview-image"
+                      />
+                    )}
+                  </div>
+                ) : (
+                  <ContentCarousel ariaLabel="Social composer media preview">
+                    {draftMediaItems.map((item) => (
+                      <div
+                        key={item.id}
+                        className="overflow-hidden rounded-md border border-hush-bg-hover bg-hush-bg-dark/40 p-1"
+                      >
+                        {item.kind === "video" ? (
+                          <video
+                            src={item.previewUrl}
+                            controls
+                            className="max-h-64 w-full rounded-md object-contain"
+                            data-testid={`social-new-post-media-preview-video-${item.id}`}
+                          />
+                        ) : (
+                          <img
+                            src={item.previewUrl}
+                            alt={item.label}
+                            className="max-h-64 w-full rounded-md object-contain"
+                            data-testid={`social-new-post-media-preview-image-${item.id}`}
+                          />
+                        )}
+                      </div>
+                    ))}
+                  </ContentCarousel>
+                )}
+              </div>
+            )}
             {draftMediaItems.length > 0 && (
               <ul className="mt-2 space-y-1" data-testid="social-new-post-media-list">
                 {draftMediaItems.map((item) => (
-                  <li key={item.id} className="flex items-center justify-between rounded-md border border-hush-bg-hover px-2 py-1">
+                  <li
+                    key={item.id}
+                    data-testid={`social-new-post-media-item-${item.id}`}
+                    className="flex items-center justify-between rounded-md border border-hush-bg-hover px-2 py-1"
+                  >
                     <span className="text-xs text-hush-text-primary">
                       {item.label} ({item.sizeMb}MB)
                     </span>
@@ -180,44 +313,95 @@ export function SocialPostComposerCard({
 
             {postAudience === "close" && (
               <div className="space-y-2" data-testid="social-new-post-private-options">
-                <label className="flex items-center gap-2 text-xs text-hush-text-primary">
-                  <input
-                    type="checkbox"
-                    checked={includeInnerCircleForPost}
-                    data-testid="social-new-post-inner-circle-toggle"
-                    onChange={onToggleInnerCircle}
-                  />
-                  Inner Circle (default)
-                </label>
+                <div className="flex flex-wrap items-center gap-2">
+                  {includeInnerCircleForPost ? (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-hush-purple/40 bg-hush-purple/10 px-2 py-1 text-xs text-hush-purple">
+                      Inner Circle
+                      <button
+                        type="button"
+                        data-testid="social-new-post-remove-inner-circle"
+                        onClick={onToggleInnerCircle}
+                        disabled={selectedCircleCount <= 1}
+                        className="text-hush-purple/90 disabled:cursor-not-allowed disabled:opacity-60"
+                        title={selectedCircleCount <= 1 ? "At least one circle is required" : "Remove circle"}
+                      >
+                        {selectedCircleCount <= 1 ? "lock" : "x"}
+                      </button>
+                    </span>
+                  ) : null}
+                  {selectedCustomCircleIdsForPost.map((feedId) => {
+                    const circle = availableCustomCirclesForPost.find((item) => item.feedId === feedId);
+                    if (!circle) {
+                      return null;
+                    }
 
-                <div className="space-y-1">
-                  <p className="text-[11px] text-hush-text-accent">Select at most one custom circle:</p>
-                  {availableCustomCirclesForPost.length === 0 ? (
-                    <p className="text-[11px] text-hush-text-accent">No custom circles available yet.</p>
-                  ) : (
-                    availableCustomCirclesForPost.map((circle) => (
-                      <label key={circle.feedId} className="flex items-center gap-2 text-xs text-hush-text-primary">
-                        <input
-                          type="radio"
-                          name="new-post-custom-circle"
-                          checked={selectedCustomCircleIdForPost === circle.feedId}
-                          data-testid={`social-new-post-custom-circle-${circle.feedId}`}
-                          onChange={() => onSelectCustomCircle(circle.feedId)}
-                        />
+                    return (
+                      <span
+                        key={circle.feedId}
+                        className="inline-flex items-center gap-1 rounded-full border border-hush-purple/40 bg-hush-purple/10 px-2 py-1 text-xs text-hush-purple"
+                      >
                         {circle.name}
-                      </label>
-                    ))
-                  )}
-                  {selectedCustomCircleIdForPost && (
-                    <button
-                      type="button"
-                      data-testid="social-new-post-clear-custom-circle"
-                      onClick={onClearCustomCircle}
-                      className="rounded border border-hush-bg-hover px-2 py-1 text-[11px] text-hush-text-accent hover:bg-hush-bg-hover"
-                    >
-                      Clear custom circle
-                    </button>
-                  )}
+                        <button
+                          type="button"
+                          data-testid={`social-new-post-remove-custom-circle-${circle.feedId}`}
+                          onClick={() => onToggleCustomCircle(circle.feedId)}
+                          disabled={selectedCircleCount <= 1}
+                          className="text-hush-purple/90 disabled:cursor-not-allowed disabled:opacity-60"
+                          title={selectedCircleCount <= 1 ? "At least one circle is required" : "Remove circle"}
+                        >
+                          {selectedCircleCount <= 1 ? "lock" : "x"}
+                        </button>
+                      </span>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    data-testid="social-new-post-add-circle"
+                    onClick={() => setIsCirclePickerOpen((current) => !current)}
+                    className="rounded-full border border-hush-bg-hover px-3 py-1 text-xs text-hush-text-accent hover:border-hush-purple/40"
+                  >
+                    Add circle
+                  </button>
+                </div>
+
+                {isCirclePickerOpen ? (
+                  <div className="space-y-1 rounded-md border border-hush-bg-hover bg-hush-bg-dark p-2" data-testid="social-new-post-circle-picker">
+                    <label className="flex items-center gap-2 text-xs text-hush-text-primary">
+                      <input
+                        type="checkbox"
+                        checked={includeInnerCircleForPost}
+                        data-testid="social-new-post-inner-circle-toggle"
+                        onChange={onToggleInnerCircle}
+                        disabled={selectedCircleCount <= 1 && includeInnerCircleForPost}
+                      />
+                      Inner Circle (default)
+                    </label>
+                    {availableCustomCirclesForPost.length === 0 ? (
+                      <p className="text-[11px] text-hush-text-accent">No custom circles available yet.</p>
+                    ) : (
+                      availableCustomCirclesForPost.map((circle) => {
+                        const isChecked = selectedCustomCircleIdsForPost.includes(circle.feedId);
+                        return (
+                          <label key={circle.feedId} className="flex items-center gap-2 text-xs text-hush-text-primary">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              data-testid={`social-new-post-custom-circle-${circle.feedId}`}
+                              onChange={() => onToggleCustomCircle(circle.feedId)}
+                              disabled={selectedCircleCount <= 1 && isChecked}
+                            />
+                            {circle.name}
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
+                ) : null}
+
+                <div className="text-[11px] text-hush-text-accent">
+                  {selectedCircleCount <= 1
+                    ? "At least one circle is required for private posts."
+                    : "You can remove a circle by clicking x on its badge."}
                 </div>
               </div>
             )}

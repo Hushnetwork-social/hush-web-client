@@ -13,27 +13,33 @@ if (typeof window === 'undefined') {
 
 // Encode a varint (variable-length integer)
 function encodeVarint(value: number): number[] {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`encodeVarint expects a non-negative finite number, got: ${value}`);
+  }
+
+  // Use arithmetic division instead of bitwise operators to preserve values > 32-bit.
+  value = Math.floor(value);
   const bytes: number[] = [];
   while (value > 0x7f) {
-    bytes.push((value & 0x7f) | 0x80);
-    value >>>= 7;
+    bytes.push((value % 128) | 0x80);
+    value = Math.floor(value / 128);
   }
-  bytes.push(value & 0x7f);
+  bytes.push(value);
   return bytes;
 }
 
 // Parse a varint from bytes
 export function parseVarint(bytes: Uint8Array, offset: number): { value: number; bytesRead: number } {
   let value = 0;
-  let shift = 0;
+  let factor = 1;
   let bytesRead = 0;
 
   while (offset + bytesRead < bytes.length) {
     const byte = bytes[offset + bytesRead];
-    value |= (byte & 0x7f) << shift;
+    value += (byte & 0x7f) * factor;
     bytesRead++;
     if ((byte & 0x80) === 0) break;
-    shift += 7;
+    factor *= 128;
   }
 
   return { value, bytesRead };
@@ -177,6 +183,21 @@ export function buildDownloadAttachmentRequest(
     ...encodeString(2, feedId),
     ...encodeString(3, requesterUserAddress),
     ...(thumbnailOnly ? encodeBoolField(4, true) : []),
+  ];
+  return new Uint8Array(bytes);
+}
+
+export function buildDownloadSocialPostAttachmentRequest(
+  attachmentId: string,
+  postId: string,
+  requesterPublicAddress: string | null,
+  isAuthenticated: boolean,
+): Uint8Array {
+  const bytes = [
+    ...encodeString(1, attachmentId),
+    ...encodeString(2, postId),
+    ...(requesterPublicAddress ? encodeString(3, requesterPublicAddress) : []),
+    ...encodeBoolField(4, isAuthenticated),
   ];
   return new Uint8Array(bytes);
 }

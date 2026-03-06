@@ -34,14 +34,17 @@ export async function fetchBlockHeight(): Promise<number> {
  * @param signedTransaction - The JSON-serialized signed transaction
  * @returns Whether the submission was successful
  */
-export async function submitTransaction(signedTransaction: string): Promise<{
+export async function submitTransaction(
+  signedTransaction: string,
+  attachments?: Array<{ attachmentId: string; encryptedOriginal: string; encryptedThumbnail?: string | null }>
+): Promise<{
   successful: boolean;
   message: string;
 }> {
   const response = await fetch(buildApiUrl('/api/blockchain/submit'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ signedTransaction }),
+    body: JSON.stringify({ signedTransaction, attachments }),
   });
 
   if (!response.ok) {

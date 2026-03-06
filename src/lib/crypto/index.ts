@@ -37,6 +37,7 @@ export {
   createAddMembersToInnerCircleTransaction,
   createCreateCustomCircleTransaction,
   createAddMembersToCustomCircleTransaction,
+  createCreateSocialPostTransaction,
   createReactionTransaction,
   // Types
   type SignatureInfo,
@@ -52,6 +53,8 @@ export {
   type CreateCustomCirclePayload,
   type CustomCircleMemberPayload,
   type AddMembersToCustomCirclePayload,
+  type CreateSocialPostPayload,
+  type SocialPostAttachmentPayload,
   type NewReactionPayload,
   type AttachmentRefPayload,
 } from './transactions';

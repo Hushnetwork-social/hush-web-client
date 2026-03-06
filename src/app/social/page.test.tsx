@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import SocialPage from './page';
 
 const setSelectedNavMock = vi.fn();
@@ -10,6 +10,9 @@ const addMembersToCustomCircleMock = vi.fn();
 const checkIdentityExistsMock = vi.fn();
 const triggerSyncNowMock = vi.fn();
 const clipboardWriteTextMock = vi.fn();
+const getSocialFeedWallMock = vi.fn();
+const createSocialPostMock = vi.fn();
+const computeSha256Mock = vi.fn();
 let selectedNav = 'feed-wall';
 let stateParam: string | null = null;
 let mockFeeds = [
@@ -126,7 +129,26 @@ vi.mock('@/lib/sync', () => ({
   }),
 }));
 
+vi.mock('@/modules/social/FeedWallService', () => ({
+  getSocialFeedWall: (...args: unknown[]) => getSocialFeedWallMock(...args),
+}));
+
+vi.mock('@/modules/social/SocialService', () => ({
+  createSocialPost: (...args: unknown[]) => createSocialPostMock(...args),
+}));
+
+vi.mock('@/lib/attachments/attachmentHash', () => ({
+  computeSha256: (...args: unknown[]) => computeSha256Mock(...args),
+}));
+
 describe('SocialPage', () => {
+  const renderFeedWallAndWaitReady = async () => {
+    render(<SocialPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId('social-populated')).toBeInTheDocument();
+    });
+  };
+
   beforeEach(() => {
     selectedNav = 'feed-wall';
     stateParam = null;
@@ -137,6 +159,7 @@ describe('SocialPage', () => {
     addMembersToCustomCircleMock.mockReset();
     checkIdentityExistsMock.mockReset();
     triggerSyncNowMock.mockReset();
+    createSocialPostMock.mockReset();
     createCustomCircleMock.mockResolvedValue({ success: true, message: 'ok' });
     addMembersToCustomCircleMock.mockResolvedValue({ success: true, message: 'ok' });
     checkIdentityExistsMock.mockResolvedValue({
@@ -144,11 +167,44 @@ describe('SocialPage', () => {
       publicEncryptAddress: 'alice-encrypt-address',
     });
     triggerSyncNowMock.mockResolvedValue(true);
+    createSocialPostMock.mockResolvedValue({
+      success: true,
+      message: 'ok',
+      permalink: '/social/post/test-post',
+    });
+    getSocialFeedWallMock.mockResolvedValue({
+      success: true,
+      message: 'ok',
+      posts: [
+        {
+          postId: 'post-1',
+          authorPublicAddress: 'me-address',
+          content: 'A'.repeat(1205),
+          createdAtBlock: 2539,
+          visibility: 'open',
+          circleFeedIds: [],
+        },
+        {
+          postId: 'post-2',
+          authorPublicAddress: 'alice-address',
+          content: 'Built a merchant flow on Kasmart for handmade products. Feedback welcome.',
+          createdAtBlock: 2538,
+          visibility: 'open',
+          circleFeedIds: [],
+        },
+      ],
+    });
+    computeSha256Mock.mockResolvedValue('a'.repeat(64));
     clipboardWriteTextMock.mockResolvedValue(undefined);
     Object.assign(navigator, {
       clipboard: {
         writeText: clipboardWriteTextMock,
       },
+    });
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: vi.fn(() => 'blob:mock-social-media'),
+      revokeObjectURL: vi.fn(),
     });
     mockFeeds = [
       {
@@ -210,17 +266,17 @@ describe('SocialPage', () => {
     expect(screen.getByTestId('social-error')).toBeInTheDocument();
   });
 
-  it('renders populated feed wall by default', () => {
-    render(<SocialPage />);
+  it('renders populated feed wall by default', async () => {
+    await renderFeedWallAndWaitReady();
 
     expect(screen.getByTestId('social-populated')).toBeInTheDocument();
     expect(screen.getByTestId('feed-wall-region')).toBeInTheDocument();
     expect(screen.getByTestId('social-feedwall-composer')).toBeInTheDocument();
     expect(screen.getByTestId('social-new-post-compact-trigger')).toHaveTextContent('What do you want to show us?');
-    expect(screen.getByTestId('post-action-reply-post-1')).toHaveTextContent('Reply (2)');
+    expect(screen.getByTestId('post-action-reply-post-1')).toHaveTextContent('Reply (0)');
     expect(screen.getByTestId('post-action-link-post-1')).toHaveTextContent('Get Link');
     expect(screen.getByTestId('post-reaction-strip-post-1')).toBeInTheDocument();
-    expect(screen.getByTestId('post-reaction-post-1-👍')).toHaveTextContent('1');
+    expect(screen.getByTestId('post-reaction-post-1-👍')).toHaveTextContent('0');
     expect(screen.getByTestId('post-reaction-add-post-1')).toHaveTextContent('Add');
     expect(screen.queryByTestId('post-replies-post-1')).not.toBeInTheDocument();
   });
@@ -343,8 +399,8 @@ describe('SocialPage', () => {
     expect(screen.getByTestId('social-new-post-selected-circles')).toHaveTextContent('Selected circles: Inner Circle');
   });
 
-  it('expands compact feed-wall composer and allows collapse', () => {
-    render(<SocialPage />);
+  it('expands compact feed-wall composer and allows collapse', async () => {
+    await renderFeedWallAndWaitReady();
 
     fireEvent.click(screen.getByTestId('social-new-post-compact-trigger'));
     expect(screen.getByTestId('social-new-post-draft')).toBeInTheDocument();
@@ -354,16 +410,61 @@ describe('SocialPage', () => {
     expect(screen.getByTestId('social-new-post-compact-trigger')).toBeInTheDocument();
   });
 
-  it('enforces media attachment cap in composer', () => {
+  it('enforces media attachment cap in composer', async () => {
     selectedNav = 'new-post';
     render(<SocialPage />);
 
-    for (let i = 0; i < 4; i += 1) {
-      fireEvent.click(screen.getByTestId('social-new-post-add-image'));
-    }
-    fireEvent.click(screen.getByTestId('social-new-post-add-image'));
+    const input = screen.getByTestId('social-new-post-file-input') as HTMLInputElement;
+    const files = Array.from(
+      { length: 5 },
+      (_, index) => new File([`image-${index}`], `image-${index}.png`, { type: 'image/png' })
+    );
+    fireEvent.change(input, { target: { files } });
 
-    expect(screen.getByTestId('social-new-post-media-error')).toHaveTextContent('You can attach up to 4 items.');
+    await waitFor(() => {
+      expect(screen.getByTestId('social-new-post-media-error')).toHaveTextContent('You can attach up to 4 items.');
+    });
+  });
+
+  it('renders image preview when composer receives media', async () => {
+    selectedNav = 'new-post';
+    render(<SocialPage />);
+
+    const input = screen.getByTestId('social-new-post-file-input') as HTMLInputElement;
+    const file = new File(['image-bytes'], 'image.png', { type: 'image/png' });
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('social-new-post-media-preview-image')).toBeInTheDocument();
+      expect(screen.getByTestId('social-new-post-media-list')).toBeInTheDocument();
+      expect(screen.getByText('image.png (0MB)')).toBeInTheDocument();
+    });
+  });
+
+  it('allows publishing media-only post and renders media in feed card', async () => {
+    await renderFeedWallAndWaitReady();
+
+    fireEvent.click(screen.getByTestId('social-new-post-compact-trigger'));
+    const input = screen.getByTestId('social-new-post-file-input') as HTMLInputElement;
+    const file = new File(['image-bytes'], 'media-only.png', { type: 'image/png' });
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('social-new-post-media-preview-image')).toBeInTheDocument();
+    });
+
+    const draft = screen.getByTestId('social-new-post-draft') as HTMLTextAreaElement;
+    expect(draft.value).toBe('');
+    fireEvent.click(screen.getByTestId('social-new-post-publish'));
+
+    await waitFor(() => {
+      expect(createSocialPostMock).toHaveBeenCalled();
+      expect(screen.queryByTestId('social-new-post-audience-error')).not.toBeInTheDocument();
+      expect(screen.getByAltText('media-only.png')).toBeInTheDocument();
+    });
+
+    const [publishArgs] = createSocialPostMock.mock.calls[0];
+    expect(publishArgs.content).toBe('');
   });
 
   it('keeps private post valid with at most one custom circle plus Inner Circle', () => {
@@ -389,40 +490,21 @@ describe('SocialPage', () => {
 
     render(<SocialPage />);
 
+    fireEvent.click(screen.getByTestId('social-new-post-add-circle'));
     fireEvent.click(screen.getByTestId('social-new-post-custom-circle-friends-circle'));
     expect(screen.getByTestId('social-new-post-selected-circles')).toHaveTextContent('Inner Circle, Friends');
   });
 
-  it('rejects publish when private post has zero selected circles', () => {
+  it('rejects removing Inner Circle when no custom circle is selected', () => {
     selectedNav = 'new-post';
-    mockFeeds = [
-      ...mockFeeds,
-      {
-        id: 'friends-circle',
-        type: 'group',
-        name: 'Friends',
-        description: 'Owner-managed custom circle',
-        participants: ['me-address', 'alice-address'],
-      },
-    ];
-    mockGroupMembers = {
-      ...mockGroupMembers,
-      'friends-circle': [{ publicAddress: 'alice-address' }],
-    };
-    mockMemberRoles = {
-      ...mockMemberRoles,
-      'friends-circle': 'Admin',
-    };
 
     render(<SocialPage />);
 
-    fireEvent.click(screen.getByTestId('social-new-post-custom-circle-friends-circle'));
+    fireEvent.click(screen.getByTestId('social-new-post-add-circle'));
     fireEvent.click(screen.getByTestId('social-new-post-inner-circle-toggle'));
-    fireEvent.click(screen.getByTestId('social-new-post-clear-custom-circle'));
-    fireEvent.click(screen.getByTestId('social-new-post-publish'));
 
     expect(screen.getByTestId('social-new-post-audience-error')).toHaveTextContent(
-      'Private post requires at least one selected circle.'
+      'Inner Circle cannot be removed unless another private circle is selected.'
     );
   });
 
@@ -475,6 +557,117 @@ describe('SocialPage', () => {
     expect(screen.getByTestId('social-following-circle-alice-address-Friends')).toBeInTheDocument();
   });
 
+  it('shows generic Private badge for private post received from another user', async () => {
+    const circleFeedId = 'd741ab67-e1d4-4008-9cd1-2a51c19ae0ae';
+    mockFeeds = [
+      ...mockFeeds,
+      {
+        id: circleFeedId,
+        type: 'group',
+        name: 'Inner Circle',
+        description: 'Auto-managed inner circle',
+        participants: ['me-address', 'alice-address'],
+      },
+    ];
+    mockGroupMembers = {
+      ...mockGroupMembers,
+      [circleFeedId]: [{ publicAddress: 'me-address' }, { publicAddress: 'alice-address' }],
+    };
+
+    getSocialFeedWallMock.mockResolvedValue({
+      success: true,
+      message: 'ok',
+      posts: [
+        {
+          postId: 'post-private-1',
+          authorPublicAddress: 'alice-address',
+          content: 'private post',
+          createdAtBlock: 2540,
+          visibility: 'private',
+          circleFeedIds: [circleFeedId.toUpperCase()],
+        },
+      ],
+    });
+
+    await renderFeedWallAndWaitReady();
+
+    const privatePreview = await screen.findByText('private post');
+    const postCard = privatePreview.closest('article');
+    expect(postCard).toBeTruthy();
+    const badges = within(postCard as HTMLElement).getByTestId(/post-audience-badges-/);
+    expect(within(badges).getByText('Private')).toBeInTheDocument();
+    expect(within(badges).queryByText('Inner Circle')).not.toBeInTheDocument();
+    expect(within(badges).queryByText(/d741ab67/i)).not.toBeInTheDocument();
+  });
+
+  it('shows circle badge for own private post', async () => {
+    const circleFeedId = 'd741ab67-e1d4-4008-9cd1-2a51c19ae0ae';
+    mockFeeds = [
+      ...mockFeeds,
+      {
+        id: circleFeedId,
+        type: 'group',
+        name: 'Inner Circle',
+        description: 'Auto-managed inner circle',
+        participants: ['me-address', 'alice-address'],
+      },
+    ];
+    mockGroupMembers = {
+      ...mockGroupMembers,
+      [circleFeedId]: [{ publicAddress: 'me-address' }, { publicAddress: 'alice-address' }],
+    };
+
+    getSocialFeedWallMock.mockResolvedValue({
+      success: true,
+      message: 'ok',
+      posts: [
+        {
+          postId: 'post-private-own',
+          authorPublicAddress: 'me-address',
+          content: 'private own post',
+          createdAtBlock: 2540,
+          visibility: 'private',
+          circleFeedIds: [circleFeedId.toUpperCase()],
+        },
+      ],
+    });
+
+    await renderFeedWallAndWaitReady();
+
+    const privatePreview = await screen.findByText('private own post');
+    const postCard = privatePreview.closest('article');
+    expect(postCard).toBeTruthy();
+    const badges = within(postCard as HTMLElement).getByTestId(/post-audience-badges-/);
+    expect(within(badges).getByText('Inner Circle')).toBeInTheDocument();
+    expect(within(badges).queryByText('Private')).not.toBeInTheDocument();
+  });
+
+  it('falls back to generic Private badge when circle name is not resolved', async () => {
+    getSocialFeedWallMock.mockResolvedValue({
+      success: true,
+      message: 'ok',
+      posts: [
+        {
+          postId: 'post-private-unknown-circle',
+          authorPublicAddress: 'alice-address',
+          content: 'private post unresolved circle',
+          createdAtBlock: 2541,
+          visibility: 'private',
+          circleFeedIds: ['d741ab67-e1d4-4008-9cd1-2a51c19ae0ae'],
+        },
+      ],
+    });
+
+    await renderFeedWallAndWaitReady();
+
+    const privatePreview = await screen.findByText('private post unresolved circle');
+    const postCard = privatePreview.closest('article');
+    expect(postCard).toBeTruthy();
+    const badges = within(postCard as HTMLElement).getByTestId(/post-audience-badges-/);
+    expect(within(badges).getByText('Private')).toBeInTheDocument();
+    expect(within(badges).queryByText(/d741ab67/i)).not.toBeInTheDocument();
+  });
+
   it('persists scroll position into social app context', () => {
     render(<SocialPage />);
 
@@ -485,26 +678,26 @@ describe('SocialPage', () => {
     expect(setAppContextScrollMock).toHaveBeenCalledWith('social', 120);
   });
 
-  it('opens post detail overlay with full content and replies', () => {
-    render(<SocialPage />);
+  it('opens post detail overlay with full content and replies', async () => {
+    await renderFeedWallAndWaitReady();
 
     fireEvent.click(screen.getByTestId('open-post-detail-post-1'));
     expect(screen.getByTestId('post-detail-overlay')).toBeInTheDocument();
     expect(screen.getByTestId('post-detail-full-text').textContent?.length).toBeGreaterThan(1000);
     expect(screen.getByTestId('post-detail-action-link-post-1')).toHaveTextContent('Get Link');
-    expect(screen.getByTestId('post-detail-action-reply-post-1')).toHaveTextContent('Reply (2)');
+    expect(screen.getByTestId('post-detail-action-reply-post-1')).toHaveTextContent('Reply (0)');
     expect(screen.queryByTestId('post-detail-composer-top')).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId('post-detail-action-reply-post-1'));
     expect(screen.getByTestId('post-detail-composer-top')).toBeInTheDocument();
-    expect(screen.getByTestId('post-detail-reply-reply-post-1-reply-1')).toHaveTextContent('Reply');
-    expect(screen.getByText('Replies (2)')).toBeInTheDocument();
+    expect(screen.queryByTestId('post-detail-reply-reply-post-1-reply-1')).not.toBeInTheDocument();
+    expect(screen.getByText('Replies (0)')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('close-post-detail'));
     expect(screen.queryByTestId('post-detail-overlay')).not.toBeInTheDocument();
   });
 
   it('copies post permalink from feed card and detail actions', async () => {
-    render(<SocialPage />);
+    await renderFeedWallAndWaitReady();
 
     fireEvent.click(screen.getByTestId('post-action-link-post-1'));
     await waitFor(() => {
@@ -519,8 +712,8 @@ describe('SocialPage', () => {
     });
   });
 
-  it('adds a reply with Enter and places it at top of reply list', () => {
-    render(<SocialPage />);
+  it('adds a reply with Enter and places it at top of reply list', async () => {
+    await renderFeedWallAndWaitReady();
 
     fireEvent.click(screen.getByTestId('open-post-detail-post-1'));
     fireEvent.click(screen.getByTestId('post-detail-action-reply-post-1'));
@@ -529,14 +722,14 @@ describe('SocialPage', () => {
     fireEvent.change(input, { target: { value: 'New top reply' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
-    expect(screen.getByText('Replies (3)')).toBeInTheDocument();
+    expect(screen.getByText('Replies (1)')).toBeInTheDocument();
     const replyCards = screen.getAllByTestId(/post-detail-reply-/);
     expect(replyCards[0]).toHaveTextContent('You');
     expect(replyCards[0]).toHaveTextContent('New top reply');
   });
 
-  it('keeps top reply composer hidden when entering through card Reply action', () => {
-    render(<SocialPage />);
+  it('keeps top reply composer hidden when entering through card Reply action', async () => {
+    await renderFeedWallAndWaitReady();
 
     fireEvent.click(screen.getByTestId('post-action-reply-post-1'));
 
@@ -544,8 +737,8 @@ describe('SocialPage', () => {
     expect(screen.queryByTestId('post-detail-composer-top')).not.toBeInTheDocument();
   });
 
-  it('closes overlay on outside click and Escape', () => {
-    render(<SocialPage />);
+  it('closes overlay on outside click and Escape', async () => {
+    await renderFeedWallAndWaitReady();
 
     fireEvent.click(screen.getByTestId('open-post-detail-post-1'));
     expect(screen.getByTestId('post-detail-overlay')).toBeInTheDocument();
@@ -560,15 +753,74 @@ describe('SocialPage', () => {
     expect(screen.queryByTestId('post-detail-overlay')).not.toBeInTheDocument();
   });
 
-  it('reply-to-reply pre-fills mention prefix and Ctrl+Enter adds newline', () => {
-    render(<SocialPage />);
+  it('uses ArrowLeft and ArrowRight to navigate media inside the open post detail overlay', async () => {
+    getSocialFeedWallMock.mockResolvedValue({
+      success: true,
+      message: 'ok',
+      posts: [
+        {
+          postId: 'post-1',
+          authorPublicAddress: 'me-address',
+          content: 'Post with carousel media',
+          createdAtBlock: 2539,
+          visibility: 'open',
+          circleFeedIds: [],
+          attachments: [
+            {
+              id: 'attachment-1',
+              kind: 'image',
+              fileName: 'image-1.png',
+              mimeType: 'image/png',
+              sizeBytes: 1024,
+              previewUrl: 'blob:image-1',
+            },
+            {
+              id: 'attachment-2',
+              kind: 'image',
+              fileName: 'image-2.png',
+              mimeType: 'image/png',
+              sizeBytes: 2048,
+              previewUrl: 'blob:image-2',
+            },
+          ],
+        },
+      ],
+    });
+
+    await renderFeedWallAndWaitReady();
+
+    fireEvent.click(screen.getByTestId('social-post-post-1'));
+
+    const mediaContainer = screen.getByTestId('post-detail-media-post-1-container');
+    expect(within(mediaContainer).getByTestId('page-indicator')).toHaveTextContent('1 / 2');
+
+    fireEvent.keyDown(window, { key: 'ArrowRight' });
+    expect(within(mediaContainer).getByTestId('page-indicator')).toHaveTextContent('2 / 2');
+
+    fireEvent.keyDown(window, { key: 'ArrowLeft' });
+    expect(within(mediaContainer).getByTestId('page-indicator')).toHaveTextContent('1 / 2');
+  });
+
+  it('reply-to-reply pre-fills mention prefix and Ctrl+Enter adds newline', async () => {
+    await renderFeedWallAndWaitReady();
 
     fireEvent.click(screen.getByTestId('open-post-detail-post-1'));
-    fireEvent.click(screen.getByTestId('post-detail-reply-reply-post-1-reply-1'));
+    fireEvent.click(screen.getByTestId('post-detail-action-reply-post-1'));
+    const topComposerInput = screen.getByTestId('post-detail-composer-input');
+    fireEvent.change(topComposerInput, { target: { value: 'Seed top reply' } });
+    fireEvent.keyDown(topComposerInput, { key: 'Enter' });
 
-    expect(screen.getByTestId('inline-composer-post-1-reply-1')).toBeInTheDocument();
+    const seededReplyCard = await screen.findByText('Seed top reply');
+    const seededReplyContainer = seededReplyCard.closest('[data-testid^="post-detail-reply-"]');
+    expect(seededReplyContainer).toBeTruthy();
+    const seededReplyButton = within(seededReplyContainer as HTMLElement).getByTestId(/post-detail-reply-reply-/);
+    fireEvent.click(seededReplyButton);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('inline-composer-input')).toBeInTheDocument();
+    });
     const input = screen.getByTestId('inline-composer-input') as HTMLTextAreaElement;
-    expect(input.value).toBe('Zbid, ');
+    expect(input.value).toBe('You, ');
 
     fireEvent.change(input, { target: { value: 'Zbid, first line' } });
     fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true });

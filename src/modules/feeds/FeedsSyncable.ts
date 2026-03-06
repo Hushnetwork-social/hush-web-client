@@ -28,6 +28,7 @@ import {
   submitTransaction,
   retryMessage,
   ensureInnerCircleForOwner,
+  getInnerCircle,
   TransactionStatus,
   type FetchMessagesResponse,
 } from './FeedsService';
@@ -35,6 +36,7 @@ import { getUnreadCounts } from '@/lib/grpc/services/notification';
 import { shouldRetry, isMaxAttemptsReached, MESSAGE_RETRY_CONFIG } from '@/lib/retry';
 import { checkIdentityExists } from '../identity/IdentityService';
 import { useFeedsStore } from './useFeedsStore';
+import { groupService } from '@/lib/grpc/services/group';
 import { useBlockchainStore } from '../blockchain/useBlockchainStore';
 import { useReactionsStore } from '../reactions/useReactionsStore';
 import { syncGroupMembers, syncKeyGenerations, syncGroupFeedInfo, type PreviousGroupSettings } from '@/lib/sync/group-sync';
@@ -233,6 +235,7 @@ export class FeedsSyncable implements ISyncable {
       );
 
       if (result.success) {
+        await this.hydrateInnerCircleFeedProjection(credentials.signingPublicKey);
         this.innerCircleRetryAttempt = 0;
         this.nextInnerCircleRetryAt = 0;
         this.updateInnerCircleSyncState({
@@ -298,6 +301,43 @@ export class FeedsSyncable implements ISyncable {
         nextRetryAt: this.nextInnerCircleRetryAt,
       });
     }
+  }
+
+  private async hydrateInnerCircleFeedProjection(ownerAddress: string): Promise<void> {
+    const innerCircle = await getInnerCircle(ownerAddress);
+    if (!innerCircle.exists || !innerCircle.feedId) {
+      return;
+    }
+
+    const members = await groupService.getGroupMembers(innerCircle.feedId);
+    const store = useFeedsStore.getState();
+    const existingFeed = store.getFeed(innerCircle.feedId);
+    const participantAddresses = members.map((member) => member.publicAddress);
+    const blockchainHeight = useBlockchainStore.getState().blockHeight;
+    const nowMs = Date.now();
+
+    const hydratedFeed: Feed = {
+      id: innerCircle.feedId,
+      type: 'group',
+      name: 'Inner Circle',
+      description: 'Auto-managed inner circle',
+      isPublic: false,
+      participants: participantAddresses.length > 0 ? participantAddresses : [ownerAddress],
+      unreadCount: existingFeed?.unreadCount ?? 0,
+      createdAt: existingFeed?.createdAt ?? nowMs,
+      updatedAt: nowMs,
+      blockIndex: existingFeed?.blockIndex ?? blockchainHeight,
+      aesKey: existingFeed?.aesKey,
+      encryptedFeedKey: existingFeed?.encryptedFeedKey,
+      inviteCode: existingFeed?.inviteCode,
+      settingsChangeHistory: existingFeed?.settingsChangeHistory,
+      lastReadBlockIndex: existingFeed?.lastReadBlockIndex ?? 0,
+      hasPendingMessages: existingFeed?.hasPendingMessages,
+    };
+
+    store.addFeeds([hydratedFeed]);
+    store.setGroupMembers(innerCircle.feedId, members);
+    store.setUserRole(innerCircle.feedId, 'Admin');
   }
 
   /**

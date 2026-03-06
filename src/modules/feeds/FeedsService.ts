@@ -24,6 +24,7 @@ import { useAppStore } from '@/stores';
 import { buildApiUrl } from '@/lib/api-config';
 import { debugLog, debugError } from '@/lib/debug-logger';
 import { checkIdentityExists } from '../identity/IdentityService';
+import { isCircleFeed } from '@/lib/social/circleFeed';
 import { groupService } from '@/lib/grpc/services/group';
 import {
   CircleOperationErrorCode,
@@ -362,6 +363,111 @@ export async function ensureInnerCircleForOwner(
   };
 }
 
+async function ensureInnerCircleExistsForOwner(
+  ownerAddress: string,
+  signingPrivateKey: Uint8Array
+): Promise<{ success: boolean; retryable: boolean; message: string; feedId?: string }> {
+  let innerCircle = await getInnerCircle(ownerAddress);
+  if (!innerCircle.exists) {
+    const { signedTransaction } = await createCreateInnerCircleTransaction(ownerAddress, signingPrivateKey);
+    const createResult = await submitTransaction(signedTransaction);
+    if (!createResult.successful && createResult.status !== TransactionStatus.ALREADY_EXISTS) {
+      return {
+        success: false,
+        retryable: true,
+        message: createResult.message || 'Failed to create inner circle',
+      };
+    }
+
+    innerCircle = await getInnerCircle(ownerAddress);
+    if (!innerCircle.exists || !innerCircle.feedId) {
+      return {
+        success: false,
+        retryable: true,
+        message: 'Inner circle creation pending confirmation',
+      };
+    }
+  }
+
+  if (!innerCircle.feedId) {
+    return {
+      success: false,
+      retryable: true,
+      message: 'Inner circle feed id is unavailable',
+    };
+  }
+
+  return {
+    success: true,
+    retryable: false,
+    message: 'Inner circle is available',
+    feedId: innerCircle.feedId,
+  };
+}
+
+async function linkMemberToInnerCircleAfterChat(
+  ownerAddress: string,
+  ownerSigningPrivateKeyHex: string,
+  memberPublicAddress: string,
+  memberPublicEncryptAddress: string
+): Promise<{ success: boolean; retryable: boolean; message: string }> {
+  const signingPrivateKey = hexToBytes(ownerSigningPrivateKeyHex);
+  const innerCircleResult = await ensureInnerCircleExistsForOwner(ownerAddress, signingPrivateKey);
+  if (!innerCircleResult.success || !innerCircleResult.feedId) {
+    return {
+      success: false,
+      retryable: innerCircleResult.retryable,
+      message: innerCircleResult.message,
+    };
+  }
+
+  try {
+    const existingMembers = await groupService.getGroupMembers(innerCircleResult.feedId);
+    const alreadyMember = existingMembers.some((member) =>
+      stringEqualsIgnoreCase(member.publicAddress, memberPublicAddress)
+    );
+    if (alreadyMember) {
+      return {
+        success: true,
+        retryable: false,
+        message: 'Member already present in inner circle',
+      };
+    }
+  } catch (error) {
+    debugError('[FeedsService] Failed to read inner circle members before linking chat member:', error);
+  }
+
+  const { signedTransaction } = await createAddMembersToInnerCircleTransaction(
+    ownerAddress,
+    [
+      {
+        PublicAddress: memberPublicAddress,
+        PublicEncryptAddress: memberPublicEncryptAddress,
+      },
+    ],
+    signingPrivateKey
+  );
+  const addResult = await submitTransaction(signedTransaction);
+  if (!addResult.successful && addResult.status !== TransactionStatus.ALREADY_EXISTS) {
+    const unauthorized = (addResult.message || '').toUpperCase().includes('UNAUTHORIZED');
+    return {
+      success: false,
+      retryable: !unauthorized,
+      message: addResult.message || 'Failed to link member to inner circle',
+    };
+  }
+
+  return {
+    success: true,
+    retryable: false,
+    message: 'Member added to inner circle',
+  };
+}
+
+function stringEqualsIgnoreCase(left: string, right: string): boolean {
+  return left.localeCompare(right, undefined, { sensitivity: 'base' }) === 0;
+}
+
 export async function createCustomCircle(
   ownerPublicAddress: string,
   circleName: string,
@@ -555,6 +661,9 @@ export async function sendMessage(
   if (!feed) {
     return { success: false, error: 'Feed not found' };
   }
+  if (isCircleFeed(feed)) {
+    return { success: false, error: 'Circle feeds are audience-only and do not support chat messages' };
+  }
 
   // Determine the AES key to use for encryption
   // For group feeds, use the current KeyGeneration's key from groupKeyStates
@@ -716,7 +825,14 @@ export function findExistingChatFeed(participantPublicSigningAddress: string): F
  */
 export async function createChatFeed(
   profile: ProfileSearchResult
-): Promise<{ success: boolean; feedId?: string; isExisting?: boolean; error?: string }> {
+): Promise<{
+  success: boolean;
+  feedId?: string;
+  isExisting?: boolean;
+  error?: string;
+  innerCircleLinked?: boolean;
+  innerCircleMessage?: string;
+}> {
   const credentials = useAppStore.getState().credentials;
 
   // Validate credentials
@@ -732,7 +848,13 @@ export async function createChatFeed(
   const existingFeed = findExistingChatFeed(profile.publicSigningAddress);
   if (existingFeed) {
     debugLog(`[FeedsService] Found existing feed ${existingFeed.id} with ${profile.displayName}`);
-    return { success: true, feedId: existingFeed.id, isExisting: true };
+    return {
+      success: true,
+      feedId: existingFeed.id,
+      isExisting: true,
+      innerCircleLinked: true,
+      innerCircleMessage: 'Feed already existed',
+    };
   }
 
   try {
@@ -775,10 +897,37 @@ export async function createChatFeed(
     const requestInnerCircleRetry = (
       useAppStore.getState() as { requestInnerCircleRetry?: () => void }
     ).requestInnerCircleRetry;
-    requestInnerCircleRetry?.();
+
+    let innerCircleLinked = false;
+    let innerCircleMessage = '';
+    try {
+      const syncResult = await linkMemberToInnerCircleAfterChat(
+        credentials.signingPublicKey,
+        credentials.signingPrivateKey,
+        profile.publicSigningAddress,
+        profile.publicEncryptAddress
+      );
+      innerCircleLinked = syncResult.success;
+      innerCircleMessage = syncResult.message;
+
+      if (!syncResult.success && syncResult.retryable) {
+        requestInnerCircleRetry?.();
+      }
+    } catch (innerCircleError) {
+      const message = innerCircleError instanceof Error ? innerCircleError.message : 'Inner circle sync failed';
+      innerCircleMessage = message;
+      requestInnerCircleRetry?.();
+      debugError(`[FeedsService] Inner circle link after chat creation failed:`, innerCircleError);
+    }
 
     debugLog(`[FeedsService] Feed ${feedId} created successfully`);
-    return { success: true, feedId, isExisting: false };
+    return {
+      success: true,
+      feedId,
+      isExisting: false,
+      innerCircleLinked,
+      innerCircleMessage,
+    };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     debugError(`[FeedsService] Create chat feed failed:`, error);

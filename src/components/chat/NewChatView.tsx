@@ -10,6 +10,7 @@ import { hexToBytes } from "@/lib/crypto/keys";
 import { invalidateGroupCaches } from "@/lib/sync/group-sync";
 import { useAppStore } from "@/stores";
 import { GroupCard } from "@/components/groups/GroupCard";
+import { SystemToastContainer } from "@/components/notifications/SystemToast";
 import type { ProfileSearchResult, PublicGroupInfo } from "@/types";
 import { debugLog, debugError } from "@/lib/debug-logger";
 
@@ -41,6 +42,7 @@ export function NewChatView({ onFeedCreated, onFeedSelected, onBack, showBackBut
   const [searchResults, setSearchResults] = useState<SearchResultWithFeed[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [systemToasts, setSystemToasts] = useState<Array<{ id: string; message: string }>>([]);
 
   // Public groups search state
   const [groupSearchQuery, setGroupSearchQuery] = useState("");
@@ -53,6 +55,15 @@ export function NewChatView({ onFeedCreated, onFeedSelected, onBack, showBackBut
   const [joiningGroupId, setJoiningGroupId] = useState<string | null>(null);
   const [joinedGroupIds, setJoinedGroupIds] = useState<Set<string>>(new Set());
   const [cooldownErrors, setCooldownErrors] = useState<Record<string, string>>({});
+
+  const addSystemToast = useCallback((message: string) => {
+    const id = `system-toast-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+    setSystemToasts((current) => [...current, { id, message }]);
+  }, []);
+
+  const dismissSystemToast = useCallback((id: string) => {
+    setSystemToasts((current) => current.filter((toast) => toast.id !== id));
+  }, []);
 
   // Get initials from display name
   const getInitials = (name: string): string => {
@@ -267,6 +278,11 @@ export function NewChatView({ onFeedCreated, onFeedSelected, onBack, showBackBut
             onFeedSelected?.(result.feedId);
           } else {
             debugLog("[NewChatView] New feed created:", result.feedId);
+            if (result.innerCircleLinked) {
+              addSystemToast(`${profile.displayName} added to Inner Circle`);
+            } else if (result.innerCircleMessage) {
+              addSystemToast(`Inner Circle sync pending: ${result.innerCircleMessage}`);
+            }
             onFeedCreated?.(result.feedId);
           }
         }
@@ -277,7 +293,7 @@ export function NewChatView({ onFeedCreated, onFeedSelected, onBack, showBackBut
         setIsCreating(false);
       }
     },
-    [onFeedCreated, onFeedSelected]
+    [addSystemToast, onFeedCreated, onFeedSelected]
   );
 
   // Handle Enter key in search input
@@ -300,6 +316,7 @@ export function NewChatView({ onFeedCreated, onFeedSelected, onBack, showBackBut
   }, []);
 
   return (
+    <>
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
       {/* Header */}
       <div className="flex-shrink-0 px-4 py-3 border-b border-hush-bg-hover">
@@ -524,5 +541,7 @@ export function NewChatView({ onFeedCreated, onFeedSelected, onBack, showBackBut
         )}
       </div>
     </div>
+    <SystemToastContainer toasts={systemToasts} onDismiss={dismissSystemToast} />
+    </>
   );
 }

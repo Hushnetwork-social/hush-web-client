@@ -1,15 +1,21 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { useSearchParams } from "next/navigation";
-import { AlertCircle, Link2, Loader2, MessageCircle, SmilePlus, Sparkles, X } from "lucide-react";
+import { AlertCircle, Check, Link2, Loader2, MessageCircle, SmilePlus, Sparkles, X } from "lucide-react";
+import { buildApiUrl } from "@/lib/api-config";
 import { useAppStore } from "@/stores";
 import { useFeedsStore } from "@/modules/feeds/useFeedsStore";
+import { useBlockchainStore } from "@/modules/blockchain";
 import { useSyncContext } from "@/lib/sync";
 import { SystemToastContainer } from "@/components/notifications/SystemToast";
 import { addMembersToCustomCircle, createCustomCircle } from "@/modules/feeds/FeedsService";
 import { checkIdentityExists } from "@/modules/identity/IdentityService";
 import type { CustomCircleMemberPayload } from "@/lib/crypto";
+import { createSocialPost } from "@/modules/social/SocialService";
+import { getSocialFeedWall } from "@/modules/social/FeedWallService";
+import { computeSha256 } from "@/lib/attachments/attachmentHash";
+import { ContentCarousel } from "@/components/chat/ContentCarousel";
 import { SocialPostComposerCard } from "./components/SocialPostComposerCard";
 import { usePostPermalink } from "./hooks/usePostPermalink";
 
@@ -28,6 +34,7 @@ const SOCIAL_MENU_IDS = new Set([
 
 type ViewState = "loading" | "empty" | "error" | "populated";
 const POST_PREVIEW_LIMIT = 1000;
+const POST_PREVIEW_MAX_LINES = 5;
 const EMPTY_REACTIONS = { "👍": 0, "❤️": 0, "😂": 0, "😮": 0, "😢": 0, "😡": 0 };
 
 type ReplyItem = {
@@ -41,12 +48,20 @@ type ReplyItem = {
 
 type PostItem = {
   id: string;
+  authorPublicAddress: string;
   author: string;
   time: string;
+  createdAtBlock: number;
+  visibility: "open" | "private";
+  circleFeedIds: string[];
+  confirmedAtMs: number | null;
+  confirmedAtText: string;
+  confirmationState: "pending" | "confirmed";
   text: string;
   replyCount: number;
   reactions: Record<string, number>;
   replies: ReplyItem[];
+  attachments: PostMediaItem[];
 };
 
 type FollowingItem = {
@@ -81,63 +96,149 @@ type DraftMediaItem = {
   kind: "image" | "video";
   label: string;
   sizeMb: number;
+  sizeBytes: number;
+  mimeType: string;
+  fileName: string;
+  hash: string;
+  previewUrl: string;
+  rawBytes: Uint8Array;
+};
+
+type PostMediaItem = {
+  id: string;
+  kind: "image" | "video";
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  previewUrl: string;
 };
 
 const MAX_MEDIA_ATTACHMENTS = 4;
 const MAX_MEDIA_SIZE_MB = 25;
+const MAX_MEDIA_SIZE_BYTES = MAX_MEDIA_SIZE_MB * 1024 * 1024;
+const FEED_WALL_TIMESTAMP_CACHE_KEY = "hush.social.feedwall.confirmedAtMs.v1";
 
-const LONG_POST_TEXT =
-  "Kaspa is reentering the GPU era and proving real utility with GPU workstations. " +
-  "We are documenting benchmarks, thermals, and real deployment costs so builders can compare setups with clear numbers. ".repeat(
-    14
-  );
+function formatConfirmedAt(value: Date): string {
+  return value.toLocaleString();
+}
 
-const DEMO_POSTS: PostItem[] = [
-  {
-    id: "post-1",
-    author: "Victor Resto",
-    time: "1h",
-    text: LONG_POST_TEXT,
-    replyCount: 2,
-    reactions: { "👍": 1, "❤️": 1, "😂": 0, "😮": 0, "😢": 0, "😡": 0 },
-    replies: [
-      {
-        id: "post-1-reply-1",
-        author: "Zbid",
-        time: "54m",
-        text: "Nice take. Benchmarks on real workloads would make this stronger.",
-        reactions: { "👍": 1, "❤️": 0, "😂": 0, "😮": 0, "😢": 0, "😡": 0 },
-        threadRootId: null,
-      },
-      {
-        id: "post-1-reply-2",
-        author: "Klaus",
-        time: "38m",
-        text: "We tested two rigs this weekend, power efficiency is improving a lot.",
-        reactions: { "👍": 1, "❤️": 0, "😂": 1, "😮": 0, "😢": 0, "😡": 0 },
-        threadRootId: null,
-      },
-    ],
-  },
-  {
-    id: "post-2",
-    author: "Falty",
-    time: "2h",
-    text: "Built a merchant flow on Kasmart for handmade products. Feedback welcome.",
-    replyCount: 1,
-    reactions: { "👍": 1, "❤️": 0, "😂": 1, "😮": 0, "😢": 0, "😡": 0 },
-    replies: [
-      {
-        id: "post-2-reply-1",
-        author: "Jeff",
-        time: "1h",
-        text: "Checkout flow is clean. I would add one shipping summary step.",
-        reactions: { "👍": 1, "❤️": 0, "😂": 0, "😮": 0, "😢": 0, "😡": 0 },
-        threadRootId: null,
-      },
-    ],
-  },
-];
+function formatRelativeTime(value: Date | number): string {
+  const timestampMs = value instanceof Date ? value.getTime() : value;
+  const deltaMs = Date.now() - timestampMs;
+  return formatRelativeDuration(deltaMs);
+}
+
+function formatRelativeDuration(deltaMs: number): string {
+  if (!Number.isFinite(deltaMs) || deltaMs < 0) {
+    return "now";
+  }
+
+  const minuteMs = 60 * 1000;
+  const hourMs = 60 * minuteMs;
+  const dayMs = 24 * hourMs;
+
+  if (deltaMs < minuteMs) {
+    return "now";
+  }
+
+  if (deltaMs < hourMs) {
+    const minutes = Math.floor(deltaMs / minuteMs);
+    return `${minutes}m ago`;
+  }
+
+  if (deltaMs < dayMs) {
+    const hours = Math.floor(deltaMs / hourMs);
+    return `${hours}h ago`;
+  }
+
+  const days = Math.floor(deltaMs / dayMs);
+  if (days < 7) {
+    return `${days}d ago`;
+  }
+
+  if (days < 30) {
+    const weeks = Math.floor(days / 7);
+    return weeks === 1 ? "1 week ago" : `${weeks} weeks ago`;
+  }
+
+  if (days < 365) {
+    const months = Math.floor(days / 30);
+    return months <= 1 ? "1 month ago" : `${months} months ago`;
+  }
+
+  const years = Math.floor(days / 365);
+  return years <= 1 ? "1 year ago" : `${years} years ago`;
+}
+
+function formatRelativeTimeFromBlockAge(createdAtBlock: number, currentBlockHeight: number): string | null {
+  if (createdAtBlock <= 0 || currentBlockHeight <= 0 || currentBlockHeight < createdAtBlock) {
+    return null;
+  }
+
+  // HushServerNode block production interval defaults to 3 seconds.
+  const elapsedMs = (currentBlockHeight - createdAtBlock) * 3000;
+  return formatRelativeDuration(elapsedMs);
+}
+
+function readFeedWallTimestampCache(): Record<string, number> {
+  if (typeof window === "undefined") {
+    return {};
+  }
+
+  try {
+    const raw = window.localStorage.getItem(FEED_WALL_TIMESTAMP_CACHE_KEY);
+    if (!raw) {
+      return {};
+    }
+
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const normalized: Record<string, number> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+        normalized[key] = value;
+      }
+    }
+    return normalized;
+  } catch {
+    return {};
+  }
+}
+
+function writeFeedWallTimestampCache(cache: Record<string, number>): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(FEED_WALL_TIMESTAMP_CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    // Ignore cache persistence errors; UI still works without this.
+  }
+}
+
+function getPostPreview(text: string): { previewText: string; isTruncated: boolean } {
+  const normalized = text.replace(/\r\n/g, "\n");
+  const lines = normalized.split("\n");
+
+  if (lines.length > POST_PREVIEW_MAX_LINES) {
+    return {
+      previewText: lines.slice(0, POST_PREVIEW_MAX_LINES).join("\n"),
+      isTruncated: true,
+    };
+  }
+
+  if (normalized.length > POST_PREVIEW_LIMIT) {
+    return {
+      previewText: normalized.slice(0, POST_PREVIEW_LIMIT),
+      isTruncated: true,
+    };
+  }
+
+  return {
+    previewText: normalized,
+    isTruncated: false,
+  };
+}
 
 function resolveViewState(rawState: string | null): ViewState {
   if (rawState === "loading" || rawState === "empty" || rawState === "error") {
@@ -147,7 +248,10 @@ function resolveViewState(rawState: string | null): ViewState {
 }
 
 function getDisplayInitials(value: string): string {
-  const trimmed = value.trim();
+  const trimmed = value
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/[_-]+/g, " ")
+    .trim();
   if (!trimmed) {
     return "?";
   }
@@ -161,16 +265,57 @@ function getDisplayInitials(value: string): string {
 }
 
 function normalizeCircleName(name: string): string {
-  return name.trim().toLowerCase();
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
 }
 
-function normalizePublicAddress(address: string): string {
-  return address.trim().toLowerCase();
+function isInnerCircleName(name: string): boolean {
+  const normalized = normalizeCircleName(name);
+  const compact = normalized.replace(/\s+/g, "");
+  return normalized === "inner circle" || compact === "innercircle";
+}
+
+function normalizePublicAddress(address?: string | null): string {
+  return (address ?? "").trim().toLowerCase();
+}
+
+function normalizeFeedId(feedId?: string | null): string {
+  return (feedId ?? "").trim().toLowerCase();
+}
+
+function detectMediaKindFromMime(mimeType: string): "image" | "video" | null {
+  const normalizedMime = mimeType.trim().toLowerCase();
+  if (normalizedMime.startsWith("image/")) {
+    return "image";
+  }
+
+  if (normalizedMime.startsWith("video/")) {
+    return "video";
+  }
+
+  return null;
+}
+
+function toMediaSizeMb(sizeBytes: number): number {
+  return Math.round((sizeBytes / (1024 * 1024)) * 10) / 10;
+}
+
+async function readFileBytes(file: File): Promise<Uint8Array> {
+  if (typeof file.arrayBuffer === "function") {
+    const buffer = await file.arrayBuffer();
+    return new Uint8Array(buffer);
+  }
+
+  // Fallback used by some test/browser environments where File#arrayBuffer is unavailable.
+  const buffer = await new Response(file).arrayBuffer();
+  return new Uint8Array(buffer);
 }
 
 function isCircleFeed(feedName: string, feedDescription?: string): boolean {
-  const normalizedName = normalizeCircleName(feedName);
-  if (normalizedName === "inner circle") {
+  if (isInnerCircleName(feedName)) {
     return true;
   }
 
@@ -194,10 +339,13 @@ export default function SocialPage() {
   const innerCircleSync = useAppStore((state) => state.innerCircleSync);
   const requestInnerCircleRetry = useAppStore((state) => state.requestInnerCircleRetry);
   const credentials = useAppStore((state) => state.credentials);
+  const currentUser = useAppStore((state) => state.currentUser);
+  const currentBlockHeight = useBlockchainStore((state) => state.blockHeight);
   const { triggerSyncNow } = useSyncContext();
   const feeds = useFeedsStore((state) => state.feeds);
   const groupMembers = useFeedsStore((state) => state.groupMembers);
   const [activePostId, setActivePostId] = useState<string | null>(null);
+  const [activePostMediaIndex, setActivePostMediaIndex] = useState(0);
   const [topReplyDraft, setTopReplyDraft] = useState("");
   const [isTopComposerOpen, setIsTopComposerOpen] = useState(false);
   const [inlineReplyDraft, setInlineReplyDraft] = useState("");
@@ -218,13 +366,47 @@ export default function SocialPage() {
   const [newPostDraft, setNewPostDraft] = useState("");
   const [postAudience, setPostAudience] = useState<"public" | "close">("close");
   const [includeInnerCircleForPost, setIncludeInnerCircleForPost] = useState(true);
-  const [selectedCustomCircleIdForPost, setSelectedCustomCircleIdForPost] = useState<string | null>(null);
+  const [selectedCustomCircleIdsForPost, setSelectedCustomCircleIdsForPost] = useState<string[]>([]);
   const [newPostAudienceError, setNewPostAudienceError] = useState<string | null>(null);
   const [isFeedComposerExpanded, setIsFeedComposerExpanded] = useState(false);
   const [draftMediaItems, setDraftMediaItems] = useState<DraftMediaItem[]>([]);
   const [newPostMediaError, setNewPostMediaError] = useState<string | null>(null);
+  const [feedWallPosts, setFeedWallPosts] = useState<PostItem[]>([]);
+  const authorNamesByAddressRef = useRef<Record<string, string>>({});
+  const mediaPreviewUrlsRef = useRef<Set<string>>(new Set());
+  const [isFeedWallLoading, setIsFeedWallLoading] = useState(true);
   const feedWallRegionRef = useRef<HTMLElement | null>(null);
+  const activePostDialogRef = useRef<HTMLDivElement | null>(null);
   const hasInitializedSocialNavRef = useRef(false);
+  const ownDisplayName = currentUser?.displayName?.trim() || "You";
+  const ownAuthorLabel = `${ownDisplayName} (YOU)`;
+  const ownAddressNormalized = normalizePublicAddress(credentials?.signingPublicKey ?? "");
+  const ownInitials = currentUser?.initials?.trim() || getDisplayInitials(ownDisplayName);
+  const circleNameByFeedId = useMemo(() => {
+    const lookup = new Map<string, string>();
+    for (const circle of renderCircleItems) {
+      lookup.set(normalizeFeedId(circle.feedId), circle.name);
+    }
+    for (const feed of feeds) {
+      if (!isCircleFeed(feed.name, feed.description)) {
+        continue;
+      }
+      const normalizedId = normalizeFeedId(feed.id);
+      if (!lookup.has(normalizedId)) {
+        lookup.set(normalizedId, isInnerCircleName(feed.name) ? "Inner Circle" : feed.name);
+      }
+    }
+    return lookup;
+  }, [renderCircleItems, feeds]);
+
+  useEffect(() => {
+    return () => {
+      for (const previewUrl of mediaPreviewUrlsRef.current) {
+        URL.revokeObjectURL(previewUrl);
+      }
+      mediaPreviewUrlsRef.current.clear();
+    };
+  }, []);
 
   useEffect(() => {
     if (hasInitializedSocialNavRef.current) {
@@ -253,7 +435,7 @@ export default function SocialPage() {
   }, [appContexts.social.scrollOffset]);
 
   const viewState = useMemo(() => resolveViewState(searchParams.get("state")), [searchParams]);
-  const activePost = useMemo(() => DEMO_POSTS.find((post) => post.id === activePostId) ?? null, [activePostId]);
+  const activePost = useMemo(() => feedWallPosts.find((post) => post.id === activePostId) ?? null, [activePostId, feedWallPosts]);
   const followingItems = useMemo<FollowingItem[]>(() => {
     const ownAddress = credentials?.signingPublicKey;
     const circleFeeds = feeds.filter((feed) => feed.type === "group" && isCircleFeed(feed.name, feed.description));
@@ -279,7 +461,7 @@ export default function SocialPage() {
             circleFeed.participants.map((participant) => normalizePublicAddress(participant));
           return members.includes(normalizedOtherParticipant);
         })
-        .map((circleFeed) => circleFeed.name)
+        .map((circleFeed) => (isInnerCircleName(circleFeed.name) ? "Inner Circle" : circleFeed.name))
         .filter((name): name is string => Boolean(name));
 
       const entry = followedByAddress.get(normalizedOtherParticipant);
@@ -322,11 +504,11 @@ export default function SocialPage() {
         groupMembers[feed.id]?.map((member) => normalizePublicAddress(member.publicAddress)) ??
         feed.participants.map((participant) => normalizePublicAddress(participant));
       const uniqueMembers = Array.from(new Set(members.filter((member) => member !== normalizedOwnAddress)));
-      const isInnerCircle = normalizeCircleName(feed.name) === "inner circle";
+      const isInnerCircle = isInnerCircleName(feed.name);
 
       return {
         feedId: feed.id,
-        name: feed.name,
+        name: isInnerCircle ? "Inner Circle" : feed.name,
         isInnerCircle,
         members: uniqueMembers,
         memberCount: uniqueMembers.length,
@@ -487,6 +669,7 @@ export default function SocialPage() {
 
   useEffect(() => {
     if (!activePost) {
+      setActivePostMediaIndex(0);
       setOverlayReplies([]);
       setTopReplyDraft("");
       setIsTopComposerOpen(false);
@@ -496,6 +679,7 @@ export default function SocialPage() {
       return;
     }
 
+    setActivePostMediaIndex(0);
     setOverlayReplies(activePost.replies);
     setTopReplyDraft("");
     setIsTopComposerOpen(false);
@@ -512,6 +696,23 @@ export default function SocialPage() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setActivePostId(null);
+        return;
+      }
+
+      const attachmentCount = activePost.attachments?.length ?? 0;
+      if (attachmentCount <= 1) {
+        return;
+      }
+
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        setActivePostMediaIndex((current) => Math.max(0, current - 1));
+        return;
+      }
+
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        setActivePostMediaIndex((current) => Math.min(attachmentCount - 1, current + 1));
       }
     };
 
@@ -519,8 +720,54 @@ export default function SocialPage() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [activePost]);
 
+  useEffect(() => {
+    if (!activePost) {
+      return;
+    }
+
+    const focusTarget = activePostDialogRef.current;
+    if (!focusTarget) {
+      return;
+    }
+
+    window.setTimeout(() => {
+      focusTarget.focus();
+    }, 0);
+  }, [activePost]);
+
+  useEffect(() => {
+    if (!isFeedComposerExpanded || activePost) {
+      return;
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsFeedComposerExpanded(false);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isFeedComposerExpanded, activePost]);
+
   const openPostDetail = (postId: string) => {
     setActivePostId(postId);
+  };
+
+  const handlePostCardClick = (event: MouseEvent<HTMLElement>, postId: string) => {
+    const target = event.target as HTMLElement;
+    if (target.closest("button, a, input, textarea, select, [data-post-interactive='true']")) {
+      return;
+    }
+
+    if (typeof window !== "undefined") {
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed && selection.toString().trim().length > 0) {
+        return;
+      }
+    }
+
+    openPostDetail(postId);
   };
 
   const insertReplyInThread = (replies: ReplyItem[], newReply: ReplyItem, rootId: string) => {
@@ -591,10 +838,176 @@ export default function SocialPage() {
     setUiToasts((current) => current.filter((toast) => toast.id !== toastId));
   };
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const refreshFeedWall = async () => {
+      if (!credentials?.signingPublicKey) {
+        if (!cancelled) {
+          setIsFeedWallLoading(false);
+        }
+        return;
+      }
+
+      let result: Awaited<ReturnType<typeof getSocialFeedWall>>;
+      try {
+        result = await getSocialFeedWall(credentials.signingPublicKey, true, 100);
+      } catch {
+        if (!cancelled) {
+          setIsFeedWallLoading(false);
+        }
+        return;
+      }
+
+      if (!result.success) {
+        if (!cancelled) {
+          setIsFeedWallLoading(false);
+        }
+        return;
+      }
+
+      const ownAddress = normalizePublicAddress(credentials.signingPublicKey);
+      const fetchedAt = new Date();
+      const cachedTimestamps = readFeedWallTimestampCache();
+      const nextTimestampCache: Record<string, number> = { ...cachedTimestamps };
+      const followedDisplayNameByAddress = new Map<string, string>();
+      for (const item of renderFollowingItems) {
+        followedDisplayNameByAddress.set(normalizePublicAddress(item.publicAddress), item.displayName);
+      }
+
+      const unresolvedAuthorAddresses = Array.from(
+        new Set(
+          result.posts
+            .map((post) => normalizePublicAddress(post.authorPublicAddress))
+            .filter(
+              (address) =>
+                address.length > 0 &&
+                address !== ownAddress &&
+                !followedDisplayNameByAddress.has(address) &&
+                !authorNamesByAddressRef.current[address]
+            )
+        )
+      );
+
+      const fetchedAuthorNames: Record<string, string> = {};
+      if (unresolvedAuthorAddresses.length > 0) {
+        await Promise.all(
+          unresolvedAuthorAddresses.map(async (address) => {
+            try {
+              const identity = await checkIdentityExists(address);
+              const profileName = identity.profileName?.trim();
+              if (profileName) {
+                fetchedAuthorNames[address] = profileName;
+              }
+            } catch {
+              // Keep address fallback when identity lookup fails.
+            }
+          })
+        );
+
+        if (!cancelled && Object.keys(fetchedAuthorNames).length > 0) {
+          authorNamesByAddressRef.current = {
+            ...authorNamesByAddressRef.current,
+            ...fetchedAuthorNames,
+          };
+        }
+      }
+
+      if (cancelled) {
+        return;
+      }
+
+      setFeedWallPosts((current) => {
+        const serverPosts = result.posts.map((post) => {
+          const authorPublicAddress = post.authorPublicAddress ?? "";
+          const existing = current.find((item) => item.id === post.postId);
+          const isOwnPost = normalizePublicAddress(authorPublicAddress) === ownAddress;
+          const normalizedAuthorAddress = normalizePublicAddress(authorPublicAddress);
+          const followedDisplayName = followedDisplayNameByAddress.get(normalizedAuthorAddress) ?? null;
+          const resolvedAuthorName =
+            followedDisplayName ??
+            authorNamesByAddressRef.current[normalizedAuthorAddress] ??
+            fetchedAuthorNames[normalizedAuthorAddress] ??
+            `${authorPublicAddress.slice(0, 8)}...${authorPublicAddress.slice(-6)}`;
+          const createdAtBlock = Number(post.createdAtBlock || 0);
+          const createdAtUnixMs = Number(post.createdAtUnixMs || 0);
+          const cachedConfirmedAtMs = nextTimestampCache[post.postId];
+          const inferredFromBlockMs =
+            currentBlockHeight > 0 && createdAtBlock > 0 && currentBlockHeight >= createdAtBlock
+              ? fetchedAt.getTime() - (currentBlockHeight - createdAtBlock) * 3000
+              : null;
+          const confirmedAtMs =
+            existing?.confirmationState === "confirmed" && existing.confirmedAtMs
+              ? existing.confirmedAtMs
+              : (createdAtUnixMs > 0 ? createdAtUnixMs : null) ||
+                cachedConfirmedAtMs ||
+                inferredFromBlockMs ||
+                fetchedAt.getTime();
+
+          nextTimestampCache[post.postId] = confirmedAtMs;
+          const confirmedAtText =
+            existing?.confirmationState === "confirmed"
+              ? existing.confirmedAtText
+              : formatConfirmedAt(fetchedAt);
+
+          const attachmentItems = (post.attachments ?? []).map((attachment) => ({
+            id: attachment.attachmentId,
+            kind: attachment.kind,
+            fileName: attachment.fileName,
+            mimeType: attachment.mimeType,
+            sizeBytes: attachment.size,
+            previewUrl: buildApiUrl(
+              `/api/social/posts/attachment?attachmentId=${encodeURIComponent(attachment.attachmentId)}&postId=${encodeURIComponent(post.postId)}&isAuthenticated=${encodeURIComponent(String(!!credentials?.signingPublicKey))}&requesterPublicAddress=${encodeURIComponent(credentials?.signingPublicKey ?? "")}&mimeType=${encodeURIComponent(attachment.mimeType)}`
+            ),
+          }));
+
+          return {
+            id: post.postId,
+            authorPublicAddress,
+            author: isOwnPost
+              ? ownAuthorLabel
+              : resolvedAuthorName,
+            time: confirmedAtText,
+            createdAtBlock,
+            visibility: post.visibility,
+            circleFeedIds: [...post.circleFeedIds],
+            confirmedAtMs,
+            confirmedAtText,
+            confirmationState: "confirmed" as const,
+            text: post.content,
+            replyCount: existing?.replyCount ?? 0,
+            reactions: existing?.reactions ?? { ...EMPTY_REACTIONS },
+            replies: existing?.replies ?? [],
+            attachments: attachmentItems.length > 0 ? attachmentItems : existing?.attachments ?? [],
+          };
+        });
+
+        const serverPostIds = new Set(serverPosts.map((post) => post.id));
+        const pendingPosts = current.filter((post) => post.confirmationState === "pending" && !serverPostIds.has(post.id));
+        return [...serverPosts, ...pendingPosts];
+      });
+
+      writeFeedWallTimestampCache(nextTimestampCache);
+
+      setIsFeedWallLoading(false);
+    };
+
+    void refreshFeedWall();
+    const intervalId = window.setInterval(() => {
+      void refreshFeedWall();
+    }, 3000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [credentials?.signingPublicKey, ownAuthorLabel, renderFollowingItems, currentBlockHeight]);
+
   const getDisplayNameForAddress = (address: string) => {
     const normalizedAddress = normalizePublicAddress(address);
     return (
       renderFollowingItems.find((item) => normalizePublicAddress(item.publicAddress) === normalizedAddress)?.displayName ??
+      authorNamesByAddressRef.current[normalizedAddress] ??
       `${normalizedAddress.slice(0, 8)}...${normalizedAddress.slice(-6)}`
     );
   };
@@ -767,8 +1180,8 @@ export default function SocialPage() {
       selectedNames.push("Inner Circle");
     }
 
-    if (selectedCustomCircleIdForPost) {
-      const customCircle = availableCustomCirclesForPost.find((circle) => circle.feedId === selectedCustomCircleIdForPost);
+    for (const customCircleId of selectedCustomCircleIdsForPost) {
+      const customCircle = availableCustomCirclesForPost.find((circle) => circle.feedId === customCircleId);
       if (customCircle) {
         selectedNames.push(customCircle.name);
       }
@@ -777,44 +1190,263 @@ export default function SocialPage() {
     return selectedNames;
   };
 
-  const handlePublishPost = () => {
+  const resolveAudienceBadgesForPost = (post: PostItem): string[] => {
+    if (post.visibility === "open") {
+      return ["Public"];
+    }
+
+    const isOwnPost = normalizePublicAddress(post.authorPublicAddress) === ownAddressNormalized;
+    if (!isOwnPost) {
+      return ["Private"];
+    }
+
+    const resolvedCircleBadges = post.circleFeedIds.flatMap((feedId) => {
+      const circleName = circleNameByFeedId.get(normalizeFeedId(feedId));
+      if (circleName) {
+        return [circleName];
+      }
+      return [];
+    });
+
+    const uniqueBadges = Array.from(new Set(resolvedCircleBadges));
+    return uniqueBadges.length > 0 ? uniqueBadges : ["Private"];
+  };
+
+  const renderPostMedia = (
+    post: PostItem,
+    testIdPrefix: string,
+    options?: {
+      goToIndex?: number;
+      onIndexChange?: (index: number) => void;
+    }
+  ) => {
+    if (!post.attachments || post.attachments.length === 0) {
+      return null;
+    }
+
+    const mediaItems = post.attachments.map((attachment) => (
+      <div
+        key={`${post.id}-media-${attachment.id}`}
+        className="overflow-hidden rounded-md border border-hush-bg-hover bg-hush-bg-dark/40 p-1"
+      >
+        {attachment.kind === "video" ? (
+          <video
+            src={attachment.previewUrl}
+            controls
+            className="max-h-80 w-full rounded-md object-contain"
+            data-testid={`${testIdPrefix}-video-${attachment.id}`}
+          />
+        ) : (
+          <img
+            src={attachment.previewUrl}
+            alt={attachment.fileName}
+            className="max-h-80 w-full rounded-md object-contain"
+            data-testid={`${testIdPrefix}-image-${attachment.id}`}
+          />
+        )}
+      </div>
+    ));
+
+    return (
+      <div className="mt-3" data-testid={`${testIdPrefix}-container`}>
+        {mediaItems.length === 1 ? (
+          mediaItems[0]
+        ) : (
+          <ContentCarousel
+            ariaLabel="Post media"
+            goToIndex={options?.goToIndex}
+            onIndexChange={options?.onIndexChange}
+          >
+            {mediaItems}
+          </ContentCarousel>
+        )}
+      </div>
+    );
+  };
+
+  const handlePublishPost = async () => {
     if (postAudience === "close" && resolveSelectedCircleNamesForPost().length === 0) {
       setNewPostAudienceError("Private post requires at least one selected circle.");
       return;
     }
 
-    if (draftMediaItems.some((item) => item.sizeMb > MAX_MEDIA_SIZE_MB)) {
+    if (draftMediaItems.some((item) => item.sizeBytes > MAX_MEDIA_SIZE_BYTES)) {
       setNewPostMediaError(`Each attachment must be ${MAX_MEDIA_SIZE_MB}MB or less.`);
+      return;
+    }
+
+    const trimmedContent = newPostDraft.trim();
+    if (!trimmedContent && draftMediaItems.length === 0) {
+      setNewPostAudienceError("Post content cannot be empty unless media is attached.");
       return;
     }
 
     setNewPostAudienceError(null);
     setNewPostMediaError(null);
-    addUiToast("Post composer validation passed (publish flow is out of scope in this phase).");
+
+    const selectedCircleFeedIds: string[] = [];
+    if (postAudience === "close") {
+      if (includeInnerCircleForPost) {
+        const innerCircle = renderCircleItems.find((circle) => circle.isInnerCircle);
+        if (!innerCircle || innerCircle.feedId === "inner-circle-pending") {
+          setNewPostAudienceError("Inner Circle is not ready yet. Please sync and try again.");
+          return;
+        }
+        selectedCircleFeedIds.push(innerCircle.feedId);
+      }
+
+      selectedCircleFeedIds.push(...selectedCustomCircleIdsForPost);
+    }
+
+    const authorPublicAddress = credentials?.signingPublicKey;
+    const signingPrivateKeyHex = credentials?.signingPrivateKey;
+    if (!authorPublicAddress || !signingPrivateKeyHex) {
+      addUiToast("Missing credentials. Please login again.");
+      return;
+    }
+
+    const now = Date.now();
+    const postId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `post-${now}`;
+
+    const result = await createSocialPost(
+      {
+        postId,
+        authorPublicAddress,
+        content: trimmedContent,
+        audience: {
+          visibility: postAudience === "close" ? "private" : "open",
+          circleFeedIds: selectedCircleFeedIds,
+        },
+        attachments: draftMediaItems.map((item) => ({
+          attachmentId: item.id,
+          mimeType: item.mimeType,
+          size: item.sizeBytes,
+          fileName: item.fileName,
+          hash: item.hash,
+          kind: item.kind,
+        })),
+        createdAtUnixMs: now,
+      },
+      signingPrivateKeyHex,
+      draftMediaItems.map((item) => ({
+        attachmentId: item.id,
+        bytes: item.rawBytes,
+      }))
+    );
+
+    if (!result.success) {
+      addUiToast(`Transaction failed: ${result.message || result.errorCode || "Unknown error"}`);
+      return;
+    }
+
+    setFeedWallPosts((current) => [
+      {
+        id: postId,
+        authorPublicAddress,
+        author: ownAuthorLabel,
+        time: "sending...",
+        createdAtBlock: 0,
+        visibility: postAudience === "close" ? "private" : "open",
+        circleFeedIds: [...selectedCircleFeedIds],
+        confirmedAtMs: null,
+        confirmedAtText: "sending...",
+        confirmationState: "pending",
+        text: trimmedContent,
+        replyCount: 0,
+        reactions: { ...EMPTY_REACTIONS },
+        replies: [],
+        attachments: draftMediaItems.map((item) => ({
+          id: item.id,
+          kind: item.kind,
+          fileName: item.fileName,
+          mimeType: item.mimeType,
+          sizeBytes: item.sizeBytes,
+          previewUrl: item.previewUrl,
+        })),
+      },
+      ...current,
+    ]);
+
+    setNewPostDraft("");
+    setDraftMediaItems([]);
+    setPostAudience("close");
+    setIncludeInnerCircleForPost(true);
+    setSelectedCustomCircleIdsForPost([]);
+    setIsFeedComposerExpanded(false);
+    addUiToast(result.permalink ? `Post published: ${result.permalink}` : "Post published.");
+    await triggerSyncNow();
   };
 
-  const addDraftMediaItem = (kind: "image" | "video") => {
-    if (draftMediaItems.length >= MAX_MEDIA_ATTACHMENTS) {
+  const addDraftMediaFiles = async (incomingFiles: File[] | FileList | null) => {
+    const files = incomingFiles ? Array.from(incomingFiles) : [];
+    if (files.length === 0) {
+      return;
+    }
+
+    if (draftMediaItems.length + files.length > MAX_MEDIA_ATTACHMENTS) {
       setNewPostMediaError(`You can attach up to ${MAX_MEDIA_ATTACHMENTS} items.`);
       return;
     }
 
-    const nextCount = draftMediaItems.length + 1;
-    const sizeMb = kind === "image" ? 3 : 12;
-    setDraftMediaItems((current) => [
-      ...current,
-      {
-        id: `${kind}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    const nextItems: DraftMediaItem[] = [];
+    for (const file of files) {
+      const kind = detectMediaKindFromMime(file.type);
+      if (!kind) {
+        setNewPostMediaError(`Unsupported file type: ${file.type || file.name}`);
+        return;
+      }
+
+      if (file.size > MAX_MEDIA_SIZE_BYTES) {
+        setNewPostMediaError(`Each attachment must be ${MAX_MEDIA_SIZE_MB}MB or less.`);
+        return;
+      }
+
+      const bytes = await readFileBytes(file);
+      const hash = await computeSha256(bytes);
+      const previewUrl = URL.createObjectURL(file);
+      mediaPreviewUrlsRef.current.add(previewUrl);
+      const itemId =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `${kind}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+
+      nextItems.push({
+        id: itemId,
         kind,
-        label: `${kind === "image" ? "Image" : "Video"} ${nextCount}`,
-        sizeMb,
-      },
-    ]);
+        label: file.name,
+        sizeMb: toMediaSizeMb(file.size),
+        sizeBytes: file.size,
+        mimeType: file.type,
+        fileName: file.name,
+        hash,
+        previewUrl,
+        rawBytes: bytes,
+      });
+    }
+
+    setDraftMediaItems((current) => [...current, ...nextItems]);
+    setNewPostMediaError(null);
+  };
+
+  const handleAddImageClick = () => {
+    setNewPostMediaError(null);
+  };
+
+  const handleAddVideoClick = () => {
     setNewPostMediaError(null);
   };
 
   const removeDraftMediaItem = (id: string) => {
-    setDraftMediaItems((current) => current.filter((item) => item.id !== id));
+    setDraftMediaItems((current) => {
+      const target = current.find((item) => item.id === id);
+      if (target?.previewUrl) {
+        URL.revokeObjectURL(target.previewUrl);
+        mediaPreviewUrlsRef.current.delete(target.previewUrl);
+      }
+      return current.filter((item) => item.id !== id);
+    });
     setNewPostMediaError(null);
   };
 
@@ -825,14 +1457,14 @@ export default function SocialPage() {
 
   const handleSelectPrivateAudience = () => {
     setPostAudience("close");
-    if (!includeInnerCircleForPost && !selectedCustomCircleIdForPost) {
+    if (!includeInnerCircleForPost && selectedCustomCircleIdsForPost.length === 0) {
       setIncludeInnerCircleForPost(true);
     }
     setNewPostAudienceError(null);
   };
 
   const handleToggleInnerCircleForPost = () => {
-    if (includeInnerCircleForPost && !selectedCustomCircleIdForPost) {
+    if (includeInnerCircleForPost && selectedCustomCircleIdsForPost.length === 0) {
       setNewPostAudienceError("Inner Circle cannot be removed unless another private circle is selected.");
       return;
     }
@@ -840,13 +1472,19 @@ export default function SocialPage() {
     setNewPostAudienceError(null);
   };
 
-  const handleSelectCustomCircleForPost = (feedId: string) => {
-    setSelectedCustomCircleIdForPost(feedId);
-    setNewPostAudienceError(null);
-  };
+  const handleToggleCustomCircleForPost = (feedId: string) => {
+    const alreadySelected = selectedCustomCircleIdsForPost.includes(feedId);
+    if (alreadySelected) {
+      if (!includeInnerCircleForPost && selectedCustomCircleIdsForPost.length === 1) {
+        setNewPostAudienceError("Private post requires at least one selected circle.");
+        return;
+      }
+      setSelectedCustomCircleIdsForPost((current) => current.filter((id) => id !== feedId));
+      setNewPostAudienceError(null);
+      return;
+    }
 
-  const handleClearCustomCircleForPost = () => {
-    setSelectedCustomCircleIdForPost(null);
+    setSelectedCustomCircleIdsForPost((current) => [...current, feedId]);
     setNewPostAudienceError(null);
   };
 
@@ -864,17 +1502,17 @@ export default function SocialPage() {
       includeInnerCircleForPost={includeInnerCircleForPost}
       onToggleInnerCircle={handleToggleInnerCircleForPost}
       availableCustomCirclesForPost={availableCustomCirclesForPost}
-      selectedCustomCircleIdForPost={selectedCustomCircleIdForPost}
-      onSelectCustomCircle={handleSelectCustomCircleForPost}
-      onClearCustomCircle={handleClearCustomCircleForPost}
+      selectedCustomCircleIdsForPost={selectedCustomCircleIdsForPost}
+      onToggleCustomCircle={handleToggleCustomCircleForPost}
       selectedCircleNames={resolveSelectedCircleNamesForPost()}
       newPostAudienceError={newPostAudienceError}
       draftMediaItems={draftMediaItems}
       newPostMediaError={newPostMediaError}
       maxMediaAttachments={MAX_MEDIA_ATTACHMENTS}
       maxMediaSizeMb={MAX_MEDIA_SIZE_MB}
-      onAddImage={() => addDraftMediaItem("image")}
-      onAddVideo={() => addDraftMediaItem("video")}
+      onAddImage={handleAddImageClick}
+      onAddVideo={handleAddVideoClick}
+      onAddFiles={(files) => void addDraftMediaFiles(files)}
       onRemoveMedia={removeDraftMediaItem}
       onPublish={handlePublishPost}
     />
@@ -910,34 +1548,75 @@ export default function SocialPage() {
       );
     }
 
+    if (isFeedWallLoading) {
+      return (
+        <div data-testid="social-loading" className="flex flex-col items-center justify-center py-16 text-center">
+          <Loader2 className="w-8 h-8 animate-spin text-hush-purple mb-3" />
+          <p className="text-hush-text-accent text-sm">Loading Feed Wall...</p>
+        </div>
+      );
+    }
+
     return (
       <div data-testid="social-populated" className="space-y-3">
         <section data-testid="social-feedwall-composer">{renderPostComposerCard("compact")}</section>
-        {DEMO_POSTS.map((post) => (
-          <article
-            key={post.id}
-            data-testid={`social-post-${post.id}`}
-            className="bg-hush-bg-dark rounded-xl p-4 border border-hush-bg-hover"
-          >
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-hush-text-primary font-semibold">{post.author}</p>
-              <span className="text-xs text-hush-text-accent">{post.time}</span>
+        {feedWallPosts.length === 0 ? (
+          <div data-testid="social-empty" className="rounded-xl border border-hush-bg-hover bg-hush-bg-dark p-6 text-center">
+            <p className="text-hush-text-primary font-semibold mb-1">Your Feed Wall is quiet</p>
+            <p className="text-hush-text-accent text-sm">Create a post to start your wall.</p>
+          </div>
+        ) : null}
+        {feedWallPosts.map((post) => {
+          const preview = getPostPreview(post.text);
+
+          return (
+            <article
+              key={post.id}
+              data-testid={`social-post-${post.id}`}
+              className="bg-hush-bg-dark rounded-xl p-4 border border-hush-bg-hover cursor-pointer"
+              onClick={(event) => handlePostCardClick(event, post.id)}
+            >
+            <div className="mb-2 flex items-start justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-hush-purple/40 bg-hush-purple/10 text-sm font-semibold text-hush-purple">
+                  {normalizePublicAddress(post.authorPublicAddress) === ownAddressNormalized
+                    ? ownInitials
+                    : getDisplayInitials(post.author)}
+                </span>
+                <p className="truncate text-sm font-semibold text-hush-text-primary">{post.author}</p>
+              </div>
+              <span className="inline-flex items-center gap-1 text-xs text-hush-text-accent" data-testid={`post-status-${post.id}`}>
+                {post.confirmationState === "confirmed" ? (
+                  <Check className="h-3.5 w-3.5 text-green-400" />
+                ) : (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-hush-purple" />
+                )}
+                {post.confirmationState === "confirmed"
+                  ? (post.confirmedAtMs
+                    ? formatRelativeTime(post.confirmedAtMs)
+                    : formatRelativeTimeFromBlockAge(post.createdAtBlock, currentBlockHeight) ?? post.time)
+                  : post.time}
+              </span>
             </div>
-            <p className="text-sm text-hush-text-accent" data-testid={`post-preview-${post.id}`}>
-              {post.text.length > POST_PREVIEW_LIMIT ? post.text.slice(0, POST_PREVIEW_LIMIT) : post.text}
-              {post.text.length > POST_PREVIEW_LIMIT && (
+            <p
+              className="text-sm text-hush-text-accent whitespace-pre-wrap break-words"
+              data-testid={`post-preview-${post.id}`}
+            >
+              {preview.previewText}
+              {preview.isTruncated && (
                 <button
                   type="button"
                   className="ml-1 text-hush-purple hover:underline"
                   data-testid={`open-post-detail-${post.id}`}
                   onClick={() => openPostDetail(post.id)}
                 >
-                  ...
+                  ... Show more
                 </button>
               )}
             </p>
+            {renderPostMedia(post, `post-media-${post.id}`)}
 
-            <div className="mt-3 flex items-center gap-2">
+            <div className="mt-3 flex items-center gap-2" onClick={(event) => event.stopPropagation()}>
                 <button
                   type="button"
                   className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-hush-text-accent hover:bg-hush-bg-hover"
@@ -956,9 +1635,23 @@ export default function SocialPage() {
                 <Link2 className="w-3.5 h-3.5" />
                 Get Link
               </button>
+              <div className="ml-1 flex flex-wrap items-center gap-1" data-testid={`post-audience-badges-${post.id}`}>
+                {resolveAudienceBadgesForPost(post).map((badge) => (
+                  <span
+                    key={`${post.id}-audience-${badge}`}
+                    className="rounded-full border border-hush-purple/40 bg-hush-purple/10 px-2 py-0.5 text-[11px] text-hush-purple"
+                  >
+                    {badge}
+                  </span>
+                ))}
+              </div>
             </div>
 
-            <div className="mt-2 flex flex-wrap items-center gap-2" data-testid={`post-reaction-strip-${post.id}`}>
+            <div
+              className="mt-2 flex flex-wrap items-center gap-2"
+              data-testid={`post-reaction-strip-${post.id}`}
+              onClick={(event) => event.stopPropagation()}
+            >
               {Object.entries(post.reactions).map(([emoji, count]) => (
                 <button
                   key={emoji}
@@ -980,12 +1673,17 @@ export default function SocialPage() {
               </button>
             </div>
             {post.replyCount > 0 && (
-              <div className="mt-2 text-[11px] text-hush-text-accent" data-testid={`post-replies-hint-${post.id}`}>
-                Replies open in post detail (mock preview mode).
+              <div
+                className="mt-2 text-[11px] text-hush-text-accent"
+                data-testid={`post-replies-hint-${post.id}`}
+                onClick={(event) => event.stopPropagation()}
+              >
+                Replies open in post detail.
               </div>
             )}
-          </article>
-        ))}
+            </article>
+          );
+        })}
       </div>
     );
   };
@@ -1347,8 +2045,10 @@ export default function SocialPage() {
           onClick={() => setActivePostId(null)}
         >
           <div
+            ref={activePostDialogRef}
             className="w-full max-w-3xl max-h-[85vh] overflow-y-auto rounded-xl border border-hush-bg-hover bg-hush-bg-dark p-4"
             onClick={(event) => event.stopPropagation()}
+            tabIndex={-1}
           >
             <div className="flex items-center justify-between mb-3">
               <p className="text-hush-text-primary font-semibold">{activePost.author}</p>
@@ -1366,6 +2066,10 @@ export default function SocialPage() {
             <p className="text-sm text-hush-text-accent whitespace-pre-wrap" data-testid="post-detail-full-text">
               {activePost.text}
             </p>
+            {renderPostMedia(activePost, `post-detail-media-${activePost.id}`, {
+              goToIndex: activePostMediaIndex,
+              onIndexChange: setActivePostMediaIndex,
+            })}
             <div className="mt-3 flex flex-wrap items-center gap-2" data-testid={`post-detail-actions-${activePost.id}`}>
               <button
                 type="button"
@@ -1385,6 +2089,16 @@ export default function SocialPage() {
                 <Link2 className="w-3.5 h-3.5" />
                 Get Link
               </button>
+              <div className="ml-1 flex flex-wrap items-center gap-1" data-testid={`post-detail-audience-badges-${activePost.id}`}>
+                {resolveAudienceBadgesForPost(activePost).map((badge) => (
+                  <span
+                    key={`${activePost.id}-detail-audience-${badge}`}
+                    className="rounded-full border border-hush-purple/40 bg-hush-purple/10 px-2 py-0.5 text-[11px] text-hush-purple"
+                  >
+                    {badge}
+                  </span>
+                ))}
+              </div>
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-2" data-testid={`post-detail-reaction-strip-${activePost.id}`}>
               {Object.entries(activePost.reactions).map(([emoji, count]) => (
@@ -1589,3 +2303,4 @@ export default function SocialPage() {
     </div>
   );
 }
+

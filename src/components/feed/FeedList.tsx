@@ -5,6 +5,7 @@ import { useAppStore } from "@/stores";
 import { useFeedsStore } from "@/modules/feeds";
 import { notificationService } from "@/lib/grpc/services";
 import { getMentionDisplayText, hasUnreadMentions } from "@/lib/mentions";
+import { isCircleFeed, isCircleFeedMetadata } from "@/lib/social/circleFeed";
 import { ChatListItem } from "./ChatListItem";
 import { MessageSquare, Loader2 } from "lucide-react";
 import type { GroupFeedMember } from "@/types";
@@ -27,6 +28,15 @@ export function FeedList({ onFeedSelect }: FeedListProps) {
 
   // UI state from app store
   const { selectedFeedId, selectFeed, isLoading, credentials } = useAppStore();
+  const visibleFeeds = useMemo(
+    () =>
+      feeds.filter(
+        (feed) =>
+          !isCircleFeed(feed) &&
+          !isCircleFeedMetadata(feed.name, feed.description)
+      ),
+    [feeds]
+  );
 
   const handleFeedClick = async (feedId: string) => {
     selectFeed(feedId);
@@ -34,7 +44,7 @@ export function FeedList({ onFeedSelect }: FeedListProps) {
 
     // Mark feed as read when clicking on it
     // Note: needsSync is cleared by FeedsSyncable after fetching messages
-    const feed = feeds.find((f) => f.id === feedId);
+    const feed = visibleFeeds.find((f) => f.id === feedId);
     if (feed && feed.unreadCount > 0 && credentials?.signingPublicKey) {
       // FEAT-063: Compute max blockIndex from local messages for cross-device sync
       const feedMessages = messages[feedId] || [];
@@ -135,7 +145,7 @@ export function FeedList({ onFeedSelect }: FeedListProps) {
   };
 
   // Show loading only on initial load (no feeds yet and syncing)
-  if (isLoading || (feeds.length === 0 && isSyncing)) {
+  if (isLoading || (visibleFeeds.length === 0 && isSyncing)) {
     return (
       <div className="flex items-center justify-center p-8">
         <Loader2 className="w-6 h-6 animate-spin text-hush-purple" />
@@ -143,7 +153,7 @@ export function FeedList({ onFeedSelect }: FeedListProps) {
     );
   }
 
-  if (feeds.length === 0) {
+  if (visibleFeeds.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center p-8 text-center">
         <div className="w-16 h-16 rounded-full bg-hush-bg-dark flex items-center justify-center mb-4">
@@ -158,8 +168,8 @@ export function FeedList({ onFeedSelect }: FeedListProps) {
   }
 
   return (
-    <div className="space-y-2 w-full max-w-full" data-testid="feed-list" data-feed-count={feeds.length}>
-      {feeds.map((feed) => {
+    <div className="space-y-2 w-full max-w-full" data-testid="feed-list" data-feed-count={visibleFeeds.length}>
+      {visibleFeeds.map((feed) => {
         const lastMessage = getLastMessage(feed.id);
         const isPersonalFeed = feed.type === 'personal';
         // For group feeds, resolve sender name from group members

@@ -12,6 +12,8 @@ interface ContentCarouselProps {
   ariaLabel?: string;
   /** External index override — carousel jumps here when this value changes */
   goToIndex?: number;
+  /** Optional callback fired whenever the current index changes */
+  onIndexChange?: (index: number) => void;
 }
 
 /**
@@ -27,6 +29,7 @@ export const ContentCarousel = memo(function ContentCarousel({
   className = "",
   ariaLabel = "Content carousel",
   goToIndex,
+  onIndexChange,
 }: ContentCarouselProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -95,6 +98,10 @@ export const ContentCarousel = memo(function ContentCarousel({
       setCurrentIndex(goToIndex);
     }
   }, [goToIndex, totalCount]);
+
+  useEffect(() => {
+    onIndexChange?.(currentIndex);
+  }, [currentIndex, onIndexChange]);
 
   // Clamp index if children shrink (e.g. item removed)
   useEffect(() => {

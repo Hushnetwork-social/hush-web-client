@@ -21,6 +21,7 @@ export const PAYLOAD_GUIDS = {
   ADD_MEMBERS_TO_INNER_CIRCLE: 'f1baf6ab-cd4f-4d95-a0f2-7d1abcc4f8e4',
   CREATE_CUSTOM_CIRCLE: '8f7d8cc0-f8fb-4f8f-b2d6-7e51db96f351',
   ADD_MEMBERS_TO_CUSTOM_CIRCLE: '4d27a7d3-693f-4306-93cc-f4e3a562cdd4',
+  CREATE_SOCIAL_POST: '7d6f3fe6-d108-4f73-9d6f-cc76f8b53a4e',
   NEW_FEED_MESSAGE: '3309d79b-92e9-4435-9b23-0de0b3d24264',
   NEW_REACTION: 'a7b3c2d1-e4f5-6789-abcd-ef0123456789',
 };
@@ -185,6 +186,29 @@ export interface AddMembersToCustomCirclePayload {
   FeedId: string;
   OwnerPublicAddress: string;
   Members: CustomCircleMemberPayload[];
+}
+
+export interface SocialPostAudiencePayload {
+  Visibility: number; // 0 = Open, 1 = Private
+  CircleFeedIds: string[];
+}
+
+export interface SocialPostAttachmentPayload {
+  AttachmentId: string;
+  MimeType: string;
+  Size: number;
+  FileName: string;
+  Hash: string;
+  Kind: number; // 0 = Image, 1 = Video
+}
+
+export interface CreateSocialPostPayload {
+  PostId: string;
+  AuthorPublicAddress: string;
+  Content: string;
+  Audience: SocialPostAudiencePayload;
+  Attachments: SocialPostAttachmentPayload[];
+  CreatedAtUnixMs: number;
 }
 
 // =============================================================================
@@ -735,6 +759,40 @@ export async function createAddMembersToCustomCircleTransaction(
   const signedTx = await signByUser(unsignedTx, {
     privateKey: signingPrivateKey,
     publicSigningAddress: ownerPublicAddress,
+  });
+
+  return {
+    signedTransaction: JSON.stringify(signedTx),
+  };
+}
+
+export async function createCreateSocialPostTransaction(
+  postId: string,
+  authorPublicAddress: string,
+  content: string,
+  audienceVisibility: "open" | "private",
+  circleFeedIds: string[],
+  attachments: SocialPostAttachmentPayload[],
+  createdAtUnixMs: number,
+  signingPrivateKey: Uint8Array
+): Promise<{ signedTransaction: string }> {
+  const payload: CreateSocialPostPayload = {
+    PostId: postId,
+    AuthorPublicAddress: authorPublicAddress,
+    Content: content,
+    Audience: {
+      Visibility: audienceVisibility === "private" ? 1 : 0,
+      CircleFeedIds: circleFeedIds,
+    },
+    Attachments: attachments,
+    CreatedAtUnixMs: createdAtUnixMs,
+  };
+
+  const unsignedTx = createUnsignedTransaction(PAYLOAD_GUIDS.CREATE_SOCIAL_POST, payload);
+
+  const signedTx = await signByUser(unsignedTx, {
+    privateKey: signingPrivateKey,
+    publicSigningAddress: authorPublicAddress,
   });
 
   return {

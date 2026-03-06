@@ -30,6 +30,7 @@ import type { Feed, FeedMessage, GroupFeedMember, SettingsChangeRecord, Attachme
 import { onVisibilityChange, type SettingsChange } from "@/lib/events";
 import { debugLog } from "@/lib/debug-logger";
 import { announceMentionNavigation } from "@/lib/a11y";
+import { isCircleFeedMetadata } from "@/lib/social/circleFeed";
 
 // Empty array constants to avoid creating new references
 const EMPTY_MESSAGES: FeedMessage[] = [];
@@ -454,6 +455,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
 
   // Check if current user is admin of the group
   const isGroupFeed = feed.type === 'group';
+  const isCircleGroupFeed = isGroupFeed && isCircleFeedMetadata(feed.name, feed.description);
 
   // State for member panel visibility
   const [showMemberPanel, setShowMemberPanel] = useState(false);
@@ -501,7 +503,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   // Check if current user can send messages
   // For group feeds: only Admin and Member can send, Blocked users cannot
   // For non-group feeds: always allowed (personal, chat, broadcast)
-  const canSendMessages = !isGroupFeed || (isCurrentUserMember && currentUserRole !== 'Blocked');
+  const canSendMessages = !isGroupFeed || (!isCircleGroupFeed && isCurrentUserMember && currentUserRole !== 'Blocked');
 
   // Check if current user is the last admin (for delete button visibility)
   const isLastAdmin = useMemo(() => {
@@ -1520,7 +1522,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
             </div>
           </div>
           {/* Action buttons for group feeds - hidden in compact mode */}
-          {isGroupFeed && !isKeyboardVisible && (
+          {isGroupFeed && !isCircleGroupFeed && !isKeyboardVisible && (
             <div className="flex items-center gap-2">
               <button
                 onClick={handleOpenMemberPanel}
@@ -1700,7 +1702,12 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
       {isGroupFeed && !canSendMessages ? (
         <div className="flex-shrink-0 px-4 py-3 border-t border-hush-bg-hover bg-hush-bg-dark/50">
           <div className="flex items-center gap-3 p-3 rounded-lg bg-hush-bg-element text-hush-text-accent">
-            {currentUserRole === 'Blocked' ? (
+            {isCircleGroupFeed ? (
+              <>
+                <Info className="w-5 h-5 text-hush-text-accent flex-shrink-0" aria-hidden="true" />
+                <span className="text-sm">Circle feeds are audience-only and do not support chat messages.</span>
+              </>
+            ) : currentUserRole === 'Blocked' ? (
               <>
                 <Ban className="w-5 h-5 text-orange-400 flex-shrink-0" aria-hidden="true" />
                 <span className="text-sm">You are blocked and cannot send messages in this group.</span>
@@ -1718,7 +1725,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
       )}
 
       {/* Member List Panel (Group feeds only) */}
-      {isGroupFeed && credentials?.signingPublicKey && (
+      {isGroupFeed && !isCircleGroupFeed && credentials?.signingPublicKey && (
         <MemberListPanel
           isOpen={showMemberPanel}
           onClose={handleCloseMemberPanel}
@@ -1730,7 +1737,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
       )}
 
       {/* Group Settings Panel (Group feeds only) */}
-      {isGroupFeed && credentials?.signingPublicKey && (
+      {isGroupFeed && !isCircleGroupFeed && credentials?.signingPublicKey && (
         <GroupSettingsPanel
           isOpen={showSettingsPanel}
           onClose={handleCloseSettingsPanel}
