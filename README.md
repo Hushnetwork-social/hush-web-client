@@ -107,3 +107,14 @@ hush-web-client/
 - **Testing:** Vitest, Testing Library
 - **Desktop:** Tauri 2.0
 - **Communication:** gRPC-Web
+
+## Licensing
+
+HushNetwork original code in this repository is licensed under Apache-2.0 unless otherwise stated.
+
+This project also includes or depends on third-party components under other licenses, including
+GPL-3.0.
+
+Forked third-party components retain their original licenses.
+
+See [THIRD_PARTY_LICENSES.md](./THIRD_PARTY_LICENSES.md) for details.
