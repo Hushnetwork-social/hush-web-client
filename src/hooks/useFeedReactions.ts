@@ -34,6 +34,9 @@ interface DerivedKeyResult {
   privateKey: bigint;
 }
 const derivationPromises = new Map<string, Promise<DerivedKeyResult>>(); // derivationKey -> Promise
+function isReactionDevModeAllowed(): boolean {
+  return process.env.NEXT_PUBLIC_REACTIONS_ALLOW_DEV_MODE === "true";
+}
 
 interface UseFeedReactionsOptions {
   /** Feed ID */
@@ -307,6 +310,11 @@ export function useFeedReactions({
       // Get current reaction for this message
       const currentReaction = getMyReaction(messageId);
 
+      if (pendingReactions[messageId]) {
+        debugWarn(`[useFeedReactions] Ignoring duplicate reaction click while submission is pending for ${messageId.substring(0, 8)}...`);
+        return;
+      }
+
       // If clicking the same emoji, remove the reaction
       const isRemoval = currentReaction === emojiIndex || emojiIndex >= 6;
       const newEmojiIndex = isRemoval ? -1 : emojiIndex;
@@ -325,12 +333,22 @@ export function useFeedReactions({
         return;
       }
 
-      // DEV MODE: If ZK prover isn't ready, use dev mode submission
-      // This allows testing the full reaction flow without real ZK proofs
-      const useDevMode = !isProverReady;
+      // Dev mode must be an explicit opt-in. Missing prover support should not silently
+      // downgrade the supported path and contaminate privacy or throughput evidence.
+      const devModeAllowed = isReactionDevModeAllowed();
+      const useDevMode = devModeAllowed && !isProverReady;
       if (useDevMode) {
         console.log(`[E2E Reaction] Using DEV MODE (ZK prover not ready)`);
         debugWarn("[useFeedReactions] ZK prover not ready, using DEV MODE submission");
+      }
+
+      if (!isProverReady && !devModeAllowed) {
+        console.log(`[E2E Reaction] EARLY RETURN: ZK prover not ready and dev mode is not explicitly enabled`);
+        revertReaction(messageId);
+        const errorMessage = "Reactions are unavailable because the ZK prover is not ready.";
+        setError(errorMessage);
+        debugWarn(`[useFeedReactions] ${errorMessage}`);
+        return;
       }
 
       if (!userSecret) {
@@ -402,6 +420,7 @@ export function useFeedReactions({
     [
       feedId,
       isProverReady,
+      pendingReactions,
       userSecret,
       getMyReaction,
       setPendingReaction,

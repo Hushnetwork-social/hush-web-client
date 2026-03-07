@@ -11,19 +11,20 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { useFeedReactions } from './useFeedReactions';
 
+const mockReactionsState = {
+  reactions: {},
+  pendingReactions: {},
+  isProverReady: false,
+  userSecret: 'test-secret',
+  setPendingReaction: vi.fn(),
+  confirmReaction: vi.fn(),
+  revertReaction: vi.fn(),
+};
+
 // Mock dependencies
 vi.mock('@/modules/reactions/useReactionsStore', () => ({
   useReactionsStore: vi.fn((selector) => {
-    const state = {
-      reactions: {},
-      pendingReactions: {},
-      isProverReady: false,
-      userSecret: 'test-secret',
-      setPendingReaction: vi.fn(),
-      confirmReaction: vi.fn(),
-      revertReaction: vi.fn(),
-    };
-    return selector(state);
+    return selector(mockReactionsState);
   }),
   EMPTY_EMOJI_COUNTS: [0, 0, 0, 0, 0, 0],
 }));
@@ -61,14 +62,21 @@ vi.mock('@/modules/feeds/useFeedsStore', () => ({
 
 import { deriveFeedElGamalKey, scalarMul } from '@/lib/crypto/reactions';
 import { debugLog } from '@/lib/debug-logger';
+import { reactionsServiceInstance } from '@/modules/reactions/ReactionsService';
 
 describe('useFeedReactions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockReactionsState.reactions = {};
+    mockReactionsState.pendingReactions = {};
+    mockReactionsState.isProverReady = false;
+    mockReactionsState.userSecret = 'test-secret';
+    process.env.NEXT_PUBLIC_REACTIONS_ALLOW_DEV_MODE = 'false';
   });
 
   afterEach(() => {
     vi.clearAllMocks();
+    process.env.NEXT_PUBLIC_REACTIONS_ALLOW_DEV_MODE = 'false';
   });
 
   describe('Key Derivation', () => {
@@ -199,6 +207,72 @@ describe('useFeedReactions', () => {
       );
 
       expect(result.current.isReady).toBe(false);
+    });
+  });
+
+  describe('Proof Guardrails', () => {
+    it('should fail closed when prover is not ready and dev mode is not explicitly enabled', async () => {
+      const { result } = renderHook(() =>
+        useFeedReactions({
+          feedId: 'proof-guard-feed-id-1',
+          feedAesKey: 'proof-guard-aes-key-1==',
+        })
+      );
+
+      await waitFor(() => {
+        expect(deriveFeedElGamalKey).toHaveBeenCalled();
+      });
+
+      await result.current.handleReactionSelect('message-1', 2);
+
+      expect(mockReactionsState.setPendingReaction).toHaveBeenCalledWith('message-1', 2);
+      expect(mockReactionsState.revertReaction).toHaveBeenCalledWith('message-1');
+      expect(reactionsServiceInstance.submitReactionDevMode).not.toHaveBeenCalled();
+    });
+
+    it('should only use dev mode submission when explicitly enabled', async () => {
+      process.env.NEXT_PUBLIC_REACTIONS_ALLOW_DEV_MODE = 'true';
+
+      const { result } = renderHook(() =>
+        useFeedReactions({
+          feedId: 'proof-guard-feed-id-2',
+          feedAesKey: 'proof-guard-aes-key-2==',
+        })
+      );
+
+      await waitFor(() => {
+        expect(deriveFeedElGamalKey).toHaveBeenCalled();
+      });
+
+      await result.current.handleReactionSelect('message-1', 2);
+
+      expect(reactionsServiceInstance.submitReactionDevMode).toHaveBeenCalled();
+      expect(mockReactionsState.revertReaction).not.toHaveBeenCalled();
+    });
+
+    it('ignores duplicate clicks while a reaction is already pending for the same message', async () => {
+      mockReactionsState.pendingReactions = {
+        'message-1': {
+          emojiIndex: 2,
+          submittedAt: Date.now(),
+        },
+      };
+
+      const { result } = renderHook(() =>
+        useFeedReactions({
+          feedId: 'proof-guard-feed-id-3',
+          feedAesKey: 'proof-guard-aes-key-3==',
+        })
+      );
+
+      await waitFor(() => {
+        expect(deriveFeedElGamalKey).toHaveBeenCalled();
+      });
+
+      await result.current.handleReactionSelect('message-1', 2);
+
+      expect(mockReactionsState.setPendingReaction).not.toHaveBeenCalled();
+      expect(reactionsServiceInstance.submitReactionDevMode).not.toHaveBeenCalled();
     });
   });
 });

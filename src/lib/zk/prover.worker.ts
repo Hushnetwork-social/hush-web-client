@@ -14,6 +14,7 @@
  *   public/circuits/{version}/reaction.zkey
  */
 
+import { getApprovedCircuitArtifacts } from './artifactManifest';
 import type { CircuitInputs, WorkerMessage } from './types';
 
 // Circuit file buffers (loaded on init)
@@ -44,12 +45,11 @@ async function handleInit(payload: { circuitVersion: string }): Promise<void> {
   const { circuitVersion } = payload;
 
   try {
-    // Check if circuit files exist
-    const baseUrl = `/circuits/${circuitVersion}`;
+    const artifacts = getApprovedCircuitArtifacts(circuitVersion);
 
     // Try to load circuit files
-    const wasmResponse = await fetch(`${baseUrl}/reaction.wasm`);
-    const zkeyResponse = await fetch(`${baseUrl}/reaction.zkey`);
+    const wasmResponse = await fetch(artifacts.wasmPath);
+    const zkeyResponse = await fetch(artifacts.zkeyPath);
 
     if (wasmResponse.ok && zkeyResponse.ok) {
       wasmBuffer = await wasmResponse.arrayBuffer();

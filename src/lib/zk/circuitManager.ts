@@ -6,6 +6,7 @@
  */
 
 import { CIRCUIT } from '../crypto/reactions/constants';
+import { getApprovedCircuitArtifacts, listApprovedCircuitVersions } from './artifactManifest';
 import { zkProver } from './prover';
 
 /**
@@ -21,6 +22,7 @@ export interface CircuitVersionInfo {
  * Circuit Manager - handles version checking and updates
  */
 class CircuitManager {
+  private readonly supportedVersions = new Set<string>(listApprovedCircuitVersions());
   private currentVersion: string = CIRCUIT.version;
   private minimumVersion: string = CIRCUIT.version;
   private isInitialized = false;
@@ -35,6 +37,9 @@ class CircuitManager {
     // const versionInfo = await this.fetchVersionInfo();
     // this.currentVersion = versionInfo.currentVersion;
     // this.minimumVersion = versionInfo.minimumVersion;
+
+    this.assertVersionAllowed(this.currentVersion);
+    this.assertVersionAllowed(this.minimumVersion);
 
     // Initialize the prover with current version
     await zkProver.initialize(this.currentVersion);
@@ -60,6 +65,7 @@ class CircuitManager {
    * Force update to a specific version
    */
   async forceUpdate(version: string): Promise<void> {
+    this.assertVersionAllowed(version);
     console.log(`[CircuitManager] Forcing update to ${version}`);
     this.currentVersion = version;
     await zkProver.initialize(version);
@@ -86,6 +92,37 @@ class CircuitManager {
     return this.minimumVersion;
   }
 
+  getArtifactBasePath(version: string = this.currentVersion): string {
+    this.assertVersionAllowed(version);
+    return getApprovedCircuitArtifacts(version).basePath;
+  }
+
+  ensureProofResultVersion(version: string): void {
+    this.assertVersionAllowed(version);
+
+    if (version !== this.currentVersion) {
+      throw new Error(
+        `Proof result version '${version}' does not match the approved client circuit version '${this.currentVersion}'.`
+      );
+    }
+  }
+
+  isVersionSupported(version: string): boolean {
+    return this.supportedVersions.has(version);
+  }
+
+  private assertVersionAllowed(version: string): void {
+    if (!this.isRecognizedVersionFormat(version)) {
+      throw new Error(`Circuit version '${version}' has an invalid format.`);
+    }
+
+    if (!this.isVersionSupported(version)) {
+      throw new Error(
+        `Circuit version '${version}' is not part of the approved FEAT-087 artifact set.`
+      );
+    }
+  }
+
   /**
    * Compare version strings (semver-like)
    * Returns: -1 if a < b, 0 if a == b, 1 if a > b
@@ -107,6 +144,10 @@ class CircuitManager {
     }
 
     return 0;
+  }
+
+  private isRecognizedVersionFormat(version: string): boolean {
+    return /^omega-v\d+\.\d+\.\d+$/.test(version);
   }
 
   /**

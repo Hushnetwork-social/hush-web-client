@@ -85,6 +85,8 @@ class ReactionsServiceClass {
     store.setGeneratingProof(true);
 
     try {
+      const hasActiveReaction = emojiIndex >= 0 && emojiIndex < EMOJI_COUNT;
+
       // 1. Encrypt emoji as one-hot vector
       const { ciphertext, nonces } = encryptVector(emojiIndex, feedPublicKey);
 
@@ -118,6 +120,7 @@ class ReactionsServiceClass {
       };
 
       const proofResult = await generateProof(circuitInputs);
+      circuitManager.ensureProofResultVersion(proofResult.circuitVersion);
 
       // 6. Convert ciphertext to base64 format for blockchain
       const grpcCiphertext = vectorCiphertextToGrpc(ciphertext);
@@ -147,7 +150,11 @@ class ReactionsServiceClass {
       console.log(`[ReactionsService] Reaction submitted to blockchain, txId=${transactionId}`);
 
       // 9. Store locally for fast access
-      localReactionCache.set(messageId, emojiIndex);
+      if (hasActiveReaction) {
+        localReactionCache.set(messageId, emojiIndex);
+      } else {
+        localReactionCache.remove(messageId);
+      }
 
       return transactionId;
     } finally {
@@ -261,7 +268,11 @@ class ReactionsServiceClass {
       console.log(`[ReactionsService] DEV MODE: Reaction submitted to blockchain, txId=${transactionId}`);
 
       // 8. Store locally for fast access
-      localReactionCache.set(messageId, emojiIndex);
+      if (emojiIndex >= 0 && emojiIndex < EMOJI_COUNT) {
+        localReactionCache.set(messageId, emojiIndex);
+      } else {
+        localReactionCache.remove(messageId);
+      }
 
       return transactionId;
     } catch (error) {
@@ -386,6 +397,12 @@ class ReactionsServiceClass {
       const backupKey = await computeBackupKey(userSecret, messageIdBigint);
       const encryptedBytes = this.base64ToBytes(response.EncryptedEmojiBackup);
       const emojiIndex = decryptEmojiBackup(encryptedBytes, backupKey);
+
+      if (emojiIndex >= EMOJI_COUNT) {
+        localReactionCache.remove(messageId);
+        store.setMyReaction(messageId, null);
+        return null;
+      }
 
       // Cache locally
       localReactionCache.set(messageId, emojiIndex);

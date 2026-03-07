@@ -179,6 +179,42 @@ describe('useReactionsStore', () => {
 
       expect(useReactionsStore.getState().pendingTallies['msg-1']).toEqual(serverTally);
     });
+
+    it('should preserve confirmed counts instead of fabricating per-emoji totals from reactionCount', () => {
+      useReactionsStore.getState().updateTally('msg-1', {
+        '👍': 1,
+        '❤️': 0,
+        '😂': 0,
+        '😮': 0,
+        '😢': 0,
+        '😡': 0,
+      }, 2);
+      useReactionsStore.getState().setMyReaction('msg-1', 0);
+
+      const serverTally: ServerReactionTally = {
+        tallyC1: [{ x: 'abc', y: 'def' }],
+        tallyC2: [{ x: 'ghi', y: 'jkl' }],
+        tallyVersion: 3,
+        reactionCount: 10,
+        feedId: 'feed-1',
+      };
+
+      useReactionsStore.getState().setTallyFromServer('msg-1', serverTally);
+
+      expect(useReactionsStore.getState().reactions['msg-1']).toMatchObject({
+        counts: {
+          '👍': 1,
+          '❤️': 0,
+          '😂': 0,
+          '😮': 0,
+          '😢': 0,
+          '😡': 0,
+        },
+        myReaction: 0,
+        tallyVersion: 3,
+      });
+      expect(useReactionsStore.getState().pendingTallies['msg-1']).toEqual(serverTally);
+    });
   });
 
   describe('Status Management', () => {
