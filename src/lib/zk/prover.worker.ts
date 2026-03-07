@@ -3,8 +3,8 @@
  *
  * Runs proof generation in a separate thread to avoid blocking the UI.
  *
- * NOTE: This is a placeholder that will work once snarkjs is installed
- * and circuit files are generated. For now, it provides the worker structure.
+ * NOTE: This worker fails closed until real proof generation is wired.
+ * Placeholder proofs were removed because they create a false sense of privacy/security.
  *
  * TODO: When ready, add snarkjs:
  *   npm install snarkjs
@@ -50,8 +50,6 @@ async function handleInit(payload: { circuitVersion: string }): Promise<void> {
     const baseUrl = `/circuits/${circuitVersion}`;
 
     // Try to load circuit files
-    // In production, these would be real circuit files
-    // For now, we'll check if they exist and handle gracefully
     const wasmResponse = await fetch(`${baseUrl}/reaction.wasm`);
     const zkeyResponse = await fetch(`${baseUrl}/reaction.zkey`);
 
@@ -61,22 +59,26 @@ async function handleInit(payload: { circuitVersion: string }): Promise<void> {
       currentVersion = circuitVersion;
       console.log(`[ZkWorker] Loaded circuit ${circuitVersion}`);
     } else {
-      // Circuit files not found - use placeholder mode
-      console.warn(`[ZkWorker] Circuit files not found for ${circuitVersion}, using placeholder mode`);
-      wasmBuffer = null;
-      zkeyBuffer = null;
-      currentVersion = circuitVersion;
+      self.postMessage({
+        type: 'error',
+        payload: {
+          message: `Circuit files not found for ${circuitVersion}. Refusing to generate placeholder proofs.`,
+        },
+      });
+      return;
     }
 
     // Signal ready
     self.postMessage({ type: 'ready' });
   } catch (error) {
-    console.warn('[ZkWorker] Failed to load circuit files:', error);
-    // Still signal ready - we'll use placeholder proofs
-    wasmBuffer = null;
-    zkeyBuffer = null;
-    currentVersion = payload.circuitVersion;
-    self.postMessage({ type: 'ready' });
+    self.postMessage({
+      type: 'error',
+      payload: {
+        message: error instanceof Error
+          ? `Failed to load circuit files: ${error.message}`
+          : 'Failed to load circuit files',
+      },
+    });
   }
 }
 
@@ -87,108 +89,21 @@ async function handleProve(payload: { inputs: CircuitInputs }): Promise<void> {
   const { inputs } = payload;
 
   try {
-    if (wasmBuffer && zkeyBuffer) {
-      // Real proof generation with snarkjs
-      // TODO: Uncomment when snarkjs is installed:
-      //
-      // const { groth16 } = await import('snarkjs');
-      // const { proof, publicSignals } = await groth16.fullProve(
-      //   inputs,
-      //   new Uint8Array(wasmBuffer),
-      //   new Uint8Array(zkeyBuffer)
-      // );
-      //
-      // self.postMessage({
-      //   type: 'proof',
-      //   payload: { proof, publicSignals }
-      // });
-
-      // For now, generate a placeholder proof
-      const placeholderResult = generatePlaceholderProof(inputs);
-      self.postMessage({
-        type: 'proof',
-        payload: placeholderResult,
-      });
-    } else {
-      // Placeholder mode - generate fake proof
-      console.warn('[ZkWorker] Generating placeholder proof (circuit not loaded)');
-      const placeholderResult = generatePlaceholderProof(inputs);
-      self.postMessage({
-        type: 'proof',
-        payload: placeholderResult,
-      });
+    if (!wasmBuffer || !zkeyBuffer) {
+      throw new Error('Real circuit artifacts are not loaded. Placeholder proofs are disabled.');
     }
+
+    // Real proof generation with snarkjs is not wired into this worker yet.
+    // Fail closed instead of generating fake proofs that look valid to callers.
+    throw new Error(
+      'Real ZK proof generation is not enabled in this build. Refusing to generate placeholder proofs.'
+    );
   } catch (error) {
     self.postMessage({
       type: 'error',
       payload: { message: error instanceof Error ? error.message : 'Unknown error' },
     });
   }
-}
-
-/**
- * Generate a placeholder proof for development/testing
- *
- * WARNING: This is NOT a real ZK proof and provides NO privacy guarantees!
- * It should only be used during development before the real circuit is ready.
- */
-function generatePlaceholderProof(inputs: CircuitInputs): {
-  proof: {
-    pi_a: [string, string, string];
-    pi_b: [[string, string], [string, string], [string, string]];
-    pi_c: [string, string, string];
-    protocol: string;
-    curve: string;
-  };
-  publicSignals: string[];
-} {
-  // Generate deterministic but fake proof values based on inputs
-  const hash = simpleHash(JSON.stringify(inputs));
-
-  return {
-    proof: {
-      pi_a: [
-        (BigInt(hash) % (2n ** 254n)).toString(),
-        ((BigInt(hash) * 2n) % (2n ** 254n)).toString(),
-        '1',
-      ],
-      pi_b: [
-        [
-          ((BigInt(hash) * 3n) % (2n ** 254n)).toString(),
-          ((BigInt(hash) * 4n) % (2n ** 254n)).toString(),
-        ],
-        [
-          ((BigInt(hash) * 5n) % (2n ** 254n)).toString(),
-          ((BigInt(hash) * 6n) % (2n ** 254n)).toString(),
-        ],
-        ['1', '0'],
-      ],
-      pi_c: [
-        ((BigInt(hash) * 7n) % (2n ** 254n)).toString(),
-        ((BigInt(hash) * 8n) % (2n ** 254n)).toString(),
-        '1',
-      ],
-      protocol: 'groth16',
-      curve: 'bn128',
-    },
-    publicSignals: [
-      inputs.nullifier,
-      inputs.members_root,
-      inputs.message_id,
-      inputs.feed_id,
-    ],
-  };
-}
-
-/**
- * Simple hash function for placeholder proof generation
- */
-function simpleHash(str: string): string {
-  let hash = 0n;
-  for (let i = 0; i < str.length; i++) {
-    hash = (hash * 31n + BigInt(str.charCodeAt(i))) % (2n ** 256n);
-  }
-  return hash.toString();
 }
 
 // Export for TypeScript module compatibility
