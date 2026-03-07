@@ -12,6 +12,7 @@ import { initializePoseidon, computeCommitment } from '@/lib/crypto/reactions/po
 import { BABYJUBJUB } from '@/lib/crypto/reactions/constants';
 import { useReactionsStore } from './useReactionsStore';
 import { membershipProofManager } from './MembershipProofManager';
+import { reactionsServiceInstance } from './ReactionsService';
 import { debugLog, debugError } from '@/lib/debug-logger';
 
 // Track registered feeds to avoid duplicate API calls
@@ -98,6 +99,9 @@ export async function initializeReactionsSystem(mnemonic: string[]): Promise<boo
     const store = useReactionsStore.getState();
     store.setUserSecret(userSecret);
     store.setUserCommitment(userCommitment);
+
+    // Initialize the supported proof/decryption path after credentials are ready.
+    await reactionsServiceInstance.initialize();
 
     console.log('[initializeReactions] Reactions system initialized successfully');
     debugLog('[initializeReactions] Reactions system initialized successfully');
