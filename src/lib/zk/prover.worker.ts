@@ -19,8 +19,6 @@ import type { CircuitInputs, WorkerMessage } from './types';
 // Circuit file buffers (loaded on init)
 let wasmBuffer: ArrayBuffer | null = null;
 let zkeyBuffer: ArrayBuffer | null = null;
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-let currentVersion: string | null = null;
 
 /**
  * Handle messages from the main thread
@@ -56,7 +54,6 @@ async function handleInit(payload: { circuitVersion: string }): Promise<void> {
     if (wasmResponse.ok && zkeyResponse.ok) {
       wasmBuffer = await wasmResponse.arrayBuffer();
       zkeyBuffer = await zkeyResponse.arrayBuffer();
-      currentVersion = circuitVersion;
       console.log(`[ZkWorker] Loaded circuit ${circuitVersion}`);
     } else {
       self.postMessage({
@@ -86,9 +83,10 @@ async function handleInit(payload: { circuitVersion: string }): Promise<void> {
  * Generate a proof for the given inputs
  */
 async function handleProve(payload: { inputs: CircuitInputs }): Promise<void> {
-  const { inputs } = payload;
-
   try {
+    // Touch the payload so lint/build stay honest while the real proof path is still fail-closed.
+    void payload.inputs;
+
     if (!wasmBuffer || !zkeyBuffer) {
       throw new Error('Real circuit artifacts are not loaded. Placeholder proofs are disabled.');
     }
