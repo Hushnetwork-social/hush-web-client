@@ -194,6 +194,7 @@ export interface FeedMessageEntity {
   MessageContent: string;
   IssuerPublicAddress: string;
   IssuerName: string;
+  AuthorCommitment?: string;
   TimeStamp: { seconds: number; nanos: number };
   BlockIndex: number;
   ReplyToMessageId?: string;  // Reply to Message: parent message reference

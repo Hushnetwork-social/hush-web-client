@@ -453,6 +453,7 @@ export async function createFeedMessageTransaction(
   keyGeneration?: number,
   existingMessageId?: string,
   attachmentRefs?: AttachmentRefPayload[],
+  authorCommitment?: string,
 ): Promise<{ signedTransaction: string; messageId: string }> {
   // FEAT-058: Use existing messageId for retry idempotency, or generate new one
   const messageId = existingMessageId ?? generateGuid();
@@ -468,6 +469,7 @@ export async function createFeedMessageTransaction(
     ...(replyToMessageId && { ReplyToMessageId: replyToMessageId }),
     ...(keyGeneration !== undefined && { KeyGeneration: keyGeneration }),
     ...(attachmentRefs && attachmentRefs.length > 0 && { Attachments: attachmentRefs }),
+    ...(authorCommitment && { AuthorCommitment: authorCommitment }),
   };
 
   // Create unsigned transaction

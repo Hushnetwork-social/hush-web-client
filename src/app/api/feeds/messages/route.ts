@@ -52,6 +52,9 @@ export async function GET(request: NextRequest) {
         messageContent: msg.messageContent,
         issuerPublicAddress: msg.issuerPublicAddress,
         issuerName: msg.issuerName,
+        authorCommitment: msg.authorCommitment
+          ? Buffer.from(msg.authorCommitment).toString('base64')
+          : undefined,
         timestamp: msg.timestamp?.toISOString() || null,
         blockIndex: msg.blockIndex,
         replyToMessageId: msg.replyToMessageId || undefined,  // Reply to Message: include parent reference

@@ -13,14 +13,20 @@ import {
 } from "@/modules/reactions/useReactionsStore";
 import { reactionsServiceInstance } from "@/modules/reactions/ReactionsService";
 import {
+  ensureCommitmentRegistered,
+  initializeReactionsSystem,
+} from "@/modules/reactions/initializeReactions";
+import {
   deriveFeedElGamalKey,
   scalarMul,
   getGenerator,
   type Point,
   bsgsManager,
+  bytesToBigint,
 } from "@/lib/crypto/reactions";
 import { debugLog, debugWarn, debugError } from "@/lib/debug-logger";
 import { useFeedsStore } from "@/modules/feeds/useFeedsStore";
+import { useAppStore } from "@/stores";
 
 // Module-level guards to prevent duplicate operations across React Strict Mode remounts
 // These persist across component unmount/remount cycles
@@ -80,6 +86,7 @@ export function useFeedReactions({
   const [feedPrivateKey, setFeedPrivateKey] = useState<bigint | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isDerivingKey, setIsDerivingKey] = useState(false);
+  const credentials = useAppStore((s) => s.credentials);
 
   // Subscribe to store state
   const reactions = useReactionsStore((s) => s.reactions);
@@ -91,6 +98,7 @@ export function useFeedReactions({
   const setPendingReaction = useReactionsStore((s) => s.setPendingReaction);
   const confirmReaction = useReactionsStore((s) => s.confirmReaction);
   const revertReaction = useReactionsStore((s) => s.revertReaction);
+  const getMessageById = useFeedsStore((s) => s.getMessageById);
 
   // Track key derivation to prevent duplicate calls (React Strict Mode)
   const keyDerivationStartedRef = useRef<string | null>(null);
@@ -295,7 +303,7 @@ export function useFeedReactions({
   const handleReactionSelect = useCallback(
     async (messageId: string, emojiIndex: number) => {
       // Use ref to always get fresh state (avoids stale closure)
-      const currentFeedPublicKey = feedPublicKeyRef.current;
+      let currentFeedPublicKey = feedPublicKeyRef.current;
 
       // [E2E Reaction] Debug logging for tracing the reaction flow
       console.log(`[E2E Reaction] handleReactionSelect called: messageId=${messageId.substring(0, 8)}..., emojiIndex=${emojiIndex}`);
@@ -327,10 +335,27 @@ export function useFeedReactions({
 
       // Check if we can actually submit to the server (use ref for fresh value)
       if (!currentFeedPublicKey) {
-        console.log(`[E2E Reaction] EARLY RETURN: Feed public key not available`);
-        debugWarn("[useFeedReactions] Feed public key not available, reaction stays pending");
-        // Reaction stays in pending state until server confirms or user cancels
-        return;
+        if (feedAesKey) {
+          try {
+            const privateKey = await deriveFeedElGamalKey(feedAesKey);
+            currentFeedPublicKey = scalarMul(getGenerator(), privateKey);
+            feedPublicKeyRef.current = currentFeedPublicKey;
+            setFeedPublicKey(currentFeedPublicKey);
+            setFeedPrivateKey(privateKey);
+            derivedFromAesKeyRef.current = feedAesKey;
+          } catch (err) {
+            console.log(`[E2E Reaction] EARLY RETURN: Feed public key derivation failed`);
+            debugWarn("[useFeedReactions] Feed public key derivation failed", err);
+            revertReaction(messageId);
+            setError("Reactions are unavailable because the feed encryption key is not ready.");
+            return;
+          }
+        } else {
+          console.log(`[E2E Reaction] EARLY RETURN: Feed public key not available`);
+          debugWarn("[useFeedReactions] Feed public key not available, reaction stays pending");
+          // Reaction stays in pending state until server confirms or user cancels
+          return;
+        }
       }
 
       // Dev mode must be an explicit opt-in. Missing prover support should not silently
@@ -352,15 +377,62 @@ export function useFeedReactions({
       }
 
       if (!userSecret) {
-        console.log(`[E2E Reaction] EARLY RETURN: User secret not set`);
-        debugWarn("[useFeedReactions] User secret not set, reaction stays pending");
-        // Reaction stays in pending state
+        const mnemonic = credentials?.mnemonic;
+        if (mnemonic && mnemonic.length > 0) {
+          const initialized = await initializeReactionsSystem(mnemonic);
+          if (!initialized) {
+            revertReaction(messageId);
+            const errorMessage =
+              "Reactions are unavailable because reaction credentials could not be initialized.";
+            setError(errorMessage);
+            debugWarn(`[useFeedReactions] ${errorMessage}`);
+            return;
+          }
+        } else {
+          console.log(`[E2E Reaction] EARLY RETURN: User secret not set`);
+          debugWarn("[useFeedReactions] User secret not set, reaction stays pending");
+          // Reaction stays in pending state
+          return;
+        }
+      }
+
+      const isRegisteredForFeed = await ensureCommitmentRegistered(feedId);
+      if (!isRegisteredForFeed) {
+        revertReaction(messageId);
+        const errorMessage =
+          "Reactions are unavailable because membership registration is not ready for this feed.";
+        setError(errorMessage);
+        debugWarn(`[useFeedReactions] ${errorMessage}`);
         return;
       }
 
-      // TODO: Get actual author commitment from message metadata or server
-      // For now, use 0n which disables author exclusion check in the circuit
-      const authorCommitment = 0n;
+      const message = getMessageById(messageId);
+      let authorCommitment: bigint | null = null;
+
+      if (message?.authorCommitment) {
+        try {
+          const commitmentBytes = Uint8Array.from(
+            atob(message.authorCommitment),
+            (char) => char.charCodeAt(0)
+          );
+          authorCommitment = bytesToBigint(commitmentBytes);
+        } catch (decodeError) {
+          debugWarn("[useFeedReactions] Failed to decode author commitment", decodeError);
+        }
+      }
+
+      if (authorCommitment === null) {
+        if (useDevMode) {
+          authorCommitment = 0n;
+          debugWarn("[useFeedReactions] Author commitment missing, falling back to dev-mode placeholder");
+        } else {
+          revertReaction(messageId);
+          const errorMessage = "Reactions are unavailable because the message author commitment is missing.";
+          setError(errorMessage);
+          debugWarn(`[useFeedReactions] ${errorMessage}`);
+          return;
+        }
+      }
 
       console.log(`[E2E Reaction] Preconditions passed, submitting reaction (useDevMode=${useDevMode})`);
 
@@ -419,6 +491,7 @@ export function useFeedReactions({
     },
     [
       feedId,
+      feedAesKey,
       isProverReady,
       pendingReactions,
       userSecret,
@@ -427,6 +500,8 @@ export function useFeedReactions({
       confirmReaction,
       revertReaction,
       refreshTallies,
+      getMessageById,
+      credentials,
     ]
   );
 

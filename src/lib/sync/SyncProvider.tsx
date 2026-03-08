@@ -144,7 +144,10 @@ export function SyncProvider({ children, config }: SyncProviderProps) {
         if (!isMountedRef.current || isPaused) break;
 
         try {
+          const startedAt = Date.now();
+          console.log(`[E2E Sync] ${loopName} start: ${syncable.name}`);
           await syncable.syncTask();
+          console.log(`[E2E Sync] ${loopName} done: ${syncable.name} (${Date.now() - startedAt}ms)`);
           // Reset failures on success
           if (consecutiveFailures > 0) {
             setConsecutiveFailures(0);
@@ -152,6 +155,7 @@ export function SyncProvider({ children, config }: SyncProviderProps) {
           }
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          console.log(`[E2E Sync] ${loopName} failed: ${syncable.name} -> ${errorMessage}`);
           debugError(`[SyncProvider] ${loopName} - ${syncable.name} failed:`, errorMessage);
 
           setConsecutiveFailures((prev) => {

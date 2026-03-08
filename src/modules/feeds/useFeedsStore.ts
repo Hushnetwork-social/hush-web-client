@@ -1066,6 +1066,7 @@ export const useFeedsStore = create<FeedsStore>()(
             content,
             senderPublicKey: serverMsg.IssuerPublicAddress,
             senderName: serverMsg.IssuerName,
+            authorCommitment: serverMsg.AuthorCommitment,
             timestamp: serverMsg.TimeStamp?.seconds
               ? serverMsg.TimeStamp.seconds * 1000 + Math.floor((serverMsg.TimeStamp.nanos || 0) / 1000000)
               : Date.now(),
@@ -1187,6 +1188,13 @@ export const useFeedsStore = create<FeedsStore>()(
                 const confirmedMsg = confirmMap.get(msg.id)!;
                 return {
                   ...msg,
+                  content: confirmedMsg.content,
+                  contentEncrypted: confirmedMsg.contentEncrypted ?? msg.contentEncrypted,
+                  decryptionFailed: confirmedMsg.decryptionFailed ?? msg.decryptionFailed,
+                  keyGeneration: confirmedMsg.keyGeneration ?? msg.keyGeneration,
+                  senderName: confirmedMsg.senderName || msg.senderName,
+                  senderPublicKey: confirmedMsg.senderPublicKey || msg.senderPublicKey,
+                  authorCommitment: confirmedMsg.authorCommitment || msg.authorCommitment,
                   isConfirmed: true,
                   // FEAT-058: Update status to confirmed
                   status: 'confirmed' as MessageStatus,
@@ -2256,6 +2264,7 @@ export const useFeedsStore = create<FeedsStore>()(
               content: msg.MessageContent,
               senderPublicKey: msg.IssuerPublicAddress,
               senderName: msg.IssuerName,
+              authorCommitment: msg.AuthorCommitment,
               isConfirmed: true,
               // FEAT-058: Messages from server are confirmed
               status: 'confirmed' as MessageStatus,

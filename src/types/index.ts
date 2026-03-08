@@ -125,6 +125,8 @@ export interface FeedMessage {
   senderName?: string;
   content: string;
   contentEncrypted?: string;
+  /** Protocol Omega: base64-encoded Poseidon(author_secret) */
+  authorCommitment?: string;
   timestamp: number;
   blockHeight?: number;
   /**

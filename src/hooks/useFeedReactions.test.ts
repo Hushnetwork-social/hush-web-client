@@ -11,6 +11,21 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { useFeedReactions } from './useFeedReactions';
 
+const hoistedFeedStore = vi.hoisted(() => ({
+  getMessageById: vi.fn(() => ({
+    id: 'message-1',
+    authorCommitment: btoa(String.fromCharCode(...new Uint8Array(32).fill(1))),
+  })),
+}));
+
+const { ensureCommitmentRegisteredMock } = vi.hoisted(() => ({
+  ensureCommitmentRegisteredMock: vi.fn().mockResolvedValue(true),
+}));
+
+const { initializeReactionsSystemMock } = vi.hoisted(() => ({
+  initializeReactionsSystemMock: vi.fn().mockResolvedValue(true),
+}));
+
 const mockReactionsState = {
   reactions: {},
   pendingReactions: {},
@@ -37,10 +52,26 @@ vi.mock('@/modules/reactions/ReactionsService', () => ({
   },
 }));
 
+vi.mock('@/modules/reactions/initializeReactions', () => ({
+  ensureCommitmentRegistered: ensureCommitmentRegisteredMock,
+  initializeReactionsSystem: initializeReactionsSystemMock,
+}));
+
+vi.mock('@/stores', () => ({
+  useAppStore: vi.fn((selector) =>
+    selector({
+      credentials: {
+        mnemonic: ['alpha', 'beta', 'gamma'],
+      },
+    })
+  ),
+}));
+
 vi.mock('@/lib/crypto/reactions', () => ({
   deriveFeedElGamalKey: vi.fn().mockResolvedValue(123456n),
   scalarMul: vi.fn().mockReturnValue({ x: 1n, y: 2n }),
   getGenerator: vi.fn().mockReturnValue({ x: 0n, y: 1n }),
+  bytesToBigint: vi.fn().mockReturnValue(1n),
   bsgsManager: {
     ensureLoaded: vi.fn().mockResolvedValue(undefined),
   },
@@ -53,11 +84,15 @@ vi.mock('@/lib/debug-logger', () => ({
 }));
 
 vi.mock('@/modules/feeds/useFeedsStore', () => ({
-  useFeedsStore: {
-    getState: vi.fn().mockReturnValue({
-      messages: {},
-    }),
-  },
+  useFeedsStore: Object.assign(
+    vi.fn((selector) => selector(hoistedFeedStore)),
+    {
+      getState: vi.fn(() => ({
+        messages: {},
+        getMessageById: hoistedFeedStore.getMessageById,
+      })),
+    }
+  ),
 }));
 
 import { deriveFeedElGamalKey, scalarMul } from '@/lib/crypto/reactions';
@@ -67,10 +102,16 @@ import { reactionsServiceInstance } from '@/modules/reactions/ReactionsService';
 describe('useFeedReactions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    ensureCommitmentRegisteredMock.mockResolvedValue(true);
+    initializeReactionsSystemMock.mockResolvedValue(true);
     mockReactionsState.reactions = {};
     mockReactionsState.pendingReactions = {};
     mockReactionsState.isProverReady = false;
     mockReactionsState.userSecret = 'test-secret';
+    hoistedFeedStore.getMessageById.mockReturnValue({
+      id: 'message-1',
+      authorCommitment: btoa(String.fromCharCode(...new Uint8Array(32).fill(1))),
+    });
     process.env.NEXT_PUBLIC_REACTIONS_ALLOW_DEV_MODE = 'false';
   });
 
@@ -232,6 +273,10 @@ describe('useFeedReactions', () => {
 
     it('should only use dev mode submission when explicitly enabled', async () => {
       process.env.NEXT_PUBLIC_REACTIONS_ALLOW_DEV_MODE = 'true';
+      hoistedFeedStore.getMessageById.mockReturnValue({
+        id: 'message-1',
+        authorCommitment: undefined,
+      });
 
       const { result } = renderHook(() =>
         useFeedReactions({
@@ -246,8 +291,99 @@ describe('useFeedReactions', () => {
 
       await result.current.handleReactionSelect('message-1', 2);
 
+      expect(ensureCommitmentRegisteredMock).toHaveBeenCalledWith('proof-guard-feed-id-2');
       expect(reactionsServiceInstance.submitReactionDevMode).toHaveBeenCalled();
       expect(mockReactionsState.revertReaction).not.toHaveBeenCalled();
+    });
+
+    it('should fail closed when author commitment is missing outside dev mode', async () => {
+      mockReactionsState.isProverReady = true;
+      hoistedFeedStore.getMessageById.mockReturnValue({
+        id: 'message-1',
+        authorCommitment: undefined,
+      });
+
+      const { result } = renderHook(() =>
+        useFeedReactions({
+          feedId: 'proof-guard-feed-id-4',
+          feedAesKey: 'proof-guard-aes-key-4==',
+        })
+      );
+
+      await waitFor(() => {
+        expect(deriveFeedElGamalKey).toHaveBeenCalled();
+      });
+
+      await result.current.handleReactionSelect('message-1', 2);
+
+      expect(ensureCommitmentRegisteredMock).toHaveBeenCalledWith('proof-guard-feed-id-4');
+      expect(mockReactionsState.revertReaction).toHaveBeenCalledWith('message-1');
+      expect(reactionsServiceInstance.submitReactionDevMode).not.toHaveBeenCalled();
+    });
+
+    it('fails closed when feed commitment registration is unavailable', async () => {
+      process.env.NEXT_PUBLIC_REACTIONS_ALLOW_DEV_MODE = 'true';
+      ensureCommitmentRegisteredMock.mockResolvedValue(false);
+
+      const { result } = renderHook(() =>
+        useFeedReactions({
+          feedId: 'proof-guard-feed-id-5',
+          feedAesKey: 'proof-guard-aes-key-5==',
+        })
+      );
+
+      await waitFor(() => {
+        expect(deriveFeedElGamalKey).toHaveBeenCalled();
+      });
+
+      await result.current.handleReactionSelect('message-1', 2);
+
+      expect(ensureCommitmentRegisteredMock).toHaveBeenCalledWith('proof-guard-feed-id-5');
+      expect(mockReactionsState.revertReaction).toHaveBeenCalledWith('message-1');
+      expect(reactionsServiceInstance.submitReactionDevMode).not.toHaveBeenCalled();
+    });
+
+    it('bootstraps reaction credentials from mnemonic when the hook is used before sync initialization', async () => {
+      process.env.NEXT_PUBLIC_REACTIONS_ALLOW_DEV_MODE = 'true';
+      mockReactionsState.userSecret = null;
+      initializeReactionsSystemMock.mockImplementation(async () => {
+        mockReactionsState.userSecret = 'initialized-secret';
+        return true;
+      });
+
+      const { result } = renderHook(() =>
+        useFeedReactions({
+          feedId: 'proof-guard-feed-id-6',
+          feedAesKey: 'proof-guard-aes-key-6==',
+        })
+      );
+
+      await waitFor(() => {
+        expect(deriveFeedElGamalKey).toHaveBeenCalled();
+      });
+
+      await result.current.handleReactionSelect('message-1', 2);
+
+      expect(initializeReactionsSystemMock).toHaveBeenCalledWith(['alpha', 'beta', 'gamma']);
+      expect(ensureCommitmentRegisteredMock).toHaveBeenCalledWith('proof-guard-feed-id-6');
+      expect(reactionsServiceInstance.submitReactionDevMode).toHaveBeenCalled();
+    });
+
+    it('derives the feed reaction key on demand when the user reacts before the effect-driven key setup finishes', async () => {
+      process.env.NEXT_PUBLIC_REACTIONS_ALLOW_DEV_MODE = 'true';
+
+      const { result } = renderHook(() =>
+        useFeedReactions({
+          feedId: 'proof-guard-feed-id-7',
+          feedAesKey: 'proof-guard-aes-key-7==',
+        })
+      );
+
+      await result.current.handleReactionSelect('message-1', 2);
+
+      expect(deriveFeedElGamalKey).toHaveBeenCalledWith('proof-guard-aes-key-7==');
+      expect(ensureCommitmentRegisteredMock).toHaveBeenCalledWith('proof-guard-feed-id-7');
+      expect(reactionsServiceInstance.submitReactionDevMode).toHaveBeenCalled();
     });
 
     it('ignores duplicate clicks while a reaction is already pending for the same message', async () => {

@@ -21,6 +21,7 @@ class ZkProver {
   private isReady = false;
   private initPromise: Promise<void> | null = null;
   private currentCircuitVersion: string = CIRCUIT.version;
+  private pendingInitReject: ((error: Error) => void) | null = null;
 
   // Pending proof requests
   private pendingProof: {
@@ -53,6 +54,25 @@ class ZkProver {
     }
 
     return new Promise((resolve, reject) => {
+      let settled = false;
+      this.pendingInitReject = (error: Error) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        this.isReady = false;
+        this.initPromise = null;
+        this.pendingInitReject = null;
+
+        if (this.worker) {
+          this.worker.terminate();
+          this.worker = null;
+        }
+
+        reject(error);
+      };
+
       try {
         // Create Web Worker
         this.worker = new Worker(
@@ -65,8 +85,15 @@ class ZkProver {
 
           switch (type) {
             case 'ready':
+              if (settled) {
+                break;
+              }
+
+              settled = true;
               this.isReady = true;
               this.currentCircuitVersion = circuitVersion;
+              this.initPromise = null;
+              this.pendingInitReject = null;
               console.log(`[ZkProver] Ready with circuit ${circuitVersion}`);
               resolve();
               break;
@@ -94,13 +121,23 @@ class ZkProver {
                 this.pendingProof.reject(new Error(errorPayload.message));
                 this.pendingProof = null;
               }
+              if (!this.isReady) {
+                this.pendingInitReject?.(new Error(errorPayload.message));
+              }
               break;
           }
         };
 
         this.worker.onerror = (error) => {
           console.error('[ZkProver] Worker error:', error);
-          reject(new Error(`Worker error: ${error.message}`));
+          const workerError = new Error(`Worker error: ${error.message}`);
+
+          if (this.pendingProof) {
+            this.pendingProof.reject(workerError);
+            this.pendingProof = null;
+          }
+
+          this.pendingInitReject?.(workerError);
         };
 
         // Send init message
@@ -109,6 +146,8 @@ class ZkProver {
           payload: { circuitVersion },
         });
       } catch (error) {
+        this.initPromise = null;
+        this.pendingInitReject = null;
         reject(error);
       }
     });
@@ -215,6 +254,13 @@ class ZkProver {
     if (this.pendingProof) {
       this.pendingProof.reject(new Error('Prover terminated'));
       this.pendingProof = null;
+    }
+
+    if (this.pendingInitReject) {
+      const reject = this.pendingInitReject;
+      this.pendingInitReject = null;
+      this.initPromise = null;
+      reject(new Error('Prover terminated'));
     }
   }
 }
