@@ -13,7 +13,9 @@ type PermalinkPayload = {
   message: string;
   accessState: AccessState;
   postId?: string;
+  reactionScopeId?: string;
   authorPublicAddress?: string;
+  authorCommitment?: string;
   content?: string;
   createdAtBlock?: number;
   createdAtUnixMs?: number;

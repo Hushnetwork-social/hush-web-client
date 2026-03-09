@@ -123,7 +123,10 @@ export async function ensureCommitmentRegistered(feedId: string): Promise<boolea
   const store = useReactionsStore.getState();
   const userCommitment = store.getUserCommitment();
 
+  console.log(`[E2E Reaction] ensureCommitmentRegistered: feedId=${feedId.substring(0, 8)}..., hasCommitment=${!!userCommitment}`);
+
   if (!userCommitment) {
+    console.log('[E2E Reaction] ensureCommitmentRegistered: EARLY RETURN user commitment not set');
     debugLog('[ensureCommitmentRegistered] User commitment not set, skipping');
     return false;
   }
@@ -131,13 +134,16 @@ export async function ensureCommitmentRegistered(feedId: string): Promise<boolea
   // Check if already registered this session
   const cacheKey = `${feedId}:${userCommitment.toString(16)}`;
   if (registeredFeeds.has(cacheKey)) {
+    console.log(`[E2E Reaction] ensureCommitmentRegistered: cache hit for feed ${feedId.substring(0, 8)}...`);
     debugLog(`[ensureCommitmentRegistered] Already registered for feed ${feedId.substring(0, 8)}...`);
     return true;
   }
 
   try {
+    console.log(`[E2E Reaction] ensureCommitmentRegistered: checking membership for feed ${feedId.substring(0, 8)}...`);
     // Check if already registered on server
     const isMember = await membershipProofManager.isMember(feedId, userCommitment);
+    console.log(`[E2E Reaction] ensureCommitmentRegistered: isMember=${isMember}`);
 
     if (isMember) {
       debugLog(`[ensureCommitmentRegistered] Already a member of feed ${feedId.substring(0, 8)}...`);
@@ -146,8 +152,10 @@ export async function ensureCommitmentRegistered(feedId: string): Promise<boolea
     }
 
     // Register commitment
+    console.log(`[E2E Reaction] ensureCommitmentRegistered: registering commitment for feed ${feedId.substring(0, 8)}...`);
     debugLog(`[ensureCommitmentRegistered] Registering for feed ${feedId.substring(0, 8)}...`);
     const success = await membershipProofManager.registerCommitment(feedId, userCommitment);
+    console.log(`[E2E Reaction] ensureCommitmentRegistered: registerCommitment success=${success}`);
 
     if (success) {
       debugLog(`[ensureCommitmentRegistered] Successfully registered for feed ${feedId.substring(0, 8)}...`);
@@ -158,6 +166,7 @@ export async function ensureCommitmentRegistered(feedId: string): Promise<boolea
 
     return success;
   } catch (error) {
+    console.log('[E2E Reaction] ensureCommitmentRegistered: ERROR', error);
     debugError(`[ensureCommitmentRegistered] Error registering for feed ${feedId.substring(0, 8)}...:`, error);
     return false;
   }

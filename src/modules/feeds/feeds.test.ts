@@ -2840,6 +2840,39 @@ describe('FeedsSyncable retry integration', () => {
     expect(messages.every(m => m.content === 'Now decrypted!')).toBe(true);
   });
 
+  it('should re-decrypt personal feed messages after the AES key is decrypted later', async () => {
+    const { setFeeds, addMessages, updateFeedAesKey } = useFeedsStore.getState();
+    const personalFeedId = 'personal-feed-late-key';
+    setFeeds([{
+      id: personalFeedId,
+      type: 'personal',
+      name: 'My Personal Feed',
+      encryptedFeedKey: 'enc-feed-key',
+      createdAt: new Date().toISOString(),
+    }]);
+
+    addMessages(personalFeedId, [{
+      id: 'msg-personal-encrypted',
+      feedId: personalFeedId,
+      content: 'encrypted-personal-message',
+      contentEncrypted: 'encrypted-personal-message',
+      senderPublicKey: 'user-public-key',
+      timestamp: new Date().toISOString(),
+      blockIndex: 100,
+      isConfirmed: true,
+      decryptionFailed: true,
+    }]);
+
+    updateFeedAesKey(personalFeedId, 'personal-aes-key');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const messages = useFeedsStore.getState().messages[personalFeedId];
+    expect(messages).toHaveLength(1);
+    expect(messages[0].decryptionFailed).toBe(false);
+    expect(messages[0].content).toBe('decrypted-message');
+    expect(messages[0].contentEncrypted).toBe('encrypted-personal-message');
+  });
+
   it('should handle retry errors gracefully without breaking state', async () => {
     const { setFeeds, addMessages, mergeKeyGenerations } = useFeedsStore.getState();
     const { aesDecrypt } = await import('@/lib/crypto/encryption');

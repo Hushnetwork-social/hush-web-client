@@ -236,6 +236,7 @@ export const membershipServiceBinary = {
     userCommitmentBase64: string
   ): Promise<IsCommitmentRegisteredResponse> {
     try {
+      console.log(`[MembershipService] IsCommitmentRegistered: calling gRPC`);
       const feedIdBytes = base64ToBytes(feedIdBase64);
       const commitmentBytes = base64ToBytes(userCommitmentBase64);
 
@@ -248,12 +249,15 @@ export const membershipServiceBinary = {
       debugLog(`[MembershipService] IsCommitmentRegistered: feedId=${feedIdBase64.substring(0, 20)}...`);
 
       const responseBytes = await grpcCallBinary('IsCommitmentRegistered', messageBytes);
+      console.log(`[MembershipService] IsCommitmentRegistered: got response, ${responseBytes.length} bytes`);
       const isRegistered = parseBoolField(responseBytes);
+      console.log(`[MembershipService] IsCommitmentRegistered result: ${isRegistered}`);
 
       debugLog(`[MembershipService] IsCommitmentRegistered result: ${isRegistered}`);
 
       return { IsRegistered: isRegistered };
     } catch (error) {
+      console.error('[MembershipService] IsCommitmentRegistered failed:', error);
       debugError('[MembershipService] IsCommitmentRegistered failed:', error);
       throw error;
     }

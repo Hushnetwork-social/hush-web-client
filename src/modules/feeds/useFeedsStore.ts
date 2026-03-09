@@ -691,20 +691,20 @@ function areGroupMembersEqual(left: GroupFeedMember[] | undefined, right: GroupF
 
 /**
  * FEAT-059: Helper to decrypt messages based on feed type.
- * - Chat feeds: use feed's AES key
+ * - Personal/Chat feeds: use feed's AES key
  * - Group feeds: use KeyGeneration-specific AES keys
- * - Personal/Broadcast: no encryption
+ * - Broadcast feeds: no encryption
  */
 async function decryptMessages(
   messages: FeedMessage[],
   feed: Feed,
   getState: () => FeedsStore
 ): Promise<FeedMessage[]> {
-  if (feed.type === 'chat') {
-    // Chat feed: decrypt with feed's AES key
+  if (feed.type === 'chat' || feed.type === 'personal') {
+    // Direct feeds: decrypt with feed's AES key
     const feedAesKey = feed.aesKey;
     if (!feedAesKey) {
-      debugLog(`[FeedsStore] decryptMessages: no AES key for chat feed ${feed.id.substring(0, 8)}...`);
+      debugLog(`[FeedsStore] decryptMessages: no AES key for direct feed ${feed.id.substring(0, 8)}...`);
       return messages.map((msg) => ({
         ...msg,
         contentEncrypted: msg.content,
@@ -816,7 +816,7 @@ async function decryptMessages(
     );
   }
 
-  // Personal/Broadcast feeds: no encryption
+  // Broadcast feeds: no encryption
   return messages;
 }
 
@@ -1094,6 +1094,8 @@ export const useFeedsStore = create<FeedsStore>()(
             f.id === feedId ? { ...f, aesKey } : f
           ),
         }));
+
+        void get().retryDecryptFailedMessages(feedId);
       },
 
       updateFeedName: (feedId, name) => {
@@ -1823,25 +1825,87 @@ export const useFeedsStore = create<FeedsStore>()(
 
       retryDecryptFailedMessages: async (feedId) => {
         const currentMessages = get().messages[feedId] || [];
-        const keyState = get().groupKeyStates[feedId];
+        const feed = get().getFeed(feedId);
+        if (!feed) {
+          debugLog(`[FeedsStore] retryDecryptFailedMessages: feed not found ${feedId.substring(0, 8)}...`);
+          return;
+        }
 
-        // Find messages that failed decryption
-        const failedMessages = currentMessages.filter((m) => m.decryptionFailed === true);
+        const isDirectEncryptedFeed = feed.type === 'chat' || feed.type === 'personal';
+        const failedMessages = currentMessages.filter((m) =>
+          m.decryptionFailed === true ||
+          (isDirectEncryptedFeed && m.isConfirmed && !m.contentEncrypted)
+        );
 
         if (failedMessages.length === 0) {
           debugLog(`[FeedsStore] retryDecryptFailedMessages: no failed messages for feed ${feedId.substring(0, 8)}...`);
           return;
         }
 
+        if (isDirectEncryptedFeed) {
+          const feedAesKey = feed.aesKey;
+          if (!feedAesKey) {
+            debugLog(`[FeedsStore] retryDecryptFailedMessages: no AES key available for direct feed ${feedId.substring(0, 8)}...`);
+            return;
+          }
+
+          debugLog(`[FeedsStore] retryDecryptFailedMessages: retrying ${failedMessages.length} direct-feed messages for feed ${feedId.substring(0, 8)}...`);
+
+          const updatedMessages: FeedMessage[] = [];
+          let successCount = 0;
+          let stillFailedCount = 0;
+
+          for (const msg of failedMessages) {
+            const encryptedContent = msg.contentEncrypted || msg.content;
+            try {
+              const decryptedContent = await aesDecrypt(encryptedContent, feedAesKey);
+              updatedMessages.push({
+                ...msg,
+                content: decryptedContent,
+                contentEncrypted: encryptedContent,
+                decryptionFailed: false,
+              });
+              successCount++;
+            } catch {
+              updatedMessages.push({
+                ...msg,
+                contentEncrypted: encryptedContent,
+                decryptionFailed: true,
+              });
+              stillFailedCount++;
+            }
+          }
+
+          set((state) => {
+            const existingMessages = state.messages[feedId] || [];
+            const updatedMap = new Map(updatedMessages.map((m) => [m.id, m]));
+            const newMessages = existingMessages.map((m) =>
+              updatedMap.has(m.id) ? updatedMap.get(m.id)! : m
+            );
+
+            debugLog(`[FeedsStore] retryDecryptFailedMessages: direct-feed complete - success=${successCount}, stillFailed=${stillFailedCount}`);
+
+            return {
+              messages: {
+                ...state.messages,
+                [feedId]: newMessages,
+              },
+            };
+          });
+
+          return;
+        }
+
+        const keyState = get().groupKeyStates[feedId];
         if (!keyState || keyState.keyGenerations.length === 0) {
-          debugLog(`[FeedsStore] retryDecryptFailedMessages: no KeyGenerations available for feed ${feedId.substring(0, 8)}...`);
+          debugLog(`[FeedsStore] retryDecryptFailedMessages: no KeyGenerations available for group feed ${feedId.substring(0, 8)}...`);
           return;
         }
 
         debugLog(`[FeedsStore] retryDecryptFailedMessages: retrying ${failedMessages.length} messages for feed ${feedId.substring(0, 8)}...`);
 
-        // Import aesDecrypt dynamically to avoid circular dependency
-        const { aesDecrypt } = await import('@/lib/crypto/encryption');
+        // Import under a distinct name to avoid shadowing the top-level aesDecrypt import.
+        const { aesDecrypt: decryptWithImportedKey } = await import('@/lib/crypto/encryption');
 
         // Build a map of keyGeneration -> aesKey for O(1) lookup
         const keyMap = new Map<number, string>();
@@ -1863,7 +1927,7 @@ export const useFeedsStore = create<FeedsStore>()(
           if (keyGenToTry !== undefined && keyMap.has(keyGenToTry)) {
             const aesKey = keyMap.get(keyGenToTry)!;
             try {
-              const decryptedContent = await aesDecrypt(msg.contentEncrypted || msg.content, aesKey);
+              const decryptedContent = await decryptWithImportedKey(msg.contentEncrypted || msg.content, aesKey);
               updatedMessages.push({
                 ...msg,
                 content: decryptedContent,
@@ -1882,7 +1946,7 @@ export const useFeedsStore = create<FeedsStore>()(
             let decrypted = false;
             for (const [keyGen, aesKey] of keyMap.entries()) {
               try {
-                const decryptedContent = await aesDecrypt(msg.contentEncrypted || msg.content, aesKey);
+                const decryptedContent = await decryptWithImportedKey(msg.contentEncrypted || msg.content, aesKey);
                 updatedMessages.push({
                   ...msg,
                   content: decryptedContent,
@@ -2279,8 +2343,8 @@ export const useFeedsStore = create<FeedsStore>()(
             const feed = get().getFeed(feedId);
             let newMessages: FeedMessage[] = rawMessages;
 
-            if (feed?.type === 'chat') {
-              // Chat feed: decrypt with feed's AES key
+            if (feed?.type === 'chat' || feed?.type === 'personal') {
+              // Direct feeds: decrypt with feed's AES key
               const feedAesKey = feed.aesKey;
               if (feedAesKey) {
                 newMessages = await Promise.all(
@@ -2304,7 +2368,12 @@ export const useFeedsStore = create<FeedsStore>()(
                   })
                 );
               } else {
-                debugLog(`[FeedsStore] loadOlderMessages: no AES key for chat feed ${feedId.substring(0, 8)}...`);
+                debugLog(`[FeedsStore] loadOlderMessages: no AES key for direct feed ${feedId.substring(0, 8)}...`);
+                newMessages = rawMessages.map((msg) => ({
+                  ...msg,
+                  contentEncrypted: msg.content,
+                  decryptionFailed: true,
+                }));
               }
             } else if (feed?.type === 'group') {
               // Group feed: decrypt with keyGeneration-specific AES key

@@ -291,7 +291,7 @@ describe('useFeedReactions', () => {
 
       await result.current.handleReactionSelect('message-1', 2);
 
-      expect(ensureCommitmentRegisteredMock).toHaveBeenCalledWith('proof-guard-feed-id-2');
+      expect(ensureCommitmentRegisteredMock).not.toHaveBeenCalled();
       expect(reactionsServiceInstance.submitReactionDevMode).toHaveBeenCalled();
       expect(mockReactionsState.revertReaction).not.toHaveBeenCalled();
     });
@@ -321,7 +321,7 @@ describe('useFeedReactions', () => {
       expect(reactionsServiceInstance.submitReactionDevMode).not.toHaveBeenCalled();
     });
 
-    it('fails closed when feed commitment registration is unavailable', async () => {
+    it('continues in dev mode when feed commitment registration is unavailable', async () => {
       process.env.NEXT_PUBLIC_REACTIONS_ALLOW_DEV_MODE = 'true';
       ensureCommitmentRegisteredMock.mockResolvedValue(false);
 
@@ -338,9 +338,9 @@ describe('useFeedReactions', () => {
 
       await result.current.handleReactionSelect('message-1', 2);
 
-      expect(ensureCommitmentRegisteredMock).toHaveBeenCalledWith('proof-guard-feed-id-5');
-      expect(mockReactionsState.revertReaction).toHaveBeenCalledWith('message-1');
-      expect(reactionsServiceInstance.submitReactionDevMode).not.toHaveBeenCalled();
+      expect(ensureCommitmentRegisteredMock).not.toHaveBeenCalled();
+      expect(mockReactionsState.revertReaction).not.toHaveBeenCalled();
+      expect(reactionsServiceInstance.submitReactionDevMode).toHaveBeenCalled();
     });
 
     it('bootstraps reaction credentials from mnemonic when the hook is used before sync initialization', async () => {
@@ -365,7 +365,7 @@ describe('useFeedReactions', () => {
       await result.current.handleReactionSelect('message-1', 2);
 
       expect(initializeReactionsSystemMock).toHaveBeenCalledWith(['alpha', 'beta', 'gamma']);
-      expect(ensureCommitmentRegisteredMock).toHaveBeenCalledWith('proof-guard-feed-id-6');
+      expect(ensureCommitmentRegisteredMock).not.toHaveBeenCalled();
       expect(reactionsServiceInstance.submitReactionDevMode).toHaveBeenCalled();
     });
 
@@ -382,7 +382,7 @@ describe('useFeedReactions', () => {
       await result.current.handleReactionSelect('message-1', 2);
 
       expect(deriveFeedElGamalKey).toHaveBeenCalledWith('proof-guard-aes-key-7==');
-      expect(ensureCommitmentRegisteredMock).toHaveBeenCalledWith('proof-guard-feed-id-7');
+      expect(ensureCommitmentRegisteredMock).not.toHaveBeenCalled();
       expect(reactionsServiceInstance.submitReactionDevMode).toHaveBeenCalled();
     });
 

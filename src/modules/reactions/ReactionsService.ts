@@ -46,6 +46,17 @@ import type { Point } from '@/lib/crypto/reactions/babyjubjub';
  * Reactions Service Class
  */
 class ReactionsServiceClass {
+  private isMissingCircuitArtifactsError(error: unknown): boolean {
+    if (!(error instanceof Error)) {
+      return false;
+    }
+
+    return (
+      error.message.includes('Circuit files not found') ||
+      error.message.includes('Failed to load circuit files')
+    );
+  }
+
   /**
    * Submit a reaction to a message as a blockchain transaction
    *
@@ -441,13 +452,30 @@ class ReactionsServiceClass {
     const store = useReactionsStore.getState();
 
     try {
-      // Initialize circuit manager and ZK prover
-      await circuitManager.initialize();
-      store.setProverReady(true);
+      try {
+        await circuitManager.initialize();
+        store.setProverReady(true);
+      } catch (error) {
+        store.setProverReady(false);
 
-      // Initialize BSGS table (for decryption)
-      await bsgsManager.ensureLoaded();
-      store.setBsgsReady(true);
+        if (this.isMissingCircuitArtifactsError(error)) {
+          console.warn(
+            '[ReactionsService] ZK circuit artifacts are not available in this build; prover remains disabled.'
+          );
+        } else {
+          console.error('[ReactionsService] Failed to initialize prover:', error);
+          store.setError('Failed to initialize reactions prover');
+        }
+      }
+
+      try {
+        await bsgsManager.ensureLoaded();
+        store.setBsgsReady(true);
+      } catch (error) {
+        console.error('[ReactionsService] Failed to initialize BSGS table:', error);
+        store.setError('Failed to initialize reactions decryption');
+        return;
+      }
 
       console.log('[ReactionsService] Initialized');
     } catch (error) {

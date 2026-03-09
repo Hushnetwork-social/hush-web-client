@@ -891,7 +891,11 @@ export class FeedsSyncable implements ISyncable {
                   };
                 } catch (error) {
                   debugError(`[FeedsSyncable] Failed to decrypt message ${msg.id}:`, error);
-                  return msg;
+                  return {
+                    ...msg,
+                    contentEncrypted: msg.content,
+                    decryptionFailed: true,
+                  };
                 }
               })
             );
@@ -900,7 +904,14 @@ export class FeedsSyncable implements ISyncable {
             this.trackMentionsInNewMessages(feedId, decryptedMessages);
           } else {
             debugWarn(`[FeedsSyncable] No AES key for feed ${feedId}, storing encrypted messages`);
-            useFeedsStore.getState().addMessages(feedId, messages);
+            useFeedsStore.getState().addMessages(
+              feedId,
+              messages.map((msg) => ({
+                ...msg,
+                contentEncrypted: msg.content,
+                decryptionFailed: true,
+              }))
+            );
             // Cannot track mentions for encrypted messages
           }
         }

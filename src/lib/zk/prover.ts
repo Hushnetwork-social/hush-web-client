@@ -29,6 +29,13 @@ class ZkProver {
     reject: (error: Error) => void;
   } | null = null;
 
+  private static isMissingCircuitArtifactsMessage(message: string): boolean {
+    return (
+      message.includes('Circuit files not found') ||
+      message.includes('Failed to load circuit files')
+    );
+  }
+
   /**
    * Initialize the prover and load circuit files
    */
@@ -116,7 +123,15 @@ class ZkProver {
 
             case 'error':
               const errorPayload = payload as { message: string };
-              console.error('[ZkProver] Worker error:', errorPayload.message);
+              const isInitArtifactError =
+                !this.isReady && ZkProver.isMissingCircuitArtifactsMessage(errorPayload.message);
+
+              if (isInitArtifactError) {
+                console.warn('[ZkProver] Circuit artifacts unavailable:', errorPayload.message);
+              } else {
+                console.error('[ZkProver] Worker error:', errorPayload.message);
+              }
+
               if (this.pendingProof) {
                 this.pendingProof.reject(new Error(errorPayload.message));
                 this.pendingProof = null;

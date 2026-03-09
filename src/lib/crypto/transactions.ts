@@ -204,7 +204,9 @@ export interface SocialPostAttachmentPayload {
 
 export interface CreateSocialPostPayload {
   PostId: string;
+  ReactionScopeId: string;
   AuthorPublicAddress: string;
+  AuthorCommitment?: string;
   Content: string;
   Audience: SocialPostAudiencePayload;
   Attachments: SocialPostAttachmentPayload[];
@@ -770,7 +772,9 @@ export async function createAddMembersToCustomCircleTransaction(
 
 export async function createCreateSocialPostTransaction(
   postId: string,
+  reactionScopeId: string,
   authorPublicAddress: string,
+  authorCommitmentBase64: string | undefined,
   content: string,
   audienceVisibility: "open" | "private",
   circleFeedIds: string[],
@@ -780,7 +784,9 @@ export async function createCreateSocialPostTransaction(
 ): Promise<{ signedTransaction: string }> {
   const payload: CreateSocialPostPayload = {
     PostId: postId,
+    ReactionScopeId: reactionScopeId,
     AuthorPublicAddress: authorPublicAddress,
+    ...(authorCommitmentBase64 ? { AuthorCommitment: authorCommitmentBase64 } : {}),
     Content: content,
     Audience: {
       Visibility: audienceVisibility === "private" ? 1 : 0,

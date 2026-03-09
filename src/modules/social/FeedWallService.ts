@@ -2,7 +2,9 @@ import { buildApiUrl } from "@/lib/api-config";
 
 export type FeedWallPostContract = {
   postId: string;
+  reactionScopeId?: string;
   authorPublicAddress: string;
+  authorCommitment?: string;
   content: string;
   createdAtBlock: number;
   createdAtUnixMs: number;

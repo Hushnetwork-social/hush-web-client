@@ -396,14 +396,18 @@ export function useFeedReactions({
         }
       }
 
-      const isRegisteredForFeed = await ensureCommitmentRegistered(feedId);
-      if (!isRegisteredForFeed) {
-        revertReaction(messageId);
-        const errorMessage =
-          "Reactions are unavailable because membership registration is not ready for this feed.";
-        setError(errorMessage);
-        debugWarn(`[useFeedReactions] ${errorMessage}`);
-        return;
+      if (!useDevMode) {
+        const isRegisteredForFeed = await ensureCommitmentRegistered(feedId);
+        if (!isRegisteredForFeed) {
+          revertReaction(messageId);
+          const errorMessage =
+            "Reactions are unavailable because membership registration is not ready for this feed.";
+          setError(errorMessage);
+          debugWarn(`[useFeedReactions] ${errorMessage}`);
+          return;
+        }
+      } else {
+        console.log("[E2E Reaction] DEV MODE: skipping membership registration gate");
       }
 
       const message = getMessageById(messageId);
