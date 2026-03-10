@@ -79,7 +79,10 @@ interface UseFeedReactionsResult {
   handleReactionSelect: (messageId: string, emojiIndex: number) => Promise<void>;
 
   /** Fetch tallies for specific message IDs (call when messages become visible) */
-  fetchTalliesForMessages: (messageIds: string[]) => Promise<void>;
+  fetchTalliesForMessages: (
+    messageIds: string[],
+    options?: { forceRefresh?: boolean }
+  ) => Promise<void>;
 
   /** Recover the current user's reaction for specific message IDs */
   hydrateMyReactions: (messageIds: string[]) => Promise<void>;
@@ -255,11 +258,22 @@ export function useFeedReactions({
   }, [feedId]);
 
   // Fetch tallies for specific message IDs (lazy loading for visible messages)
-  const fetchTalliesForMessages = useCallback(async (messageIds: string[]) => {
+  const fetchTalliesForMessages = useCallback(async (
+    messageIds: string[],
+    options?: { forceRefresh?: boolean }
+  ) => {
     if (!feedPrivateKey || messageIds.length === 0) return;
+    const forceRefresh = options?.forceRefresh === true;
+    if (forceRefresh) {
+      debugLog(
+        `[useFeedReactions] Forcing tally refresh for ${messageIds.length} target(s) in scope ${feedId.substring(0, 8)}...`
+      );
+    }
 
     // Filter out message IDs that have already been fetched
-    const newMessageIds = messageIds.filter(id => !fetchedTallyMessageIds.current.has(id));
+    const newMessageIds = forceRefresh
+      ? [...messageIds]
+      : messageIds.filter(id => !fetchedTallyMessageIds.current.has(id));
     if (newMessageIds.length === 0) return;
 
     // Prevent concurrent fetches

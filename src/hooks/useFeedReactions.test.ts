@@ -224,6 +224,57 @@ describe('useFeedReactions', () => {
     });
   });
 
+  describe('Tally Fetching', () => {
+    it('deduplicates repeated tally fetches by default', async () => {
+      mockReactionsState.isProverReady = true;
+      const { result } = renderHook(() =>
+        useFeedReactions({
+          feedId: 'tally-feed-id-1',
+          feedAesKey: 'tally-feed-key-1==',
+        })
+      );
+
+      await waitFor(() => {
+        expect(result.current.isReady).toBe(true);
+      });
+
+      await result.current.fetchTalliesForMessages(['message-1']);
+      await result.current.fetchTalliesForMessages(['message-1']);
+
+      expect(reactionsServiceInstance.getTallies).toHaveBeenCalledTimes(1);
+      expect(reactionsServiceInstance.getTallies).toHaveBeenCalledWith(
+        'tally-feed-id-1',
+        ['message-1'],
+        123456n
+      );
+    });
+
+    it('allows forced tally refreshes for already-fetched messages', async () => {
+      mockReactionsState.isProverReady = true;
+      const { result } = renderHook(() =>
+        useFeedReactions({
+          feedId: 'tally-feed-id-2',
+          feedAesKey: 'tally-feed-key-2==',
+        })
+      );
+
+      await waitFor(() => {
+        expect(result.current.isReady).toBe(true);
+      });
+
+      await result.current.fetchTalliesForMessages(['message-1']);
+      await result.current.fetchTalliesForMessages(['message-1'], { forceRefresh: true });
+
+      expect(reactionsServiceInstance.getTallies).toHaveBeenCalledTimes(2);
+      expect(reactionsServiceInstance.getTallies).toHaveBeenNthCalledWith(
+        2,
+        'tally-feed-id-2',
+        ['message-1'],
+        123456n
+      );
+    });
+  });
+
   describe('My Reaction', () => {
     it('should return null for message with no reaction', () => {
       const { result } = renderHook(() =>

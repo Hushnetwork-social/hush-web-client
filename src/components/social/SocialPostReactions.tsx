@@ -48,6 +48,7 @@ export function SocialPostReactions({
 }: SocialPostReactionsProps) {
   const [showPicker, setShowPicker] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
+  const hasHydratedMyReactionRef = useRef(false);
   const credentials = useAppStore((s) => s.credentials);
   const reactionScope = reactionScopeId ?? postId;
   const membershipFeedId = visibility === "private"
@@ -74,11 +75,36 @@ export function SocialPostReactions({
 
   useEffect(() => {
     const messageIds = [postId];
-    void fetchTalliesForMessages(messageIds);
-    if (credentials?.mnemonic) {
-      void hydrateMyReactions(messageIds);
+
+    const refreshReactions = async () => {
+      await fetchTalliesForMessages(messageIds, { forceRefresh: true });
+    };
+
+    void refreshReactions();
+
+    const intervalId = window.setInterval(() => {
+      void refreshReactions();
+    }, 3000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [fetchTalliesForMessages, postId]);
+
+  useEffect(() => {
+    const messageIds = [postId];
+
+    if (!credentials?.mnemonic || hasHydratedMyReactionRef.current) {
+      return;
     }
-  }, [credentials?.mnemonic, fetchTalliesForMessages, hydrateMyReactions, postId]);
+
+    hasHydratedMyReactionRef.current = true;
+    void hydrateMyReactions(messageIds);
+  }, [credentials?.mnemonic, hydrateMyReactions, postId]);
+
+  useEffect(() => {
+    hasHydratedMyReactionRef.current = false;
+  }, [postId, credentials?.signingPublicKey]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {

@@ -456,7 +456,7 @@ class ReactionsServiceClass {
     try {
       try {
         await circuitManager.initialize();
-        store.setProverReady(true);
+        store.setProverReady(circuitManager.isProverReady());
       } catch (error) {
         store.setProverReady(false);
 
