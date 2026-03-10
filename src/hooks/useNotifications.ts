@@ -16,6 +16,7 @@ import { aesDecrypt } from '@/lib/crypto/encryption';
 import { detectPlatform } from '@/lib/platform';
 import { showNotification as showPlatformNotification } from '@/lib/notifications';
 import { onMemberJoin, onVisibilityChange } from '@/lib/events';
+import { onSyncRecoveredMessage } from '@/lib/events/syncRecoveredMessageEvents';
 import type { FeedEventResponse } from '@/lib/grpc/grpc-web-helper';
 import { debugLog, debugError } from '@/lib/debug-logger';
 import { parseMentions, trackMention, getMentionDisplayText } from '@/lib/mentions';
@@ -81,9 +82,17 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
   // Add a toast notification (with deduplication)
   const addToast = useCallback((toast: NotificationToast) => {
     setToasts((prev) => {
+      if (prev.some((t) => t.id === toast.id)) {
+        return prev;
+      }
+
       // Prevent duplicate toasts for the same feed within a short time window
       const isDuplicate = prev.some(
-        (t) => t.feedId === toast.feedId && Math.abs(t.timestamp - toast.timestamp) < 1000
+        (t) =>
+          t.feedId === toast.feedId &&
+          t.senderName === toast.senderName &&
+          t.messagePreview === toast.messagePreview &&
+          Math.abs(t.timestamp - toast.timestamp) < 60000
       );
       if (isDuplicate) return prev;
       return [...prev, toast];
@@ -703,6 +712,41 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
           addToast(toast);
         }
       }
+    });
+
+    return unsubscribe;
+  }, [isAuthenticated, addToast]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const unsubscribe = onSyncRecoveredMessage((event) => {
+      const currentSelectedFeedId = selectedFeedIdRef.current;
+      const currentUserId = userIdRef.current;
+
+      if (event.feedId === currentSelectedFeedId) {
+        return;
+      }
+
+      if (currentUserId && event.senderPublicKey === currentUserId) {
+        return;
+      }
+
+      const displayPreview = getMentionDisplayText(event.messagePreview);
+      const mentions = parseMentions(event.messagePreview);
+      const isMention = currentUserId
+        ? mentions.some((m) => m.identityId === currentUserId)
+        : false;
+
+      addToast({
+        id: `sync-recovered-${event.messageId}`,
+        feedId: event.feedId,
+        senderName: event.senderName || 'Unknown',
+        messagePreview: displayPreview,
+        timestamp: event.timestamp,
+        feedName: event.feedName,
+        isMention,
+      });
     });
 
     return unsubscribe;

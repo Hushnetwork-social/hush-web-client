@@ -5,6 +5,7 @@ import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { buildApiUrl } from "@/lib/api-config";
 import { ContentCarousel } from "@/components/chat/ContentCarousel";
+import { SocialPostReactions } from "@/components/social/SocialPostReactions";
 
 type AccessState = "allowed" | "guest_denied" | "unauthorized_denied" | "not_found";
 
@@ -407,26 +408,15 @@ export default function SocialPostPermalinkPage() {
             </span>
           </div>
 
-          <div className="mt-2 flex flex-wrap items-center gap-2" data-testid="social-permalink-reactions">
-            {["👍", "❤️", "😂", "😮", "😢", "😡"].map((emoji) => (
-              <button
-                key={emoji}
-                type="button"
-                className="inline-flex items-center gap-1 rounded-full border border-hush-bg-hover px-2 py-1 text-[11px] text-hush-text-accent hover:bg-hush-bg-hover"
-                data-testid={`social-permalink-reaction-${emoji}`}
-              >
-                <span>{emoji}</span>
-                <span>0</span>
-              </button>
-            ))}
-            <button
-              type="button"
-              className="inline-flex items-center gap-1 rounded-full border border-hush-purple/40 px-2 py-1 text-[11px] text-hush-purple hover:bg-hush-purple/10"
-              data-testid="social-permalink-react"
-            >
-              Add
-            </button>
-          </div>
+          <SocialPostReactions
+            postId={permalink.postId ?? routePostId}
+            reactionScopeId={permalink.reactionScopeId}
+            visibility={permalink.circleFeedIds.length > 0 ? "private" : "open"}
+            circleFeedIds={permalink.circleFeedIds}
+            authorCommitment={permalink.authorCommitment}
+            canInteract={permalink.canInteract}
+            testIdPrefix="social-permalink-reactions"
+          />
 
           <p className="mt-3 text-sm font-semibold text-hush-text-primary" data-testid="social-permalink-replies-title">
             Replies (0)

@@ -40,6 +40,7 @@ class ReactionsSyncableClass implements ISyncable {
   private registeredFeeds: Set<string> = new Set();
 
   async syncTask(): Promise<void> {
+    const useDevMode = process.env.NEXT_PUBLIC_REACTIONS_ALLOW_DEV_MODE === 'true';
     const feedsStore = useFeedsStore.getState();
     const appStore = useAppStore.getState();
 
@@ -78,6 +79,11 @@ class ReactionsSyncableClass implements ISyncable {
 
     // Skip if still initializing or no commitment yet
     if (this.isInitializing || !isReactionsInitialized()) {
+      return;
+    }
+
+    if (useDevMode) {
+      debugLog('[ReactionsSyncable] Dev mode enabled - skipping background commitment registration');
       return;
     }
 

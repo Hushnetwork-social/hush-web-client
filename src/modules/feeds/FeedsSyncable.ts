@@ -41,6 +41,7 @@ import { useBlockchainStore } from '../blockchain/useBlockchainStore';
 import { useReactionsStore } from '../reactions/useReactionsStore';
 import { syncGroupMembers, syncKeyGenerations, syncGroupFeedInfo, type PreviousGroupSettings } from '@/lib/sync/group-sync';
 import { emitMemberJoin, emitSettingsChange, type SettingsChange } from '@/lib/events';
+import { emitSyncRecoveredMessage } from '@/lib/events/syncRecoveredMessageEvents';
 import { parseMentions, trackMention } from '@/lib/mentions';
 import type { Feed, FeedMessage, SettingsChangeRecord } from '@/types';
 import { debugLog, debugWarn, debugError } from '@/lib/debug-logger';
@@ -512,11 +513,16 @@ export class FeedsSyncable implements ISyncable {
       // Detect chat feeds with BlockIndex changes (participant may have updated their name)
       const feedsWithChangedBlockIndex = this.detectBlockIndexChanges(currentFeeds, serverFeeds);
 
-      // Detect feeds that have new messages (blockIndex increased) and mark them as needing sync
-      // NOTE: This runs BEFORE we update previousFeedBlockIndices, so the comparison is correct
+      // Add feeds first so newly discovered non-active feeds exist in the store before
+      // we mark them as needing sync. Otherwise the needsSync flag is dropped for brand
+      // new feeds and their messages are never fetched on this cycle.
+      useFeedsStore.getState().addFeeds(serverFeeds);
+
+      // Detect feeds that have new messages (blockIndex increased) and mark them as needing sync.
+      // The comparison still uses the pre-sync snapshot, but the mark must happen after addFeeds
+      // so new feeds can actually receive the needsSync flag.
       this.detectAndMarkFeedsNeedingSync(currentFeeds, serverFeeds);
 
-      useFeedsStore.getState().addFeeds(serverFeeds);
       useFeedsStore.getState().setSyncMetadata({ lastFeedBlockIndex: maxBlockIndex });
 
       // NOTE: previousFeedBlockIndices is updated AFTER syncActiveFeedMessages runs
@@ -1497,6 +1503,7 @@ export class FeedsSyncable implements ISyncable {
         useFeedsStore.getState().addMessages(feed.id, decryptedMessages);
         // Track mentions for non-active feeds
         this.trackMentionsInNewMessages(feed.id, decryptedMessages);
+        this.emitRecoveredNotificationForLatestMessage(feed, decryptedMessages);
       } else {
         // Non-group feeds: Use the single AES key
         const feedAesKey = feed.aesKey;
@@ -1519,6 +1526,7 @@ export class FeedsSyncable implements ISyncable {
           useFeedsStore.getState().addMessages(feed.id, decryptedMessages);
           // Track mentions for non-active feeds
           this.trackMentionsInNewMessages(feed.id, decryptedMessages);
+          this.emitRecoveredNotificationForLatestMessage(feed, decryptedMessages);
         } else {
           debugWarn(`[FeedsSyncable] No AES key for feed ${feed.id}, storing encrypted messages`);
           useFeedsStore.getState().addMessages(feed.id, feedMessages);
@@ -1635,6 +1643,36 @@ export class FeedsSyncable implements ISyncable {
     if (mentionsTracked > 0) {
       debugLog(`[FeedsSyncable] Tracked ${mentionsTracked} mention(s) in ${unreadCount} unread message(s) for feed ${feedId.substring(0, 8)}...`);
     }
+  }
+
+  private emitRecoveredNotificationForLatestMessage(feed: Feed, messages: FeedMessage[]): void {
+    const selectedFeedId = useAppStore.getState().selectedFeedId;
+    const credentials = useAppStore.getState().credentials;
+    const currentUserPublicKey = credentials?.signingPublicKey;
+
+    if (feed.id === selectedFeedId) {
+      return;
+    }
+
+    const latest = [...messages]
+      .filter((msg) => !msg.decryptionFailed)
+      .filter((msg) => !currentUserPublicKey || msg.senderPublicKey !== currentUserPublicKey)
+      .sort((a, b) => a.timestamp - b.timestamp)
+      .at(-1);
+
+    if (!latest) {
+      return;
+    }
+
+    emitSyncRecoveredMessage({
+      messageId: latest.id,
+      feedId: feed.id,
+      feedName: feed.type === 'group' || feed.type === 'broadcast' ? feed.name : undefined,
+      senderName: latest.senderName,
+      senderPublicKey: latest.senderPublicKey,
+      messagePreview: latest.content,
+      timestamp: latest.timestamp,
+    });
   }
 
   /**

@@ -71,7 +71,8 @@ class ReactionsServiceClass {
     messageId: string,
     emojiIndex: number,
     feedPublicKey: Point,
-    authorCommitment: bigint
+    authorCommitment: bigint,
+    membershipFeedId: string = feedId
   ): Promise<string> {
     const store = useReactionsStore.getState();
     const credentials = useAppStore.getState().credentials;
@@ -111,7 +112,7 @@ class ReactionsServiceClass {
       const encryptedBackup = encryptEmojiBackup(emojiIndex, backupKey);
 
       // 4. Get membership proof
-      const membershipProof = await membershipProofManager.getProof(feedId, userCommitment);
+      const membershipProof = await membershipProofManager.getProof(membershipFeedId, userCommitment);
 
       // 5. Generate ZK proof
       const circuitInputs: CircuitInputs = {
@@ -180,10 +181,11 @@ class ReactionsServiceClass {
     feedId: string,
     messageId: string,
     feedPublicKey: Point,
-    authorCommitment: bigint
+    authorCommitment: bigint,
+    membershipFeedId: string = feedId
   ): Promise<string> {
     // Emoji index 6 signals removal (zero vector)
-    return this.submitReaction(feedId, messageId, 6, feedPublicKey, authorCommitment);
+    return this.submitReaction(feedId, messageId, 6, feedPublicKey, authorCommitment, membershipFeedId);
   }
 
   /**

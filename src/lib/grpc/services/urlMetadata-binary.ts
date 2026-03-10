@@ -8,6 +8,8 @@
 import { grpcConfig } from '../config';
 import { debugLog } from '@/lib/debug-logger';
 
+const URL_METADATA_GRPC_TIMEOUT_MS = 8000;
+
 // ============= Protobuf Encoding Helpers =============
 
 function encodeVarint(value: number): number[] {
@@ -338,6 +340,8 @@ async function grpcCallBrowser(
 ): Promise<Uint8Array> {
   const url = `${grpcConfig.serverUrl}/${serviceName}/${methodName}`;
   const frame = createGrpcFrame(requestBytes);
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), URL_METADATA_GRPC_TIMEOUT_MS);
 
   debugLog(`[UrlMetadataBinary] Calling ${serviceName}/${methodName}`);
 
@@ -349,6 +353,7 @@ async function grpcCallBrowser(
         Accept: 'application/grpc-web+proto, application/grpc-web',
         'X-Grpc-Web': '1',
       },
+      signal: controller.signal,
       body: frame.buffer.slice(frame.byteOffset, frame.byteOffset + frame.byteLength) as ArrayBuffer,
     });
 
@@ -361,8 +366,15 @@ async function grpcCallBrowser(
     const buffer = await response.arrayBuffer();
     return new Uint8Array(buffer);
   } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      const timeoutError = new Error(`URL metadata request timed out after ${URL_METADATA_GRPC_TIMEOUT_MS}ms`);
+      debugLog(`[UrlMetadataBinary] Call timed out`, timeoutError);
+      throw timeoutError;
+    }
     debugLog(`[UrlMetadataBinary] Call error:`, error);
     throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
   }
 }
 

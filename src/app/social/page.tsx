@@ -16,6 +16,7 @@ import { createSocialPost } from "@/modules/social/SocialService";
 import { getSocialFeedWall } from "@/modules/social/FeedWallService";
 import { computeSha256 } from "@/lib/attachments/attachmentHash";
 import { ContentCarousel } from "@/components/chat/ContentCarousel";
+import { SocialPostReactions } from "@/components/social/SocialPostReactions";
 import { SocialPostComposerCard } from "./components/SocialPostComposerCard";
 import { usePostPermalink } from "./hooks/usePostPermalink";
 
@@ -48,7 +49,9 @@ type ReplyItem = {
 
 type PostItem = {
   id: string;
+  reactionScopeId?: string;
   authorPublicAddress: string;
+  authorCommitment?: string;
   author: string;
   time: string;
   createdAtBlock: number;
@@ -964,7 +967,9 @@ export default function SocialPage() {
 
           return {
             id: post.postId,
+            reactionScopeId: post.reactionScopeId,
             authorPublicAddress,
+            authorCommitment: post.authorCommitment,
             author: isOwnPost
               ? ownAuthorLabel
               : resolvedAuthorName,
@@ -1651,28 +1656,17 @@ export default function SocialPage() {
 
             <div
               className="mt-2 flex flex-wrap items-center gap-2"
-              data-testid={`post-reaction-strip-${post.id}`}
               onClick={(event) => event.stopPropagation()}
             >
-              {Object.entries(post.reactions).map(([emoji, count]) => (
-                <button
-                  key={emoji}
-                  type="button"
-                  className="inline-flex items-center gap-1 rounded-full border border-hush-bg-hover px-2 py-1 text-[11px] text-hush-text-accent hover:bg-hush-bg-hover"
-                  data-testid={`post-reaction-${post.id}-${emoji}`}
-                >
-                  <span>{emoji}</span>
-                  <span>{count}</span>
-                </button>
-              ))}
-              <button
-                type="button"
-                className="inline-flex items-center gap-1 rounded-full border border-hush-purple/40 px-2 py-1 text-[11px] text-hush-purple hover:bg-hush-purple/10"
-                data-testid={`post-reaction-add-${post.id}`}
-              >
-                <SmilePlus className="w-3 h-3" />
-                Add
-              </button>
+              <SocialPostReactions
+                postId={post.id}
+                reactionScopeId={post.reactionScopeId}
+                visibility={post.visibility}
+                circleFeedIds={post.circleFeedIds}
+                authorCommitment={post.authorCommitment}
+                canInteract={true}
+                testIdPrefix={`post-reaction-strip-${post.id}`}
+              />
             </div>
             {post.replyCount > 0 && (
               <div
@@ -2102,26 +2096,15 @@ export default function SocialPage() {
                 ))}
               </div>
             </div>
-            <div className="mt-3 flex flex-wrap items-center gap-2" data-testid={`post-detail-reaction-strip-${activePost.id}`}>
-              {Object.entries(activePost.reactions).map(([emoji, count]) => (
-                <button
-                  key={emoji}
-                  type="button"
-                  className="inline-flex items-center gap-1 rounded-full border border-hush-bg-hover px-2 py-1 text-[11px] text-hush-text-accent hover:bg-hush-bg-hover"
-                >
-                  <span>{emoji}</span>
-                  <span>{count}</span>
-                </button>
-              ))}
-              <button
-                type="button"
-                className="inline-flex items-center gap-1 rounded-full border border-hush-purple/40 px-2 py-1 text-[11px] text-hush-purple hover:bg-hush-purple/10"
-                data-testid={`post-detail-reaction-add-${activePost.id}`}
-              >
-                <SmilePlus className="w-3 h-3" />
-                Add
-              </button>
-            </div>
+            <SocialPostReactions
+              postId={activePost.id}
+              reactionScopeId={activePost.reactionScopeId}
+              visibility={activePost.visibility}
+              circleFeedIds={activePost.circleFeedIds}
+              authorCommitment={activePost.authorCommitment}
+              canInteract={true}
+              testIdPrefix={`post-detail-reaction-strip-${activePost.id}`}
+            />
 
             {isTopComposerOpen && (
               <div className="mt-3 rounded-lg border border-hush-bg-hover p-3" data-testid="post-detail-composer-top">

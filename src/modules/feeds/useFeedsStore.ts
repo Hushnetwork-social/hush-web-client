@@ -1437,7 +1437,9 @@ export const useFeedsStore = create<FeedsStore>()(
         set((state) => ({
           feeds: state.feeds.map((f) => ({
             ...f,
-            unreadCount: counts[f.id] ?? f.unreadCount ?? 0,
+            // GetUnreadCounts returns only feeds that currently have unread entries.
+            // If a feed is absent from the snapshot, it has zero unread messages.
+            unreadCount: counts[f.id] ?? 0,
           })),
         }));
         // Note: syncUnreadCounts is a bulk fallback path; mention clearing is handled

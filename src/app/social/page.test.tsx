@@ -137,6 +137,14 @@ vi.mock('@/modules/social/SocialService', () => ({
   createSocialPost: (...args: unknown[]) => createSocialPostMock(...args),
 }));
 
+vi.mock('@/components/social/SocialPostReactions', () => ({
+  SocialPostReactions: ({ testIdPrefix }: { testIdPrefix: string }) => (
+    <div data-testid={testIdPrefix}>
+      <button data-testid={`${testIdPrefix}-add`}>Add</button>
+    </div>
+  ),
+}));
+
 vi.mock('@/lib/attachments/attachmentHash', () => ({
   computeSha256: (...args: unknown[]) => computeSha256Mock(...args),
 }));
@@ -276,8 +284,7 @@ describe('SocialPage', () => {
     expect(screen.getByTestId('post-action-reply-post-1')).toHaveTextContent('Reply (0)');
     expect(screen.getByTestId('post-action-link-post-1')).toHaveTextContent('Get Link');
     expect(screen.getByTestId('post-reaction-strip-post-1')).toBeInTheDocument();
-    expect(screen.getByTestId('post-reaction-post-1-👍')).toHaveTextContent('0');
-    expect(screen.getByTestId('post-reaction-add-post-1')).toHaveTextContent('Add');
+    expect(screen.getByTestId('post-reaction-strip-post-1-add')).toHaveTextContent('Add');
     expect(screen.queryByTestId('post-replies-post-1')).not.toBeInTheDocument();
   });
 

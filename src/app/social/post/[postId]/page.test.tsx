@@ -12,6 +12,14 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
+vi.mock("@/components/social/SocialPostReactions", () => ({
+  SocialPostReactions: ({ testIdPrefix }: { testIdPrefix: string }) => (
+    <div data-testid={testIdPrefix}>
+      <button data-testid={`${testIdPrefix}-add`}>Add</button>
+    </div>
+  ),
+}));
+
 describe("SocialPostPermalinkPage", () => {
   beforeEach(() => {
     accessParam = null;
@@ -61,7 +69,8 @@ describe("SocialPostPermalinkPage", () => {
     expect(await screen.findByTestId("social-permalink-public")).toBeInTheDocument();
     expect(await screen.findByTestId("social-permalink-author-name")).toHaveTextContent("Owner");
     expect(await screen.findByTestId("social-permalink-content")).toHaveTextContent("Hello public world");
-    expect(screen.getByTestId("social-permalink-react")).toBeInTheDocument();
+    expect(screen.getByTestId("social-permalink-reactions")).toBeInTheDocument();
+    expect(screen.getByTestId("social-permalink-reactions-add")).toBeInTheDocument();
     expect(screen.getByTestId("social-permalink-comment")).toBeInTheDocument();
     expect(screen.getByTestId("social-permalink-link")).toBeInTheDocument();
     expect(screen.getByTestId("social-permalink-replies-title")).toHaveTextContent("Replies (0)");

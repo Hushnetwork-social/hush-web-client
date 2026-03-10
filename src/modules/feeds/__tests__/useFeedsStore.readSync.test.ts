@@ -472,6 +472,22 @@ describe('FEAT-063: Cross-Device Read Sync', () => {
       expect(feeds.find((f) => f.id === 'feed-1')?.unreadCount).toBe(1);
       expect(feeds.find((f) => f.id === 'feed-2')?.unreadCount).toBe(3);
     });
+
+    it('should clear unread count when a feed is missing from the server snapshot', () => {
+      // Arrange: local state still shows unread, but Redis no longer has a key for feed-1
+      useFeedsStore.getState().setFeeds([
+        createTestFeed({ id: 'feed-1', unreadCount: 2, lastReadBlockIndex: 0 }),
+        createTestFeed({ id: 'feed-2', unreadCount: 4, lastReadBlockIndex: 0 }),
+      ]);
+
+      // Act: server snapshot contains only feed-2
+      useFeedsStore.getState().syncUnreadCounts({ 'feed-2': 1 });
+
+      // Assert: missing feed-1 is cleared to zero, feed-2 updates to latest count
+      const feeds = useFeedsStore.getState().feeds;
+      expect(feeds.find((f) => f.id === 'feed-1')?.unreadCount).toBe(0);
+      expect(feeds.find((f) => f.id === 'feed-2')?.unreadCount).toBe(1);
+    });
   });
 
   describe('Pending messages edge case', () => {

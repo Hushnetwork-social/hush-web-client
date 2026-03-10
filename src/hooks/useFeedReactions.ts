@@ -18,6 +18,7 @@ import {
 } from "@/modules/reactions/initializeReactions";
 import {
   deriveFeedElGamalKey,
+  deriveDeterministicReactionScopeKey,
   scalarMul,
   getGenerator,
   type Point,
@@ -50,6 +51,15 @@ interface UseFeedReactionsOptions {
 
   /** Feed's decrypted AES key (base64) */
   feedAesKey?: string;
+
+  /** Public reaction scope for open targets that do not have an AES-backed feed key */
+  publicReactionKeyScopeId?: string;
+
+  /** Feed scope used for membership proof registration, when different from the reaction scope */
+  membershipFeedId?: string;
+
+  /** Optional resolver for author commitments when the target is not a feed message */
+  resolveAuthorCommitment?: (messageId: string) => string | undefined;
 }
 
 interface UseFeedReactionsResult {
@@ -71,6 +81,9 @@ interface UseFeedReactionsResult {
   /** Fetch tallies for specific message IDs (call when messages become visible) */
   fetchTalliesForMessages: (messageIds: string[]) => Promise<void>;
 
+  /** Recover the current user's reaction for specific message IDs */
+  hydrateMyReactions: (messageIds: string[]) => Promise<void>;
+
   /** Current error, if any */
   error: string | null;
 }
@@ -81,6 +94,9 @@ interface UseFeedReactionsResult {
 export function useFeedReactions({
   feedId,
   feedAesKey,
+  publicReactionKeyScopeId,
+  membershipFeedId,
+  resolveAuthorCommitment,
 }: UseFeedReactionsOptions): UseFeedReactionsResult {
   const [feedPublicKey, setFeedPublicKey] = useState<Point | null>(null);
   const [feedPrivateKey, setFeedPrivateKey] = useState<bigint | null>(null);
@@ -112,24 +128,29 @@ export function useFeedReactions({
 
   // Derive feed ElGamal keys from AES key
   useEffect(() => {
-    console.log(`[E2E Reaction] useFeedReactions useEffect: feedId=${feedId.substring(0, 8)}..., feedAesKey=${feedAesKey?.substring(0, 16) ?? 'NOT SET'}..., isDerivingKey=${isDerivingKey}, feedPublicKey=${!!feedPublicKey}`);
+    console.log(`[E2E Reaction] useFeedReactions useEffect: feedId=${feedId.substring(0, 8)}..., feedAesKey=${feedAesKey?.substring(0, 16) ?? 'NOT SET'}..., publicReactionKeyScopeId=${publicReactionKeyScopeId?.substring(0, 8) ?? 'NOT SET'}..., isDerivingKey=${isDerivingKey}, feedPublicKey=${!!feedPublicKey}`);
 
-    // Skip if no AES key or currently deriving
-    if (!feedAesKey || isDerivingKey) {
-      console.log(`[E2E Reaction]   SKIPPING: !feedAesKey=${!feedAesKey}, isDerivingKey=${isDerivingKey}`);
+    const derivationInput = feedAesKey ?? publicReactionKeyScopeId;
+
+    // Skip if no derivation input or currently deriving
+    if (!derivationInput || isDerivingKey) {
+      console.log(`[E2E Reaction]   SKIPPING: !derivationInput=${!derivationInput}, isDerivingKey=${isDerivingKey}`);
       return;
     }
 
     // If AES key changed (key rotation), clear the old derived keys and re-derive
-    if (derivedFromAesKeyRef.current !== null && derivedFromAesKeyRef.current !== feedAesKey) {
-      const oldAesKey = derivedFromAesKeyRef.current;
+    if (derivedFromAesKeyRef.current !== null && derivedFromAesKeyRef.current !== derivationInput) {
+      const oldDerivationInput = derivedFromAesKeyRef.current;
       debugLog(`[useFeedReactions] AES key changed for feed ${feedId.substring(0, 8)}... (key rotation detected)`);
-      debugLog(`[useFeedReactions]   Previous AES key: ${oldAesKey.substring(0, 16)}...`);
-      debugLog(`[useFeedReactions]   New AES key: ${feedAesKey.substring(0, 16)}...`);
+      debugLog(`[useFeedReactions]   Previous derivation input: ${oldDerivationInput.substring(0, 16)}...`);
+      debugLog(`[useFeedReactions]   New derivation input: ${derivationInput.substring(0, 16)}...`);
       debugLog(`[useFeedReactions]   Re-deriving ElGamal keys...`);
-      // Invalidate any cached derivation promise for the old key (before clearing refs)
-      const oldDerivationKey = `${feedId}:${oldAesKey.substring(0, 16)}`;
-      derivationPromises.delete(oldDerivationKey);
+      // Invalidate any cached derivation promises for this feed before clearing refs.
+      for (const key of derivationPromises.keys()) {
+        if (key.startsWith(`${feedId}:`)) {
+          derivationPromises.delete(key);
+        }
+      }
       // Now clear local state
       setFeedPublicKey(null);
       setFeedPrivateKey(null);
@@ -138,7 +159,7 @@ export function useFeedReactions({
     }
 
     // Skip if already have public key derived from current AES key
-    if (feedPublicKey && derivedFromAesKeyRef.current === feedAesKey) {
+    if (feedPublicKey && derivedFromAesKeyRef.current === derivationInput) {
       console.log(`[E2E Reaction]   SKIPPING: Already have public key from current AES key`);
       return;
     }
@@ -146,7 +167,9 @@ export function useFeedReactions({
     // Key derivation with Promise-based deduplication for React Strict Mode
     // When a second instance mounts while derivation is in progress, it WAITS for
     // the existing Promise instead of skipping (which would leave it without keys)
-    const derivationKey = `${feedId}:${feedAesKey.substring(0, 16)}`;
+    const derivationKey = feedAesKey
+      ? `${feedId}:aes:${feedAesKey.substring(0, 16)}`
+      : `${feedId}:scope:${publicReactionKeyScopeId}`;
 
     // Skip if this instance already started derivation for this key
     if (keyDerivationStartedRef.current === derivationKey) {
@@ -166,7 +189,7 @@ export function useFeedReactions({
         feedPublicKeyRef.current = result.publicKey;
         setFeedPublicKey(result.publicKey);
         setFeedPrivateKey(result.privateKey);
-        derivedFromAesKeyRef.current = feedAesKey;
+        derivedFromAesKeyRef.current = derivationInput;
       }).catch((err) => {
         console.log(`[E2E Reaction]   OTHER INSTANCE FAILED: ${err}`);
         keyDerivationStartedRef.current = null; // Allow retry
@@ -182,16 +205,23 @@ export function useFeedReactions({
     const derivationPromise = (async (): Promise<DerivedKeyResult> => {
       setIsDerivingKey(true);
       try {
-        console.log(`[E2E Reaction] useFeedReactions: Deriving ElGamal key for feed ${feedId.substring(0, 8)}... from AES key ${feedAesKey.substring(0, 16)}...`);
-        debugLog(`[useFeedReactions] Deriving ElGamal key for feed ${feedId.substring(0, 8)}... from AES key ${feedAesKey.substring(0, 16)}...`);
-        const privateKey = await deriveFeedElGamalKey(feedAesKey);
+        let privateKey: bigint;
+        if (feedAesKey) {
+          console.log(`[E2E Reaction] useFeedReactions: Deriving ElGamal key for feed ${feedId.substring(0, 8)}... from AES key ${feedAesKey.substring(0, 16)}...`);
+          debugLog(`[useFeedReactions] Deriving ElGamal key for feed ${feedId.substring(0, 8)}... from AES key ${feedAesKey.substring(0, 16)}...`);
+          privateKey = await deriveFeedElGamalKey(feedAesKey);
+        } else {
+          console.log(`[E2E Reaction] useFeedReactions: Deriving deterministic public reaction key for scope ${publicReactionKeyScopeId?.substring(0, 8)}...`);
+          debugLog(`[useFeedReactions] Deriving deterministic public reaction key for scope ${publicReactionKeyScopeId?.substring(0, 8)}...`);
+          privateKey = await deriveDeterministicReactionScopeKey(publicReactionKeyScopeId!);
+        }
         const publicKey = scalarMul(getGenerator(), privateKey);
 
         // Update ref IMMEDIATELY so callbacks can see it right away
         feedPublicKeyRef.current = publicKey;
         setFeedPublicKey(publicKey);
         setFeedPrivateKey(privateKey);
-        derivedFromAesKeyRef.current = feedAesKey;
+        derivedFromAesKeyRef.current = derivationInput;
 
         console.log(`[E2E Reaction] useFeedReactions: ElGamal key derived successfully for feed ${feedId.substring(0, 8)}...`);
         return { publicKey, privateKey };
@@ -211,7 +241,7 @@ export function useFeedReactions({
     })();
 
     derivationPromises.set(derivationKey, derivationPromise);
-  }, [feedAesKey, feedId, feedPublicKey, isDerivingKey]);
+  }, [feedAesKey, feedId, feedPublicKey, isDerivingKey, publicReactionKeyScopeId]);
 
   // Track which message IDs have already had tallies fetched (to avoid duplicate decryption)
   const fetchedTallyMessageIds = useRef<Set<string>>(new Set());
@@ -254,6 +284,35 @@ export function useFeedReactions({
       activeTallyFetches.delete(feedId);
     }
   }, [feedId, feedPrivateKey]);
+
+  const hydratedMyReactionMessageIds = useRef<Set<string>>(new Set());
+
+  const hydrateMyReactions = useCallback(async (messageIds: string[]) => {
+    if (messageIds.length === 0) {
+      return;
+    }
+
+    const candidateIds = messageIds.filter((id) => !hydratedMyReactionMessageIds.current.has(id));
+    if (candidateIds.length === 0) {
+      return;
+    }
+
+    const mnemonic = credentials?.mnemonic;
+    if (!userSecret && mnemonic && mnemonic.length > 0) {
+      await initializeReactionsSystem(mnemonic);
+    }
+
+    await Promise.all(
+      candidateIds.map(async (messageId) => {
+        try {
+          await reactionsServiceInstance.getMyReaction(feedId, messageId);
+          hydratedMyReactionMessageIds.current.add(messageId);
+        } catch {
+          // Keep the message eligible for retry if recovery fails.
+        }
+      })
+    );
+  }, [credentials, feedId, userSecret]);
 
   // Legacy refreshTallies for after reaction submission (refreshes last 20 messages)
   const refreshTallies = useCallback(async () => {
@@ -397,7 +456,17 @@ export function useFeedReactions({
       }
 
       if (!useDevMode) {
-        const isRegisteredForFeed = await ensureCommitmentRegistered(feedId);
+        const effectiveMembershipFeedId = membershipFeedId ?? feedId;
+        if (!effectiveMembershipFeedId) {
+          revertReaction(messageId);
+          const errorMessage =
+            "Reactions are unavailable because the membership scope is not ready for this target.";
+          setError(errorMessage);
+          debugWarn(`[useFeedReactions] ${errorMessage}`);
+          return;
+        }
+
+        const isRegisteredForFeed = await ensureCommitmentRegistered(effectiveMembershipFeedId);
         if (!isRegisteredForFeed) {
           revertReaction(messageId);
           const errorMessage =
@@ -412,11 +481,12 @@ export function useFeedReactions({
 
       const message = getMessageById(messageId);
       let authorCommitment: bigint | null = null;
+      const resolvedAuthorCommitment = resolveAuthorCommitment?.(messageId);
 
-      if (message?.authorCommitment) {
+      if (message?.authorCommitment || resolvedAuthorCommitment) {
         try {
           const commitmentBytes = Uint8Array.from(
-            atob(message.authorCommitment),
+            atob(message?.authorCommitment ?? resolvedAuthorCommitment ?? ""),
             (char) => char.charCodeAt(0)
           );
           authorCommitment = bytesToBigint(commitmentBytes);
@@ -466,7 +536,8 @@ export function useFeedReactions({
               feedId,
               messageId,
               currentFeedPublicKey,
-              authorCommitment
+              authorCommitment,
+              membershipFeedId ?? feedId
             );
           } else {
             await reactionsServiceInstance.submitReaction(
@@ -474,7 +545,8 @@ export function useFeedReactions({
               messageId,
               emojiIndex,
               currentFeedPublicKey,
-              authorCommitment
+              authorCommitment,
+              membershipFeedId ?? feedId
             );
           }
         }
@@ -505,6 +577,8 @@ export function useFeedReactions({
       revertReaction,
       refreshTallies,
       getMessageById,
+      membershipFeedId,
+      resolveAuthorCommitment,
       credentials,
     ]
   );
@@ -521,6 +595,7 @@ export function useFeedReactions({
     isReady,
     handleReactionSelect,
     fetchTalliesForMessages,
+    hydrateMyReactions,
     error,
   };
 }

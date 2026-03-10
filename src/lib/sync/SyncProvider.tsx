@@ -73,6 +73,7 @@ export function SyncProvider({ children, config }: SyncProviderProps) {
     ...DEFAULT_SYNC_CONFIG,
     ...config,
   };
+  const manualOnlyMode = intervalMs >= 999999;
 
   // Get auth state from app store
   const isAuthenticated = useAppStore((state) => state.isAuthenticated);
@@ -203,6 +204,11 @@ export function SyncProvider({ children, config }: SyncProviderProps) {
   useEffect(() => {
     isMountedRef.current = true;
 
+    if (manualOnlyMode) {
+      debugLog('[SyncProvider] Manual-only sync mode enabled; skipping always-running loop');
+      return;
+    }
+
     const alwaysRunningSyncables = syncablesRef.current.filter((s) => !s.requiresAuth);
 
     if (alwaysRunningSyncables.length === 0) {
@@ -235,7 +241,7 @@ export function SyncProvider({ children, config }: SyncProviderProps) {
         alwaysRunningIntervalRef.current = null;
       }
     };
-  }, [intervalMs, runSyncTasks]);
+  }, [intervalMs, manualOnlyMode, runSyncTasks]);
 
   // =============================================================================
   // Auth-Dependent Loop (requiresAuth = true)
@@ -249,6 +255,11 @@ export function SyncProvider({ children, config }: SyncProviderProps) {
         clearInterval(authDependentIntervalRef.current);
         authDependentIntervalRef.current = null;
       }
+      return;
+    }
+
+    if (manualOnlyMode) {
+      debugLog('[SyncProvider] Manual-only sync mode enabled; skipping auth-dependent loop');
       return;
     }
 
@@ -284,7 +295,7 @@ export function SyncProvider({ children, config }: SyncProviderProps) {
         authDependentIntervalRef.current = null;
       }
     };
-  }, [isAuthenticated, intervalMs, runSyncTasks]);
+  }, [isAuthenticated, intervalMs, manualOnlyMode, runSyncTasks]);
 
   // =============================================================================
   // Cleanup on unmount

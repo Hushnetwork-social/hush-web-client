@@ -219,6 +219,38 @@ describe('useUrlMetadataStore', () => {
       // Error should be recorded
       const error = useUrlMetadataStore.getState().errors.get('https://example.com');
       expect(error).toBe('Network error');
+
+      // Failure metadata should be materialized so the UI does not remain on a skeleton forever
+      const metadata = useUrlMetadataStore.getState().metadata.get('https://example.com');
+      expect(metadata).toEqual({
+        url: 'https://example.com',
+        domain: 'example.com',
+        title: 'example.com',
+        description: 'Network error',
+        imageUrl: null,
+        imageBase64: null,
+        success: false,
+        errorMessage: 'Network error',
+      });
+    });
+
+    it('should materialize failure metadata when the server returns no result for a URL', async () => {
+      vi.mocked(urlMetadataCache.getCachedMetadata).mockReturnValue(null);
+      vi.mocked(urlMetadataService.fetchUrlMetadataBatch).mockResolvedValue(new Map());
+
+      await useUrlMetadataStore.getState().fetchMetadata(['https://example.com']);
+
+      const metadata = useUrlMetadataStore.getState().metadata.get('https://example.com');
+      expect(metadata).toEqual({
+        url: 'https://example.com',
+        domain: 'example.com',
+        title: 'example.com',
+        description: 'No metadata returned',
+        imageUrl: null,
+        imageBase64: null,
+        success: false,
+        errorMessage: 'No metadata returned',
+      });
     });
   });
 

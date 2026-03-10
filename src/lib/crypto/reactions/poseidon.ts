@@ -8,6 +8,7 @@
 import { buildPoseidon, type Poseidon } from 'circomlibjs';
 import { BABYJUBJUB, DOMAIN_SEPARATORS, FEED_KEY_DOMAIN } from './constants';
 import { bytesToBigint } from './babyjubjub';
+import { uuidToBytes } from '@/lib/grpc/grpc-web-helper';
 
 // Field modulus (same as Baby JubJub prime)
 const F = BABYJUBJUB.p;
@@ -188,5 +189,19 @@ export async function deriveFeedElGamalKey(feedAesKey: string): Promise<bigint> 
   const privateKey = mod(bytesToBigint(derivedBytes), BABYJUBJUB.order);
 
   // Ensure the private key is non-zero (extremely unlikely but check anyway)
+  return privateKey === 0n ? 1n : privateKey;
+}
+
+/**
+ * Derive a deterministic ElGamal private key from a public reaction scope ID.
+ *
+ * This matches the server-side open-post path, which hashes the .NET Guid bytes
+ * of the reaction scope and maps the result onto Baby JubJub.
+ */
+export async function deriveDeterministicReactionScopeKey(scopeId: string): Promise<bigint> {
+  const scopeBytes = uuidToBytes(scopeId);
+  const scopeScalar = bytesToBigint(scopeBytes);
+  const hashed = await poseidonHash([scopeScalar]);
+  const privateKey = mod(hashed, BABYJUBJUB.order);
   return privateKey === 0n ? 1n : privateKey;
 }
