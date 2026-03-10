@@ -17,6 +17,7 @@ interface SocialPostReactionsProps {
   authorCommitment?: string;
   canInteract: boolean;
   testIdPrefix: string;
+  onRequireAccount?: () => void;
 }
 
 function resolveReactionFeedAesKey(circleFeedIds: string[]): string | undefined {
@@ -43,6 +44,7 @@ export function SocialPostReactions({
   authorCommitment,
   canInteract,
   testIdPrefix,
+  onRequireAccount,
 }: SocialPostReactionsProps) {
   const [showPicker, setShowPicker] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
@@ -94,6 +96,11 @@ export function SocialPostReactions({
   const pending = isPending(postId);
   const hasInteractiveIdentity = canInteract && !!credentials?.signingPublicKey;
   const canOpenPicker = visibility === "open" || canInteract;
+  const handleGuestInteraction = () => {
+    if (!hasInteractiveIdentity && visibility === "open") {
+      onRequireAccount?.();
+    }
+  };
 
   const visibleChipCount = useMemo(
     () =>
@@ -108,7 +115,13 @@ export function SocialPostReactions({
         counts={counts}
         myReaction={myReaction}
         isPending={pending}
-        onReactionClick={hasInteractiveIdentity ? (emojiIndex) => void handleReactionSelect(postId, emojiIndex) : undefined}
+        onReactionClick={
+          hasInteractiveIdentity
+            ? (emojiIndex) => void handleReactionSelect(postId, emojiIndex)
+            : visibility === "open"
+              ? () => handleGuestInteraction()
+              : undefined
+        }
       />
 
       <div className="relative" ref={pickerRef}>
@@ -116,7 +129,14 @@ export function SocialPostReactions({
           type="button"
           className="inline-flex items-center gap-1 rounded-full border border-hush-purple/40 px-2 py-1 text-[11px] text-hush-purple hover:bg-hush-purple/10 disabled:opacity-60"
           data-testid={`${testIdPrefix}-add`}
-          onClick={() => setShowPicker((current) => !current)}
+          onClick={() => {
+            if (!hasInteractiveIdentity) {
+              handleGuestInteraction();
+              return;
+            }
+
+            setShowPicker((current) => !current);
+          }}
           disabled={!canOpenPicker}
           title={hasInteractiveIdentity ? "Add reaction" : "Sign in to react"}
         >

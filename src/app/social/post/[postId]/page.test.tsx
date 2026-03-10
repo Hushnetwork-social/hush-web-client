@@ -76,6 +76,51 @@ describe("SocialPostPermalinkPage", () => {
     expect(screen.getByTestId("social-permalink-replies-title")).toHaveTextContent("Replies (0)");
   });
 
+  it("opens create-account overlay when guest attempts to reply on a public permalink", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/social/posts/permalink")) {
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            message: "",
+            accessState: "allowed",
+            postId: "post-123",
+            authorPublicAddress: "02abcdef1234567890fedcba1234567890abcdef1234567890fedcba1234567890",
+            content: "Hello public world",
+            canInteract: false,
+            circleFeedIds: [],
+          }),
+        } as Response;
+      }
+
+      if (url.includes("/api/identity/check")) {
+        return {
+          ok: true,
+          json: async () => ({
+            exists: true,
+            identity: {
+              profileName: "Owner",
+            },
+          }),
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        json: async () => ({}),
+      } as Response;
+    }));
+
+    render(<SocialPostPermalinkPage />);
+
+    fireEvent.click(await screen.findByTestId("social-permalink-comment"));
+
+    expect(screen.getByTestId("social-auth-overlay")).toBeInTheDocument();
+    expect(screen.getByTestId("social-auth-overlay-cta")).toBeInTheDocument();
+  });
+
   it("renders guest denial with create-account CTA", () => {
     accessParam = "guest";
     render(<SocialPostPermalinkPage />);

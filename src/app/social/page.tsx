@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import { useSearchParams } from "next/navigation";
 import { AlertCircle, Check, Link2, Loader2, MessageCircle, SmilePlus, Sparkles, X } from "lucide-react";
 import { buildApiUrl } from "@/lib/api-config";
 import { useAppStore } from "@/stores";
@@ -16,6 +15,7 @@ import { createSocialPost } from "@/modules/social/SocialService";
 import { getSocialFeedWall } from "@/modules/social/FeedWallService";
 import { computeSha256 } from "@/lib/attachments/attachmentHash";
 import { ContentCarousel } from "@/components/chat/ContentCarousel";
+import { SocialAuthPromptOverlay } from "@/components/social/SocialAuthPromptOverlay";
 import { SocialPostReactions } from "@/components/social/SocialPostReactions";
 import { SocialPostComposerCard } from "./components/SocialPostComposerCard";
 import { usePostPermalink } from "./hooks/usePostPermalink";
@@ -334,7 +334,13 @@ function logSocialDrag(event: string, payload: Record<string, unknown>): void {
 }
 
 export default function SocialPage() {
-  const searchParams = useSearchParams();
+  const [queryViewState, setQueryViewState] = useState<string | null>(() => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+
+    return new URLSearchParams(window.location.search).get("state");
+  });
   const appContexts = useAppStore((state) => state.appContexts);
   const selectedNav = useAppStore((state) => state.selectedNav);
   const setSelectedNav = useAppStore((state) => state.setSelectedNav);
@@ -375,6 +381,7 @@ export default function SocialPage() {
   const [draftMediaItems, setDraftMediaItems] = useState<DraftMediaItem[]>([]);
   const [newPostMediaError, setNewPostMediaError] = useState<string | null>(null);
   const [feedWallPosts, setFeedWallPosts] = useState<PostItem[]>([]);
+  const [showAuthOverlay, setShowAuthOverlay] = useState(false);
   const authorNamesByAddressRef = useRef<Record<string, string>>({});
   const mediaPreviewUrlsRef = useRef<Set<string>>(new Set());
   const [isFeedWallLoading, setIsFeedWallLoading] = useState(true);
@@ -438,7 +445,16 @@ export default function SocialPage() {
     region.scrollTop = appContexts.social.scrollOffset;
   }, [appContexts.social.scrollOffset]);
 
-  const viewState = useMemo(() => resolveViewState(searchParams.get("state")), [searchParams]);
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const nextState = new URLSearchParams(window.location.search).get("state");
+    setQueryViewState((current) => (current === nextState ? current : nextState));
+  }, []);
+
+  const viewState = useMemo(() => resolveViewState(queryViewState), [queryViewState]);
   const activePost = useMemo(() => feedWallPosts.find((post) => post.id === activePostId) ?? null, [activePostId, feedWallPosts]);
   const followingItems = useMemo<FollowingItem[]>(() => {
     const ownAddress = credentials?.signingPublicKey;
@@ -842,20 +858,26 @@ export default function SocialPage() {
     setUiToasts((current) => current.filter((toast) => toast.id !== toastId));
   };
 
+  const handleGuestInteractiveAttempt = (visibility: PostItem["visibility"]) => {
+    if (visibility !== "open" || credentials?.signingPublicKey) {
+      return false;
+    }
+
+    setShowAuthOverlay(true);
+    return true;
+  };
+
   useEffect(() => {
     let cancelled = false;
 
     const refreshFeedWall = async () => {
-      if (!credentials?.signingPublicKey) {
-        if (!cancelled) {
-          setIsFeedWallLoading(false);
-        }
-        return;
-      }
-
       let result: Awaited<ReturnType<typeof getSocialFeedWall>>;
       try {
-        result = await getSocialFeedWall(credentials.signingPublicKey, true, 100);
+        result = await getSocialFeedWall(
+          credentials?.signingPublicKey ?? null,
+          !!credentials?.signingPublicKey,
+          100
+        );
       } catch {
         if (!cancelled) {
           setIsFeedWallLoading(false);
@@ -870,7 +892,7 @@ export default function SocialPage() {
         return;
       }
 
-      const ownAddress = normalizePublicAddress(credentials.signingPublicKey);
+      const ownAddress = normalizePublicAddress(credentials?.signingPublicKey ?? "");
       const fetchedAt = new Date();
       const cachedTimestamps = readFeedWallTimestampCache();
       const nextTimestampCache: Record<string, number> = { ...cachedTimestamps };
@@ -1628,7 +1650,13 @@ export default function SocialPage() {
                   type="button"
                   className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-hush-text-accent hover:bg-hush-bg-hover"
                   data-testid={`post-action-reply-${post.id}`}
-                  onClick={() => openPostDetail(post.id)}
+                  onClick={() => {
+                    if (handleGuestInteractiveAttempt(post.visibility)) {
+                      return;
+                    }
+
+                    openPostDetail(post.id);
+                  }}
                 >
                   <MessageCircle className="w-3.5 h-3.5" />
                   Reply ({post.replyCount})
@@ -1664,8 +1692,9 @@ export default function SocialPage() {
                 visibility={post.visibility}
                 circleFeedIds={post.circleFeedIds}
                 authorCommitment={post.authorCommitment}
-                canInteract={true}
+                canInteract={!!credentials?.signingPublicKey}
                 testIdPrefix={`post-reaction-strip-${post.id}`}
+                onRequireAccount={() => setShowAuthOverlay(true)}
               />
             </div>
             {post.replyCount > 0 && (
@@ -2032,6 +2061,9 @@ export default function SocialPage() {
       </section>
 
       <SystemToastContainer toasts={uiToasts} onDismiss={removeUiToast} />
+      {showAuthOverlay ? (
+        <SocialAuthPromptOverlay onClose={() => setShowAuthOverlay(false)} />
+      ) : null}
       {renderCreateCircleDialog()}
 
       {activePost && (
@@ -2071,7 +2103,13 @@ export default function SocialPage() {
                 type="button"
                 className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-hush-text-accent hover:bg-hush-bg-hover"
                 data-testid={`post-detail-action-reply-${activePost.id}`}
-                onClick={() => setIsTopComposerOpen(true)}
+                onClick={() => {
+                  if (handleGuestInteractiveAttempt(activePost.visibility)) {
+                    return;
+                  }
+
+                  setIsTopComposerOpen(true);
+                }}
               >
                 <MessageCircle className="w-3.5 h-3.5" />
                 Reply ({overlayReplies.length})
@@ -2102,8 +2140,9 @@ export default function SocialPage() {
               visibility={activePost.visibility}
               circleFeedIds={activePost.circleFeedIds}
               authorCommitment={activePost.authorCommitment}
-              canInteract={true}
+              canInteract={!!credentials?.signingPublicKey}
               testIdPrefix={`post-detail-reaction-strip-${activePost.id}`}
+              onRequireAccount={() => setShowAuthOverlay(true)}
             />
 
             {isTopComposerOpen && (

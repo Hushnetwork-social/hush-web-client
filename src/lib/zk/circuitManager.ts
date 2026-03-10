@@ -18,6 +18,16 @@ export interface CircuitVersionInfo {
   deprecatedVersions: string[];
 }
 
+export interface CircuitArtifactStatus {
+  version: string;
+  proverArtifactsAvailable: boolean;
+  provenance: string;
+}
+
+export interface CircuitStatusResponse extends CircuitVersionInfo {
+  approvedVersions: CircuitArtifactStatus[];
+}
+
 /**
  * Circuit Manager - handles version checking and updates
  */
@@ -25,6 +35,7 @@ class CircuitManager {
   private readonly supportedVersions = new Set<string>(listApprovedCircuitVersions());
   private currentVersion: string = CIRCUIT.version;
   private minimumVersion: string = CIRCUIT.version;
+  private proverArtifactsAvailable = false;
   private isInitialized = false;
 
   /**
@@ -33,32 +44,70 @@ class CircuitManager {
   async initialize(): Promise<void> {
     if (this.isInitialized) return;
 
-    // TODO: Fetch current version from server
-    // const versionInfo = await this.fetchVersionInfo();
-    // this.currentVersion = versionInfo.currentVersion;
-    // this.minimumVersion = versionInfo.minimumVersion;
+    const versionInfo = await this.fetchVersionInfo();
+    this.currentVersion = versionInfo.currentVersion;
+    this.minimumVersion = versionInfo.minimumVersion;
 
     this.assertVersionAllowed(this.currentVersion);
     this.assertVersionAllowed(this.minimumVersion);
 
-    // Initialize the prover with current version
-    await zkProver.initialize(this.currentVersion);
+    const currentStatus = versionInfo.approvedVersions.find((item) => item.version === this.currentVersion);
+    this.proverArtifactsAvailable = currentStatus?.proverArtifactsAvailable ?? false;
+
+    if (this.proverArtifactsAvailable) {
+      await zkProver.initialize(this.currentVersion);
+    }
+
     this.isInitialized = true;
 
-    console.log(`[CircuitManager] Initialized with version ${this.currentVersion}`);
+    console.log(
+      `[CircuitManager] Initialized with version ${this.currentVersion} (proverArtifactsAvailable=${this.proverArtifactsAvailable})`
+    );
   }
 
   /**
    * Fetch version info from server
    */
-  private async fetchVersionInfo(): Promise<CircuitVersionInfo> {
-    // TODO: Implement actual server call
-    // const response = await grpcClient.getCircuitVersion();
-    return {
-      currentVersion: CIRCUIT.version,
-      minimumVersion: CIRCUIT.version,
-      deprecatedVersions: [],
-    };
+  private async fetchVersionInfo(): Promise<CircuitStatusResponse> {
+    try {
+      const response = await fetch('/api/reactions/circuit-status', {
+        method: 'GET',
+        cache: 'no-store',
+      });
+
+      if (!response.ok) {
+        throw new Error(`Circuit status request failed with ${response.status}`);
+      }
+
+      const payload = (await response.json()) as Partial<CircuitStatusResponse>;
+      const approvedVersions = Array.isArray(payload.approvedVersions)
+        ? payload.approvedVersions.filter((item): item is CircuitArtifactStatus =>
+            typeof item?.version === 'string' &&
+            typeof item?.proverArtifactsAvailable === 'boolean' &&
+            typeof item?.provenance === 'string')
+        : [];
+
+      return {
+        currentVersion: typeof payload.currentVersion === 'string' ? payload.currentVersion : CIRCUIT.version,
+        minimumVersion: typeof payload.minimumVersion === 'string' ? payload.minimumVersion : CIRCUIT.version,
+        deprecatedVersions: Array.isArray(payload.deprecatedVersions)
+          ? payload.deprecatedVersions.filter((item): item is string => typeof item === 'string')
+          : [],
+        approvedVersions,
+      };
+    } catch (error) {
+      console.warn('[CircuitManager] Falling back to bundled circuit status:', error);
+      return {
+        currentVersion: CIRCUIT.version,
+        minimumVersion: CIRCUIT.version,
+        deprecatedVersions: [],
+        approvedVersions: listApprovedCircuitVersions().map((version) => ({
+          version,
+          proverArtifactsAvailable: false,
+          provenance: getApprovedCircuitArtifacts(version).provenance,
+        })),
+      };
+    }
   }
 
   /**
@@ -90,6 +139,10 @@ class CircuitManager {
    */
   getMinimumVersion(): string {
     return this.minimumVersion;
+  }
+
+  isProverReady(): boolean {
+    return this.proverArtifactsAvailable;
   }
 
   getArtifactBasePath(version: string = this.currentVersion): string {

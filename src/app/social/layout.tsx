@@ -1,1 +1,1 @@
-export { default } from '../feeds/layout';
+export { default } from "../feeds/layout";

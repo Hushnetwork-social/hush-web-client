@@ -5,6 +5,7 @@ import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { buildApiUrl } from "@/lib/api-config";
 import { ContentCarousel } from "@/components/chat/ContentCarousel";
+import { SocialAuthPromptOverlay } from "@/components/social/SocialAuthPromptOverlay";
 import { SocialPostReactions } from "@/components/social/SocialPostReactions";
 
 type AccessState = "allowed" | "guest_denied" | "unauthorized_denied" | "not_found";
@@ -77,6 +78,7 @@ export default function SocialPostPermalinkPage() {
   const [authorName, setAuthorName] = useState<string>("Owner");
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [activeMediaIndex, setActiveMediaIndex] = useState(0);
+  const [showAuthOverlay, setShowAuthOverlay] = useState(false);
 
   const accessOverride = useMemo(() => resolveAccessOverride(searchParams.get("access")), [searchParams]);
 
@@ -239,7 +241,11 @@ export default function SocialPostPermalinkPage() {
     };
 
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
   }, [permalink]);
 
   if (isLoading) {
@@ -390,6 +396,11 @@ export default function SocialPostPermalinkPage() {
               type="button"
               className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-hush-text-accent hover:bg-hush-bg-hover"
               data-testid="social-permalink-comment"
+              onClick={() => {
+                if (!permalink.canInteract && permalink.circleFeedIds.length === 0) {
+                  setShowAuthOverlay(true);
+                }
+              }}
             >
               Reply (0)
             </button>
@@ -416,6 +427,7 @@ export default function SocialPostPermalinkPage() {
             authorCommitment={permalink.authorCommitment}
             canInteract={permalink.canInteract}
             testIdPrefix="social-permalink-reactions"
+            onRequireAccount={() => setShowAuthOverlay(true)}
           />
 
           <p className="mt-3 text-sm font-semibold text-hush-text-primary" data-testid="social-permalink-replies-title">
@@ -423,6 +435,9 @@ export default function SocialPostPermalinkPage() {
           </p>
         </article>
       </div>
+      {showAuthOverlay ? (
+        <SocialAuthPromptOverlay onClose={() => setShowAuthOverlay(false)} />
+      ) : null}
     </section>
   );
 }

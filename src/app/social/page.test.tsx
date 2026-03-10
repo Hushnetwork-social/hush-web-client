@@ -13,8 +13,18 @@ const clipboardWriteTextMock = vi.fn();
 const getSocialFeedWallMock = vi.fn();
 const createSocialPostMock = vi.fn();
 const computeSha256Mock = vi.fn();
+let mockCredentials: {
+  signingPublicKey?: string;
+  signingPrivateKey?: string;
+  encryptionPublicKey?: string;
+  encryptionPrivateKey?: string;
+} | null = {
+  signingPublicKey: 'me-address',
+  signingPrivateKey: 'private',
+  encryptionPublicKey: 'enc-public',
+  encryptionPrivateKey: 'enc-private',
+};
 let selectedNav = 'feed-wall';
-let stateParam: string | null = null;
 let mockFeeds = [
   {
     id: 'chat-alice',
@@ -54,12 +64,6 @@ let mockMemberRoles: Record<string, string> = {
   'support-group': 'Member',
 };
 
-vi.mock('next/navigation', () => ({
-  useSearchParams: () => ({
-    get: (key: string) => (key === 'state' ? stateParam : null),
-  }),
-}));
-
 vi.mock('@/stores', () => ({
   useAppStore: (
     selector: (state: {
@@ -84,12 +88,7 @@ vi.mock('@/stores', () => ({
   ) =>
     selector({
       selectedNav,
-      credentials: {
-        signingPublicKey: 'me-address',
-        signingPrivateKey: 'private',
-        encryptionPublicKey: 'enc-public',
-        encryptionPrivateKey: 'enc-private',
-      },
+      credentials: mockCredentials,
       innerCircleSync: {
         status: 'idle',
         message: null,
@@ -159,7 +158,12 @@ describe('SocialPage', () => {
 
   beforeEach(() => {
     selectedNav = 'feed-wall';
-    stateParam = null;
+    mockCredentials = {
+      signingPublicKey: 'me-address',
+      signingPrivateKey: 'private',
+      encryptionPublicKey: 'enc-public',
+      encryptionPrivateKey: 'enc-private',
+    };
     setSelectedNavMock.mockReset();
     setAppContextScrollMock.mockReset();
     requestInnerCircleRetryMock.mockReset();
@@ -251,24 +255,25 @@ describe('SocialPage', () => {
       'support-group': 'Member',
     };
     sessionStorage.clear();
+    window.history.replaceState({}, '', '/social');
   });
 
   it('renders loading state', () => {
-    stateParam = 'loading';
+    window.history.replaceState({}, '', '/social?state=loading');
     render(<SocialPage />);
 
     expect(screen.getByTestId('social-loading')).toBeInTheDocument();
   });
 
   it('renders empty state', () => {
-    stateParam = 'empty';
+    window.history.replaceState({}, '', '/social?state=empty');
     render(<SocialPage />);
 
     expect(screen.getByTestId('social-empty')).toBeInTheDocument();
   });
 
   it('renders error state', () => {
-    stateParam = 'error';
+    window.history.replaceState({}, '', '/social?state=error');
     render(<SocialPage />);
 
     expect(screen.getByTestId('social-error')).toBeInTheDocument();
@@ -286,6 +291,25 @@ describe('SocialPage', () => {
     expect(screen.getByTestId('post-reaction-strip-post-1')).toBeInTheDocument();
     expect(screen.getByTestId('post-reaction-strip-post-1-add')).toHaveTextContent('Add');
     expect(screen.queryByTestId('post-replies-post-1')).not.toBeInTheDocument();
+  });
+
+  it('loads public feed wall for guests without an identity', async () => {
+    mockCredentials = null;
+
+    await renderFeedWallAndWaitReady();
+
+    expect(getSocialFeedWallMock).toHaveBeenCalledWith(null, false, 100);
+    expect(screen.getByTestId('post-reaction-strip-post-1')).toBeInTheDocument();
+  });
+
+  it('opens create-account overlay when a guest attempts to reply on a public post', async () => {
+    mockCredentials = null;
+
+    await renderFeedWallAndWaitReady();
+    fireEvent.click(screen.getByTestId('post-action-reply-post-1'));
+
+    expect(screen.getByTestId('social-auth-overlay')).toBeInTheDocument();
+    expect(screen.getByTestId('social-auth-overlay-cta')).toBeInTheDocument();
   });
 
   it('renders following list with user circles', () => {

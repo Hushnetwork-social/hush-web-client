@@ -13,6 +13,28 @@ import { zkProver } from './prover';
 describe('circuitManager', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        currentVersion: CIRCUIT.version,
+        minimumVersion: CIRCUIT.version,
+        deprecatedVersions: [],
+        approvedVersions: [
+          {
+            version: CIRCUIT.version,
+            proverArtifactsAvailable: true,
+            provenance: 'FEAT-087 approved artifact set',
+          },
+        ],
+      }),
+    }));
+
+    Object.assign(circuitManager as unknown as Record<string, unknown>, {
+      currentVersion: CIRCUIT.version,
+      minimumVersion: CIRCUIT.version,
+      proverArtifactsAvailable: false,
+      isInitialized: false,
+    });
   });
 
   it('initializes the prover with the approved FEAT-087 circuit version', async () => {
@@ -37,5 +59,14 @@ describe('circuitManager', () => {
   it('keeps the explicit allowlist narrow for FEAT-087', () => {
     expect(circuitManager.isVersionSupported(CIRCUIT.version)).toBe(true);
     expect(circuitManager.isVersionSupported('omega-v1.0.1')).toBe(false);
+  });
+
+  it('falls back to bundled status when the status route is unavailable', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+
+    await circuitManager.initialize();
+
+    expect(zkProver.initialize).not.toHaveBeenCalled();
+    expect(circuitManager.isProverReady()).toBe(false);
   });
 });

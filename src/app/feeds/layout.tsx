@@ -48,6 +48,7 @@ interface DashboardLayoutProps {
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const router = useRouter();
   const pathname = usePathname();
+  const isSocialRoute = pathname.startsWith("/social");
   const {
     isAuthenticated,
     balance,
@@ -88,14 +89,14 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     // Small delay to allow store rehydration from localStorage
     const timer = setTimeout(() => {
       setIsCheckingAuth(false);
-      if (!isAuthenticated) {
+      if (!isAuthenticated && !isSocialRoute) {
         debugLog('[Dashboard] Not authenticated, redirecting to /auth');
         router.replace("/auth");
       }
     }, 100);
 
     return () => clearTimeout(timer);
-  }, [isAuthenticated, router]);
+  }, [isAuthenticated, isSocialRoute, router]);
 
   // Get user info from store
   const userDisplayName = currentUser?.displayName || "User";
@@ -240,7 +241,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   }, [performLogout]);
 
   // Show loading while checking auth
-  if (isCheckingAuth || !isAuthenticated) {
+  if (isCheckingAuth || (!isAuthenticated && !isSocialRoute)) {
     return (
       <div className="min-h-screen bg-hush-bg-dark flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-hush-purple" />
