@@ -141,10 +141,10 @@ class MembershipProofManagerClass {
       const feedIdBase64 = btoa(String.fromCharCode(...feedIdBytes));
       const commitmentBase64 = btoa(String.fromCharCode(...commitmentBytes));
 
-      console.log(`[MembershipProofManager] Registering commitment for feed ${feedId.substring(0, 8)}...`);
+      console.log('[MembershipProofManager] Registering commitment for feed');
       console.log(`[MembershipProofManager] FeedId base64: ${feedIdBase64.substring(0, 20)}...`);
       console.log(`[MembershipProofManager] Commitment base64: ${commitmentBase64.substring(0, 20)}...`);
-      debugLog(`[MembershipProofManager] Registering commitment for feed ${feedId.substring(0, 8)}...`);
+      debugLog('[MembershipProofManager] Registering commitment for feed');
 
       const response = await membershipServiceBinary.registerCommitment(feedIdBase64, commitmentBase64);
 

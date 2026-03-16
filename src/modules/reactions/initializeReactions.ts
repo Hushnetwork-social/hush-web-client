@@ -85,15 +85,13 @@ export async function initializeReactionsSystem(mnemonic: string[]): Promise<boo
     console.log('[initializeReactions] Deriving user secret from mnemonic...');
     debugLog('[initializeReactions] Deriving user secret...');
     const userSecret = await deriveUserSecretFromMnemonic(mnemonic);
-    console.log('[initializeReactions] User secret derived:', userSecret.toString(16).substring(0, 16) + '...');
     debugLog('[initializeReactions] User secret derived');
 
     // 3. Compute commitment
     console.log('[initializeReactions] Computing Poseidon commitment...');
     debugLog('[initializeReactions] Computing commitment...');
     const userCommitment = await computeCommitment(userSecret);
-    console.log(`[initializeReactions] Commitment computed: ${userCommitment.toString(16).substring(0, 16)}...`);
-    debugLog(`[initializeReactions] Commitment computed: ${userCommitment.toString(16).substring(0, 16)}...`);
+    debugLog('[initializeReactions] Commitment computed');
 
     // 4. Store in reactions store
     const store = useReactionsStore.getState();
@@ -119,11 +117,14 @@ export async function initializeReactionsSystem(mnemonic: string[]): Promise<boo
  * Should be called when user opens a feed.
  * Checks if already registered to avoid duplicate calls.
  */
-export async function ensureCommitmentRegistered(feedId: string): Promise<boolean> {
+export async function ensureCommitmentRegistered(
+  feedId: string,
+  userCommitmentOverride?: bigint
+): Promise<boolean> {
   const store = useReactionsStore.getState();
-  const userCommitment = store.getUserCommitment();
+  const userCommitment = userCommitmentOverride ?? store.getUserCommitment();
 
-  console.log(`[E2E Reaction] ensureCommitmentRegistered: feedId=${feedId.substring(0, 8)}..., hasCommitment=${!!userCommitment}`);
+  console.log(`[E2E Reaction] ensureCommitmentRegistered: hasCommitment=${!!userCommitment}`);
 
   if (!userCommitment) {
     console.log('[E2E Reaction] ensureCommitmentRegistered: EARLY RETURN user commitment not set');
@@ -146,7 +147,7 @@ export async function ensureCommitmentRegistered(feedId: string): Promise<boolea
     console.log(`[E2E Reaction] ensureCommitmentRegistered: isMember=${isMember}`);
 
     if (isMember) {
-      debugLog(`[ensureCommitmentRegistered] Already a member of feed ${feedId.substring(0, 8)}...`);
+      debugLog('[ensureCommitmentRegistered] Already a member of feed');
       registeredFeeds.add(cacheKey);
       return true;
     }

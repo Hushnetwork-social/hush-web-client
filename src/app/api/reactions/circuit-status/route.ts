@@ -30,6 +30,8 @@ export async function GET() {
       return {
         version,
         proverArtifactsAvailable: wasmExists && zkeyExists,
+        wasmSha256: artifacts.wasmSha256,
+        zkeySha256: artifacts.zkeySha256,
         provenance: artifacts.provenance,
       };
     })

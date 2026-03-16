@@ -97,7 +97,7 @@ class ReactionsSyncableClass implements ISyncable {
 
       // Register feeds sequentially to avoid database serialization conflicts
       for (const feed of unregisteredFeeds) {
-        debugLog(`[ReactionsSyncable] Registering commitment for feed ${feed.id.substring(0, 8)}...`);
+        debugLog('[ReactionsSyncable] Registering commitment for feed');
         try {
           const success = await ensureCommitmentRegistered(feed.id);
           if (success) {

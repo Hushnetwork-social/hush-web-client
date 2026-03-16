@@ -6,6 +6,7 @@ import { ReactionBar } from "@/components/chat/ReactionBar";
 import { ReactionPicker } from "@/components/chat/ReactionPicker";
 import { useFeedReactions } from "@/hooks/useFeedReactions";
 import { GLOBAL_HUSH_MEMBERS_SCOPE_ID } from "@/modules/reactions/publicScope";
+import { useReactionsStore } from "@/modules/reactions/useReactionsStore";
 import { useAppStore } from "@/stores";
 import { useFeedsStore } from "@/modules/feeds/useFeedsStore";
 
@@ -50,6 +51,7 @@ export function SocialPostReactions({
   const pickerRef = useRef<HTMLDivElement>(null);
   const hasHydratedMyReactionRef = useRef(false);
   const credentials = useAppStore((s) => s.credentials);
+  const isGeneratingProof = useReactionsStore((s) => s.isGeneratingProof);
   const reactionScope = reactionScopeId ?? postId;
   const membershipFeedId = visibility === "private"
     ? circleFeedIds[0]
@@ -65,6 +67,7 @@ export function SocialPostReactions({
     handleReactionSelect,
     fetchTalliesForMessages,
     hydrateMyReactions,
+    error,
   } = useFeedReactions({
     feedId: reactionScope,
     feedAesKey,
@@ -77,6 +80,9 @@ export function SocialPostReactions({
     const messageIds = [postId];
 
     const refreshReactions = async () => {
+      if (useReactionsStore.getState().isGeneratingProof) {
+        return;
+      }
       await fetchTalliesForMessages(messageIds, { forceRefresh: true });
     };
 
@@ -89,7 +95,7 @@ export function SocialPostReactions({
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [fetchTalliesForMessages, postId]);
+  }, [fetchTalliesForMessages, isGeneratingProof, postId]);
 
   useEffect(() => {
     const messageIds = [postId];
@@ -141,8 +147,9 @@ export function SocialPostReactions({
         counts={counts}
         myReaction={myReaction}
         isPending={pending}
+        disabled={pending}
         onReactionClick={
-          hasInteractiveIdentity
+          hasInteractiveIdentity && !pending
             ? (emojiIndex) => void handleReactionSelect(postId, emojiIndex)
             : visibility === "open"
               ? () => handleGuestInteraction()
@@ -163,7 +170,7 @@ export function SocialPostReactions({
 
             setShowPicker((current) => !current);
           }}
-          disabled={!canOpenPicker}
+          disabled={!canOpenPicker || pending}
           title={hasInteractiveIdentity ? "Add reaction" : "Sign in to react"}
         >
           <SmilePlus className="h-3 w-3" />
@@ -181,6 +188,15 @@ export function SocialPostReactions({
           </div>
         ) : null}
       </div>
+
+      {error ? (
+        <p
+          className="basis-full text-[11px] text-red-400"
+          data-testid={`${testIdPrefix}-error`}
+        >
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

@@ -465,3 +465,14 @@ export function getIndexForEmoji(emoji: EmojiType): number {
   const emojis: EmojiType[] = ['👍', '❤️', '😂', '😮', '😢', '😡'];
   return emojis.indexOf(emoji);
 }
+
+const isE2EOrDev =
+  process.env.NODE_ENV !== 'production' || process.env.NEXT_PUBLIC_DEBUG_LOGGING === 'true';
+
+if (typeof window !== 'undefined' && isE2EOrDev) {
+  const storesWindow = window as unknown as { __zustand_stores?: Record<string, unknown> };
+  storesWindow.__zustand_stores = {
+    ...(storesWindow.__zustand_stores || {}),
+    reactionsStore: useReactionsStore,
+  };
+}

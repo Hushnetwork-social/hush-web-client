@@ -6,6 +6,7 @@
  */
 
 import { CIRCUIT } from '../crypto/reactions/constants';
+import { buildApiUrl } from '../api-config';
 import { getApprovedCircuitArtifacts, listApprovedCircuitVersions } from './artifactManifest';
 import { zkProver } from './prover';
 
@@ -21,6 +22,8 @@ export interface CircuitVersionInfo {
 export interface CircuitArtifactStatus {
   version: string;
   proverArtifactsAvailable: boolean;
+  wasmSha256: string;
+  zkeySha256: string;
   provenance: string;
 }
 
@@ -70,7 +73,7 @@ class CircuitManager {
    */
   private async fetchVersionInfo(): Promise<CircuitStatusResponse> {
     try {
-      const response = await fetch('/api/reactions/circuit-status', {
+      const response = await fetch(buildApiUrl('/api/reactions/circuit-status'), {
         method: 'GET',
         cache: 'no-store',
       });
@@ -84,6 +87,8 @@ class CircuitManager {
         ? payload.approvedVersions.filter((item): item is CircuitArtifactStatus =>
             typeof item?.version === 'string' &&
             typeof item?.proverArtifactsAvailable === 'boolean' &&
+            typeof item?.wasmSha256 === 'string' &&
+            typeof item?.zkeySha256 === 'string' &&
             typeof item?.provenance === 'string')
         : [];
 
@@ -104,6 +109,8 @@ class CircuitManager {
         approvedVersions: listApprovedCircuitVersions().map((version) => ({
           version,
           proverArtifactsAvailable: false,
+          wasmSha256: getApprovedCircuitArtifacts(version).wasmSha256,
+          zkeySha256: getApprovedCircuitArtifacts(version).zkeySha256,
           provenance: getApprovedCircuitArtifacts(version).provenance,
         })),
       };

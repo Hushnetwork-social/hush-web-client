@@ -131,9 +131,10 @@ export async function computeBackupKey(
  * Convert UUID string to bigint for use in hash functions
  */
 export function uuidToBigint(uuid: string): bigint {
-  // Remove hyphens and convert hex to bigint
-  const hex = uuid.replace(/-/g, '');
-  return BigInt('0x' + hex);
+  // Match .NET Guid.ToByteArray() layout so browser-generated public inputs
+  // line up with the server's Guid -> field conversion.
+  const bytes = uuidToBytes(uuid);
+  return bytesToBigint(bytes);
 }
 
 /**
@@ -204,4 +205,38 @@ export async function deriveDeterministicReactionScopeKey(scopeId: string): Prom
   const hashed = await poseidonHash([scopeScalar]);
   const privateKey = mod(hashed, BABYJUBJUB.order);
   return privateKey === 0n ? 1n : privateKey;
+}
+
+/**
+ * Derive the global-membership user secret from a public signing address.
+ *
+ * This matches the server-side `UserCommitmentService.DeriveCommitmentFromAddress`
+ * path used for the reserved "all valid Hush identities" membership scope.
+ */
+export async function deriveAddressMembershipSecret(publicAddress: string): Promise<bigint> {
+  const encoder = new TextEncoder();
+  const addressBytes = encoder.encode(publicAddress);
+
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    addressBytes,
+    { name: 'HKDF' },
+    false,
+    ['deriveBits']
+  );
+
+  const derivedBits = await crypto.subtle.deriveBits(
+    {
+      name: 'HKDF',
+      salt: encoder.encode('hush-network-address-commitment'),
+      info: encoder.encode('address-secret-v1'),
+      hash: 'SHA-256',
+    },
+    keyMaterial,
+    256
+  );
+
+  const derivedBytes = new Uint8Array(derivedBits);
+  const secret = mod(bytesToBigint(derivedBytes), BABYJUBJUB.order);
+  return secret === 0n ? 1n : secret;
 }

@@ -1500,7 +1500,7 @@ export const useFeedsStore = create<FeedsStore>()(
       // ============= Group Feed Implementations =============
 
       setGroupMembers: (feedId, members) => {
-        debugLog(`[FeedsStore] setGroupMembers: feedId=${feedId}, count=${members.length}`);
+        debugLog(`[FeedsStore] setGroupMembers: count=${members.length}`);
         set((state) => {
           if (areGroupMembersEqual(state.groupMembers[feedId], members)) {
             return state;
@@ -1580,7 +1580,7 @@ export const useFeedsStore = create<FeedsStore>()(
       },
 
       setUserRole: (feedId, role) => {
-        debugLog(`[FeedsStore] setUserRole: feedId=${feedId}, role=${role}`);
+        debugLog(`[FeedsStore] setUserRole: role=${role}`);
         set((state) => ({
           memberRoles: {
             ...state.memberRoles,

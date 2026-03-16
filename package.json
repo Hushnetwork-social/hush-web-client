@@ -16,6 +16,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "proof:benchmark": "node scripts/benchmark-reaction-proof.mjs",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:prod": "tauri dev --config src-tauri/tauri.prod.conf.json",
@@ -41,6 +42,7 @@
     "react-dom": "^19.0.0",
     "react-virtuoso": "^4.17.0",
     "react-zoom-pan-pinch": "^3.7.0",
+    "snarkjs": "^0.7.5",
     "zustand": "^5.0.2"
   },
   "devDependencies": {
@@ -53,6 +55,7 @@
     "@types/react-dom": "^19.0.2",
     "@vitejs/plugin-react": "^5.1.4",
     "autoprefixer": "^10.4.20",
+    "circomlib": "^2.0.5",
     "cross-env": "^10.1.0",
     "eslint": "^9.17.0",
     "eslint-config-next": "^15.1.0",

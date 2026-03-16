@@ -61,7 +61,7 @@ export class IdentitySyncable implements ISyncable {
       // Log what we're checking
       debugLog('[IdentitySyncable] Checking identity in blockchain...');
       debugLog(`  - User: ${currentUser?.displayName || 'Unknown'}`);
-      debugLog(`  - SigningKey: ${credentials.signingPublicKey.substring(0, 20)}...`);
+      debugLog('  - Signing key available');
 
       // Check if identity exists
       const identityInfo = await checkIdentityExists(credentials.signingPublicKey);
@@ -69,8 +69,8 @@ export class IdentitySyncable implements ISyncable {
       if (identityInfo.exists) {
         debugLog('[IdentitySyncable] Identity found in blockchain:');
         debugLog(`  - ProfileName: ${identityInfo.profileName}`);
-        debugLog(`  - PublicSigningAddress: ${identityInfo.publicSigningAddress?.substring(0, 20)}...`);
-        debugLog(`  - PublicEncryptAddress: ${identityInfo.publicEncryptAddress?.substring(0, 20)}...`);
+        debugLog('  - Public signing address available');
+        debugLog('  - Public encryption address available');
         debugLog(`  - IsPublic: ${identityInfo.isPublic}`);
         identityConfirmed = true;
         identityCreationPending = false;

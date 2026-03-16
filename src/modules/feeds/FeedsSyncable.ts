@@ -572,7 +572,7 @@ export class FeedsSyncable implements ISyncable {
       return;
     }
 
-    console.log(`[E2E Feed Decrypt] Encryption private key available: ${credentials.encryptionPrivateKey.substring(0, 16)}...`);
+    console.log('[E2E Feed Decrypt] Encryption private key available');
 
     for (const feed of feeds) {
       console.log(`[E2E Feed Decrypt] Feed ${feed.id?.substring(0, 8)}... (${feed.name}): encryptedFeedKey=${!!feed.encryptedFeedKey}, aesKey=${!!feed.aesKey}`);

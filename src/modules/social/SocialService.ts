@@ -1,6 +1,8 @@
 import type { CreateSocialPostContract } from "./contracts";
 import { createCreateSocialPostTransaction, hexToBytes, type SocialPostAttachmentPayload } from "@/lib/crypto";
 import { submitTransaction } from "@/modules/blockchain/BlockchainService";
+import { useAppStore } from "@/stores";
+import { initializeReactionsSystem } from "@/modules/reactions/initializeReactions";
 import { useReactionsStore } from "@/modules/reactions/useReactionsStore";
 
 export type CreateSocialPostResult = {
@@ -36,6 +38,23 @@ function bigintToFixed32Bytes(value: bigint): Uint8Array {
   return bytes;
 }
 
+async function getAuthorCommitmentBase64(): Promise<string | undefined> {
+  let userCommitment = useReactionsStore.getState().getUserCommitment();
+  if (!userCommitment) {
+    const mnemonic = useAppStore.getState().credentials?.mnemonic;
+    if (mnemonic && mnemonic.length > 0) {
+      const initialized = await initializeReactionsSystem(mnemonic);
+      if (initialized) {
+        userCommitment = useReactionsStore.getState().getUserCommitment();
+      }
+    }
+  }
+
+  return userCommitment
+    ? toBase64(bigintToFixed32Bytes(userCommitment))
+    : undefined;
+}
+
 export async function createSocialPost(
   contract: CreateSocialPostContract,
   signingPrivateKeyHex: string,
@@ -51,10 +70,7 @@ export async function createSocialPost(
     Kind: attachment.kind === "video" ? 1 : 0,
   }));
 
-  const userCommitment = useReactionsStore.getState().getUserCommitment();
-  const authorCommitmentBase64 = userCommitment
-    ? toBase64(bigintToFixed32Bytes(userCommitment))
-    : undefined;
+  const authorCommitmentBase64 = await getAuthorCommitmentBase64();
 
   const { signedTransaction } = await createCreateSocialPostTransaction(
     contract.postId,

@@ -9,6 +9,7 @@ interface ReactionBarProps {
   isPending?: boolean;
   onReactionClick?: (emojiIndex: number) => void;
   isOwnMessage?: boolean;
+  disabled?: boolean;
 }
 
 /**
@@ -26,6 +27,7 @@ export function ReactionBar({
   isPending = false,
   onReactionClick,
   isOwnMessage = false,
+  disabled = false,
 }: ReactionBarProps) {
   // Get emojis with counts > 0
   const activeReactions = EMOJIS.map((emoji, index) => ({
@@ -61,8 +63,14 @@ export function ReactionBar({
         return (
           <button
             key={emoji}
-            onClick={() => onReactionClick?.(index)}
-            disabled={!onReactionClick}
+            onClick={() => {
+              if (disabled) {
+                return;
+              }
+
+              onReactionClick?.(index);
+            }}
+            disabled={!onReactionClick || disabled}
             data-testid={`reaction-badge-${emoji}`}
             className={`
               inline-flex items-center gap-0.5
@@ -75,7 +83,7 @@ export function ReactionBar({
                   ? "opacity-50 grayscale animate-pulse"
                   : "opacity-100"
               }
-              ${onReactionClick ? "hover:scale-105 cursor-pointer" : "cursor-default"}
+              ${onReactionClick && !disabled ? "hover:scale-105 cursor-pointer" : "cursor-default"}
             `}
             title={
               isMyPendingReaction

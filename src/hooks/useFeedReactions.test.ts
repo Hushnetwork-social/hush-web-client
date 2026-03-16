@@ -47,6 +47,8 @@ vi.mock('@/modules/reactions/useReactionsStore', () => ({
 vi.mock('@/modules/reactions/ReactionsService', () => ({
   reactionsServiceInstance: {
     submitReactionDevMode: vi.fn().mockResolvedValue(undefined),
+    submitReaction: vi.fn().mockResolvedValue('tx-1'),
+    removeReaction: vi.fn().mockResolvedValue('tx-2'),
     removeReactionDevMode: vi.fn().mockResolvedValue(undefined),
     getTallies: vi.fn().mockResolvedValue(undefined),
   },
@@ -62,6 +64,7 @@ vi.mock('@/stores', () => ({
     selector({
       credentials: {
         mnemonic: ['alpha', 'beta', 'gamma'],
+        signingPublicKey: '0349f6768a0751dce9e3775cde70468e6eb4977c9484003f661fa04f82ca629ee7',
       },
     })
   ),
@@ -69,6 +72,9 @@ vi.mock('@/stores', () => ({
 
 vi.mock('@/lib/crypto/reactions', () => ({
   deriveFeedElGamalKey: vi.fn().mockResolvedValue(123456n),
+  deriveDeterministicReactionScopeKey: vi.fn().mockResolvedValue(654321n),
+  deriveAddressMembershipSecret: vi.fn().mockResolvedValue(777n),
+  computeCommitment: vi.fn().mockResolvedValue(888n),
   scalarMul: vi.fn().mockReturnValue({ x: 1n, y: 2n }),
   getGenerator: vi.fn().mockReturnValue({ x: 0n, y: 1n }),
   bytesToBigint: vi.fn().mockReturnValue(1n),
@@ -95,9 +101,15 @@ vi.mock('@/modules/feeds/useFeedsStore', () => ({
   ),
 }));
 
-import { deriveFeedElGamalKey, scalarMul } from '@/lib/crypto/reactions';
+import {
+  deriveFeedElGamalKey,
+  deriveAddressMembershipSecret,
+  computeCommitment,
+  scalarMul,
+} from '@/lib/crypto/reactions';
 import { debugLog } from '@/lib/debug-logger';
 import { reactionsServiceInstance } from '@/modules/reactions/ReactionsService';
+import { GLOBAL_HUSH_MEMBERS_SCOPE_ID } from '@/modules/reactions/publicScope';
 
 describe('useFeedReactions', () => {
   beforeEach(() => {
@@ -367,9 +379,72 @@ describe('useFeedReactions', () => {
 
       await result.current.handleReactionSelect('message-1', 2);
 
-      expect(ensureCommitmentRegisteredMock).toHaveBeenCalledWith('proof-guard-feed-id-4');
+      expect(ensureCommitmentRegisteredMock).toHaveBeenCalledWith(
+        'proof-guard-feed-id-4',
+        undefined
+      );
       expect(mockReactionsState.revertReaction).toHaveBeenCalledWith('message-1');
       expect(reactionsServiceInstance.submitReactionDevMode).not.toHaveBeenCalled();
+    });
+
+    it('uses the address-derived global membership commitment for open-post reactions', async () => {
+      mockReactionsState.isProverReady = true;
+
+      const { result } = renderHook(() =>
+        useFeedReactions({
+          feedId: '62ab0d24-96a4-420e-bffd-5ce2eaf079b8',
+          publicReactionKeyScopeId: '62ab0d24-96a4-420e-bffd-5ce2eaf079b8',
+          membershipFeedId: GLOBAL_HUSH_MEMBERS_SCOPE_ID,
+        })
+      );
+
+      await waitFor(() => {
+        expect(reactionsServiceInstance.submitReaction).not.toHaveBeenCalled();
+      });
+
+      await result.current.handleReactionSelect('message-1', 2);
+
+      expect(deriveAddressMembershipSecret).toHaveBeenCalledWith(
+        '0349f6768a0751dce9e3775cde70468e6eb4977c9484003f661fa04f82ca629ee7'
+      );
+      expect(computeCommitment).toHaveBeenCalledWith(777n);
+      expect(ensureCommitmentRegisteredMock).toHaveBeenCalledWith(
+        GLOBAL_HUSH_MEMBERS_SCOPE_ID,
+        888n
+      );
+      expect(reactionsServiceInstance.submitReaction).toHaveBeenCalled();
+    });
+
+    it('reverts the first reaction and exposes the error when non-dev proof generation times out', async () => {
+      mockReactionsState.isProverReady = true;
+      vi.mocked(reactionsServiceInstance.submitReaction).mockRejectedValueOnce(
+        new Error('ZK proof generation timed out after 12000ms')
+      );
+
+      const { result } = renderHook(() =>
+        useFeedReactions({
+          feedId: 'proof-guard-feed-id-timeout',
+          feedAesKey: 'proof-guard-aes-key-timeout==',
+        })
+      );
+
+      await waitFor(() => {
+        expect(deriveFeedElGamalKey).toHaveBeenCalled();
+      });
+
+      await result.current.handleReactionSelect('message-1', 2);
+
+      expect(ensureCommitmentRegisteredMock).toHaveBeenCalledWith(
+        'proof-guard-feed-id-timeout',
+        undefined
+      );
+      expect(reactionsServiceInstance.submitReaction).toHaveBeenCalledTimes(1);
+      expect(mockReactionsState.setPendingReaction).toHaveBeenCalledWith('message-1', 2);
+      expect(mockReactionsState.confirmReaction).not.toHaveBeenCalled();
+      expect(mockReactionsState.revertReaction).toHaveBeenCalledWith('message-1');
+      await waitFor(() => {
+        expect(result.current.error).toBe('ZK proof generation timed out after 12000ms');
+      });
     });
 
     it('continues in dev mode when feed commitment registration is unavailable', async () => {

@@ -19,6 +19,8 @@ import {
 import {
   deriveFeedElGamalKey,
   deriveDeterministicReactionScopeKey,
+  deriveAddressMembershipSecret,
+  computeCommitment,
   scalarMul,
   getGenerator,
   type Point,
@@ -28,6 +30,7 @@ import {
 import { debugLog, debugWarn, debugError } from "@/lib/debug-logger";
 import { useFeedsStore } from "@/modules/feeds/useFeedsStore";
 import { useAppStore } from "@/stores";
+import { GLOBAL_HUSH_MEMBERS_SCOPE_ID } from "@/modules/reactions/publicScope";
 
 // Module-level guards to prevent duplicate operations across React Strict Mode remounts
 // These persist across component unmount/remount cycles
@@ -214,8 +217,8 @@ export function useFeedReactions({
           debugLog(`[useFeedReactions] Deriving ElGamal key for feed ${feedId.substring(0, 8)}... from AES key ${feedAesKey.substring(0, 16)}...`);
           privateKey = await deriveFeedElGamalKey(feedAesKey);
         } else {
-          console.log(`[E2E Reaction] useFeedReactions: Deriving deterministic public reaction key for scope ${publicReactionKeyScopeId?.substring(0, 8)}...`);
-          debugLog(`[useFeedReactions] Deriving deterministic public reaction key for scope ${publicReactionKeyScopeId?.substring(0, 8)}...`);
+          console.log('[E2E Reaction] useFeedReactions: Deriving deterministic public reaction key');
+          debugLog('[useFeedReactions] Deriving deterministic public reaction key');
           privateKey = await deriveDeterministicReactionScopeKey(publicReactionKeyScopeId!);
         }
         const publicKey = scalarMul(getGenerator(), privateKey);
@@ -263,10 +266,13 @@ export function useFeedReactions({
     options?: { forceRefresh?: boolean }
   ) => {
     if (!feedPrivateKey || messageIds.length === 0) return;
+    if (useReactionsStore.getState().isGeneratingProof) {
+      return;
+    }
     const forceRefresh = options?.forceRefresh === true;
     if (forceRefresh) {
       debugLog(
-        `[useFeedReactions] Forcing tally refresh for ${messageIds.length} target(s) in scope ${feedId.substring(0, 8)}...`
+        `[useFeedReactions] Forcing tally refresh for ${messageIds.length} target(s)`
       );
     }
 
@@ -469,6 +475,27 @@ export function useFeedReactions({
         }
       }
 
+      let effectiveUserSecret = userSecret ?? null;
+      let effectiveUserCommitment: bigint | null = null;
+
+      if (membershipFeedId === GLOBAL_HUSH_MEMBERS_SCOPE_ID) {
+        const publicSigningAddress = credentials?.signingPublicKey;
+        if (!publicSigningAddress) {
+          revertReaction(messageId);
+          const errorMessage =
+            "Reactions are unavailable because the public membership identity is not ready.";
+          setError(errorMessage);
+          debugWarn(`[useFeedReactions] ${errorMessage}`);
+          return;
+        }
+
+        effectiveUserSecret = await deriveAddressMembershipSecret(publicSigningAddress);
+        effectiveUserCommitment = await computeCommitment(effectiveUserSecret);
+        debugLog(
+          `[useFeedReactions] Derived global membership commitment for ${publicSigningAddress.substring(0, 20)}...`
+        );
+      }
+
       if (!useDevMode) {
         const effectiveMembershipFeedId = membershipFeedId ?? feedId;
         if (!effectiveMembershipFeedId) {
@@ -480,7 +507,10 @@ export function useFeedReactions({
           return;
         }
 
-        const isRegisteredForFeed = await ensureCommitmentRegistered(effectiveMembershipFeedId);
+        const isRegisteredForFeed = await ensureCommitmentRegistered(
+          effectiveMembershipFeedId,
+          effectiveUserCommitment ?? undefined
+        );
         if (!isRegisteredForFeed) {
           revertReaction(messageId);
           const errorMessage =
@@ -551,7 +581,9 @@ export function useFeedReactions({
               messageId,
               currentFeedPublicKey,
               authorCommitment,
-              membershipFeedId ?? feedId
+              membershipFeedId ?? feedId,
+              effectiveUserSecret ?? undefined,
+              effectiveUserCommitment ?? undefined
             );
           } else {
             await reactionsServiceInstance.submitReaction(
@@ -560,7 +592,9 @@ export function useFeedReactions({
               emojiIndex,
               currentFeedPublicKey,
               authorCommitment,
-              membershipFeedId ?? feedId
+              membershipFeedId ?? feedId,
+              effectiveUserSecret ?? undefined,
+              effectiveUserCommitment ?? undefined
             );
           }
         }

@@ -36,9 +36,22 @@ vi.mock("@/modules/feeds/useFeedsStore", () => ({
   },
 }));
 
+let mockIsGeneratingProof = false;
+
+vi.mock("@/modules/reactions/useReactionsStore", () => ({
+  useReactionsStore: Object.assign(
+    (selector: (state: { isGeneratingProof: boolean }) => unknown) =>
+      selector({ isGeneratingProof: mockIsGeneratingProof }),
+    {
+      getState: () => ({ isGeneratingProof: mockIsGeneratingProof }),
+    }
+  ),
+}));
+
 describe("SocialPostReactions", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    mockIsGeneratingProof = false;
     mockCredentials = {
       signingPublicKey: "me-address",
       mnemonic: "test mnemonic",
@@ -117,6 +130,25 @@ describe("SocialPostReactions", () => {
     expect(fetchTalliesForMessagesMock).toHaveBeenLastCalledWith(["post-1"], {
       forceRefresh: true,
     });
+  });
+
+  it("pauses forced tally refresh polling while proof generation is in flight", async () => {
+    mockIsGeneratingProof = true;
+
+    render(
+      <SocialPostReactions
+        postId="post-1"
+        visibility="open"
+        circleFeedIds={[]}
+        canInteract={true}
+        testIdPrefix="social-post-reactions"
+      />
+    );
+
+    await vi.advanceTimersByTimeAsync(9000);
+
+    expect(fetchTalliesForMessagesMock).not.toHaveBeenCalled();
+    expect(hydrateMyReactionsMock).toHaveBeenCalledTimes(1);
   });
 
 });

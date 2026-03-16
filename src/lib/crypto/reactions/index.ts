@@ -50,6 +50,7 @@ export {
   bigintToUuid,
   deriveFeedElGamalKey,
   deriveDeterministicReactionScopeKey,
+  deriveAddressMembershipSecret,
 } from './poseidon';
 
 // ElGamal encryption
