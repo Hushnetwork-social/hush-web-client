@@ -38,9 +38,14 @@ const mockReactionsState = {
 
 // Mock dependencies
 vi.mock('@/modules/reactions/useReactionsStore', () => ({
-  useReactionsStore: vi.fn((selector) => {
-    return selector(mockReactionsState);
-  }),
+  useReactionsStore: Object.assign(
+    vi.fn((selector) => {
+      return selector(mockReactionsState);
+    }),
+    {
+      getState: vi.fn(() => mockReactionsState),
+    }
+  ),
   EMPTY_EMOJI_COUNTS: [0, 0, 0, 0, 0, 0],
 }));
 

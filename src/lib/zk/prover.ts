@@ -6,6 +6,7 @@
  */
 
 import { CIRCUIT } from '../crypto/reactions/constants';
+import { buildApiUrl } from '../api-config';
 import type {
   CircuitInputs,
   ProofResult,
@@ -268,7 +269,7 @@ class ZkProver {
     const timeoutHandle = setTimeout(() => controller.abort(), ZkProver.PROOF_TIMEOUT_MS);
 
     try {
-      const response = await fetch('/api/reactions/prove', {
+      const response = await fetch(buildApiUrl('/api/reactions/prove'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
