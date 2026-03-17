@@ -251,7 +251,7 @@ export const useAppStore = create<AppStore>()(
           if (state.isAuthenticated && state.credentials) {
             debugLog('[AppStore] Credentials loaded from localStorage:');
             debugLog(`  - User: ${state.currentUser?.displayName || 'Unknown'}`);
-            debugLog(`  - SigningKey: ${state.credentials.signingPublicKey?.substring(0, 20)}...`);
+            debugLog('  - Signing key available');
             debugLog(`  - EncryptKey: ${state.credentials.encryptionPublicKey?.substring(0, 20)}...`);
             debugLog(`  - Has mnemonic: ${!!state.credentials.mnemonic}`);
           } else {

@@ -34,6 +34,7 @@ import {
 import { bsgsManager, solveDiscreteLog } from '@/lib/crypto/reactions/bsgs';
 import { generateProof } from '@/lib/zk';
 import { circuitManager } from '@/lib/zk/circuitManager';
+import { getApprovedCircuitArtifacts } from '@/lib/zk/artifactManifest';
 import { membershipProofManager } from './MembershipProofManager';
 import { useReactionsStore, type EmojiCounts, EMPTY_EMOJI_COUNTS } from './useReactionsStore';
 import { useAppStore } from '@/stores';
@@ -46,6 +47,17 @@ import type { Point } from '@/lib/crypto/reactions/babyjubjub';
  * Reactions Service Class
  */
 class ReactionsServiceClass {
+  private isMissingCircuitArtifactsError(error: unknown): boolean {
+    if (!(error instanceof Error)) {
+      return false;
+    }
+
+    return (
+      error.message.includes('Circuit files not found') ||
+      error.message.includes('Failed to load circuit files')
+    );
+  }
+
   /**
    * Submit a reaction to a message as a blockchain transaction
    *
@@ -60,18 +72,21 @@ class ReactionsServiceClass {
     messageId: string,
     emojiIndex: number,
     feedPublicKey: Point,
-    authorCommitment: bigint
+    authorCommitment: bigint,
+    membershipFeedId: string = feedId,
+    userSecretOverride?: bigint,
+    userCommitmentOverride?: bigint
   ): Promise<string> {
     const store = useReactionsStore.getState();
     const credentials = useAppStore.getState().credentials;
 
     // Get user secret
-    const userSecret = store.getUserSecret();
+    const userSecret = userSecretOverride ?? store.getUserSecret();
     if (!userSecret) {
       throw new Error('User secret not set. Please log in.');
     }
 
-    const userCommitment = store.getUserCommitment();
+    const userCommitment = userCommitmentOverride ?? store.getUserCommitment();
     if (!userCommitment) {
       throw new Error('User commitment not set.');
     }
@@ -85,6 +100,12 @@ class ReactionsServiceClass {
     store.setGeneratingProof(true);
 
     try {
+      const hasActiveReaction = emojiIndex >= 0 && emojiIndex < EMOJI_COUNT;
+      getApprovedCircuitArtifacts(circuitManager.getCurrentVersion());
+      console.log(
+        `[ReactionsService] submitReaction start: feed=${feedId.substring(0, 8)}..., message=${messageId.substring(0, 8)}..., emoji=${emojiIndex}, membershipFeed=${membershipFeedId.substring(0, 8)}...`
+      );
+
       // 1. Encrypt emoji as one-hot vector
       const { ciphertext, nonces } = encryptVector(emojiIndex, feedPublicKey);
 
@@ -98,7 +119,10 @@ class ReactionsServiceClass {
       const encryptedBackup = encryptEmojiBackup(emojiIndex, backupKey);
 
       // 4. Get membership proof
-      const membershipProof = await membershipProofManager.getProof(feedId, userCommitment);
+      const membershipProof = await membershipProofManager.getProof(membershipFeedId, userCommitment);
+      console.log(
+        `[ReactionsService] submitReaction: membershipProof depth=${membershipProof.depth}, pathElements=${membershipProof.pathElements.length}, pathIndices=${membershipProof.pathIndices.length}`
+      );
 
       // 5. Generate ZK proof
       const circuitInputs: CircuitInputs = {
@@ -112,12 +136,17 @@ class ReactionsServiceClass {
         author_commitment: authorCommitment.toString(),
         user_secret: userSecret.toString(),
         emoji_index: emojiIndex.toString(),
-        encryption_nonces: nonces.map((n) => n.toString()),
+        encryption_nonce: nonces.map((n) => n.toString()),
         merkle_path: membershipProof.pathElements.map((e) => e.toString()),
         merkle_indices: membershipProof.pathIndices.map((i) => (i ? 1 : 0)),
       };
 
+      console.log('[ReactionsService] submitReaction: generateProof start');
       const proofResult = await generateProof(circuitInputs);
+      console.log(
+        `[ReactionsService] submitReaction: generateProof done, publicSignals=${proofResult.publicSignals.length}, circuitVersion=${proofResult.circuitVersion}`
+      );
+      circuitManager.ensureProofResultVersion(proofResult.circuitVersion);
 
       // 6. Convert ciphertext to base64 format for blockchain
       const grpcCiphertext = vectorCiphertextToGrpc(ciphertext);
@@ -138,7 +167,11 @@ class ReactionsServiceClass {
       );
 
       // 8. Submit to blockchain
+      console.log('[ReactionsService] submitReaction: submitTransaction');
       const result = await submitTransaction(signedTransaction);
+      console.log(
+        `[ReactionsService] submitReaction: submitTransaction result successful=${result.successful}, message=${result.message ?? '<none>'}`
+      );
 
       if (!result.successful) {
         throw new Error(result.message || 'Failed to submit reaction transaction');
@@ -147,7 +180,11 @@ class ReactionsServiceClass {
       console.log(`[ReactionsService] Reaction submitted to blockchain, txId=${transactionId}`);
 
       // 9. Store locally for fast access
-      localReactionCache.set(messageId, emojiIndex);
+      if (hasActiveReaction) {
+        localReactionCache.set(messageId, emojiIndex);
+      } else {
+        localReactionCache.remove(messageId);
+      }
 
       return transactionId;
     } finally {
@@ -162,10 +199,22 @@ class ReactionsServiceClass {
     feedId: string,
     messageId: string,
     feedPublicKey: Point,
-    authorCommitment: bigint
+    authorCommitment: bigint,
+    membershipFeedId: string = feedId,
+    userSecretOverride?: bigint,
+    userCommitmentOverride?: bigint
   ): Promise<string> {
     // Emoji index 6 signals removal (zero vector)
-    return this.submitReaction(feedId, messageId, 6, feedPublicKey, authorCommitment);
+    return this.submitReaction(
+      feedId,
+      messageId,
+      6,
+      feedPublicKey,
+      authorCommitment,
+      membershipFeedId,
+      userSecretOverride,
+      userCommitmentOverride
+    );
   }
 
   /**
@@ -261,7 +310,11 @@ class ReactionsServiceClass {
       console.log(`[ReactionsService] DEV MODE: Reaction submitted to blockchain, txId=${transactionId}`);
 
       // 8. Store locally for fast access
-      localReactionCache.set(messageId, emojiIndex);
+      if (emojiIndex >= 0 && emojiIndex < EMOJI_COUNT) {
+        localReactionCache.set(messageId, emojiIndex);
+      } else {
+        localReactionCache.remove(messageId);
+      }
 
       return transactionId;
     } catch (error) {
@@ -387,6 +440,12 @@ class ReactionsServiceClass {
       const encryptedBytes = this.base64ToBytes(response.EncryptedEmojiBackup);
       const emojiIndex = decryptEmojiBackup(encryptedBytes, backupKey);
 
+      if (emojiIndex >= EMOJI_COUNT) {
+        localReactionCache.remove(messageId);
+        store.setMyReaction(messageId, null);
+        return null;
+      }
+
       // Cache locally
       localReactionCache.set(messageId, emojiIndex);
       store.setMyReaction(messageId, emojiIndex);
@@ -424,13 +483,30 @@ class ReactionsServiceClass {
     const store = useReactionsStore.getState();
 
     try {
-      // Initialize circuit manager and ZK prover
-      await circuitManager.initialize();
-      store.setProverReady(true);
+      try {
+        await circuitManager.initialize();
+        store.setProverReady(circuitManager.isProverReady());
+      } catch (error) {
+        store.setProverReady(false);
 
-      // Initialize BSGS table (for decryption)
-      await bsgsManager.ensureLoaded();
-      store.setBsgsReady(true);
+        if (this.isMissingCircuitArtifactsError(error)) {
+          console.warn(
+            '[ReactionsService] ZK circuit artifacts are not available in this build; prover remains disabled.'
+          );
+        } else {
+          console.error('[ReactionsService] Failed to initialize prover:', error);
+          store.setError('Failed to initialize reactions prover');
+        }
+      }
+
+      try {
+        await bsgsManager.ensureLoaded();
+        store.setBsgsReady(true);
+      } catch (error) {
+        console.error('[ReactionsService] Failed to initialize BSGS table:', error);
+        store.setError('Failed to initialize reactions decryption');
+        return;
+      }
 
       console.log('[ReactionsService] Initialized');
     } catch (error) {

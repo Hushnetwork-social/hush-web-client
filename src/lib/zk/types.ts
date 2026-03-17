@@ -19,7 +19,7 @@ export interface CircuitInputs {
   // Private inputs (witness, known only to prover)
   user_secret: string;                  // User's secret as decimal string
   emoji_index: string;                  // 0-5 as decimal string
-  encryption_nonces: string[];          // 6 random nonces as decimal strings
+  encryption_nonce: string[];           // 6 random nonces as decimal strings
   merkle_path: string[];                // Sibling hashes as decimal strings
   merkle_indices: number[];             // Left(0)/Right(1) path indicators
 }
@@ -36,6 +36,9 @@ export interface ProofResult {
 
   // Circuit version used
   circuitVersion: string;
+
+  // Raw snarkjs proof for offline verification/debugging
+  proofJson?: Groth16Proof;
 }
 
 /**

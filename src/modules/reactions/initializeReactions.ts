@@ -12,6 +12,7 @@ import { initializePoseidon, computeCommitment } from '@/lib/crypto/reactions/po
 import { BABYJUBJUB } from '@/lib/crypto/reactions/constants';
 import { useReactionsStore } from './useReactionsStore';
 import { membershipProofManager } from './MembershipProofManager';
+import { reactionsServiceInstance } from './ReactionsService';
 import { debugLog, debugError } from '@/lib/debug-logger';
 
 // Track registered feeds to avoid duplicate API calls
@@ -84,20 +85,21 @@ export async function initializeReactionsSystem(mnemonic: string[]): Promise<boo
     console.log('[initializeReactions] Deriving user secret from mnemonic...');
     debugLog('[initializeReactions] Deriving user secret...');
     const userSecret = await deriveUserSecretFromMnemonic(mnemonic);
-    console.log('[initializeReactions] User secret derived:', userSecret.toString(16).substring(0, 16) + '...');
     debugLog('[initializeReactions] User secret derived');
 
     // 3. Compute commitment
     console.log('[initializeReactions] Computing Poseidon commitment...');
     debugLog('[initializeReactions] Computing commitment...');
     const userCommitment = await computeCommitment(userSecret);
-    console.log(`[initializeReactions] Commitment computed: ${userCommitment.toString(16).substring(0, 16)}...`);
-    debugLog(`[initializeReactions] Commitment computed: ${userCommitment.toString(16).substring(0, 16)}...`);
+    debugLog('[initializeReactions] Commitment computed');
 
     // 4. Store in reactions store
     const store = useReactionsStore.getState();
     store.setUserSecret(userSecret);
     store.setUserCommitment(userCommitment);
+
+    // Initialize the supported proof/decryption path after credentials are ready.
+    await reactionsServiceInstance.initialize();
 
     console.log('[initializeReactions] Reactions system initialized successfully');
     debugLog('[initializeReactions] Reactions system initialized successfully');
@@ -115,11 +117,17 @@ export async function initializeReactionsSystem(mnemonic: string[]): Promise<boo
  * Should be called when user opens a feed.
  * Checks if already registered to avoid duplicate calls.
  */
-export async function ensureCommitmentRegistered(feedId: string): Promise<boolean> {
+export async function ensureCommitmentRegistered(
+  feedId: string,
+  userCommitmentOverride?: bigint
+): Promise<boolean> {
   const store = useReactionsStore.getState();
-  const userCommitment = store.getUserCommitment();
+  const userCommitment = userCommitmentOverride ?? store.getUserCommitment();
+
+  console.log(`[E2E Reaction] ensureCommitmentRegistered: hasCommitment=${!!userCommitment}`);
 
   if (!userCommitment) {
+    console.log('[E2E Reaction] ensureCommitmentRegistered: EARLY RETURN user commitment not set');
     debugLog('[ensureCommitmentRegistered] User commitment not set, skipping');
     return false;
   }
@@ -127,23 +135,28 @@ export async function ensureCommitmentRegistered(feedId: string): Promise<boolea
   // Check if already registered this session
   const cacheKey = `${feedId}:${userCommitment.toString(16)}`;
   if (registeredFeeds.has(cacheKey)) {
+    console.log(`[E2E Reaction] ensureCommitmentRegistered: cache hit for feed ${feedId.substring(0, 8)}...`);
     debugLog(`[ensureCommitmentRegistered] Already registered for feed ${feedId.substring(0, 8)}...`);
     return true;
   }
 
   try {
+    console.log(`[E2E Reaction] ensureCommitmentRegistered: checking membership for feed ${feedId.substring(0, 8)}...`);
     // Check if already registered on server
     const isMember = await membershipProofManager.isMember(feedId, userCommitment);
+    console.log(`[E2E Reaction] ensureCommitmentRegistered: isMember=${isMember}`);
 
     if (isMember) {
-      debugLog(`[ensureCommitmentRegistered] Already a member of feed ${feedId.substring(0, 8)}...`);
+      debugLog('[ensureCommitmentRegistered] Already a member of feed');
       registeredFeeds.add(cacheKey);
       return true;
     }
 
     // Register commitment
+    console.log(`[E2E Reaction] ensureCommitmentRegistered: registering commitment for feed ${feedId.substring(0, 8)}...`);
     debugLog(`[ensureCommitmentRegistered] Registering for feed ${feedId.substring(0, 8)}...`);
     const success = await membershipProofManager.registerCommitment(feedId, userCommitment);
+    console.log(`[E2E Reaction] ensureCommitmentRegistered: registerCommitment success=${success}`);
 
     if (success) {
       debugLog(`[ensureCommitmentRegistered] Successfully registered for feed ${feedId.substring(0, 8)}...`);
@@ -154,6 +167,7 @@ export async function ensureCommitmentRegistered(feedId: string): Promise<boolea
 
     return success;
   } catch (error) {
+    console.log('[E2E Reaction] ensureCommitmentRegistered: ERROR', error);
     debugError(`[ensureCommitmentRegistered] Error registering for feed ${feedId.substring(0, 8)}...:`, error);
     return false;
   }

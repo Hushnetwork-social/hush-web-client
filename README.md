@@ -11,6 +11,7 @@ Next.js web client for HushNetwork - a decentralized social network.
 npm install
 
 # Start development server
+# Reactions run in explicit dev mode locally until real omega circuit artifacts exist.
 npm run dev
 
 # Run tests

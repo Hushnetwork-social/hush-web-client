@@ -13,14 +13,24 @@ import {
 } from "@/modules/reactions/useReactionsStore";
 import { reactionsServiceInstance } from "@/modules/reactions/ReactionsService";
 import {
+  ensureCommitmentRegistered,
+  initializeReactionsSystem,
+} from "@/modules/reactions/initializeReactions";
+import {
   deriveFeedElGamalKey,
+  deriveDeterministicReactionScopeKey,
+  deriveAddressMembershipSecret,
+  computeCommitment,
   scalarMul,
   getGenerator,
   type Point,
   bsgsManager,
+  bytesToBigint,
 } from "@/lib/crypto/reactions";
 import { debugLog, debugWarn, debugError } from "@/lib/debug-logger";
 import { useFeedsStore } from "@/modules/feeds/useFeedsStore";
+import { useAppStore } from "@/stores";
+import { GLOBAL_HUSH_MEMBERS_SCOPE_ID } from "@/modules/reactions/publicScope";
 
 // Module-level guards to prevent duplicate operations across React Strict Mode remounts
 // These persist across component unmount/remount cycles
@@ -34,6 +44,21 @@ interface DerivedKeyResult {
   privateKey: bigint;
 }
 const derivationPromises = new Map<string, Promise<DerivedKeyResult>>(); // derivationKey -> Promise
+function isReactionDevModeAllowed(): boolean {
+  return process.env.NEXT_PUBLIC_REACTIONS_ALLOW_DEV_MODE === "true";
+}
+
+function getForcedE2EReactionMode(): "dev" | "non-dev" | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const forcedMode = (window as Window & {
+    __e2e_forceReactionMode?: unknown;
+  }).__e2e_forceReactionMode;
+
+  return forcedMode === "dev" || forcedMode === "non-dev" ? forcedMode : null;
+}
 
 interface UseFeedReactionsOptions {
   /** Feed ID */
@@ -41,6 +66,15 @@ interface UseFeedReactionsOptions {
 
   /** Feed's decrypted AES key (base64) */
   feedAesKey?: string;
+
+  /** Public reaction scope for open targets that do not have an AES-backed feed key */
+  publicReactionKeyScopeId?: string;
+
+  /** Feed scope used for membership proof registration, when different from the reaction scope */
+  membershipFeedId?: string;
+
+  /** Optional resolver for author commitments when the target is not a feed message */
+  resolveAuthorCommitment?: (messageId: string) => string | undefined;
 }
 
 interface UseFeedReactionsResult {
@@ -60,7 +94,13 @@ interface UseFeedReactionsResult {
   handleReactionSelect: (messageId: string, emojiIndex: number) => Promise<void>;
 
   /** Fetch tallies for specific message IDs (call when messages become visible) */
-  fetchTalliesForMessages: (messageIds: string[]) => Promise<void>;
+  fetchTalliesForMessages: (
+    messageIds: string[],
+    options?: { forceRefresh?: boolean }
+  ) => Promise<void>;
+
+  /** Recover the current user's reaction for specific message IDs */
+  hydrateMyReactions: (messageIds: string[]) => Promise<void>;
 
   /** Current error, if any */
   error: string | null;
@@ -72,11 +112,15 @@ interface UseFeedReactionsResult {
 export function useFeedReactions({
   feedId,
   feedAesKey,
+  publicReactionKeyScopeId,
+  membershipFeedId,
+  resolveAuthorCommitment,
 }: UseFeedReactionsOptions): UseFeedReactionsResult {
   const [feedPublicKey, setFeedPublicKey] = useState<Point | null>(null);
   const [feedPrivateKey, setFeedPrivateKey] = useState<bigint | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isDerivingKey, setIsDerivingKey] = useState(false);
+  const credentials = useAppStore((s) => s.credentials);
 
   // Subscribe to store state
   const reactions = useReactionsStore((s) => s.reactions);
@@ -88,6 +132,7 @@ export function useFeedReactions({
   const setPendingReaction = useReactionsStore((s) => s.setPendingReaction);
   const confirmReaction = useReactionsStore((s) => s.confirmReaction);
   const revertReaction = useReactionsStore((s) => s.revertReaction);
+  const getMessageById = useFeedsStore((s) => s.getMessageById);
 
   // Track key derivation to prevent duplicate calls (React Strict Mode)
   const keyDerivationStartedRef = useRef<string | null>(null);
@@ -101,24 +146,26 @@ export function useFeedReactions({
 
   // Derive feed ElGamal keys from AES key
   useEffect(() => {
-    console.log(`[E2E Reaction] useFeedReactions useEffect: feedId=${feedId.substring(0, 8)}..., feedAesKey=${feedAesKey?.substring(0, 16) ?? 'NOT SET'}..., isDerivingKey=${isDerivingKey}, feedPublicKey=${!!feedPublicKey}`);
+    const derivationInput = feedAesKey ?? publicReactionKeyScopeId;
 
-    // Skip if no AES key or currently deriving
-    if (!feedAesKey || isDerivingKey) {
-      console.log(`[E2E Reaction]   SKIPPING: !feedAesKey=${!feedAesKey}, isDerivingKey=${isDerivingKey}`);
+    // Skip if no derivation input or currently deriving
+    if (!derivationInput || isDerivingKey) {
       return;
     }
 
     // If AES key changed (key rotation), clear the old derived keys and re-derive
-    if (derivedFromAesKeyRef.current !== null && derivedFromAesKeyRef.current !== feedAesKey) {
-      const oldAesKey = derivedFromAesKeyRef.current;
+    if (derivedFromAesKeyRef.current !== null && derivedFromAesKeyRef.current !== derivationInput) {
+      const oldDerivationInput = derivedFromAesKeyRef.current;
       debugLog(`[useFeedReactions] AES key changed for feed ${feedId.substring(0, 8)}... (key rotation detected)`);
-      debugLog(`[useFeedReactions]   Previous AES key: ${oldAesKey.substring(0, 16)}...`);
-      debugLog(`[useFeedReactions]   New AES key: ${feedAesKey.substring(0, 16)}...`);
+      debugLog(`[useFeedReactions]   Previous derivation input: ${oldDerivationInput.substring(0, 16)}...`);
+      debugLog(`[useFeedReactions]   New derivation input: ${derivationInput.substring(0, 16)}...`);
       debugLog(`[useFeedReactions]   Re-deriving ElGamal keys...`);
-      // Invalidate any cached derivation promise for the old key (before clearing refs)
-      const oldDerivationKey = `${feedId}:${oldAesKey.substring(0, 16)}`;
-      derivationPromises.delete(oldDerivationKey);
+      // Invalidate any cached derivation promises for this feed before clearing refs.
+      for (const key of derivationPromises.keys()) {
+        if (key.startsWith(`${feedId}:`)) {
+          derivationPromises.delete(key);
+        }
+      }
       // Now clear local state
       setFeedPublicKey(null);
       setFeedPrivateKey(null);
@@ -127,37 +174,34 @@ export function useFeedReactions({
     }
 
     // Skip if already have public key derived from current AES key
-    if (feedPublicKey && derivedFromAesKeyRef.current === feedAesKey) {
-      console.log(`[E2E Reaction]   SKIPPING: Already have public key from current AES key`);
+    if (feedPublicKey && derivedFromAesKeyRef.current === derivationInput) {
       return;
     }
 
     // Key derivation with Promise-based deduplication for React Strict Mode
     // When a second instance mounts while derivation is in progress, it WAITS for
     // the existing Promise instead of skipping (which would leave it without keys)
-    const derivationKey = `${feedId}:${feedAesKey.substring(0, 16)}`;
+    const derivationKey = feedAesKey
+      ? `${feedId}:aes:${feedAesKey.substring(0, 16)}`
+      : `${feedId}:scope:${publicReactionKeyScopeId}`;
 
     // Skip if this instance already started derivation for this key
     if (keyDerivationStartedRef.current === derivationKey) {
-      console.log(`[E2E Reaction]   SKIPPING: Already started derivation for this key (ref guard)`);
       return;
     }
 
     // Check if another instance is deriving or has derived this key
     const existingPromise = derivationPromises.get(derivationKey);
     if (existingPromise) {
-      console.log(`[E2E Reaction]   WAITING: Another instance is deriving this key, awaiting...`);
       keyDerivationStartedRef.current = derivationKey;
 
       // Wait for the existing derivation to complete
       existingPromise.then((result) => {
-        console.log(`[E2E Reaction]   REUSING: Got keys from other instance for feed ${feedId.substring(0, 8)}...`);
         feedPublicKeyRef.current = result.publicKey;
         setFeedPublicKey(result.publicKey);
         setFeedPrivateKey(result.privateKey);
-        derivedFromAesKeyRef.current = feedAesKey;
-      }).catch((err) => {
-        console.log(`[E2E Reaction]   OTHER INSTANCE FAILED: ${err}`);
+        derivedFromAesKeyRef.current = derivationInput;
+      }).catch(() => {
         keyDerivationStartedRef.current = null; // Allow retry
       });
       return;
@@ -165,27 +209,29 @@ export function useFeedReactions({
 
     // This instance will do the derivation
     keyDerivationStartedRef.current = derivationKey;
-    console.log(`[E2E Reaction]   Starting key derivation...`);
 
     // Create and store the Promise BEFORE starting async work
     const derivationPromise = (async (): Promise<DerivedKeyResult> => {
       setIsDerivingKey(true);
       try {
-        console.log(`[E2E Reaction] useFeedReactions: Deriving ElGamal key for feed ${feedId.substring(0, 8)}... from AES key ${feedAesKey.substring(0, 16)}...`);
-        debugLog(`[useFeedReactions] Deriving ElGamal key for feed ${feedId.substring(0, 8)}... from AES key ${feedAesKey.substring(0, 16)}...`);
-        const privateKey = await deriveFeedElGamalKey(feedAesKey);
+        let privateKey: bigint;
+        if (feedAesKey) {
+          debugLog(`[useFeedReactions] Deriving ElGamal key for feed ${feedId.substring(0, 8)}... from AES key ${feedAesKey.substring(0, 16)}...`);
+          privateKey = await deriveFeedElGamalKey(feedAesKey);
+        } else {
+          debugLog('[useFeedReactions] Deriving deterministic public reaction key');
+          privateKey = await deriveDeterministicReactionScopeKey(publicReactionKeyScopeId!);
+        }
         const publicKey = scalarMul(getGenerator(), privateKey);
 
         // Update ref IMMEDIATELY so callbacks can see it right away
         feedPublicKeyRef.current = publicKey;
         setFeedPublicKey(publicKey);
         setFeedPrivateKey(privateKey);
-        derivedFromAesKeyRef.current = feedAesKey;
+        derivedFromAesKeyRef.current = derivationInput;
 
-        console.log(`[E2E Reaction] useFeedReactions: ElGamal key derived successfully for feed ${feedId.substring(0, 8)}...`);
         return { publicKey, privateKey };
       } catch (err) {
-        console.log(`[E2E Reaction] useFeedReactions: Failed to derive feed key:`, err);
         debugError(`[useFeedReactions] Failed to derive feed key:`, err);
         setError("Failed to derive feed encryption key");
         keyDerivationStartedRef.current = null;
@@ -200,7 +246,7 @@ export function useFeedReactions({
     })();
 
     derivationPromises.set(derivationKey, derivationPromise);
-  }, [feedAesKey, feedId, feedPublicKey, isDerivingKey]);
+  }, [feedAesKey, feedId, feedPublicKey, isDerivingKey, publicReactionKeyScopeId]);
 
   // Track which message IDs have already had tallies fetched (to avoid duplicate decryption)
   const fetchedTallyMessageIds = useRef<Set<string>>(new Set());
@@ -214,11 +260,25 @@ export function useFeedReactions({
   }, [feedId]);
 
   // Fetch tallies for specific message IDs (lazy loading for visible messages)
-  const fetchTalliesForMessages = useCallback(async (messageIds: string[]) => {
+  const fetchTalliesForMessages = useCallback(async (
+    messageIds: string[],
+    options?: { forceRefresh?: boolean }
+  ) => {
     if (!feedPrivateKey || messageIds.length === 0) return;
+    if (useReactionsStore.getState().isGeneratingProof) {
+      return;
+    }
+    const forceRefresh = options?.forceRefresh === true;
+    if (forceRefresh) {
+      debugLog(
+        `[useFeedReactions] Forcing tally refresh for ${messageIds.length} target(s)`
+      );
+    }
 
     // Filter out message IDs that have already been fetched
-    const newMessageIds = messageIds.filter(id => !fetchedTallyMessageIds.current.has(id));
+    const newMessageIds = forceRefresh
+      ? [...messageIds]
+      : messageIds.filter(id => !fetchedTallyMessageIds.current.has(id));
     if (newMessageIds.length === 0) return;
 
     // Prevent concurrent fetches
@@ -243,6 +303,35 @@ export function useFeedReactions({
       activeTallyFetches.delete(feedId);
     }
   }, [feedId, feedPrivateKey]);
+
+  const hydratedMyReactionMessageIds = useRef<Set<string>>(new Set());
+
+  const hydrateMyReactions = useCallback(async (messageIds: string[]) => {
+    if (messageIds.length === 0) {
+      return;
+    }
+
+    const candidateIds = messageIds.filter((id) => !hydratedMyReactionMessageIds.current.has(id));
+    if (candidateIds.length === 0) {
+      return;
+    }
+
+    const mnemonic = credentials?.mnemonic;
+    if (!userSecret && mnemonic && mnemonic.length > 0) {
+      await initializeReactionsSystem(mnemonic);
+    }
+
+    await Promise.all(
+      candidateIds.map(async (messageId) => {
+        try {
+          await reactionsServiceInstance.getMyReaction(feedId, messageId);
+          hydratedMyReactionMessageIds.current.add(messageId);
+        } catch {
+          // Keep the message eligible for retry if recovery fails.
+        }
+      })
+    );
+  }, [credentials, feedId, userSecret]);
 
   // Legacy refreshTallies for after reaction submission (refreshes last 20 messages)
   const refreshTallies = useCallback(async () => {
@@ -292,14 +381,7 @@ export function useFeedReactions({
   const handleReactionSelect = useCallback(
     async (messageId: string, emojiIndex: number) => {
       // Use ref to always get fresh state (avoids stale closure)
-      const currentFeedPublicKey = feedPublicKeyRef.current;
-
-      // [E2E Reaction] Debug logging for tracing the reaction flow
-      console.log(`[E2E Reaction] handleReactionSelect called: messageId=${messageId.substring(0, 8)}..., emojiIndex=${emojiIndex}`);
-      console.log(`[E2E Reaction]   feedPublicKey available (from ref): ${!!currentFeedPublicKey}`);
-      console.log(`[E2E Reaction]   isProverReady: ${isProverReady}`);
-      console.log(`[E2E Reaction]   userSecret available: ${!!userSecret}`);
-      console.log(`[E2E Reaction]   AES key (derived from): ${derivedFromAesKeyRef.current?.substring(0, 16) ?? 'NOT SET'}...`);
+      let currentFeedPublicKey = feedPublicKeyRef.current;
 
       debugLog(`[useFeedReactions] Reaction selected: messageId=${messageId.substring(0, 8)}..., emojiIndex=${emojiIndex}`);
       debugLog(`[useFeedReactions]   Using AES key (derived from): ${derivedFromAesKeyRef.current?.substring(0, 16) ?? 'NOT SET'}...`);
@@ -307,11 +389,14 @@ export function useFeedReactions({
       // Get current reaction for this message
       const currentReaction = getMyReaction(messageId);
 
+      if (pendingReactions[messageId]) {
+        debugWarn(`[useFeedReactions] Ignoring duplicate reaction click while submission is pending for ${messageId.substring(0, 8)}...`);
+        return;
+      }
+
       // If clicking the same emoji, remove the reaction
       const isRemoval = currentReaction === emojiIndex || emojiIndex >= 6;
       const newEmojiIndex = isRemoval ? -1 : emojiIndex;
-
-      console.log(`[E2E Reaction]   currentReaction: ${currentReaction}, isRemoval: ${isRemoval}, newEmojiIndex: ${newEmojiIndex}`);
 
       // Optimistic update - immediately show the reaction (grayed/pending state)
       setPendingReaction(messageId, newEmojiIndex);
@@ -319,37 +404,154 @@ export function useFeedReactions({
 
       // Check if we can actually submit to the server (use ref for fresh value)
       if (!currentFeedPublicKey) {
-        console.log(`[E2E Reaction] EARLY RETURN: Feed public key not available`);
-        debugWarn("[useFeedReactions] Feed public key not available, reaction stays pending");
-        // Reaction stays in pending state until server confirms or user cancels
+        if (feedAesKey) {
+          try {
+            const privateKey = await deriveFeedElGamalKey(feedAesKey);
+            currentFeedPublicKey = scalarMul(getGenerator(), privateKey);
+            feedPublicKeyRef.current = currentFeedPublicKey;
+            setFeedPublicKey(currentFeedPublicKey);
+            setFeedPrivateKey(privateKey);
+            derivedFromAesKeyRef.current = feedAesKey;
+          } catch (err) {
+            debugWarn("[useFeedReactions] Feed public key derivation failed", err);
+            revertReaction(messageId);
+            setError("Reactions are unavailable because the feed encryption key is not ready.");
+            return;
+          }
+        } else {
+          debugWarn("[useFeedReactions] Feed public key not available, reaction stays pending");
+          // Reaction stays in pending state until server confirms or user cancels
+          return;
+        }
+      }
+
+      // Dev mode must be an explicit opt-in. Missing prover support should not silently
+      // downgrade the supported path and contaminate privacy or throughput evidence.
+      const forcedMode = getForcedE2EReactionMode();
+      const devModeAllowed = isReactionDevModeAllowed();
+      const useDevMode = forcedMode === "dev" || (forcedMode !== "non-dev" && devModeAllowed && !isProverReady);
+      if (useDevMode) {
+        debugWarn(
+          forcedMode === "dev"
+            ? "[useFeedReactions] Using forced DEV MODE submission"
+            : "[useFeedReactions] ZK prover not ready, using DEV MODE submission"
+        );
+      }
+
+      if (!isProverReady && !devModeAllowed) {
+        revertReaction(messageId);
+        const errorMessage = "Reactions are unavailable because the ZK prover is not ready.";
+        setError(errorMessage);
+        debugWarn(`[useFeedReactions] ${errorMessage}`);
         return;
       }
 
-      // DEV MODE: If ZK prover isn't ready, use dev mode submission
-      // This allows testing the full reaction flow without real ZK proofs
-      const useDevMode = !isProverReady;
-      if (useDevMode) {
-        console.log(`[E2E Reaction] Using DEV MODE (ZK prover not ready)`);
-        debugWarn("[useFeedReactions] ZK prover not ready, using DEV MODE submission");
+      if (!isProverReady && forcedMode === "non-dev") {
+        revertReaction(messageId);
+        const errorMessage = "Reactions are unavailable because the non-dev prover is not ready.";
+        setError(errorMessage);
+        debugWarn(`[useFeedReactions] ${errorMessage}`);
+        return;
       }
 
       if (!userSecret) {
-        console.log(`[E2E Reaction] EARLY RETURN: User secret not set`);
-        debugWarn("[useFeedReactions] User secret not set, reaction stays pending");
-        // Reaction stays in pending state
-        return;
+        const mnemonic = credentials?.mnemonic;
+        if (mnemonic && mnemonic.length > 0) {
+          const initialized = await initializeReactionsSystem(mnemonic);
+          if (!initialized) {
+            revertReaction(messageId);
+            const errorMessage =
+              "Reactions are unavailable because reaction credentials could not be initialized.";
+            setError(errorMessage);
+            debugWarn(`[useFeedReactions] ${errorMessage}`);
+            return;
+          }
+        } else {
+          debugWarn("[useFeedReactions] User secret not set, reaction stays pending");
+          // Reaction stays in pending state
+          return;
+        }
       }
 
-      // TODO: Get actual author commitment from message metadata or server
-      // For now, use 0n which disables author exclusion check in the circuit
-      const authorCommitment = 0n;
+      let effectiveUserSecret = userSecret ?? null;
+      let effectiveUserCommitment: bigint | null = null;
 
-      console.log(`[E2E Reaction] Preconditions passed, submitting reaction (useDevMode=${useDevMode})`);
+      if (membershipFeedId === GLOBAL_HUSH_MEMBERS_SCOPE_ID) {
+        const publicSigningAddress = credentials?.signingPublicKey;
+        if (!publicSigningAddress) {
+          revertReaction(messageId);
+          const errorMessage =
+            "Reactions are unavailable because the public membership identity is not ready.";
+          setError(errorMessage);
+          debugWarn(`[useFeedReactions] ${errorMessage}`);
+          return;
+        }
 
+        effectiveUserSecret = await deriveAddressMembershipSecret(publicSigningAddress);
+        effectiveUserCommitment = await computeCommitment(effectiveUserSecret);
+        debugLog(
+          `[useFeedReactions] Derived global membership commitment for ${publicSigningAddress.substring(0, 20)}...`
+        );
+      }
+
+      if (!useDevMode) {
+        const effectiveMembershipFeedId = membershipFeedId ?? feedId;
+        if (!effectiveMembershipFeedId) {
+          revertReaction(messageId);
+          const errorMessage =
+            "Reactions are unavailable because the membership scope is not ready for this target.";
+          setError(errorMessage);
+          debugWarn(`[useFeedReactions] ${errorMessage}`);
+          return;
+        }
+
+        const isRegisteredForFeed = await ensureCommitmentRegistered(
+          effectiveMembershipFeedId,
+          effectiveUserCommitment ?? undefined
+        );
+        if (!isRegisteredForFeed) {
+          revertReaction(messageId);
+          const errorMessage =
+            "Reactions are unavailable because membership registration is not ready for this feed.";
+          setError(errorMessage);
+          debugWarn(`[useFeedReactions] ${errorMessage}`);
+          return;
+        }
+      } else {
+        debugLog("[useFeedReactions] DEV MODE skipping membership registration gate");
+      }
+
+      const message = getMessageById(messageId);
+      let authorCommitment: bigint | null = null;
+      const resolvedAuthorCommitment = resolveAuthorCommitment?.(messageId);
+
+      if (message?.authorCommitment || resolvedAuthorCommitment) {
+        try {
+          const commitmentBytes = Uint8Array.from(
+            atob(message?.authorCommitment ?? resolvedAuthorCommitment ?? ""),
+            (char) => char.charCodeAt(0)
+          );
+          authorCommitment = bytesToBigint(commitmentBytes);
+        } catch (decodeError) {
+          debugWarn("[useFeedReactions] Failed to decode author commitment", decodeError);
+        }
+      }
+
+      if (authorCommitment === null) {
+        if (useDevMode) {
+          authorCommitment = 0n;
+          debugWarn("[useFeedReactions] Author commitment missing, falling back to dev-mode placeholder");
+        } else {
+          revertReaction(messageId);
+          const errorMessage = "Reactions are unavailable because the message author commitment is missing.";
+          setError(errorMessage);
+          debugWarn(`[useFeedReactions] ${errorMessage}`);
+          return;
+        }
+      }
       try {
         if (useDevMode) {
           // DEV MODE: Submit without ZK proof
-          console.log(`[E2E Reaction] Calling reactionsServiceInstance.submitReactionDevMode...`);
           if (isRemoval) {
             await reactionsServiceInstance.removeReactionDevMode(
               feedId,
@@ -364,7 +566,6 @@ export function useFeedReactions({
               currentFeedPublicKey
             );
           }
-          console.log(`[E2E Reaction] DEV MODE submission completed successfully`);
         } else {
           // PRODUCTION: Submit with full ZK proof
           if (isRemoval) {
@@ -372,7 +573,10 @@ export function useFeedReactions({
               feedId,
               messageId,
               currentFeedPublicKey,
-              authorCommitment
+              authorCommitment,
+              membershipFeedId ?? feedId,
+              effectiveUserSecret ?? undefined,
+              effectiveUserCommitment ?? undefined
             );
           } else {
             await reactionsServiceInstance.submitReaction(
@@ -380,7 +584,10 @@ export function useFeedReactions({
               messageId,
               emojiIndex,
               currentFeedPublicKey,
-              authorCommitment
+              authorCommitment,
+              membershipFeedId ?? feedId,
+              effectiveUserSecret ?? undefined,
+              effectiveUserCommitment ?? undefined
             );
           }
         }
@@ -401,13 +608,19 @@ export function useFeedReactions({
     },
     [
       feedId,
+      feedAesKey,
       isProverReady,
+      pendingReactions,
       userSecret,
       getMyReaction,
       setPendingReaction,
       confirmReaction,
       revertReaction,
       refreshTallies,
+      getMessageById,
+      membershipFeedId,
+      resolveAuthorCommitment,
+      credentials,
     ]
   );
 
@@ -423,6 +636,7 @@ export function useFeedReactions({
     isReady,
     handleReactionSelect,
     fetchTalliesForMessages,
+    hydrateMyReactions,
     error,
   };
 }

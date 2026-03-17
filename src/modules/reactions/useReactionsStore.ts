@@ -372,34 +372,20 @@ export const useReactionsStore = create<ReactionsStore>()(
 
           debugLog(`[ReactionsStore] Storing tally for ${messageId.substring(0, 8)}...: version=${serverTally.tallyVersion}, reactionCount=${serverTally.reactionCount}, feedId=${serverTally.feedId.substring(0, 8)}...`);
 
-          // Store the encrypted tally for later decryption when feed key is available
+          // Store the encrypted tally for later decryption when feed key is available.
           const newPendingTallies = {
             ...state.pendingTallies,
             [messageId]: serverTally,
           };
 
-          // Build placeholder counts based on myReaction if available
-          // This ensures we show the user's actual emoji, not always 👍
-          // TODO: Implement proper ElGamal decryption with BSGS to get actual counts per emoji
-          const placeholderCounts: EmojiCounts = { ...EMPTY_EMOJI_COUNTS };
+          // Preserve the last confirmed decrypted counts until a newer tally is decrypted.
+          const preservedCounts: EmojiCounts = existingReaction?.counts ?? { ...EMPTY_EMOJI_COUNTS };
           const myReaction = existingReaction?.myReaction;
-
-          if (serverTally.reactionCount > 0) {
-            // If user has reacted, show their emoji with count
-            // Otherwise show 👍 as generic placeholder
-            if (myReaction !== null && myReaction !== undefined && myReaction >= 0 && myReaction < 6) {
-              const emojis: (keyof EmojiCounts)[] = ['👍', '❤️', '😂', '😮', '😢', '😡'];
-              placeholderCounts[emojis[myReaction]] = serverTally.reactionCount;
-            } else {
-              // No myReaction set, use 👍 as placeholder
-              placeholderCounts['👍'] = serverTally.reactionCount;
-            }
-          }
 
           const newReactions = {
             ...state.reactions,
             [messageId]: {
-              counts: placeholderCounts,
+              counts: preservedCounts,
               myReaction: myReaction ?? null,
               lastFetched: Date.now(),
               tallyVersion: serverTally.tallyVersion,
@@ -478,4 +464,15 @@ export function getEmojiForIndex(index: number): EmojiType | null {
 export function getIndexForEmoji(emoji: EmojiType): number {
   const emojis: EmojiType[] = ['👍', '❤️', '😂', '😮', '😢', '😡'];
   return emojis.indexOf(emoji);
+}
+
+const isE2EOrDev =
+  process.env.NODE_ENV !== 'production' || process.env.NEXT_PUBLIC_DEBUG_LOGGING === 'true';
+
+if (typeof window !== 'undefined' && isE2EOrDev) {
+  const storesWindow = window as unknown as { __zustand_stores?: Record<string, unknown> };
+  storesWindow.__zustand_stores = {
+    ...(storesWindow.__zustand_stores || {}),
+    reactionsStore: useReactionsStore,
+  };
 }

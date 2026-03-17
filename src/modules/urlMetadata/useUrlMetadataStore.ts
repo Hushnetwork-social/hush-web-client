@@ -10,6 +10,26 @@ import type { UrlMetadata } from '@/lib/urlDetector/urlMetadataCache';
 import { getCachedMetadata } from '@/lib/urlDetector/urlMetadataCache';
 import { fetchUrlMetadataBatch } from './urlMetadataService';
 
+function createFailedMetadata(normalizedUrl: string, errorMessage: string): UrlMetadata {
+  let domain = normalizedUrl;
+  try {
+    domain = new URL(normalizedUrl).hostname || normalizedUrl;
+  } catch {
+    // Keep normalized URL as the fallback label when URL parsing fails.
+  }
+
+  return {
+    url: normalizedUrl,
+    domain,
+    title: domain,
+    description: errorMessage,
+    imageUrl: null,
+    imageBase64: null,
+    success: false,
+    errorMessage,
+  };
+}
+
 /**
  * URL Metadata Store State
  */
@@ -139,7 +159,9 @@ export const useUrlMetadataStore = create<UrlMetadataState>((set, get) => ({
             newErrors.delete(url);
           } else {
             // No result - server didn't return data for this URL
-            newErrors.set(url, 'No metadata returned');
+            const errorMessage = 'No metadata returned';
+            newErrors.set(url, errorMessage);
+            newMetadata.set(url, createFailedMetadata(url, errorMessage));
           }
         }
 
@@ -152,18 +174,18 @@ export const useUrlMetadataStore = create<UrlMetadataState>((set, get) => ({
     } catch (error) {
       // Handle fetch error - clear loading state
       set((state) => {
+        const newMetadata = new Map(state.metadata);
         const newLoading = new Set(state.loading);
         const newErrors = new Map(state.errors);
 
         for (const url of urlsToFetch) {
           newLoading.delete(url);
-          newErrors.set(
-            url,
-            error instanceof Error ? error.message : 'Failed to fetch metadata'
-          );
+          const errorMessage = error instanceof Error ? error.message : 'Failed to fetch metadata';
+          newErrors.set(url, errorMessage);
+          newMetadata.set(url, createFailedMetadata(url, errorMessage));
         }
 
-        return { loading: newLoading, errors: newErrors };
+        return { metadata: newMetadata, loading: newLoading, errors: newErrors };
       });
     }
   },

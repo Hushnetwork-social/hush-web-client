@@ -1876,6 +1876,53 @@ describe('Message Re-decryption when KeyGenerations sync', () => {
     expect(typeof state.retryDecryptFailedMessages).toBe('function');
   });
 
+  it('should replace encrypted duplicate content with decrypted content when the same message id is re-added', () => {
+    const { setFeeds, addMessages } = useFeedsStore.getState();
+
+    setFeeds([{
+      id: groupFeedId,
+      type: 'group',
+      name: 'Test Group',
+      participants: ['user-1'],
+      unreadCount: 0,
+      createdAt: 100,
+      updatedAt: 100,
+    }]);
+
+    addMessages(groupFeedId, [{
+      id: 'msg-same-id',
+      feedId: groupFeedId,
+      senderPublicKey: 'sender-1',
+      content: 'XZPv+Zc3NptjFnB+bUuS7U5gyfV9G3HJ1E4J4t1eQ8rczIwIKBC8DexkHK6Ca262xQg=',
+      contentEncrypted: 'XZPv+Zc3NptjFnB+bUuS7U5gyfV9G3HJ1E4J4t1eQ8rczIwIKBC8DexkHK6Ca262xQg=',
+      timestamp: 1000,
+      isConfirmed: false,
+      status: 'pending',
+      decryptionFailed: true,
+      keyGeneration: 0,
+    }]);
+
+    addMessages(groupFeedId, [{
+      id: 'msg-same-id',
+      feedId: groupFeedId,
+      senderPublicKey: 'sender-1',
+      content: 'Founders only message!',
+      contentEncrypted: 'XZPv+Zc3NptjFnB+bUuS7U5gyfV9G3HJ1E4J4t1eQ8rczIwIKBC8DexkHK6Ca262xQg=',
+      timestamp: 1001,
+      isConfirmed: true,
+      status: 'confirmed',
+      decryptionFailed: false,
+      keyGeneration: 0,
+    }]);
+
+    const messages = useFeedsStore.getState().messages[groupFeedId];
+    expect(messages).toHaveLength(1);
+    expect(messages[0].content).toBe('Founders only message!');
+    expect(messages[0].contentEncrypted).toBe('XZPv+Zc3NptjFnB+bUuS7U5gyfV9G3HJ1E4J4t1eQ8rczIwIKBC8DexkHK6Ca262xQg=');
+    expect(messages[0].decryptionFailed).toBe(false);
+    expect(messages[0].isConfirmed).toBe(true);
+  });
+
   it('should do nothing when there are no failed messages', async () => {
     const { setFeeds, addMessages, mergeKeyGenerations } = useFeedsStore.getState();
 
@@ -2791,6 +2838,39 @@ describe('FeedsSyncable retry integration', () => {
     expect(messages).toHaveLength(2);
     expect(messages.every(m => m.decryptionFailed === false)).toBe(true);
     expect(messages.every(m => m.content === 'Now decrypted!')).toBe(true);
+  });
+
+  it('should re-decrypt personal feed messages after the AES key is decrypted later', async () => {
+    const { setFeeds, addMessages, updateFeedAesKey } = useFeedsStore.getState();
+    const personalFeedId = 'personal-feed-late-key';
+    setFeeds([{
+      id: personalFeedId,
+      type: 'personal',
+      name: 'My Personal Feed',
+      encryptedFeedKey: 'enc-feed-key',
+      createdAt: new Date().toISOString(),
+    }]);
+
+    addMessages(personalFeedId, [{
+      id: 'msg-personal-encrypted',
+      feedId: personalFeedId,
+      content: 'encrypted-personal-message',
+      contentEncrypted: 'encrypted-personal-message',
+      senderPublicKey: 'user-public-key',
+      timestamp: new Date().toISOString(),
+      blockIndex: 100,
+      isConfirmed: true,
+      decryptionFailed: true,
+    }]);
+
+    updateFeedAesKey(personalFeedId, 'personal-aes-key');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const messages = useFeedsStore.getState().messages[personalFeedId];
+    expect(messages).toHaveLength(1);
+    expect(messages[0].decryptionFailed).toBe(false);
+    expect(messages[0].content).toBe('decrypted-message');
+    expect(messages[0].contentEncrypted).toBe('encrypted-personal-message');
   });
 
   it('should handle retry errors gracefully without breaking state', async () => {

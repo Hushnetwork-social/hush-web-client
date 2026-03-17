@@ -3,7 +3,9 @@ import { grpcCall, parseGrpcResponse, encodeString, encodeVarintField, parseVari
 
 type SocialFeedWallPostDto = {
   postId: string;
+  reactionScopeId?: string;
   authorPublicAddress: string;
+  authorCommitment?: string;
   content: string;
   createdAtBlock: number;
   createdAtUnixMs: number;
@@ -127,11 +129,24 @@ function parseSocialFeedWallPost(messageBytes: Uint8Array): SocialFeedWallPostDt
     if (wireType === 2) {
       const lengthInfo = parseVarint(messageBytes, offset);
       offset += lengthInfo.bytesRead;
+      if (fieldNumber === 10) {
+        const bytes = messageBytes.slice(offset, offset + lengthInfo.value);
+        let binary = "";
+        for (const value of bytes) {
+          binary += String.fromCharCode(value);
+        }
+        result.authorCommitment = btoa(binary);
+        offset += lengthInfo.value;
+        continue;
+      }
+
       const value = parseString(messageBytes, offset, lengthInfo.value);
       offset += lengthInfo.value;
 
       if (fieldNumber === 1) {
         result.postId = value;
+      } else if (fieldNumber === 9) {
+        result.reactionScopeId = value;
       } else if (fieldNumber === 2) {
         result.authorPublicAddress = value;
       } else if (fieldNumber === 3) {

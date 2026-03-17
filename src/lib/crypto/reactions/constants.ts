@@ -43,7 +43,9 @@ export type EmojiType = typeof EMOJIS[number];
 // Domain separators for hash functions (must match ZK circuit)
 export const DOMAIN_SEPARATORS = {
   // Nullifier: Poseidon(user_secret, message_id, feed_id, DOMAIN)
-  NULLIFIER: 0x48555348n, // "HUSH" as hex
+  // Must match reaction.circom DOMAIN_SEPARATOR exactly.
+  // Historical docs claimed this was "HUSH" as hex, but the compiled circuit uses 1213481800.
+  NULLIFIER: 1213481800n,
 
   // Backup key: Poseidon(user_secret, message_id, BACKUP_DOMAIN)
   BACKUP: 0x4241434B5550n, // "BACKUP" as hex

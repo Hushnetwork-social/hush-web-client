@@ -19,6 +19,9 @@ WORKDIR /app
 ARG APP_VERSION=Production
 ARG NEXT_PUBLIC_GRPC_URL=https://api.hushnetwork.social
 ARG NEXT_PUBLIC_DEBUG_LOGGING=false
+ARG NEXT_PUBLIC_REACTIONS_ALLOW_DEV_MODE=false
+ARG NEXT_PUBLIC_REACTION_PROVER_MODE=browser
+ARG NEXT_PUBLIC_SYNC_INTERVAL_MS=3000
 
 # Copy dependencies from deps stage
 COPY --from=deps /app/node_modules ./node_modules
@@ -31,6 +34,9 @@ COPY . ./
 ENV NEXT_PUBLIC_APP_VERSION=${APP_VERSION}
 ENV NEXT_PUBLIC_GRPC_URL=${NEXT_PUBLIC_GRPC_URL}
 ENV NEXT_PUBLIC_DEBUG_LOGGING=${NEXT_PUBLIC_DEBUG_LOGGING}
+ENV NEXT_PUBLIC_REACTIONS_ALLOW_DEV_MODE=${NEXT_PUBLIC_REACTIONS_ALLOW_DEV_MODE}
+ENV NEXT_PUBLIC_REACTION_PROVER_MODE=${NEXT_PUBLIC_REACTION_PROVER_MODE}
+ENV NEXT_PUBLIC_SYNC_INTERVAL_MS=${NEXT_PUBLIC_SYNC_INTERVAL_MS}
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV STANDALONE_BUILD=true
 
@@ -45,16 +51,13 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
 # Create non-root user for security
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nextjs
+RUN addgroup --system --gid 1001 nodejs \
+    && adduser --system --uid 1001 nextjs
 
 # Copy built application
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
-
-# Set ownership
-RUN chown -R nextjs:nodejs /app
+COPY --chown=nextjs:nodejs --from=builder /app/public ./public
+COPY --chown=nextjs:nodejs --from=builder /app/.next/standalone ./
+COPY --chown=nextjs:nodejs --from=builder /app/.next/static ./.next/static
 
 USER nextjs
 

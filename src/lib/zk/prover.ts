@@ -12,21 +12,48 @@ import type {
   Groth16Proof,
   WorkerMessage,
 } from './types';
+import { packGroth16Proof } from './proofPacking';
+
+type ProverMode = 'browser' | 'server';
+
+type ServerProofResponse = {
+  success: boolean;
+  proof?: Groth16Proof;
+  publicSignals?: string[];
+  circuitVersion?: string;
+  message?: string;
+};
 
 /**
  * ZK Prover class - manages Web Worker for proof generation
  */
 class ZkProver {
+  private static readonly PROOF_TIMEOUT_MS = 30_000;
   private worker: Worker | null = null;
   private isReady = false;
   private initPromise: Promise<void> | null = null;
   private currentCircuitVersion: string = CIRCUIT.version;
+  private pendingInitReject: ((error: Error) => void) | null = null;
 
   // Pending proof requests
   private pendingProof: {
     resolve: (result: ProofResult) => void;
     reject: (error: Error) => void;
   } | null = null;
+
+  private getProverMode(): ProverMode {
+    // Browser is the canonical FEAT-087 E2E mode.
+    // Forcing server mode routes proof generation through /api/reactions/prove, which can
+    // time out in Docker and prevents the test from exercising the actual submitted-proof path.
+    return process.env.NEXT_PUBLIC_REACTION_PROVER_MODE === 'server' ? 'server' : 'browser';
+  }
+
+  private static isMissingCircuitArtifactsMessage(message: string): boolean {
+    return (
+      message.includes('Circuit files not found') ||
+      message.includes('Failed to load circuit files')
+    );
+  }
 
   /**
    * Initialize the prover and load circuit files
@@ -45,6 +72,15 @@ class ZkProver {
   }
 
   private async _initialize(circuitVersion: string): Promise<void> {
+    if (this.getProverMode() === 'server') {
+      this.isReady = true;
+      this.currentCircuitVersion = circuitVersion;
+      this.initPromise = null;
+      this.pendingInitReject = null;
+      console.log(`[ZkProver] Ready with server prover mode for circuit ${circuitVersion}`);
+      return;
+    }
+
     // Terminate existing worker if any
     if (this.worker) {
       this.worker.terminate();
@@ -53,6 +89,25 @@ class ZkProver {
     }
 
     return new Promise((resolve, reject) => {
+      let settled = false;
+      this.pendingInitReject = (error: Error) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        this.isReady = false;
+        this.initPromise = null;
+        this.pendingInitReject = null;
+
+        if (this.worker) {
+          this.worker.terminate();
+          this.worker = null;
+        }
+
+        reject(error);
+      };
+
       try {
         // Create Web Worker
         this.worker = new Worker(
@@ -65,8 +120,15 @@ class ZkProver {
 
           switch (type) {
             case 'ready':
+              if (settled) {
+                break;
+              }
+
+              settled = true;
               this.isReady = true;
               this.currentCircuitVersion = circuitVersion;
+              this.initPromise = null;
+              this.pendingInitReject = null;
               console.log(`[ZkProver] Ready with circuit ${circuitVersion}`);
               resolve();
               break;
@@ -77,10 +139,14 @@ class ZkProver {
                   proof: Groth16Proof;
                   publicSignals: string[];
                 };
+                console.log(
+                  `[ZkProver] generateProof done: circuit=${this.currentCircuitVersion}, publicSignals=${proofPayload.publicSignals.length}`
+                );
                 const result: ProofResult = {
-                  proof: this.packProof(proofPayload.proof),
+                  proof: packGroth16Proof(proofPayload.proof),
                   publicSignals: proofPayload.publicSignals,
                   circuitVersion: this.currentCircuitVersion,
+                  proofJson: proofPayload.proof,
                 };
                 this.pendingProof.resolve(result);
                 this.pendingProof = null;
@@ -89,10 +155,21 @@ class ZkProver {
 
             case 'error':
               const errorPayload = payload as { message: string };
-              console.error('[ZkProver] Worker error:', errorPayload.message);
+              const isInitArtifactError =
+                !this.isReady && ZkProver.isMissingCircuitArtifactsMessage(errorPayload.message);
+
+              if (isInitArtifactError) {
+                console.warn('[ZkProver] Circuit artifacts unavailable:', errorPayload.message);
+              } else {
+                console.error('[ZkProver] Worker error:', errorPayload.message);
+              }
+
               if (this.pendingProof) {
                 this.pendingProof.reject(new Error(errorPayload.message));
                 this.pendingProof = null;
+              }
+              if (!this.isReady) {
+                this.pendingInitReject?.(new Error(errorPayload.message));
               }
               break;
           }
@@ -100,7 +177,14 @@ class ZkProver {
 
         this.worker.onerror = (error) => {
           console.error('[ZkProver] Worker error:', error);
-          reject(new Error(`Worker error: ${error.message}`));
+          const workerError = new Error(`Worker error: ${error.message}`);
+
+          if (this.pendingProof) {
+            this.pendingProof.reject(workerError);
+            this.pendingProof = null;
+          }
+
+          this.pendingInitReject?.(workerError);
         };
 
         // Send init message
@@ -109,6 +193,8 @@ class ZkProver {
           payload: { circuitVersion },
         });
       } catch (error) {
+        this.initPromise = null;
+        this.pendingInitReject = null;
         reject(error);
       }
     });
@@ -122,70 +208,106 @@ class ZkProver {
       await this.initialize();
     }
 
+    if (this.getProverMode() === 'server') {
+      return this.generateProofViaServer(inputs);
+    }
+
     if (!this.worker) {
       throw new Error('Worker not initialized');
     }
 
     return new Promise((resolve, reject) => {
-      this.pendingProof = { resolve, reject };
+      const startedAt = performance.now();
+      console.log(
+        `[ZkProver] generateProof start: circuit=${this.currentCircuitVersion}, nullifier=${inputs.nullifier.substring(0, 24)}...`
+      );
+      const timeoutHandle = setTimeout(() => {
+        if (!this.pendingProof) {
+          return;
+        }
+
+        console.error(
+          `[ZkProver] generateProof timed out after ${ZkProver.PROOF_TIMEOUT_MS}ms`
+        );
+        this.pendingProof.reject(
+          new Error(
+            `ZK proof generation timed out after ${ZkProver.PROOF_TIMEOUT_MS}ms`
+          )
+        );
+        this.pendingProof = null;
+      }, ZkProver.PROOF_TIMEOUT_MS);
+
+      this.pendingProof = {
+        resolve: (result) => {
+          clearTimeout(timeoutHandle);
+          console.log(
+            `[ZkProver] generateProof completed in ${Math.round(performance.now() - startedAt)}ms`
+          );
+          resolve(result);
+        },
+        reject: (error) => {
+          clearTimeout(timeoutHandle);
+          reject(error);
+        },
+      };
 
       this.worker!.postMessage({
         type: 'prove',
         payload: { inputs },
       });
-    });
+      });
   }
 
-  /**
-   * Pack a Groth16 proof into bytes for transmission
-   */
-  private packProof(proof: Groth16Proof): Uint8Array {
-    // Groth16 proof consists of:
-    // - pi_a: 2 field elements (64 bytes)
-    // - pi_b: 4 field elements (128 bytes)
-    // - pi_c: 2 field elements (64 bytes)
-    // Total: 256 bytes
+  private async generateProofViaServer(inputs: CircuitInputs): Promise<ProofResult> {
+    console.log(
+      `[ZkProver] generateProof start via server: circuit=${this.currentCircuitVersion}, nullifier=${inputs.nullifier.substring(0, 24)}...`
+    );
+    const startedAt = performance.now();
 
-    const buffer = new ArrayBuffer(256);
-    let offset = 0;
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), ZkProver.PROOF_TIMEOUT_MS);
 
-    // Pack pi_a (skip the third element, it's always 1)
-    for (let i = 0; i < 2; i++) {
-      const bytes = this.bigintToBytes32(BigInt(proof.pi_a[i]));
-      new Uint8Array(buffer, offset, 32).set(bytes);
-      offset += 32;
-    }
+    try {
+      const response = await fetch('/api/reactions/prove', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          circuitVersion: this.currentCircuitVersion,
+          inputs,
+        }),
+        signal: controller.signal,
+      });
 
-    // Pack pi_b (2x2 matrix, skip third row)
-    for (let i = 0; i < 2; i++) {
-      for (let j = 0; j < 2; j++) {
-        const bytes = this.bigintToBytes32(BigInt(proof.pi_b[i][j]));
-        new Uint8Array(buffer, offset, 32).set(bytes);
-        offset += 32;
+      const payload = (await response.json()) as ServerProofResponse;
+
+      if (!response.ok || !payload.success || !payload.proof || !payload.publicSignals) {
+        throw new Error(payload.message || `Server prover request failed with ${response.status}`);
       }
-    }
 
-    // Pack pi_c (skip the third element)
-    for (let i = 0; i < 2; i++) {
-      const bytes = this.bigintToBytes32(BigInt(proof.pi_c[i]));
-      new Uint8Array(buffer, offset, 32).set(bytes);
-      offset += 32;
-    }
+      const circuitVersion = payload.circuitVersion ?? this.currentCircuitVersion;
+      console.log(
+        `[ZkProver] generateProof via server completed in ${Math.round(performance.now() - startedAt)}ms for circuit=${circuitVersion}, publicSignals=${payload.publicSignals.length}`
+      );
 
-    return new Uint8Array(buffer);
-  }
+      return {
+        proof: packGroth16Proof(payload.proof),
+        publicSignals: payload.publicSignals,
+        circuitVersion,
+        proofJson: payload.proof,
+      };
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        throw new Error(
+          `ZK proof generation timed out after ${ZkProver.PROOF_TIMEOUT_MS}ms`
+        );
+      }
 
-  /**
-   * Convert a bigint to 32-byte big-endian array
-   */
-  private bigintToBytes32(n: bigint): Uint8Array {
-    const bytes = new Uint8Array(32);
-    let temp = n;
-    for (let i = 31; i >= 0; i--) {
-      bytes[i] = Number(temp & 0xffn);
-      temp >>= 8n;
+      throw error instanceof Error ? error : new Error(String(error));
+    } finally {
+      clearTimeout(timeoutHandle);
     }
-    return bytes;
   }
 
   /**
@@ -215,6 +337,13 @@ class ZkProver {
     if (this.pendingProof) {
       this.pendingProof.reject(new Error('Prover terminated'));
       this.pendingProof = null;
+    }
+
+    if (this.pendingInitReject) {
+      const reject = this.pendingInitReject;
+      this.pendingInitReject = null;
+      this.initPromise = null;
+      reject(new Error('Prover terminated'));
     }
   }
 }

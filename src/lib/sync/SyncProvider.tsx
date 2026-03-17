@@ -73,6 +73,7 @@ export function SyncProvider({ children, config }: SyncProviderProps) {
     ...DEFAULT_SYNC_CONFIG,
     ...config,
   };
+  const manualOnlyMode = intervalMs >= 999999;
 
   // Get auth state from app store
   const isAuthenticated = useAppStore((state) => state.isAuthenticated);
@@ -144,7 +145,10 @@ export function SyncProvider({ children, config }: SyncProviderProps) {
         if (!isMountedRef.current || isPaused) break;
 
         try {
+          const startedAt = Date.now();
+          console.log(`[E2E Sync] ${loopName} start: ${syncable.name}`);
           await syncable.syncTask();
+          console.log(`[E2E Sync] ${loopName} done: ${syncable.name} (${Date.now() - startedAt}ms)`);
           // Reset failures on success
           if (consecutiveFailures > 0) {
             setConsecutiveFailures(0);
@@ -152,6 +156,7 @@ export function SyncProvider({ children, config }: SyncProviderProps) {
           }
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          console.log(`[E2E Sync] ${loopName} failed: ${syncable.name} -> ${errorMessage}`);
           debugError(`[SyncProvider] ${loopName} - ${syncable.name} failed:`, errorMessage);
 
           setConsecutiveFailures((prev) => {
@@ -199,6 +204,11 @@ export function SyncProvider({ children, config }: SyncProviderProps) {
   useEffect(() => {
     isMountedRef.current = true;
 
+    if (manualOnlyMode) {
+      debugLog('[SyncProvider] Manual-only sync mode enabled; skipping always-running loop');
+      return;
+    }
+
     const alwaysRunningSyncables = syncablesRef.current.filter((s) => !s.requiresAuth);
 
     if (alwaysRunningSyncables.length === 0) {
@@ -231,7 +241,7 @@ export function SyncProvider({ children, config }: SyncProviderProps) {
         alwaysRunningIntervalRef.current = null;
       }
     };
-  }, [intervalMs, runSyncTasks]);
+  }, [intervalMs, manualOnlyMode, runSyncTasks]);
 
   // =============================================================================
   // Auth-Dependent Loop (requiresAuth = true)
@@ -245,6 +255,11 @@ export function SyncProvider({ children, config }: SyncProviderProps) {
         clearInterval(authDependentIntervalRef.current);
         authDependentIntervalRef.current = null;
       }
+      return;
+    }
+
+    if (manualOnlyMode) {
+      debugLog('[SyncProvider] Manual-only sync mode enabled; skipping auth-dependent loop');
       return;
     }
 
@@ -280,7 +295,7 @@ export function SyncProvider({ children, config }: SyncProviderProps) {
         authDependentIntervalRef.current = null;
       }
     };
-  }, [isAuthenticated, intervalMs, runSyncTasks]);
+  }, [isAuthenticated, intervalMs, manualOnlyMode, runSyncTasks]);
 
   // =============================================================================
   // Cleanup on unmount
@@ -328,58 +343,58 @@ export function SyncProvider({ children, config }: SyncProviderProps) {
     // Expose sync trigger for E2E tests
     // This allows tests to manually trigger sync instead of waiting for interval
     (window as unknown as Record<string, unknown>).__e2e_triggerSync = async (): Promise<boolean> => {
-      console.log('[E2E] Manual sync triggered');
+      const overallTimeoutMs = 12000;
 
-      // CRITICAL: Wait for any in-progress sync to complete first
-      // This prevents the new sync from being skipped due to the isSyncing guard
-      // in FeedsSyncable. Without this, rapid sync triggers can skip syncs entirely.
-      const maxWaitMs = 10000; // Max 10 seconds
-      const pollIntervalMs = 100;
-      let waitedMs = 0;
+      const runBestEffortSync = async (): Promise<boolean> => {
+        console.log('[E2E] Manual sync triggered');
 
-      // Check if FeedsSyncable is currently syncing via the store's syncing flag
-      while (useFeedsStore.getState().isSyncing && waitedMs < maxWaitMs) {
-        console.log(`[E2E] Waiting for in-progress sync to complete... (${waitedMs}ms)`);
-        await new Promise<void>((resolve) => setTimeout(resolve, pollIntervalMs));
-        waitedMs += pollIntervalMs;
-      }
+        // CRITICAL: Wait for any in-progress sync to complete first.
+        const maxWaitMs = 10000;
+        const pollIntervalMs = 100;
+        let waitedMs = 0;
 
-      if (waitedMs > 0) {
-        console.log(`[E2E] Previous sync completed after ${waitedMs}ms`);
-      }
+        while (useFeedsStore.getState().isSyncing && waitedMs < maxWaitMs) {
+          console.log(`[E2E] Waiting for in-progress sync to complete... (${waitedMs}ms)`);
+          await new Promise<void>((resolve) => setTimeout(resolve, pollIntervalMs));
+          waitedMs += pollIntervalMs;
+        }
 
-      await triggerSyncNow();
+        if (waitedMs > 0) {
+          console.log(`[E2E] Previous sync completed after ${waitedMs}ms`);
+        }
 
-      // Wait for sync to actually complete (not just be triggered)
-      // The runSyncTasks call above might return while sync is still in progress
-      waitedMs = 0;
-      while (useFeedsStore.getState().isSyncing && waitedMs < maxWaitMs) {
-        await new Promise<void>((resolve) => setTimeout(resolve, pollIntervalMs));
-        waitedMs += pollIntervalMs;
-      }
+        await triggerSyncNow();
 
-      // Wait for React to process state updates and re-render
-      // This prevents race conditions where the test checks the DOM before
-      // React has finished rendering the new state
-      // Multiple wait cycles ensure all microtasks and renders complete
-      for (let i = 0; i < 5; i++) {
-        await new Promise<void>((resolve) => {
-          // requestAnimationFrame ensures we wait for the next paint
-          requestAnimationFrame(() => {
-            // setTimeout(0) pushes to the end of the macrotask queue
-            setTimeout(resolve, 0);
+        waitedMs = 0;
+        while (useFeedsStore.getState().isSyncing && waitedMs < maxWaitMs) {
+          await new Promise<void>((resolve) => setTimeout(resolve, pollIntervalMs));
+          waitedMs += pollIntervalMs;
+        }
+
+        for (let i = 0; i < 5; i++) {
+          await new Promise<void>((resolve) => {
+            requestAnimationFrame(() => {
+              setTimeout(resolve, 0);
+            });
           });
-        });
-      }
+        }
 
-      // Additional wait for Virtuoso (react-virtuoso) to complete scroll animation
-      // ChatView uses followOutput="smooth" which triggers animated scroll to new messages
-      // Virtuoso only renders items that are in/near the viewport, so we need to wait
-      // for the scroll animation to complete before the new message is visible
-      await new Promise<void>((resolve) => setTimeout(resolve, 150));
+        // ChatView uses smooth followOutput scrolling.
+        await new Promise<void>((resolve) => setTimeout(resolve, 150));
 
-      console.log('[E2E] Manual sync completed');
-      return true;
+        console.log('[E2E] Manual sync completed');
+        return true;
+      };
+
+      return await Promise.race<boolean>([
+        runBestEffortSync(),
+        new Promise<boolean>((resolve) => {
+          setTimeout(() => {
+            console.warn(`[E2E] Manual sync exceeded ${overallTimeoutMs}ms, returning best-effort result`);
+            resolve(false);
+          }, overallTimeoutMs);
+        }),
+      ]);
     };
 
     return () => {

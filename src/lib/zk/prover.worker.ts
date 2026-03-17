@@ -1,26 +1,42 @@
-/**
- * ZK Prover Web Worker
- *
- * Runs proof generation in a separate thread to avoid blocking the UI.
- *
- * NOTE: This worker fails closed until real proof generation is wired.
- * Placeholder proofs were removed because they create a false sense of privacy/security.
- *
- * TODO: When ready, add snarkjs:
- *   npm install snarkjs
- *
- * And add circuit files to:
- *   public/circuits/{version}/reaction.wasm
- *   public/circuits/{version}/reaction.zkey
- */
+import { getApprovedCircuitArtifacts } from './artifactManifest';
+import type { CircuitInputs, Groth16Proof, WorkerMessage } from './types';
 
-import type { CircuitInputs, WorkerMessage } from './types';
+type SnarkJsGroth16 = {
+  fullProve(
+    input: CircuitInputs,
+    wasmFile: string,
+    zkeyFile: string
+  ): Promise<{ proof: Groth16Proof; publicSignals: string[] }>;
+};
 
-// Circuit file buffers (loaded on init)
-let wasmBuffer: ArrayBuffer | null = null;
-let zkeyBuffer: ArrayBuffer | null = null;
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-let currentVersion: string | null = null;
+type SnarkJsModule = {
+  groth16: SnarkJsGroth16;
+};
+
+// Circuit artifact paths (approved and browser-accessible)
+let wasmPath: string | null = null;
+let zkeyPath: string | null = null;
+
+async function loadSnarkJs(): Promise<SnarkJsModule> {
+  try {
+    return (await import('snarkjs')) as SnarkJsModule;
+  } catch (nativeImportError) {
+    try {
+      const dynamicImport = new Function('specifier', 'return import(specifier);') as (
+        specifier: string
+      ) => Promise<unknown>;
+      return (await dynamicImport('snarkjs')) as SnarkJsModule;
+    } catch (fallbackError) {
+      const detail =
+        fallbackError instanceof Error
+          ? fallbackError.message
+          : nativeImportError instanceof Error
+            ? nativeImportError.message
+            : String(fallbackError);
+      throw new Error(`snarkjs is required for browser proof generation: ${detail}`);
+    }
+  }
+}
 
 /**
  * Handle messages from the main thread
@@ -46,17 +62,15 @@ async function handleInit(payload: { circuitVersion: string }): Promise<void> {
   const { circuitVersion } = payload;
 
   try {
-    // Check if circuit files exist
-    const baseUrl = `/circuits/${circuitVersion}`;
+    const artifacts = getApprovedCircuitArtifacts(circuitVersion);
 
     // Try to load circuit files
-    const wasmResponse = await fetch(`${baseUrl}/reaction.wasm`);
-    const zkeyResponse = await fetch(`${baseUrl}/reaction.zkey`);
+    const wasmResponse = await fetch(artifacts.wasmPath);
+    const zkeyResponse = await fetch(artifacts.zkeyPath);
 
     if (wasmResponse.ok && zkeyResponse.ok) {
-      wasmBuffer = await wasmResponse.arrayBuffer();
-      zkeyBuffer = await zkeyResponse.arrayBuffer();
-      currentVersion = circuitVersion;
+      wasmPath = artifacts.wasmPath;
+      zkeyPath = artifacts.zkeyPath;
       console.log(`[ZkWorker] Loaded circuit ${circuitVersion}`);
     } else {
       self.postMessage({
@@ -86,18 +100,29 @@ async function handleInit(payload: { circuitVersion: string }): Promise<void> {
  * Generate a proof for the given inputs
  */
 async function handleProve(payload: { inputs: CircuitInputs }): Promise<void> {
-  const { inputs } = payload;
-
   try {
-    if (!wasmBuffer || !zkeyBuffer) {
+    if (!wasmPath || !zkeyPath) {
       throw new Error('Real circuit artifacts are not loaded. Placeholder proofs are disabled.');
     }
 
-    // Real proof generation with snarkjs is not wired into this worker yet.
-    // Fail closed instead of generating fake proofs that look valid to callers.
-    throw new Error(
-      'Real ZK proof generation is not enabled in this build. Refusing to generate placeholder proofs.'
+    const startedAt = performance.now();
+    const snarkjs = await loadSnarkJs();
+    const { proof, publicSignals } = await snarkjs.groth16.fullProve(
+      payload.inputs,
+      wasmPath,
+      zkeyPath
     );
+    console.log(
+      `[ZkWorker] fullProve completed in ${Math.round(performance.now() - startedAt)}ms, publicSignals=${publicSignals.length}`
+    );
+
+    self.postMessage({
+      type: 'proof',
+      payload: {
+        proof,
+        publicSignals,
+      },
+    });
   } catch (error) {
     self.postMessage({
       type: 'error',

@@ -8,7 +8,9 @@ type PermalinkDto = {
   message: string;
   accessState: AccessState;
   postId?: string;
+  reactionScopeId?: string;
   authorPublicAddress?: string;
+  authorCommitment?: string;
   content?: string;
   createdAtBlock?: number;
   createdAtUnixMs?: number;
@@ -137,6 +139,17 @@ function parsePermalinkResponse(messageBytes: Uint8Array): PermalinkDto {
     if (wireType === 2) {
       const lengthInfo = parseVarint(messageBytes, offset);
       offset += lengthInfo.bytesRead;
+      if (fieldNumber === 20) {
+        const bytes = messageBytes.slice(offset, offset + lengthInfo.value);
+        let binary = "";
+        for (const value of bytes) {
+          binary += String.fromCharCode(value);
+        }
+        result.authorCommitment = btoa(binary);
+        offset += lengthInfo.value;
+        continue;
+      }
+
       const value = parseString(messageBytes, offset, lengthInfo.value);
       offset += lengthInfo.value;
 
@@ -144,6 +157,8 @@ function parsePermalinkResponse(messageBytes: Uint8Array): PermalinkDto {
         result.message = value;
       } else if (fieldNumber === 4) {
         result.postId = value;
+      } else if (fieldNumber === 19) {
+        result.reactionScopeId = value;
       } else if (fieldNumber === 5) {
         result.authorPublicAddress = value;
       } else if (fieldNumber === 6) {

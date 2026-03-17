@@ -469,6 +469,10 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   // FEAT-056: State for Jump to Bottom button
   // Tracks whether user is at the bottom of the chat
   const [isAtBottom, setIsAtBottom] = useState(true);
+  // Tracks whether the active chat pane is actually scrollable
+  const [canScrollMessages, setCanScrollMessages] = useState(false);
+  // Tracks whether the user has explicitly moved away from the bottom in this feed session
+  const [hasScrolledAwayFromBottom, setHasScrolledAwayFromBottom] = useState(false);
   // Tracks count of new messages since user scrolled away from bottom
   const [newMessageCount, setNewMessageCount] = useState(0);
   // Track chatItems length when user scrolled away to calculate new messages
@@ -803,9 +807,11 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
     setIsAtBottom(atBottom);
     if (atBottom) {
       // User scrolled back to bottom - reset new message count
+      setHasScrolledAwayFromBottom(false);
       setNewMessageCount(0);
     } else {
       // User scrolled away - record current count
+      setHasScrolledAwayFromBottom(true);
       chatItemsCountWhenScrolledAwayRef.current = chatItems.length;
     }
   }, [chatItems.length]);
@@ -823,9 +829,44 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
   // FEAT-056: Reset Jump to Bottom state when feed changes
   useEffect(() => {
     setIsAtBottom(true);
+    setCanScrollMessages(false);
+    setHasScrolledAwayFromBottom(false);
     setNewMessageCount(0);
     chatItemsCountWhenScrolledAwayRef.current = 0;
   }, [feed.id]);
+
+  // Keep the jump-button state aligned with the actual visible Virtuoso scroller.
+  // This covers initial render and post-sync message updates where the DOM is already
+  // at the bottom but Virtuoso has not fired a fresh atBottomStateChange callback yet.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const timeoutId = window.setTimeout(() => {
+      const scrollers = Array.from(
+        document.querySelectorAll<HTMLElement>('[data-virtuoso-scroller="true"]')
+      );
+
+      const visibleScroller = scrollers.find(
+        (scroller) => scroller.offsetHeight > 0 && scroller.offsetWidth > 0
+      );
+
+      if (!visibleScroller) return;
+
+      const canScroll = visibleScroller.scrollHeight > visibleScroller.clientHeight + 2;
+      const distanceFromBottom =
+        visibleScroller.scrollHeight - visibleScroller.scrollTop - visibleScroller.clientHeight;
+      const atBottom = !canScroll || distanceFromBottom <= 2;
+
+      setCanScrollMessages(canScroll);
+      setIsAtBottom(atBottom);
+      if (atBottom) {
+        setHasScrolledAwayFromBottom(false);
+        setNewMessageCount(0);
+      }
+    }, 50);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [chatItems.length, feed.id]);
 
   // FEAT-056: Handle Jump to Bottom button click
   const handleJumpToBottom = useCallback(() => {
@@ -837,6 +878,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
       });
     }
     setNewMessageCount(0);
+    setHasScrolledAwayFromBottom(false);
     setIsAtBottom(true);
   }, [chatItems.length]);
 
@@ -924,12 +966,6 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
 
     // Skip if a call is already in flight for this feed
     if (state.feedId === feed.id && state.inFlight) return;
-
-    // Skip if feed's lastReadBlockIndex already covers this (already read on another device)
-    if (feed.lastReadBlockIndex && maxBlockIndex <= feed.lastReadBlockIndex) {
-      markAsReadStateRef.current = { feedId: feed.id, blockIndex: maxBlockIndex, inFlight: false };
-      return;
-    }
 
     // Update state IMMEDIATELY to prevent concurrent calls
     markAsReadStateRef.current = { feedId: feed.id, blockIndex: maxBlockIndex, inFlight: true };
@@ -1560,7 +1596,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
         <div className="absolute bottom-2 right-2 z-10">
           <JumpToBottomButton
             count={newMessageCount}
-            isVisible={!isAtBottom}
+            isVisible={canScrollMessages && hasScrolledAwayFromBottom && !isAtBottom}
             onJump={handleJumpToBottom}
           />
         </div>

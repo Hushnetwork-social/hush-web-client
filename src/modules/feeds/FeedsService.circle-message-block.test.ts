@@ -27,6 +27,7 @@ vi.mock("@/lib/crypto", () => ({
   createCreateCustomCircleTransaction: vi.fn(),
   createAddMembersToCustomCircleTransaction: vi.fn(),
   generateGuid: vi.fn(() => "generated-guid"),
+  bytesToBase64: vi.fn(() => 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE='),
   hexToBytes: vi.fn(() => new Uint8Array(32)),
 }));
 
@@ -44,6 +45,14 @@ vi.mock("@/stores", () => ({
         signingPrivateKey: "a".repeat(64),
         signingPublicKey: "owner-public-key",
       },
+    })),
+  },
+}));
+
+vi.mock('@/modules/reactions/useReactionsStore', () => ({
+  useReactionsStore: {
+    getState: vi.fn(() => ({
+      getUserCommitment: vi.fn(() => 123n),
     })),
   },
 }));

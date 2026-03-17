@@ -31,6 +31,7 @@ yarn-error.log*
 # env files
 .env*
 !.env.example
+!.env.development
 
 # Firebase
 google-services.json
@@ -67,3 +68,6 @@ $RECYCLE.BIN/
 .qodo/
 .claude/settings.local.json
 /tmp/
+/.tmp/
+/.generated/
+.tmp-esm.wtns

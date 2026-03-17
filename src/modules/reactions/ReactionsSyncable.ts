@@ -40,6 +40,7 @@ class ReactionsSyncableClass implements ISyncable {
   private registeredFeeds: Set<string> = new Set();
 
   async syncTask(): Promise<void> {
+    const useDevMode = process.env.NEXT_PUBLIC_REACTIONS_ALLOW_DEV_MODE === 'true';
     const feedsStore = useFeedsStore.getState();
     const appStore = useAppStore.getState();
 
@@ -81,6 +82,11 @@ class ReactionsSyncableClass implements ISyncable {
       return;
     }
 
+    if (useDevMode) {
+      debugLog('[ReactionsSyncable] Dev mode enabled - skipping background commitment registration');
+      return;
+    }
+
     // Step 2: Register commitment for new feeds only (skip already registered)
     // NOTE: Registrations must be done sequentially to avoid server-side serialization conflicts
     const feeds = Object.values(feedsStore.feeds);
@@ -91,7 +97,7 @@ class ReactionsSyncableClass implements ISyncable {
 
       // Register feeds sequentially to avoid database serialization conflicts
       for (const feed of unregisteredFeeds) {
-        debugLog(`[ReactionsSyncable] Registering commitment for feed ${feed.id.substring(0, 8)}...`);
+        debugLog('[ReactionsSyncable] Registering commitment for feed');
         try {
           const success = await ensureCommitmentRegistered(feed.id);
           if (success) {

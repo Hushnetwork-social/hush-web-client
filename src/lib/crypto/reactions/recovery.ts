@@ -8,11 +8,39 @@
 import { computeBackupKey, uuidToBigint } from './poseidon';
 import { bigintToBytes, bytesToBigint } from './babyjubjub';
 
+const BACKUP_FORMAT_VERSION = 1;
+const BACKUP_LENGTH = 32;
+const LEGACY_BACKUP_LENGTH = 1;
+const MIN_EMOJI_INDEX = -1;
+const MAX_EMOJI_INDEX = 6;
+
+function normalizeEmojiIndex(emojiIndex: number): number {
+  if (!Number.isInteger(emojiIndex) || emojiIndex < MIN_EMOJI_INDEX || emojiIndex > MAX_EMOJI_INDEX) {
+    throw new Error(`Unsupported reaction backup emoji index: ${emojiIndex}`);
+  }
+
+  return emojiIndex;
+}
+
+function encodeEmojiIndex(emojiIndex: number): number {
+  return normalizeEmojiIndex(emojiIndex) + 128;
+}
+
+function decodeEmojiIndex(encoded: number): number {
+  const decoded = encoded - 128;
+
+  if (decoded < MIN_EMOJI_INDEX || decoded > MAX_EMOJI_INDEX) {
+    throw new Error(`Recovered reaction backup is outside the supported FEAT-087 range: ${decoded}`);
+  }
+
+  return decoded;
+}
+
 /**
  * Encrypt emoji index for backup storage
  *
- * Uses XOR with derived backup key for simple symmetric encryption.
- * The backup key is derived from user_secret and message_id.
+ * The backup is versioned and authenticated against the derived backup key so
+ * corrupted artifacts fail closed instead of silently decoding to another vote.
  *
  * @param emojiIndex - The emoji index (0-5) or -1 for removal
  * @param backupKey - Derived backup key
@@ -22,9 +50,17 @@ export function encryptEmojiBackup(
   backupKey: bigint
 ): Uint8Array {
   const keyBytes = bigintToBytes(backupKey);
-  // XOR emoji index with first byte of key
-  const encrypted = new Uint8Array(1);
-  encrypted[0] = (emojiIndex + 128) ^ keyBytes[0]; // +128 to handle negative indices
+  const encodedEmoji = encodeEmojiIndex(emojiIndex);
+  const encrypted = new Uint8Array(BACKUP_LENGTH);
+
+  encrypted[0] = BACKUP_FORMAT_VERSION;
+  encrypted[1] = encodedEmoji ^ keyBytes[0];
+
+  for (let i = 2; i < BACKUP_LENGTH; i++) {
+    const mask = keyBytes[(i - 1) % keyBytes.length];
+    encrypted[i] = mask ^ encodedEmoji ^ i;
+  }
+
   return encrypted;
 }
 
@@ -39,9 +75,35 @@ export function decryptEmojiBackup(
   encrypted: Uint8Array,
   backupKey: bigint
 ): number {
+  if (encrypted.length === 0) {
+    throw new Error('Encrypted reaction backup is empty');
+  }
+
   const keyBytes = bigintToBytes(backupKey);
-  const decrypted = (encrypted[0] ^ keyBytes[0]) - 128;
-  return decrypted;
+
+  if (encrypted.length === LEGACY_BACKUP_LENGTH) {
+    return decodeEmojiIndex(encrypted[0] ^ keyBytes[0]);
+  }
+
+  if (encrypted.length !== BACKUP_LENGTH) {
+    throw new Error(`Encrypted reaction backup has unexpected length ${encrypted.length}`);
+  }
+
+  if (encrypted[0] !== BACKUP_FORMAT_VERSION) {
+    throw new Error(`Unsupported reaction backup version: ${encrypted[0]}`);
+  }
+
+  const encodedEmoji = encrypted[1] ^ keyBytes[0];
+
+  for (let i = 2; i < BACKUP_LENGTH; i++) {
+    const mask = keyBytes[(i - 1) % keyBytes.length];
+    const expected = mask ^ encodedEmoji ^ i;
+    if (encrypted[i] !== expected) {
+      throw new Error('Encrypted reaction backup integrity check failed');
+    }
+  }
+
+  return decodeEmojiIndex(encodedEmoji);
 }
 
 /**

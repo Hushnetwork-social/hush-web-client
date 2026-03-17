@@ -15,6 +15,7 @@ import {
   createCreateCustomCircleTransaction,
   createAddMembersToCustomCircleTransaction,
   generateGuid,
+  bytesToBase64,
   hexToBytes,
   type AttachmentRefPayload,
   type CustomCircleMemberPayload,
@@ -26,6 +27,8 @@ import { debugLog, debugError } from '@/lib/debug-logger';
 import { checkIdentityExists } from '../identity/IdentityService';
 import { isCircleFeed } from '@/lib/social/circleFeed';
 import { groupService } from '@/lib/grpc/services/group';
+import { useReactionsStore } from '@/modules/reactions/useReactionsStore';
+import { bigintToBytes } from '@/lib/crypto/reactions/babyjubjub';
 import {
   CircleOperationErrorCode,
   type CircleOperationResult,
@@ -61,6 +64,7 @@ interface ServerMessage {
   messageContent: string;
   issuerPublicAddress: string;
   issuerName: string;
+  authorCommitment?: string;
   timestamp: string;
   blockIndex: number;
   replyToMessageId?: string;  // Reply to Message: parent message reference
@@ -147,13 +151,34 @@ export async function fetchFeeds(
     };
   });
 
+  const enrichedFeeds = await Promise.all(
+    feeds.map(async (feed) => {
+      if (feed.type !== 'group' || typeof groupService.getGroupInfo !== 'function') {
+        return feed;
+      }
+
+      const groupInfo = await groupService.getGroupInfo(feed.id);
+      if (!groupInfo?.Success) {
+        return feed;
+      }
+
+      return {
+        ...feed,
+        name: groupInfo.Title || feed.name,
+        description: groupInfo.Description || '',
+        isPublic: groupInfo.IsPublic,
+        inviteCode: groupInfo.InviteCode,
+      };
+    })
+  );
+
   // Calculate max block index from response
   // FEAT-062: Use blockIndex (not createdAt) since createdAt is now preserved from first creation
-  const maxBlockIndex = feeds.length > 0
-    ? Math.max(...feeds.map((f) => f.blockIndex ?? 0), blockIndex)
+  const maxBlockIndex = enrichedFeeds.length > 0
+    ? Math.max(...enrichedFeeds.map((f) => f.blockIndex ?? 0), blockIndex)
     : blockIndex;
 
-  return { feeds, maxBlockIndex };
+  return { feeds: enrichedFeeds, maxBlockIndex };
 }
 
 /**
@@ -197,6 +222,7 @@ export async function fetchMessages(
       content: msg.messageContent,
       senderPublicKey: msg.issuerPublicAddress,
       senderName: msg.issuerName || undefined,  // Display name from server (current name at sync time)
+      authorCommitment: msg.authorCommitment || undefined,
       timestamp: msg.timestamp ? new Date(msg.timestamp).getTime() : Date.now(),
       blockHeight: msg.blockIndex,
       isConfirmed: true,
@@ -698,6 +724,10 @@ export async function sendMessage(
   try {
     // Convert private key from hex to bytes
     const privateKeyBytes = hexToBytes(credentials.signingPrivateKey);
+    const userCommitment = useReactionsStore.getState().getUserCommitment();
+    const authorCommitment = userCommitment
+      ? bytesToBase64(bigintToBytes(userCommitment))
+      : undefined;
 
     // FEAT-067: Extract attachment refs for the signed payload
     const attachmentRefs = processedAttachments?.map(a => a.ref);
@@ -713,6 +743,7 @@ export async function sendMessage(
       keyGeneration,
       undefined, // existingMessageId
       attachmentRefs,
+      authorCommitment,
     );
 
     // FEAT-058: Create optimistic message with retry tracking fields
@@ -722,6 +753,7 @@ export async function sendMessage(
       feedId,
       content: messageContent, // Already decrypted for display
       senderPublicKey: credentials.signingPublicKey,
+      authorCommitment,
       timestamp: now,
       isConfirmed: false, // Not yet confirmed - will show single checkmark
       replyToMessageId: replyToMessageId || undefined,  // Reply to Message: pass through parent reference
@@ -1013,6 +1045,10 @@ export async function retryMessage(
   try {
     // Convert private key from hex to bytes
     const privateKeyBytes = hexToBytes(credentials.signingPrivateKey);
+    const userCommitment = useReactionsStore.getState().getUserCommitment();
+    const authorCommitment = userCommitment
+      ? bytesToBase64(bigintToBytes(userCommitment))
+      : undefined;
 
     // Create and sign the transaction (will generate same messageId due to deterministic signature)
     // We pass the original messageId to ensure idempotency works
@@ -1024,7 +1060,9 @@ export async function retryMessage(
       credentials.signingPublicKey,
       message.replyToMessageId,
       keyGeneration,
-      messageId  // Pass original messageId for idempotency
+      messageId,  // Pass original messageId for idempotency
+      undefined,
+      authorCommitment
     );
 
     debugLog(`[FeedsService] Retrying message ${messageId} (manual=${isManualRetry})`);

@@ -56,6 +56,11 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
   onDelete,
   onUpdate,
 }: GroupSettingsPanelProps) {
+  const [initialName, setInitialName] = useState(groupName);
+  const [initialDescription, setInitialDescription] = useState(groupDescription);
+  const [initialVisibility, setInitialVisibility] = useState(isPublic);
+  const [currentInviteCode, setCurrentInviteCode] = useState(inviteCode);
+
   // Form state
   const [name, setName] = useState(groupName);
   const [description, setDescription] = useState(groupDescription);
@@ -83,12 +88,12 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
 
   // Generate invite URL - use API base URL for Tauri, window origin for browser
   const inviteUrl = useMemo(() => {
-    if (!inviteCode || typeof window === 'undefined') return '';
+    if (!currentInviteCode || typeof window === 'undefined') return '';
     // In Tauri, use the configured API URL (e.g., https://chat.hushnetwork.social)
     // In browser, use the current origin
     const baseUrl = isTauri() ? getApiBaseUrl() : window.location.origin;
-    return `${baseUrl}/join/${inviteCode}`;
-  }, [inviteCode]);
+    return `${baseUrl}/join/${currentInviteCode}`;
+  }, [currentInviteCode]);
 
   // Handle copy invite link
   const handleCopyLink = useCallback(async () => {
@@ -112,15 +117,15 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
 
   // Handle copy invite code
   const handleCopyCode = useCallback(async () => {
-    if (!inviteCode) return;
+    if (!currentInviteCode) return;
     try {
-      await navigator.clipboard.writeText(inviteCode);
+      await navigator.clipboard.writeText(currentInviteCode);
       setCopiedCode(true);
       setTimeout(() => setCopiedCode(false), 2000);
     } catch {
       // Fallback
       const textArea = document.createElement('textarea');
-      textArea.value = inviteCode;
+      textArea.value = currentInviteCode;
       document.body.appendChild(textArea);
       textArea.select();
       document.execCommand('copy');
@@ -128,7 +133,7 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
       setCopiedCode(true);
       setTimeout(() => setCopiedCode(false), 2000);
     }
-  }, [inviteCode]);
+  }, [currentInviteCode]);
 
   // Get store functions for leave and delete operations
   const removeGroupMember = useFeedsStore((state) => state.removeGroupMember);
@@ -136,18 +141,54 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
 
   // Check if there are unsaved changes
   const hasChanges = useMemo(() => {
-    return name !== groupName || description !== groupDescription || visibility !== isPublic;
-  }, [name, description, visibility, groupName, groupDescription, isPublic]);
+    return (
+      name !== initialName ||
+      description !== initialDescription ||
+      visibility !== initialVisibility
+    );
+  }, [name, description, visibility, initialName, initialDescription, initialVisibility]);
 
   // Reset form when panel opens/closes or group data changes
   useEffect(() => {
     if (isOpen) {
+      setInitialName(groupName);
+      setInitialDescription(groupDescription);
+      setInitialVisibility(isPublic);
+      setCurrentInviteCode(inviteCode);
       setName(groupName);
       setDescription(groupDescription);
       setVisibility(isPublic);
       setError(null);
     }
-  }, [isOpen, groupName, groupDescription, isPublic]);
+  }, [isOpen, groupName, groupDescription, isPublic, inviteCode]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (typeof groupService.getGroupInfo !== "function") return;
+
+    let cancelled = false;
+
+    const loadLatestGroupInfo = async () => {
+      const result = await groupService.getGroupInfo(feedId);
+      if (!result?.Success || cancelled) {
+        return;
+      }
+
+      setInitialName(result.Title || groupName);
+      setInitialDescription(result.Description || "");
+      setInitialVisibility(result.IsPublic);
+      setCurrentInviteCode(result.InviteCode);
+      setName(result.Title || groupName);
+      setDescription(result.Description || "");
+      setVisibility(result.IsPublic);
+    };
+
+    void loadLatestGroupInfo();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, feedId, groupName]);
 
   // Handle save
   const handleSave = useCallback(async () => {
@@ -160,15 +201,15 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
       // Build settings object with only changed fields
       const settings: { newTitle?: string; newDescription?: string; isPublic?: boolean } = {};
 
-      if (name !== groupName) {
+      if (name !== initialName) {
         settings.newTitle = name;
       }
 
-      if (description !== groupDescription) {
+      if (description !== initialDescription) {
         settings.newDescription = description;
       }
 
-      if (visibility !== isPublic) {
+      if (visibility !== initialVisibility) {
         settings.isPublic = visibility;
       }
 
@@ -191,7 +232,7 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
     } finally {
       setIsSaving(false);
     }
-  }, [isAdmin, hasChanges, name, description, visibility, groupName, groupDescription, isPublic, feedId, currentUserAddress, onUpdate, onClose]);
+  }, [isAdmin, hasChanges, name, description, visibility, initialName, initialDescription, initialVisibility, feedId, currentUserAddress, onUpdate, onClose]);
 
   // Handle leave group
   const handleLeave = useCallback(async () => {
@@ -407,7 +448,7 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
               </div>
             ) : (
               <div className="flex items-center gap-3 p-3 bg-hush-bg-element rounded-lg">
-                {isPublic ? (
+                {visibility ? (
                   <>
                     <Globe className="w-5 h-5 text-green-400" aria-hidden="true" />
                     <div>
@@ -429,7 +470,7 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
           </section>
 
           {/* Invite Link Section (only for public groups) */}
-          {(isPublic || visibility) && inviteCode && (
+          {visibility && currentInviteCode && (
             <section>
               <h3 className="text-sm font-medium text-hush-text-accent mb-3 flex items-center gap-2">
                 <Link className="w-4 h-4" aria-hidden="true" />
@@ -470,7 +511,7 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
                       className="flex-1 px-3 py-2 bg-hush-bg-element border border-hush-bg-hover rounded-lg text-hush-text-primary text-lg font-mono tracking-widest text-center"
                       data-testid="invite-code"
                     >
-                      {inviteCode}
+                      {currentInviteCode}
                     </div>
                     <button
                       onClick={handleCopyCode}
@@ -508,7 +549,7 @@ export const GroupSettingsPanel = memo(function GroupSettingsPanel({
                   <p className="text-sm font-medium">Leave Group</p>
                   <p className="text-xs text-hush-text-accent">
                     You will no longer receive messages from this group.
-                    {isPublic
+                    {visibility
                       ? " You can rejoin after ~100 blocks (~16 minutes)."
                       : " You can only be re-invited after ~100 blocks (~16 minutes)."}
                   </p>

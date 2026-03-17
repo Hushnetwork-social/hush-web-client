@@ -6,6 +6,8 @@
  */
 
 import { CIRCUIT } from '../crypto/reactions/constants';
+import { buildApiUrl } from '../api-config';
+import { getApprovedCircuitArtifacts, listApprovedCircuitVersions } from './artifactManifest';
 import { zkProver } from './prover';
 
 /**
@@ -17,12 +19,26 @@ export interface CircuitVersionInfo {
   deprecatedVersions: string[];
 }
 
+export interface CircuitArtifactStatus {
+  version: string;
+  proverArtifactsAvailable: boolean;
+  wasmSha256: string;
+  zkeySha256: string;
+  provenance: string;
+}
+
+export interface CircuitStatusResponse extends CircuitVersionInfo {
+  approvedVersions: CircuitArtifactStatus[];
+}
+
 /**
  * Circuit Manager - handles version checking and updates
  */
 class CircuitManager {
+  private readonly supportedVersions = new Set<string>(listApprovedCircuitVersions());
   private currentVersion: string = CIRCUIT.version;
   private minimumVersion: string = CIRCUIT.version;
+  private proverArtifactsAvailable = false;
   private isInitialized = false;
 
   /**
@@ -31,35 +47,81 @@ class CircuitManager {
   async initialize(): Promise<void> {
     if (this.isInitialized) return;
 
-    // TODO: Fetch current version from server
-    // const versionInfo = await this.fetchVersionInfo();
-    // this.currentVersion = versionInfo.currentVersion;
-    // this.minimumVersion = versionInfo.minimumVersion;
+    const versionInfo = await this.fetchVersionInfo();
+    this.currentVersion = versionInfo.currentVersion;
+    this.minimumVersion = versionInfo.minimumVersion;
 
-    // Initialize the prover with current version
-    await zkProver.initialize(this.currentVersion);
+    this.assertVersionAllowed(this.currentVersion);
+    this.assertVersionAllowed(this.minimumVersion);
+
+    const currentStatus = versionInfo.approvedVersions.find((item) => item.version === this.currentVersion);
+    this.proverArtifactsAvailable = currentStatus?.proverArtifactsAvailable ?? false;
+
+    if (this.proverArtifactsAvailable) {
+      await zkProver.initialize(this.currentVersion);
+    }
+
     this.isInitialized = true;
 
-    console.log(`[CircuitManager] Initialized with version ${this.currentVersion}`);
+    console.log(
+      `[CircuitManager] Initialized with version ${this.currentVersion} (proverArtifactsAvailable=${this.proverArtifactsAvailable})`
+    );
   }
 
   /**
    * Fetch version info from server
    */
-  private async fetchVersionInfo(): Promise<CircuitVersionInfo> {
-    // TODO: Implement actual server call
-    // const response = await grpcClient.getCircuitVersion();
-    return {
-      currentVersion: CIRCUIT.version,
-      minimumVersion: CIRCUIT.version,
-      deprecatedVersions: [],
-    };
+  private async fetchVersionInfo(): Promise<CircuitStatusResponse> {
+    try {
+      const response = await fetch(buildApiUrl('/api/reactions/circuit-status'), {
+        method: 'GET',
+        cache: 'no-store',
+      });
+
+      if (!response.ok) {
+        throw new Error(`Circuit status request failed with ${response.status}`);
+      }
+
+      const payload = (await response.json()) as Partial<CircuitStatusResponse>;
+      const approvedVersions = Array.isArray(payload.approvedVersions)
+        ? payload.approvedVersions.filter((item): item is CircuitArtifactStatus =>
+            typeof item?.version === 'string' &&
+            typeof item?.proverArtifactsAvailable === 'boolean' &&
+            typeof item?.wasmSha256 === 'string' &&
+            typeof item?.zkeySha256 === 'string' &&
+            typeof item?.provenance === 'string')
+        : [];
+
+      return {
+        currentVersion: typeof payload.currentVersion === 'string' ? payload.currentVersion : CIRCUIT.version,
+        minimumVersion: typeof payload.minimumVersion === 'string' ? payload.minimumVersion : CIRCUIT.version,
+        deprecatedVersions: Array.isArray(payload.deprecatedVersions)
+          ? payload.deprecatedVersions.filter((item): item is string => typeof item === 'string')
+          : [],
+        approvedVersions,
+      };
+    } catch (error) {
+      console.warn('[CircuitManager] Falling back to bundled circuit status:', error);
+      return {
+        currentVersion: CIRCUIT.version,
+        minimumVersion: CIRCUIT.version,
+        deprecatedVersions: [],
+        approvedVersions: listApprovedCircuitVersions().map((version) => ({
+          version,
+          proverArtifactsAvailable: false,
+          wasmSha256: getApprovedCircuitArtifacts(version).wasmSha256,
+          zkeySha256: getApprovedCircuitArtifacts(version).zkeySha256,
+          provenance: getApprovedCircuitArtifacts(version).provenance,
+        })),
+      };
+    }
   }
 
   /**
    * Force update to a specific version
    */
   async forceUpdate(version: string): Promise<void> {
+    this.assertVersionAllowed(version);
     console.log(`[CircuitManager] Forcing update to ${version}`);
     this.currentVersion = version;
     await zkProver.initialize(version);
@@ -86,6 +148,41 @@ class CircuitManager {
     return this.minimumVersion;
   }
 
+  isProverReady(): boolean {
+    return this.proverArtifactsAvailable;
+  }
+
+  getArtifactBasePath(version: string = this.currentVersion): string {
+    this.assertVersionAllowed(version);
+    return getApprovedCircuitArtifacts(version).basePath;
+  }
+
+  ensureProofResultVersion(version: string): void {
+    this.assertVersionAllowed(version);
+
+    if (version !== this.currentVersion) {
+      throw new Error(
+        `Proof result version '${version}' does not match the approved client circuit version '${this.currentVersion}'.`
+      );
+    }
+  }
+
+  isVersionSupported(version: string): boolean {
+    return this.supportedVersions.has(version);
+  }
+
+  private assertVersionAllowed(version: string): void {
+    if (!this.isRecognizedVersionFormat(version)) {
+      throw new Error(`Circuit version '${version}' has an invalid format.`);
+    }
+
+    if (!this.isVersionSupported(version)) {
+      throw new Error(
+        `Circuit version '${version}' is not part of the approved FEAT-087 artifact set.`
+      );
+    }
+  }
+
   /**
    * Compare version strings (semver-like)
    * Returns: -1 if a < b, 0 if a == b, 1 if a > b
@@ -107,6 +204,10 @@ class CircuitManager {
     }
 
     return 0;
+  }
+
+  private isRecognizedVersionFormat(version: string): boolean {
+    return /^omega-v\d+\.\d+\.\d+$/.test(version);
   }
 
   /**

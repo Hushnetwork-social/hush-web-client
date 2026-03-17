@@ -204,7 +204,9 @@ export interface SocialPostAttachmentPayload {
 
 export interface CreateSocialPostPayload {
   PostId: string;
+  ReactionScopeId: string;
   AuthorPublicAddress: string;
+  AuthorCommitment?: string;
   Content: string;
   Audience: SocialPostAudiencePayload;
   Attachments: SocialPostAttachmentPayload[];
@@ -453,6 +455,7 @@ export async function createFeedMessageTransaction(
   keyGeneration?: number,
   existingMessageId?: string,
   attachmentRefs?: AttachmentRefPayload[],
+  authorCommitment?: string,
 ): Promise<{ signedTransaction: string; messageId: string }> {
   // FEAT-058: Use existing messageId for retry idempotency, or generate new one
   const messageId = existingMessageId ?? generateGuid();
@@ -468,6 +471,7 @@ export async function createFeedMessageTransaction(
     ...(replyToMessageId && { ReplyToMessageId: replyToMessageId }),
     ...(keyGeneration !== undefined && { KeyGeneration: keyGeneration }),
     ...(attachmentRefs && attachmentRefs.length > 0 && { Attachments: attachmentRefs }),
+    ...(authorCommitment && { AuthorCommitment: authorCommitment }),
   };
 
   // Create unsigned transaction
@@ -768,7 +772,9 @@ export async function createAddMembersToCustomCircleTransaction(
 
 export async function createCreateSocialPostTransaction(
   postId: string,
+  reactionScopeId: string,
   authorPublicAddress: string,
+  authorCommitmentBase64: string | undefined,
   content: string,
   audienceVisibility: "open" | "private",
   circleFeedIds: string[],
@@ -778,7 +784,9 @@ export async function createCreateSocialPostTransaction(
 ): Promise<{ signedTransaction: string }> {
   const payload: CreateSocialPostPayload = {
     PostId: postId,
+    ReactionScopeId: reactionScopeId,
     AuthorPublicAddress: authorPublicAddress,
+    ...(authorCommitmentBase64 ? { AuthorCommitment: authorCommitmentBase64 } : {}),
     Content: content,
     Audience: {
       Visibility: audienceVisibility === "private" ? 1 : 0,

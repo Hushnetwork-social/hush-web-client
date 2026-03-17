@@ -38,12 +38,21 @@ vi.mock('@/lib/api-config', () => ({
 vi.mock('@/lib/crypto', () => ({
   createFeedMessageTransaction: vi.fn(),
   createChatFeedTransaction: vi.fn(),
+  bytesToBase64: vi.fn(() => 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE='),
   hexToBytes: vi.fn(() => new Uint8Array(32)),
 }));
 
 vi.mock('@/lib/debug-logger', () => ({
   debugLog: vi.fn(),
   debugError: vi.fn(),
+}));
+
+vi.mock('@/modules/reactions/useReactionsStore', () => ({
+  useReactionsStore: {
+    getState: vi.fn(() => ({
+      getUserCommitment: vi.fn(() => 123n),
+    })),
+  },
 }));
 
 describe('FEAT-058: FeedsService TransactionStatus', () => {

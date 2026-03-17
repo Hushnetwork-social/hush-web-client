@@ -141,10 +141,10 @@ class MembershipProofManagerClass {
       const feedIdBase64 = btoa(String.fromCharCode(...feedIdBytes));
       const commitmentBase64 = btoa(String.fromCharCode(...commitmentBytes));
 
-      console.log(`[MembershipProofManager] Registering commitment for feed ${feedId.substring(0, 8)}...`);
+      console.log('[MembershipProofManager] Registering commitment for feed');
       console.log(`[MembershipProofManager] FeedId base64: ${feedIdBase64.substring(0, 20)}...`);
       console.log(`[MembershipProofManager] Commitment base64: ${commitmentBase64.substring(0, 20)}...`);
-      debugLog(`[MembershipProofManager] Registering commitment for feed ${feedId.substring(0, 8)}...`);
+      debugLog('[MembershipProofManager] Registering commitment for feed');
 
       const response = await membershipServiceBinary.registerCommitment(feedIdBase64, commitmentBase64);
 
@@ -191,11 +191,36 @@ class MembershipProofManagerClass {
    * Convert UUID string to bytes
    */
   private uuidToBytes(uuid: string): Uint8Array {
-    const hex = uuid.replace(/-/g, '');
+    const parts = uuid.split('-');
     const bytes = new Uint8Array(16);
-    for (let i = 0; i < 16; i++) {
-      bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
-    }
+
+    // Match .NET Guid.ToByteArray() layout expected by the gRPC server.
+    const p1 = parts[0];
+    bytes[0] = parseInt(p1.substring(6, 8), 16);
+    bytes[1] = parseInt(p1.substring(4, 6), 16);
+    bytes[2] = parseInt(p1.substring(2, 4), 16);
+    bytes[3] = parseInt(p1.substring(0, 2), 16);
+
+    const p2 = parts[1];
+    bytes[4] = parseInt(p2.substring(2, 4), 16);
+    bytes[5] = parseInt(p2.substring(0, 2), 16);
+
+    const p3 = parts[2];
+    bytes[6] = parseInt(p3.substring(2, 4), 16);
+    bytes[7] = parseInt(p3.substring(0, 2), 16);
+
+    const p4 = parts[3];
+    bytes[8] = parseInt(p4.substring(0, 2), 16);
+    bytes[9] = parseInt(p4.substring(2, 4), 16);
+
+    const p5 = parts[4];
+    bytes[10] = parseInt(p5.substring(0, 2), 16);
+    bytes[11] = parseInt(p5.substring(2, 4), 16);
+    bytes[12] = parseInt(p5.substring(4, 6), 16);
+    bytes[13] = parseInt(p5.substring(6, 8), 16);
+    bytes[14] = parseInt(p5.substring(8, 10), 16);
+    bytes[15] = parseInt(p5.substring(10, 12), 16);
+
     return bytes;
   }
 

@@ -26,6 +26,17 @@ const nextConfig: NextConfig = {
   images: {
     unoptimized: true,
   },
+  webpack: (config) => {
+    config.ignoreWarnings = [
+      ...(config.ignoreWarnings ?? []),
+      {
+        module: /web-worker[\\/]cjs[\\/]node\.js/,
+        message: /Critical dependency: the request of a dependency is an expression/,
+      },
+    ];
+
+    return config;
+  },
   // In static export mode, exclude API routes by changing page extensions
   // API routes use route.ts, so we use route.server.ts pattern to exclude them
   // In static export, we exclude route.ts files (API routes don't work without a server)
@@ -33,6 +44,14 @@ const nextConfig: NextConfig = {
     // Use webpack to exclude API routes from static export
     // API routes fundamentally don't work in static exports (no server)
     webpack: (config, { isServer }) => {
+      config.ignoreWarnings = [
+        ...(config.ignoreWarnings ?? []),
+        {
+          module: /web-worker[\\/]cjs[\\/]node\.js/,
+          message: /Critical dependency: the request of a dependency is an expression/,
+        },
+      ];
+
       if (isServer) {
         // Replace API route imports with empty modules during static export
         config.resolve.alias = {

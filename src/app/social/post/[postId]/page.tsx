@@ -5,6 +5,8 @@ import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { buildApiUrl } from "@/lib/api-config";
 import { ContentCarousel } from "@/components/chat/ContentCarousel";
+import { SocialAuthPromptOverlay } from "@/components/social/SocialAuthPromptOverlay";
+import { SocialPostReactions } from "@/components/social/SocialPostReactions";
 
 type AccessState = "allowed" | "guest_denied" | "unauthorized_denied" | "not_found";
 
@@ -13,7 +15,9 @@ type PermalinkPayload = {
   message: string;
   accessState: AccessState;
   postId?: string;
+  reactionScopeId?: string;
   authorPublicAddress?: string;
+  authorCommitment?: string;
   content?: string;
   createdAtBlock?: number;
   createdAtUnixMs?: number;
@@ -74,6 +78,7 @@ export default function SocialPostPermalinkPage() {
   const [authorName, setAuthorName] = useState<string>("Owner");
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [activeMediaIndex, setActiveMediaIndex] = useState(0);
+  const [showAuthOverlay, setShowAuthOverlay] = useState(false);
 
   const accessOverride = useMemo(() => resolveAccessOverride(searchParams.get("access")), [searchParams]);
 
@@ -236,7 +241,11 @@ export default function SocialPostPermalinkPage() {
     };
 
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
   }, [permalink]);
 
   if (isLoading) {
@@ -387,6 +396,11 @@ export default function SocialPostPermalinkPage() {
               type="button"
               className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-hush-text-accent hover:bg-hush-bg-hover"
               data-testid="social-permalink-comment"
+              onClick={() => {
+                if (!permalink.canInteract && permalink.circleFeedIds.length === 0) {
+                  setShowAuthOverlay(true);
+                }
+              }}
             >
               Reply (0)
             </button>
@@ -405,32 +419,25 @@ export default function SocialPostPermalinkPage() {
             </span>
           </div>
 
-          <div className="mt-2 flex flex-wrap items-center gap-2" data-testid="social-permalink-reactions">
-            {["👍", "❤️", "😂", "😮", "😢", "😡"].map((emoji) => (
-              <button
-                key={emoji}
-                type="button"
-                className="inline-flex items-center gap-1 rounded-full border border-hush-bg-hover px-2 py-1 text-[11px] text-hush-text-accent hover:bg-hush-bg-hover"
-                data-testid={`social-permalink-reaction-${emoji}`}
-              >
-                <span>{emoji}</span>
-                <span>0</span>
-              </button>
-            ))}
-            <button
-              type="button"
-              className="inline-flex items-center gap-1 rounded-full border border-hush-purple/40 px-2 py-1 text-[11px] text-hush-purple hover:bg-hush-purple/10"
-              data-testid="social-permalink-react"
-            >
-              Add
-            </button>
-          </div>
+          <SocialPostReactions
+            postId={permalink.postId ?? routePostId}
+            reactionScopeId={permalink.reactionScopeId}
+            visibility={permalink.circleFeedIds.length > 0 ? "private" : "open"}
+            circleFeedIds={permalink.circleFeedIds}
+            authorCommitment={permalink.authorCommitment}
+            canInteract={permalink.canInteract}
+            testIdPrefix="social-permalink-reactions"
+            onRequireAccount={() => setShowAuthOverlay(true)}
+          />
 
           <p className="mt-3 text-sm font-semibold text-hush-text-primary" data-testid="social-permalink-replies-title">
             Replies (0)
           </p>
         </article>
       </div>
+      {showAuthOverlay ? (
+        <SocialAuthPromptOverlay onClose={() => setShowAuthOverlay(false)} />
+      ) : null}
     </section>
   );
 }
