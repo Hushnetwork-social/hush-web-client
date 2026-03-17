@@ -873,7 +873,7 @@ export default function SocialPage() {
     return () => {
       cancelled = true;
     };
-  }, [activePost]);
+  }, [activePost, credentials?.signingPublicKey, ownAddressNormalized, ownAuthorLabel]);
 
   useEffect(() => {
     if (!credentials?.signingPublicKey || !feedWallPosts.length) {

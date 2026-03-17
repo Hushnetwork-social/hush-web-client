@@ -210,7 +210,7 @@ describe('SocialPage', () => {
       paging: { initialPageSize: 5, loadMorePageSize: 5 },
       hasMore: false,
     });
-    createSocialThreadEntryMock.mockImplementation(async (_postId: string, _content: string) => ({
+    createSocialThreadEntryMock.mockImplementation(async () => ({
       success: true,
       message: 'ok',
       entryId: `thread-entry-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
