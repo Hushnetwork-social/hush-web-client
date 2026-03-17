@@ -9,8 +9,11 @@
  * and can be replayed for data recovery.
  */
 
-import { reactionsService } from '@/lib/grpc/services/reactions'; // For non-critical methods (getBackup, etc.)
 import { getTallies as getTalliesBinary } from '@/lib/grpc/services/reactions-binary';
+import {
+  getReactionBackup as getReactionBackupBinary,
+  nullifierExists as nullifierExistsBinary,
+} from '@/lib/grpc/services/reactions-recovery-binary';
 import {
   encryptVector,
   vectorCiphertextToGrpc,
@@ -422,22 +425,22 @@ class ReactionsServiceClass {
       const messageIdBigint = uuidToBigint(messageId);
       const nullifier = await computeNullifier(userSecret, messageIdBigint, feedIdBigint);
 
-      const response = await reactionsService.getReactionBackup({
-        Nullifier: btoa(String.fromCharCode(...bigintToBytes(nullifier))),
-      });
+      const response = await getReactionBackupBinary(
+        btoa(String.fromCharCode(...bigintToBytes(nullifier)))
+      );
 
-      if (!response.Exists) {
+      if (!response.exists) {
         return null;
       }
 
-      if (!response.EncryptedEmojiBackup || response.EncryptedEmojiBackup.length === 0) {
+      if (!response.encryptedEmojiBackup || response.encryptedEmojiBackup.length === 0) {
         // Legacy reaction without backup
         return -1; // "Reacted" but unknown emoji
       }
 
       // Decrypt the backup
       const backupKey = await computeBackupKey(userSecret, messageIdBigint);
-      const encryptedBytes = this.base64ToBytes(response.EncryptedEmojiBackup);
+      const encryptedBytes = this.base64ToBytes(response.encryptedEmojiBackup);
       const emojiIndex = decryptEmojiBackup(encryptedBytes, backupKey);
 
       if (emojiIndex >= EMOJI_COUNT) {
@@ -469,11 +472,9 @@ class ReactionsServiceClass {
     const messageIdBigint = uuidToBigint(messageId);
     const nullifier = await computeNullifier(userSecret, messageIdBigint, feedIdBigint);
 
-    const response = await reactionsService.nullifierExists({
-      Nullifier: btoa(String.fromCharCode(...bigintToBytes(nullifier))),
-    });
-
-    return response.Exists;
+    return nullifierExistsBinary(
+      btoa(String.fromCharCode(...bigintToBytes(nullifier)))
+    );
   }
 
   /**
