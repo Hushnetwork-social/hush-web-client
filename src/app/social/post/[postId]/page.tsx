@@ -551,6 +551,16 @@ export default function SocialPostPermalinkPage() {
             Replies ({localReplies.length})
           </p>
           <div className="mt-2 space-y-2" data-testid="social-permalink-replies-list">
+            {localReplies.length === 0 ? (
+              <div
+                className="rounded-lg border border-dashed border-hush-bg-hover bg-hush-bg-dark/40 px-4 py-5 text-sm text-hush-text-accent"
+                data-testid="social-permalink-replies-empty"
+              >
+                {permalink.canInteract
+                  ? "No comments yet. Start the conversation from this permalink."
+                  : "No comments yet. Create your account to reply from this permalink."}
+              </div>
+            ) : null}
             {localReplies.map((reply) => (
               <div
                 key={reply.id}

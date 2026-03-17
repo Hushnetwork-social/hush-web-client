@@ -74,6 +74,7 @@ describe("SocialPostPermalinkPage", () => {
     expect(screen.getByTestId("social-permalink-comment")).toBeInTheDocument();
     expect(screen.getByTestId("social-permalink-link")).toBeInTheDocument();
     expect(screen.getByTestId("social-permalink-replies-title")).toHaveTextContent("Replies (0)");
+    expect(screen.getByTestId("social-permalink-replies-empty")).toBeInTheDocument();
   });
 
   it("opens create-account overlay when guest attempts to reply on a public permalink", async () => {

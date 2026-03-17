@@ -379,6 +379,8 @@ export default function SocialPage() {
   const [visibleTopLevelReplyCount, setVisibleTopLevelReplyCount] = useState(INITIAL_TOP_LEVEL_COMMENTS);
   const [expandedReplyThreads, setExpandedReplyThreads] = useState<Record<string, boolean>>({});
   const [visibleRepliesPerThread, setVisibleRepliesPerThread] = useState<Record<string, number>>({});
+  const [isLoadingMoreComments, setIsLoadingMoreComments] = useState(false);
+  const [threadLoadingState, setThreadLoadingState] = useState<Record<string, "opening" | "loading-more">>({});
   const [pointerDragMemberAddress, setPointerDragMemberAddress] = useState<string | null>(null);
   const [selectedMemberAddress, setSelectedMemberAddress] = useState<string | null>(null);
   const [creatingCircle, setCreatingCircle] = useState(false);
@@ -717,6 +719,8 @@ export default function SocialPage() {
       setVisibleTopLevelReplyCount(INITIAL_TOP_LEVEL_COMMENTS);
       setExpandedReplyThreads({});
       setVisibleRepliesPerThread({});
+      setIsLoadingMoreComments(false);
+      setThreadLoadingState({});
       setTopReplyDraft("");
       setIsTopComposerOpen(false);
       setInlineReplyDraft("");
@@ -730,6 +734,8 @@ export default function SocialPage() {
     setVisibleTopLevelReplyCount(INITIAL_TOP_LEVEL_COMMENTS);
     setExpandedReplyThreads({});
     setVisibleRepliesPerThread({});
+    setIsLoadingMoreComments(false);
+    setThreadLoadingState({});
     setTopReplyDraft("");
     setIsTopComposerOpen(false);
     setInlineReplyDraft("");
@@ -963,6 +969,51 @@ export default function SocialPage() {
 
     setShowAuthOverlay(true);
     return true;
+  };
+
+  const toggleReplyThread = (threadRootId: string) => {
+    const isExpanded = expandedReplyThreads[threadRootId] ?? false;
+    if (isExpanded) {
+      setExpandedReplyThreads((current) => ({ ...current, [threadRootId]: false }));
+      return;
+    }
+
+    setThreadLoadingState((current) => ({ ...current, [threadRootId]: "opening" }));
+    window.setTimeout(() => {
+      setExpandedReplyThreads((current) => ({ ...current, [threadRootId]: true }));
+      setVisibleRepliesPerThread((current) => ({
+        ...current,
+        [threadRootId]: current[threadRootId] ?? INITIAL_THREAD_REPLIES,
+      }));
+      setThreadLoadingState((current) => {
+        const next = { ...current };
+        delete next[threadRootId];
+        return next;
+      });
+    }, 120);
+  };
+
+  const loadMoreThreadReplies = (threadRootId: string) => {
+    setThreadLoadingState((current) => ({ ...current, [threadRootId]: "loading-more" }));
+    window.setTimeout(() => {
+      setVisibleRepliesPerThread((current) => ({
+        ...current,
+        [threadRootId]: (current[threadRootId] ?? INITIAL_THREAD_REPLIES) + LOAD_MORE_THREAD_REPLIES,
+      }));
+      setThreadLoadingState((current) => {
+        const next = { ...current };
+        delete next[threadRootId];
+        return next;
+      });
+    }, 120);
+  };
+
+  const loadMoreTopLevelComments = () => {
+    setIsLoadingMoreComments(true);
+    window.setTimeout(() => {
+      setVisibleTopLevelReplyCount((current) => current + LOAD_MORE_TOP_LEVEL_COMMENTS);
+      setIsLoadingMoreComments(false);
+    }, 120);
   };
 
   useEffect(() => {
@@ -2283,6 +2334,7 @@ export default function SocialPage() {
                   const isExpanded = expandedReplyThreads[reply.id] ?? false;
                   const visibleReplyCount = visibleRepliesPerThread[reply.id] ?? INITIAL_THREAD_REPLIES;
                   const visibleThreadReplies = isExpanded ? threadReplies.slice(0, visibleReplyCount) : [];
+                  const threadLoadingMode = threadLoadingState[reply.id];
 
                   return (
                     <div key={reply.id} className="rounded-lg border border-hush-bg-hover p-3" data-testid={`post-detail-reply-${reply.id}`}>
@@ -2335,14 +2387,9 @@ export default function SocialPage() {
                             type="button"
                             className="inline-flex items-center gap-1 rounded-full border border-hush-bg-hover px-2 py-1 text-[11px] text-hush-text-accent hover:bg-hush-bg-hover"
                             data-testid={`post-detail-thread-toggle-${reply.id}`}
-                            onClick={() =>
-                              setExpandedReplyThreads((current) => ({
-                                ...current,
-                                [reply.id]: !isExpanded,
-                              }))
-                            }
+                            onClick={() => toggleReplyThread(reply.id)}
                           >
-                            {isExpanded ? `Hide replies (${threadReplies.length})` : `View replies (${threadReplies.length})`}
+                            {threadLoadingMode === "opening" ? "Loading replies..." : isExpanded ? `Hide replies (${threadReplies.length})` : `View replies (${threadReplies.length})`}
                           </button>
                         ) : null}
                       </div>
@@ -2455,34 +2502,54 @@ export default function SocialPage() {
                           )}
                         </div>
                       ))}
+                      {threadLoadingMode === "opening" ? (
+                        <div
+                          className="mt-2 ml-4 inline-flex items-center gap-2 rounded-md border border-hush-bg-hover bg-hush-bg-dark/60 px-3 py-2 text-[11px] text-hush-text-accent"
+                          data-testid={`post-detail-thread-loading-${reply.id}`}
+                        >
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          Loading replies...
+                        </div>
+                      ) : null}
+                      {isExpanded && threadReplies.length === 0 ? (
+                        <div
+                          className="mt-2 ml-4 rounded-md border border-dashed border-hush-bg-hover bg-hush-bg-dark/40 px-3 py-2 text-[11px] text-hush-text-accent"
+                          data-testid={`post-detail-thread-empty-${reply.id}`}
+                        >
+                          No replies yet. Use Reply to continue this thread.
+                        </div>
+                      ) : null}
                       {isExpanded && threadReplies.length > visibleThreadReplies.length ? (
                         <button
                           type="button"
                           className="mt-2 ml-4 inline-flex rounded-md border border-hush-bg-hover px-3 py-1 text-[11px] text-hush-text-accent hover:bg-hush-bg-hover"
                           data-testid={`post-detail-thread-load-more-${reply.id}`}
-                          onClick={() =>
-                            setVisibleRepliesPerThread((current) => ({
-                              ...current,
-                              [reply.id]: (current[reply.id] ?? INITIAL_THREAD_REPLIES) + LOAD_MORE_THREAD_REPLIES,
-                            }))
-                          }
+                          onClick={() => loadMoreThreadReplies(reply.id)}
                         >
-                          Load more replies
+                          {threadLoadingMode === "loading-more" ? "Loading more replies..." : "Load more replies"}
                         </button>
                       ) : null}
                     </div>
                   );
                 })}
+                {visibleTopLevelReplies.length === 0 ? (
+                  <div
+                    className="rounded-lg border border-dashed border-hush-bg-hover bg-hush-bg-dark/40 px-4 py-5 text-sm text-hush-text-accent"
+                    data-testid="post-detail-comments-empty"
+                  >
+                    {credentials?.signingPublicKey
+                      ? "No comments yet. Be the first to reply."
+                      : "No comments yet. Create your account to join the discussion."}
+                  </div>
+                ) : null}
                 {sortedTopLevelReplies.length > visibleTopLevelReplies.length ? (
                   <button
                     type="button"
                     className="inline-flex rounded-md border border-hush-bg-hover px-3 py-1 text-xs text-hush-text-accent hover:bg-hush-bg-hover"
                     data-testid="post-detail-comments-load-more"
-                    onClick={() =>
-                      setVisibleTopLevelReplyCount((current) => current + LOAD_MORE_TOP_LEVEL_COMMENTS)
-                    }
+                    onClick={loadMoreTopLevelComments}
                   >
-                    Load more comments
+                    {isLoadingMoreComments ? "Loading more comments..." : "Load more comments"}
                   </button>
                 ) : null}
               </div>
