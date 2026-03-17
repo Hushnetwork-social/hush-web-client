@@ -121,6 +121,26 @@ describe("SocialPostPermalinkPage", () => {
     expect(screen.getByTestId("social-auth-overlay-cta")).toBeInTheDocument();
   });
 
+  it("restores a pending draft after the user returns authenticated to the same permalink", async () => {
+    window.sessionStorage.setItem(
+      "hush.social.thread-draft.v1",
+      JSON.stringify({
+        postId: "post-123",
+        mode: "top-level",
+        draft: "Restore me",
+        targetReplyId: null,
+        threadRootId: null,
+        source: "permalink",
+        createdAtMs: Date.now(),
+      })
+    );
+
+    render(<SocialPostPermalinkPage />);
+
+    expect(await screen.findByTestId("social-permalink-composer-top")).toBeInTheDocument();
+    expect(screen.getByTestId("social-permalink-composer-input")).toHaveValue("Restore me");
+  });
+
   it("renders guest denial with create-account CTA", () => {
     accessParam = "guest";
     render(<SocialPostPermalinkPage />);

@@ -17,6 +17,20 @@ import { computeSha256 } from "@/lib/attachments/attachmentHash";
 import { ContentCarousel } from "@/components/chat/ContentCarousel";
 import { SocialAuthPromptOverlay } from "@/components/social/SocialAuthPromptOverlay";
 import { SocialPostReactions } from "@/components/social/SocialPostReactions";
+import {
+  clearPendingSocialThreadDraft,
+  readPendingSocialThreadDraft,
+  savePendingSocialThreadDraft,
+} from "@/modules/social/threadDrafts";
+import {
+  getThreadReplies,
+  getTopLevelEntries,
+  INITIAL_THREAD_REPLIES,
+  INITIAL_TOP_LEVEL_COMMENTS,
+  insertReplyInThread,
+  LOAD_MORE_THREAD_REPLIES,
+  LOAD_MORE_TOP_LEVEL_COMMENTS,
+} from "@/modules/social/threadPresentation";
 import { SocialPostComposerCard } from "./components/SocialPostComposerCard";
 import { usePostPermalink } from "./hooks/usePostPermalink";
 
@@ -45,6 +59,7 @@ type ReplyItem = {
   text: string;
   reactions: Record<string, number>;
   threadRootId: string | null;
+  createdAtMs: number;
 };
 
 type PostItem = {
@@ -361,6 +376,9 @@ export default function SocialPage() {
   const [inlineComposerTargetId, setInlineComposerTargetId] = useState<string | null>(null);
   const [inlineComposerRootId, setInlineComposerRootId] = useState<string | null>(null);
   const [overlayReplies, setOverlayReplies] = useState<ReplyItem[]>([]);
+  const [visibleTopLevelReplyCount, setVisibleTopLevelReplyCount] = useState(INITIAL_TOP_LEVEL_COMMENTS);
+  const [expandedReplyThreads, setExpandedReplyThreads] = useState<Record<string, boolean>>({});
+  const [visibleRepliesPerThread, setVisibleRepliesPerThread] = useState<Record<string, number>>({});
   const [pointerDragMemberAddress, setPointerDragMemberAddress] = useState<string | null>(null);
   const [selectedMemberAddress, setSelectedMemberAddress] = useState<string | null>(null);
   const [creatingCircle, setCreatingCircle] = useState(false);
@@ -456,6 +474,11 @@ export default function SocialPage() {
 
   const viewState = useMemo(() => resolveViewState(queryViewState), [queryViewState]);
   const activePost = useMemo(() => feedWallPosts.find((post) => post.id === activePostId) ?? null, [activePostId, feedWallPosts]);
+  const sortedTopLevelReplies = useMemo(() => getTopLevelEntries(overlayReplies), [overlayReplies]);
+  const visibleTopLevelReplies = useMemo(
+    () => sortedTopLevelReplies.slice(0, visibleTopLevelReplyCount),
+    [sortedTopLevelReplies, visibleTopLevelReplyCount]
+  );
   const followingItems = useMemo<FollowingItem[]>(() => {
     const ownAddress = credentials?.signingPublicKey;
     const circleFeeds = feeds.filter((feed) => feed.type === "group" && isCircleFeed(feed.name, feed.description));
@@ -691,6 +714,9 @@ export default function SocialPage() {
     if (!activePost) {
       setActivePostMediaIndex(0);
       setOverlayReplies([]);
+      setVisibleTopLevelReplyCount(INITIAL_TOP_LEVEL_COMMENTS);
+      setExpandedReplyThreads({});
+      setVisibleRepliesPerThread({});
       setTopReplyDraft("");
       setIsTopComposerOpen(false);
       setInlineReplyDraft("");
@@ -701,12 +727,74 @@ export default function SocialPage() {
 
     setActivePostMediaIndex(0);
     setOverlayReplies(activePost.replies);
+    setVisibleTopLevelReplyCount(INITIAL_TOP_LEVEL_COMMENTS);
+    setExpandedReplyThreads({});
+    setVisibleRepliesPerThread({});
     setTopReplyDraft("");
     setIsTopComposerOpen(false);
     setInlineReplyDraft("");
     setInlineComposerTargetId(null);
     setInlineComposerRootId(null);
   }, [activePost]);
+
+  useEffect(() => {
+    if (!credentials?.signingPublicKey || !feedWallPosts.length) {
+      return;
+    }
+
+    if (activePostId) {
+      return;
+    }
+
+    const pendingDraft = typeof window === "undefined"
+      ? null
+      : (() => {
+          try {
+            const raw = window.sessionStorage.getItem("hush.social.thread-draft.v1");
+            return raw ? (JSON.parse(raw) as { postId?: string; source?: string }) : null;
+          } catch {
+            return null;
+          }
+        })();
+
+    if (!pendingDraft?.postId || pendingDraft.source !== "feed-wall") {
+      return;
+    }
+
+    const matchingPost = feedWallPosts.find((post) => post.id === pendingDraft.postId);
+    if (matchingPost) {
+      setActivePostId(matchingPost.id);
+    }
+  }, [activePostId, credentials?.signingPublicKey, feedWallPosts]);
+
+  useEffect(() => {
+    if (!activePost || !credentials?.signingPublicKey) {
+      return;
+    }
+
+    const pendingDraft = readPendingSocialThreadDraft(activePost.id);
+    if (!pendingDraft || pendingDraft.source !== "feed-wall") {
+      return;
+    }
+
+    if (pendingDraft.mode === "top-level") {
+      setIsTopComposerOpen(true);
+      setTopReplyDraft(pendingDraft.draft);
+    } else {
+      setInlineComposerTargetId(pendingDraft.targetReplyId);
+      setInlineComposerRootId(pendingDraft.threadRootId);
+      setInlineReplyDraft(pendingDraft.draft);
+      if (pendingDraft.threadRootId) {
+        setExpandedReplyThreads((current) => ({ ...current, [pendingDraft.threadRootId!]: true }));
+        setVisibleRepliesPerThread((current) => ({
+          ...current,
+          [pendingDraft.threadRootId!]: current[pendingDraft.threadRootId!] ?? INITIAL_THREAD_REPLIES,
+        }));
+      }
+    }
+
+    clearPendingSocialThreadDraft(activePost.id);
+  }, [activePost, credentials?.signingPublicKey]);
 
   useEffect(() => {
     if (!activePost) {
@@ -790,26 +878,16 @@ export default function SocialPage() {
     openPostDetail(postId);
   };
 
-  const insertReplyInThread = (replies: ReplyItem[], newReply: ReplyItem, rootId: string) => {
-    const lastThreadIndex = replies.reduce((lastIdx, item, index) => {
-      if (item.id === rootId || item.threadRootId === rootId) {
-        return index;
-      }
-      return lastIdx;
-    }, -1);
-
-    if (lastThreadIndex < 0) {
-      return [newReply, ...replies];
-    }
-
-    return [...replies.slice(0, lastThreadIndex + 1), newReply, ...replies.slice(lastThreadIndex + 1)];
-  };
-
   const openReplyToReplyComposer = (targetReply: ReplyItem) => {
     const rootId = targetReply.threadRootId ?? targetReply.id;
     setInlineComposerTargetId(targetReply.id);
     setInlineComposerRootId(rootId);
-    setInlineReplyDraft(`${targetReply.author}, `);
+    setInlineReplyDraft("");
+    setExpandedReplyThreads((current) => ({ ...current, [rootId]: true }));
+    setVisibleRepliesPerThread((current) => ({
+      ...current,
+      [rootId]: current[rootId] ?? INITIAL_THREAD_REPLIES,
+    }));
   };
 
   const submitTopLevelReply = () => {
@@ -823,10 +901,14 @@ export default function SocialPage() {
       text: trimmed,
       reactions: { ...EMPTY_REACTIONS },
       threadRootId: null,
+      createdAtMs: Date.now(),
     };
 
     setOverlayReplies((prev) => [newReply, ...prev]);
     setTopReplyDraft("");
+    if (activePost) {
+      clearPendingSocialThreadDraft(activePost.id);
+    }
   };
 
   const submitInlineReply = () => {
@@ -840,12 +922,16 @@ export default function SocialPage() {
       text: trimmed,
       reactions: { ...EMPTY_REACTIONS },
       threadRootId: inlineComposerRootId,
+      createdAtMs: Date.now(),
     };
 
     setOverlayReplies((prev) => insertReplyInThread(prev, newReply, inlineComposerRootId));
     setInlineReplyDraft("");
     setInlineComposerTargetId(null);
     setInlineComposerRootId(null);
+    if (activePost) {
+      clearPendingSocialThreadDraft(activePost.id);
+    }
   };
 
   const addUiToast = (message: string) => {
@@ -861,6 +947,18 @@ export default function SocialPage() {
   const handleGuestInteractiveAttempt = (visibility: PostItem["visibility"]) => {
     if (visibility !== "open" || credentials?.signingPublicKey) {
       return false;
+    }
+
+    if (activePost) {
+      savePendingSocialThreadDraft({
+        postId: activePost.id,
+        mode: inlineComposerTargetId ? "inline" : "top-level",
+        draft: inlineComposerTargetId ? inlineReplyDraft : topReplyDraft,
+        targetReplyId: inlineComposerTargetId,
+        threadRootId: inlineComposerRootId,
+        source: "feed-wall",
+        createdAtMs: Date.now(),
+      });
     }
 
     setShowAuthOverlay(true);
@@ -2180,75 +2278,103 @@ export default function SocialPage() {
             <div className="mt-4">
               <h3 className="text-sm font-semibold text-hush-text-primary mb-2">Replies ({overlayReplies.length})</h3>
               <div className="space-y-2" data-testid="post-detail-replies-scroll">
-                {overlayReplies
-                  .filter((reply) => reply.threadRootId === null)
-                  .map((reply) => (
-                  <div key={reply.id} className="rounded-lg border border-hush-bg-hover p-3" data-testid={`post-detail-reply-${reply.id}`}>
-                    <div className="flex items-center justify-between mb-1">
-                      <p className="text-xs font-semibold text-hush-text-primary">{reply.author}</p>
-                      <span className="text-[10px] text-hush-text-accent">{reply.time}</span>
-                    </div>
-                    <p className="text-xs text-hush-text-accent">{reply.text}</p>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      {Object.entries(reply.reactions).map(([emoji, count]) => (
+                {visibleTopLevelReplies.map((reply) => {
+                  const threadReplies = getThreadReplies(overlayReplies, reply.id);
+                  const isExpanded = expandedReplyThreads[reply.id] ?? false;
+                  const visibleReplyCount = visibleRepliesPerThread[reply.id] ?? INITIAL_THREAD_REPLIES;
+                  const visibleThreadReplies = isExpanded ? threadReplies.slice(0, visibleReplyCount) : [];
+
+                  return (
+                    <div key={reply.id} className="rounded-lg border border-hush-bg-hover p-3" data-testid={`post-detail-reply-${reply.id}`}>
+                      <div className="flex items-center justify-between mb-1">
+                        <p className="text-xs font-semibold text-hush-text-primary">{reply.author}</p>
+                        <span className="text-[10px] text-hush-text-accent">{reply.time}</span>
+                      </div>
+                      <p className="text-xs text-hush-text-accent">{reply.text}</p>
+                      <SocialPostReactions
+                        postId={reply.id}
+                        reactionScopeId={activePost.reactionScopeId ?? activePost.id}
+                        visibility={activePost.visibility}
+                        circleFeedIds={activePost.circleFeedIds}
+                        authorCommitment={activePost.authorCommitment}
+                        canInteract={!!credentials?.signingPublicKey}
+                        testIdPrefix={`post-detail-comment-reactions-${reply.id}`}
+                        onRequireAccount={() => {
+                          savePendingSocialThreadDraft({
+                            postId: activePost.id,
+                            mode: inlineComposerTargetId ? "inline" : "top-level",
+                            draft: inlineComposerTargetId ? inlineReplyDraft : topReplyDraft,
+                            targetReplyId: inlineComposerTargetId,
+                            threadRootId: inlineComposerRootId,
+                            source: "feed-wall",
+                            createdAtMs: Date.now(),
+                          });
+                          setShowAuthOverlay(true);
+                        }}
+                      />
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
                         <button
-                          key={emoji}
                           type="button"
                           className="inline-flex items-center gap-1 rounded-full border border-hush-bg-hover px-2 py-1 text-[11px] text-hush-text-accent hover:bg-hush-bg-hover"
+                          data-testid={`post-detail-reply-reply-${reply.id}`}
+                          onClick={() => openReplyToReplyComposer(reply)}
                         >
-                          <span>{emoji}</span>
-                          <span>{count}</span>
+                          <MessageCircle className="w-3 h-3" />
+                          Reply
                         </button>
-                      ))}
-                      <button
-                        type="button"
-                        className="inline-flex items-center gap-1 rounded-full border border-hush-bg-hover px-2 py-1 text-[11px] text-hush-text-accent hover:bg-hush-bg-hover"
-                        data-testid={`post-detail-reply-reply-${reply.id}`}
-                        onClick={() => openReplyToReplyComposer(reply)}
-                      >
-                        <MessageCircle className="w-3 h-3" />
-                        Reply
-                      </button>
-                      <button
-                        type="button"
-                        className="inline-flex items-center gap-1 rounded-full border border-hush-purple/40 px-2 py-1 text-[11px] text-hush-purple hover:bg-hush-purple/10"
-                        data-testid={`post-detail-reply-add-${reply.id}`}
-                      >
-                        <SmilePlus className="w-3 h-3" />
-                        Add
-                      </button>
-                    </div>
-                    {inlineComposerTargetId === reply.id && (
-                      <div className="mt-2 rounded-lg border border-hush-bg-hover p-2 bg-hush-bg-dark/60" data-testid={`inline-composer-${reply.id}`}>
-                        <textarea
-                          className="w-full min-h-20 rounded-md border border-hush-bg-hover bg-hush-bg-dark px-2 py-1 text-xs text-hush-text-primary outline-none focus:border-hush-purple"
-                          value={inlineReplyDraft}
-                          onChange={(event) => setInlineReplyDraft(event.currentTarget.value)}
-                          data-testid="inline-composer-input"
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" && !event.ctrlKey) {
-                              event.preventDefault();
-                              submitInlineReply();
-                            }
-                          }}
-                        />
-                        <div className="mt-2 flex items-center justify-between">
-                          <p className="text-[10px] text-hush-text-accent">Enter = send, Ctrl+Enter = new line</p>
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1 rounded-full border border-hush-purple/40 px-2 py-1 text-[11px] text-hush-purple hover:bg-hush-purple/10"
+                          data-testid={`post-detail-reply-add-${reply.id}`}
+                        >
+                          <SmilePlus className="w-3 h-3" />
+                          Add
+                        </button>
+                        {threadReplies.length > 0 ? (
                           <button
                             type="button"
-                            className="rounded-md bg-hush-purple px-2 py-1 text-[11px] font-semibold text-hush-bg-dark disabled:opacity-50"
-                            onClick={submitInlineReply}
-                            disabled={inlineReplyDraft.trim().length === 0}
-                            data-testid="inline-composer-send"
+                            className="inline-flex items-center gap-1 rounded-full border border-hush-bg-hover px-2 py-1 text-[11px] text-hush-text-accent hover:bg-hush-bg-hover"
+                            data-testid={`post-detail-thread-toggle-${reply.id}`}
+                            onClick={() =>
+                              setExpandedReplyThreads((current) => ({
+                                ...current,
+                                [reply.id]: !isExpanded,
+                              }))
+                            }
                           >
-                            Reply
+                            {isExpanded ? `Hide replies (${threadReplies.length})` : `View replies (${threadReplies.length})`}
                           </button>
-                        </div>
+                        ) : null}
                       </div>
-                    )}
-                    {overlayReplies
-                      .filter((childReply) => childReply.threadRootId === reply.id)
-                      .map((childReply) => (
+                      {inlineComposerTargetId === reply.id && (
+                        <div className="mt-2 rounded-lg border border-hush-bg-hover p-2 bg-hush-bg-dark/60" data-testid={`inline-composer-${reply.id}`}>
+                          <textarea
+                            className="w-full min-h-20 rounded-md border border-hush-bg-hover bg-hush-bg-dark px-2 py-1 text-xs text-hush-text-primary outline-none focus:border-hush-purple"
+                            value={inlineReplyDraft}
+                            onChange={(event) => setInlineReplyDraft(event.currentTarget.value)}
+                            data-testid="inline-composer-input"
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" && !event.ctrlKey) {
+                                event.preventDefault();
+                                submitInlineReply();
+                              }
+                            }}
+                          />
+                          <div className="mt-2 flex items-center justify-between">
+                            <p className="text-[10px] text-hush-text-accent">Enter = send, Ctrl+Enter = new line</p>
+                            <button
+                              type="button"
+                              className="rounded-md bg-hush-purple px-2 py-1 text-[11px] font-semibold text-hush-bg-dark disabled:opacity-50"
+                              onClick={submitInlineReply}
+                              disabled={inlineReplyDraft.trim().length === 0}
+                              data-testid="inline-composer-send"
+                            >
+                              Reply
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                      {visibleThreadReplies.map((childReply) => (
                         <div
                           key={childReply.id}
                           className="mt-2 ml-4 rounded-lg border border-hush-bg-hover p-3 bg-hush-bg-dark/50"
@@ -2259,17 +2385,28 @@ export default function SocialPage() {
                             <span className="text-[10px] text-hush-text-accent">{childReply.time}</span>
                           </div>
                           <p className="text-xs text-hush-text-accent">{childReply.text}</p>
+                          <SocialPostReactions
+                            postId={childReply.id}
+                            reactionScopeId={activePost.reactionScopeId ?? activePost.id}
+                            visibility={activePost.visibility}
+                            circleFeedIds={activePost.circleFeedIds}
+                            authorCommitment={activePost.authorCommitment}
+                            canInteract={!!credentials?.signingPublicKey}
+                            testIdPrefix={`post-detail-comment-reactions-${childReply.id}`}
+                            onRequireAccount={() => {
+                              savePendingSocialThreadDraft({
+                                postId: activePost.id,
+                                mode: "inline",
+                                draft: inlineReplyDraft,
+                                targetReplyId: childReply.id,
+                                threadRootId: childReply.threadRootId,
+                                source: "feed-wall",
+                                createdAtMs: Date.now(),
+                              });
+                              setShowAuthOverlay(true);
+                            }}
+                          />
                           <div className="mt-2 flex flex-wrap items-center gap-2">
-                            {Object.entries(childReply.reactions).map(([emoji, count]) => (
-                              <button
-                                key={emoji}
-                                type="button"
-                                className="inline-flex items-center gap-1 rounded-full border border-hush-bg-hover px-2 py-1 text-[11px] text-hush-text-accent hover:bg-hush-bg-hover"
-                              >
-                                <span>{emoji}</span>
-                                <span>{count}</span>
-                              </button>
-                            ))}
                             <button
                               type="button"
                               className="inline-flex items-center gap-1 rounded-full border border-hush-bg-hover px-2 py-1 text-[11px] text-hush-text-accent hover:bg-hush-bg-hover"
@@ -2318,8 +2455,36 @@ export default function SocialPage() {
                           )}
                         </div>
                       ))}
-                  </div>
-                ))}
+                      {isExpanded && threadReplies.length > visibleThreadReplies.length ? (
+                        <button
+                          type="button"
+                          className="mt-2 ml-4 inline-flex rounded-md border border-hush-bg-hover px-3 py-1 text-[11px] text-hush-text-accent hover:bg-hush-bg-hover"
+                          data-testid={`post-detail-thread-load-more-${reply.id}`}
+                          onClick={() =>
+                            setVisibleRepliesPerThread((current) => ({
+                              ...current,
+                              [reply.id]: (current[reply.id] ?? INITIAL_THREAD_REPLIES) + LOAD_MORE_THREAD_REPLIES,
+                            }))
+                          }
+                        >
+                          Load more replies
+                        </button>
+                      ) : null}
+                    </div>
+                  );
+                })}
+                {sortedTopLevelReplies.length > visibleTopLevelReplies.length ? (
+                  <button
+                    type="button"
+                    className="inline-flex rounded-md border border-hush-bg-hover px-3 py-1 text-xs text-hush-text-accent hover:bg-hush-bg-hover"
+                    data-testid="post-detail-comments-load-more"
+                    onClick={() =>
+                      setVisibleTopLevelReplyCount((current) => current + LOAD_MORE_TOP_LEVEL_COMMENTS)
+                    }
+                  >
+                    Load more comments
+                  </button>
+                ) : null}
               </div>
             </div>
           </div>

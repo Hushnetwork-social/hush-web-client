@@ -832,7 +832,7 @@ describe('SocialPage', () => {
     expect(within(mediaContainer).getByTestId('page-indicator')).toHaveTextContent('1 / 2');
   });
 
-  it('reply-to-reply pre-fills mention prefix and Ctrl+Enter adds newline', async () => {
+  it('reply-to-reply keeps the composer blank and Ctrl+Enter adds newline', async () => {
     await renderFeedWallAndWaitReady();
 
     fireEvent.click(screen.getByTestId('open-post-detail-post-1'));
@@ -851,7 +851,7 @@ describe('SocialPage', () => {
       expect(screen.getByTestId('inline-composer-input')).toBeInTheDocument();
     });
     const input = screen.getByTestId('inline-composer-input') as HTMLTextAreaElement;
-    expect(input.value).toBe('You, ');
+    expect(input.value).toBe('');
 
     fireEvent.change(input, { target: { value: 'Zbid, first line' } });
     fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true });
