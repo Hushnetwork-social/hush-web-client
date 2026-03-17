@@ -92,4 +92,31 @@ describe("createSocialPost", () => {
       new Uint8Array([1, 2, 3])
     );
   });
+
+  it("returns the computed author commitment so optimistic UI can preserve reaction eligibility", async () => {
+    currentCommitment = 1n;
+
+    const { createSocialPost } = await import("./SocialService");
+
+    const result = await createSocialPost(
+      {
+        postId: "post-1",
+        authorPublicAddress: "author-1",
+        content: "hello world",
+        audience: {
+          visibility: "open",
+          circleFeedIds: [],
+        },
+        attachments: [],
+        createdAtUnixMs: 123,
+      },
+      "abcd"
+    );
+
+    expect(result).toMatchObject({
+      success: true,
+      authorCommitment: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE=",
+      permalink: "/social/post/post-1",
+    });
+  });
 });

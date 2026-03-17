@@ -1374,6 +1374,7 @@ export default function SocialPage() {
       {
         id: postId,
         authorPublicAddress,
+        authorCommitment: result.authorCommitment,
         author: ownAuthorLabel,
         time: "sending...",
         createdAtBlock: 0,

@@ -10,6 +10,7 @@ export type CreateSocialPostResult = {
   message: string;
   errorCode?: string;
   permalink?: string;
+  authorCommitment?: string;
 };
 
 type SocialAttachmentBlob = {
@@ -97,5 +98,6 @@ export async function createSocialPost(
     success: result.successful,
     message: result.message,
     permalink: result.successful ? `/social/post/${contract.postId}` : undefined,
+    authorCommitment: authorCommitmentBase64,
   };
 }
