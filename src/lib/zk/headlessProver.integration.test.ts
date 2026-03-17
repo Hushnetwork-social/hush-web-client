@@ -12,7 +12,7 @@ import { CIRCUIT } from "@/lib/crypto/reactions/constants";
 import type { CircuitInputs } from "./types";
 import { generateHeadlessProof } from "./headlessProver";
 
-const WORKSPACE_ROOT = "C:\\myWork\\hush-workspace";
+const WORKSPACE_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
 const MERKLE_DEPTH = CIRCUIT.treeDepth;
 
 type ReactionFixture = {

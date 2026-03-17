@@ -23,6 +23,8 @@ describe('circuitManager', () => {
           {
             version: CIRCUIT.version,
             proverArtifactsAvailable: true,
+            wasmSha256: 'test-wasm-sha',
+            zkeySha256: 'test-zkey-sha',
             provenance: 'FEAT-087 approved artifact set',
           },
         ],
