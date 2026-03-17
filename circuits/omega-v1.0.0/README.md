@@ -32,15 +32,16 @@ Current implementation notes:
   - `reaction.wasm` = `2,877,397` bytes
   - `reaction.zkey` = `27,806,424` bytes
 
-Measured browser proving observations from the green FEAT-087 E2E run on desktop:
-- first proof after warm-up-sensitive startup: about `19.0s`
-- subsequent proofs: about `8.3s` to `9.5s`
-- server submit and verification round trip: about `1.6s` to `5.6s`
+Measured desktop observations from the real non-dev FEAT-087 manual validation on 2026-03-17:
+- browser proof generation: about `1.4s`
+- server Groth16 verification: about `0.6s`
+- reaction visibility: reached on the next block cycle, about `3s`
+- prior `8s` to `10s` figures were broader Playwright/E2E timing in a different environment and should not be reused as the per-reaction protocol cost on this desktop setup
 
 Product implication:
-- This is currently too slow for casual social reactions, and mobile devices are expected to be slower than the measured desktop run.
-- This may still be acceptable for higher-friction flows such as private polls or e-voting, but even there the target should remain below roughly `10s`.
-- Reactions should move toward a smaller or cheaper non-dev circuit in a future Protocol Omega revision instead of assuming the current browser proving path is fast enough.
+- Desktop real-proof reaction latency is materially better than the earlier coarse E2E estimate suggested.
+- Remaining performance risk is now about weaker hardware, mobile browsers, and benchmark-grade scale evidence rather than this desktop non-dev proof path being inherently unusable.
+- Reactions should still move toward a smaller or cheaper non-dev circuit in a future Protocol Omega revision instead of assuming current desktop measurements generalize to all devices.
 
 Current optimization direction to track:
 - reduce emoji-slot count

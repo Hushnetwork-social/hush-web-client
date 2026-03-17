@@ -46,6 +46,13 @@ import { submitTransaction } from '@/modules/blockchain/BlockchainService';
 import type { CircuitInputs } from '@/lib/zk/types';
 import type { Point } from '@/lib/crypto/reactions/babyjubjub';
 
+function logReactionProofSnapshot(
+  stage: string,
+  payload: Record<string, unknown>
+): void {
+  console.log(`[ReactionsService] ${stage}`, payload);
+}
+
 /**
  * Reactions Service Class
  */
@@ -144,11 +151,47 @@ class ReactionsServiceClass {
         merkle_indices: membershipProof.pathIndices.map((i) => (i ? 1 : 0)),
       };
 
+      logReactionProofSnapshot('reaction proof snapshot', {
+        messageId,
+        feedId,
+        membershipFeedId,
+        emojiIndex,
+        circuitVersion: circuitManager.getCurrentVersion(),
+        userCommitment: userCommitment.toString(),
+        nullifier: circuitInputs.nullifier,
+        message_id: circuitInputs.message_id,
+        feed_id: circuitInputs.feed_id,
+        members_root: circuitInputs.members_root,
+        author_commitment: circuitInputs.author_commitment,
+        feed_pk: circuitInputs.feed_pk,
+        merkle_indices: circuitInputs.merkle_indices,
+        merkle_path_head: circuitInputs.merkle_path.slice(0, 4),
+        merkle_path_tail: circuitInputs.merkle_path.slice(-4),
+        ciphertext_c1_0: circuitInputs.ciphertext_c1[0],
+        ciphertext_c2_0: circuitInputs.ciphertext_c2[0],
+      });
+
       console.log('[ReactionsService] submitReaction: generateProof start');
       const proofResult = await generateProof(circuitInputs);
       console.log(
         `[ReactionsService] submitReaction: generateProof done, publicSignals=${proofResult.publicSignals.length}, circuitVersion=${proofResult.circuitVersion}`
       );
+      logReactionProofSnapshot('reaction proof public signals', {
+        messageId,
+        feedId,
+        membershipFeedId,
+        circuitVersion: proofResult.circuitVersion,
+        publicSignals: proofResult.publicSignals,
+        proofJson: proofResult.proofJson
+          ? {
+              pi_a: proofResult.proofJson.pi_a,
+              pi_b: proofResult.proofJson.pi_b,
+              pi_c: proofResult.proofJson.pi_c,
+              protocol: proofResult.proofJson.protocol,
+              curve: proofResult.proofJson.curve,
+            }
+          : null,
+      });
       circuitManager.ensureProofResultVersion(proofResult.circuitVersion);
 
       // 6. Convert ciphertext to base64 format for blockchain
