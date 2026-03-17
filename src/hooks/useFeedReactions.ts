@@ -48,6 +48,18 @@ function isReactionDevModeAllowed(): boolean {
   return process.env.NEXT_PUBLIC_REACTIONS_ALLOW_DEV_MODE === "true";
 }
 
+function getForcedE2EReactionMode(): "dev" | "non-dev" | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const forcedMode = (window as Window & {
+    __e2e_forceReactionMode?: unknown;
+  }).__e2e_forceReactionMode;
+
+  return forcedMode === "dev" || forcedMode === "non-dev" ? forcedMode : null;
+}
+
 interface UseFeedReactionsOptions {
   /** Feed ID */
   feedId: string;
@@ -134,13 +146,10 @@ export function useFeedReactions({
 
   // Derive feed ElGamal keys from AES key
   useEffect(() => {
-    console.log(`[E2E Reaction] useFeedReactions useEffect: feedId=${feedId.substring(0, 8)}..., feedAesKey=${feedAesKey?.substring(0, 16) ?? 'NOT SET'}..., publicReactionKeyScopeId=${publicReactionKeyScopeId?.substring(0, 8) ?? 'NOT SET'}..., isDerivingKey=${isDerivingKey}, feedPublicKey=${!!feedPublicKey}`);
-
     const derivationInput = feedAesKey ?? publicReactionKeyScopeId;
 
     // Skip if no derivation input or currently deriving
     if (!derivationInput || isDerivingKey) {
-      console.log(`[E2E Reaction]   SKIPPING: !derivationInput=${!derivationInput}, isDerivingKey=${isDerivingKey}`);
       return;
     }
 
@@ -166,7 +175,6 @@ export function useFeedReactions({
 
     // Skip if already have public key derived from current AES key
     if (feedPublicKey && derivedFromAesKeyRef.current === derivationInput) {
-      console.log(`[E2E Reaction]   SKIPPING: Already have public key from current AES key`);
       return;
     }
 
@@ -179,25 +187,21 @@ export function useFeedReactions({
 
     // Skip if this instance already started derivation for this key
     if (keyDerivationStartedRef.current === derivationKey) {
-      console.log(`[E2E Reaction]   SKIPPING: Already started derivation for this key (ref guard)`);
       return;
     }
 
     // Check if another instance is deriving or has derived this key
     const existingPromise = derivationPromises.get(derivationKey);
     if (existingPromise) {
-      console.log(`[E2E Reaction]   WAITING: Another instance is deriving this key, awaiting...`);
       keyDerivationStartedRef.current = derivationKey;
 
       // Wait for the existing derivation to complete
       existingPromise.then((result) => {
-        console.log(`[E2E Reaction]   REUSING: Got keys from other instance for feed ${feedId.substring(0, 8)}...`);
         feedPublicKeyRef.current = result.publicKey;
         setFeedPublicKey(result.publicKey);
         setFeedPrivateKey(result.privateKey);
         derivedFromAesKeyRef.current = derivationInput;
-      }).catch((err) => {
-        console.log(`[E2E Reaction]   OTHER INSTANCE FAILED: ${err}`);
+      }).catch(() => {
         keyDerivationStartedRef.current = null; // Allow retry
       });
       return;
@@ -205,7 +209,6 @@ export function useFeedReactions({
 
     // This instance will do the derivation
     keyDerivationStartedRef.current = derivationKey;
-    console.log(`[E2E Reaction]   Starting key derivation...`);
 
     // Create and store the Promise BEFORE starting async work
     const derivationPromise = (async (): Promise<DerivedKeyResult> => {
@@ -213,11 +216,9 @@ export function useFeedReactions({
       try {
         let privateKey: bigint;
         if (feedAesKey) {
-          console.log(`[E2E Reaction] useFeedReactions: Deriving ElGamal key for feed ${feedId.substring(0, 8)}... from AES key ${feedAesKey.substring(0, 16)}...`);
           debugLog(`[useFeedReactions] Deriving ElGamal key for feed ${feedId.substring(0, 8)}... from AES key ${feedAesKey.substring(0, 16)}...`);
           privateKey = await deriveFeedElGamalKey(feedAesKey);
         } else {
-          console.log('[E2E Reaction] useFeedReactions: Deriving deterministic public reaction key');
           debugLog('[useFeedReactions] Deriving deterministic public reaction key');
           privateKey = await deriveDeterministicReactionScopeKey(publicReactionKeyScopeId!);
         }
@@ -229,10 +230,8 @@ export function useFeedReactions({
         setFeedPrivateKey(privateKey);
         derivedFromAesKeyRef.current = derivationInput;
 
-        console.log(`[E2E Reaction] useFeedReactions: ElGamal key derived successfully for feed ${feedId.substring(0, 8)}...`);
         return { publicKey, privateKey };
       } catch (err) {
-        console.log(`[E2E Reaction] useFeedReactions: Failed to derive feed key:`, err);
         debugError(`[useFeedReactions] Failed to derive feed key:`, err);
         setError("Failed to derive feed encryption key");
         keyDerivationStartedRef.current = null;
@@ -384,13 +383,6 @@ export function useFeedReactions({
       // Use ref to always get fresh state (avoids stale closure)
       let currentFeedPublicKey = feedPublicKeyRef.current;
 
-      // [E2E Reaction] Debug logging for tracing the reaction flow
-      console.log(`[E2E Reaction] handleReactionSelect called: messageId=${messageId.substring(0, 8)}..., emojiIndex=${emojiIndex}`);
-      console.log(`[E2E Reaction]   feedPublicKey available (from ref): ${!!currentFeedPublicKey}`);
-      console.log(`[E2E Reaction]   isProverReady: ${isProverReady}`);
-      console.log(`[E2E Reaction]   userSecret available: ${!!userSecret}`);
-      console.log(`[E2E Reaction]   AES key (derived from): ${derivedFromAesKeyRef.current?.substring(0, 16) ?? 'NOT SET'}...`);
-
       debugLog(`[useFeedReactions] Reaction selected: messageId=${messageId.substring(0, 8)}..., emojiIndex=${emojiIndex}`);
       debugLog(`[useFeedReactions]   Using AES key (derived from): ${derivedFromAesKeyRef.current?.substring(0, 16) ?? 'NOT SET'}...`);
 
@@ -405,8 +397,6 @@ export function useFeedReactions({
       // If clicking the same emoji, remove the reaction
       const isRemoval = currentReaction === emojiIndex || emojiIndex >= 6;
       const newEmojiIndex = isRemoval ? -1 : emojiIndex;
-
-      console.log(`[E2E Reaction]   currentReaction: ${currentReaction}, isRemoval: ${isRemoval}, newEmojiIndex: ${newEmojiIndex}`);
 
       // Optimistic update - immediately show the reaction (grayed/pending state)
       setPendingReaction(messageId, newEmojiIndex);
@@ -423,14 +413,12 @@ export function useFeedReactions({
             setFeedPrivateKey(privateKey);
             derivedFromAesKeyRef.current = feedAesKey;
           } catch (err) {
-            console.log(`[E2E Reaction] EARLY RETURN: Feed public key derivation failed`);
             debugWarn("[useFeedReactions] Feed public key derivation failed", err);
             revertReaction(messageId);
             setError("Reactions are unavailable because the feed encryption key is not ready.");
             return;
           }
         } else {
-          console.log(`[E2E Reaction] EARLY RETURN: Feed public key not available`);
           debugWarn("[useFeedReactions] Feed public key not available, reaction stays pending");
           // Reaction stays in pending state until server confirms or user cancels
           return;
@@ -439,17 +427,28 @@ export function useFeedReactions({
 
       // Dev mode must be an explicit opt-in. Missing prover support should not silently
       // downgrade the supported path and contaminate privacy or throughput evidence.
+      const forcedMode = getForcedE2EReactionMode();
       const devModeAllowed = isReactionDevModeAllowed();
-      const useDevMode = devModeAllowed && !isProverReady;
+      const useDevMode = forcedMode === "dev" || (forcedMode !== "non-dev" && devModeAllowed && !isProverReady);
       if (useDevMode) {
-        console.log(`[E2E Reaction] Using DEV MODE (ZK prover not ready)`);
-        debugWarn("[useFeedReactions] ZK prover not ready, using DEV MODE submission");
+        debugWarn(
+          forcedMode === "dev"
+            ? "[useFeedReactions] Using forced DEV MODE submission"
+            : "[useFeedReactions] ZK prover not ready, using DEV MODE submission"
+        );
       }
 
       if (!isProverReady && !devModeAllowed) {
-        console.log(`[E2E Reaction] EARLY RETURN: ZK prover not ready and dev mode is not explicitly enabled`);
         revertReaction(messageId);
         const errorMessage = "Reactions are unavailable because the ZK prover is not ready.";
+        setError(errorMessage);
+        debugWarn(`[useFeedReactions] ${errorMessage}`);
+        return;
+      }
+
+      if (!isProverReady && forcedMode === "non-dev") {
+        revertReaction(messageId);
+        const errorMessage = "Reactions are unavailable because the non-dev prover is not ready.";
         setError(errorMessage);
         debugWarn(`[useFeedReactions] ${errorMessage}`);
         return;
@@ -468,7 +467,6 @@ export function useFeedReactions({
             return;
           }
         } else {
-          console.log(`[E2E Reaction] EARLY RETURN: User secret not set`);
           debugWarn("[useFeedReactions] User secret not set, reaction stays pending");
           // Reaction stays in pending state
           return;
@@ -520,7 +518,7 @@ export function useFeedReactions({
           return;
         }
       } else {
-        console.log("[E2E Reaction] DEV MODE: skipping membership registration gate");
+        debugLog("[useFeedReactions] DEV MODE skipping membership registration gate");
       }
 
       const message = getMessageById(messageId);
@@ -551,13 +549,9 @@ export function useFeedReactions({
           return;
         }
       }
-
-      console.log(`[E2E Reaction] Preconditions passed, submitting reaction (useDevMode=${useDevMode})`);
-
       try {
         if (useDevMode) {
           // DEV MODE: Submit without ZK proof
-          console.log(`[E2E Reaction] Calling reactionsServiceInstance.submitReactionDevMode...`);
           if (isRemoval) {
             await reactionsServiceInstance.removeReactionDevMode(
               feedId,
@@ -572,7 +566,6 @@ export function useFeedReactions({
               currentFeedPublicKey
             );
           }
-          console.log(`[E2E Reaction] DEV MODE submission completed successfully`);
         } else {
           // PRODUCTION: Submit with full ZK proof
           if (isRemoval) {
