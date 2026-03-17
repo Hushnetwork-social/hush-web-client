@@ -12,6 +12,7 @@ import {
   readPendingSocialThreadDraft,
   savePendingSocialThreadDraft,
 } from "@/modules/social/threadDrafts";
+import { createSocialThreadEntry, getSocialCommentsPage } from "@/modules/social/ThreadService";
 
 type AccessState = "allowed" | "guest_denied" | "unauthorized_denied" | "not_found";
 
@@ -41,6 +42,7 @@ type PermalinkPayload = {
 type PermalinkThreadReply = {
   id: string;
   author: string;
+  authorPublicAddress?: string;
   time: string;
   text: string;
   createdAtMs: number;
@@ -244,6 +246,47 @@ export default function SocialPostPermalinkPage() {
   }, [permalink?.postId]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    async function loadComments(): Promise<void> {
+      if (!permalink?.postId || permalink.accessState !== "allowed") {
+        return;
+      }
+
+      const requesterAddress = readRequesterAddressFromStorage();
+      const response = await getSocialCommentsPage(
+        permalink.postId,
+        requesterAddress,
+        !!requesterAddress,
+        10
+      );
+
+      if (cancelled || !response.success) {
+        return;
+      }
+
+      setLocalReplies(
+        response.comments.map((entry) => ({
+          id: entry.entryId,
+          author: entry.authorPublicAddress
+            ? `${entry.authorPublicAddress.slice(0, 8)}...${entry.authorPublicAddress.slice(-6)}`
+            : "Unknown",
+          authorPublicAddress: entry.authorPublicAddress,
+          time: entry.createdAtUnixMs ? new Date(entry.createdAtUnixMs).toLocaleString("en-GB") : "now",
+          text: entry.content ?? "",
+          createdAtMs: entry.createdAtUnixMs ?? Date.now(),
+        }))
+      );
+    }
+
+    void loadComments();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [permalink?.accessState, permalink?.postId]);
+
+  useEffect(() => {
     if (!permalink?.postId || !permalink.canInteract) {
       return;
     }
@@ -274,16 +317,23 @@ export default function SocialPostPermalinkPage() {
     });
   };
 
-  const submitTopLevelReply = () => {
+  const submitTopLevelReply = async () => {
     const trimmed = topReplyDraft.trim();
-    if (!trimmed) {
+    if (!trimmed || !permalink?.postId) {
+      return;
+    }
+
+    const result = await createSocialThreadEntry(permalink.postId, trimmed);
+    const entryId = result.entryId;
+    if (!result.success || !entryId) {
       return;
     }
 
     setLocalReplies((current) => [
       {
-        id: `permalink-reply-${Date.now()}`,
+        id: entryId,
         author: "You",
+        authorPublicAddress: readRequesterAddressFromStorage() ?? undefined,
         time: "now",
         text: trimmed,
         createdAtMs: Date.now(),
@@ -291,9 +341,7 @@ export default function SocialPostPermalinkPage() {
       ...current,
     ]);
     setTopReplyDraft("");
-    if (permalink?.postId) {
-      clearPendingSocialThreadDraft(permalink.postId);
-    }
+    clearPendingSocialThreadDraft(permalink.postId);
   };
 
   useEffect(() => {

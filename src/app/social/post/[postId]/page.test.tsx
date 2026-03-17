@@ -4,6 +4,8 @@ import SocialPostPermalinkPage from "./page";
 
 let accessParam: string | null = null;
 let postIdParam = "post-123";
+const getSocialCommentsPageMock = vi.fn();
+const createSocialThreadEntryMock = vi.fn();
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ postId: postIdParam }),
@@ -20,11 +22,30 @@ vi.mock("@/components/social/SocialPostReactions", () => ({
   ),
 }));
 
+vi.mock("@/modules/social/ThreadService", () => ({
+  getSocialCommentsPage: (...args: unknown[]) => getSocialCommentsPageMock(...args),
+  createSocialThreadEntry: (...args: unknown[]) => createSocialThreadEntryMock(...args),
+}));
+
 describe("SocialPostPermalinkPage", () => {
   beforeEach(() => {
     accessParam = null;
     postIdParam = "post-123";
     vi.restoreAllMocks();
+    getSocialCommentsPageMock.mockReset();
+    createSocialThreadEntryMock.mockReset();
+    getSocialCommentsPageMock.mockResolvedValue({
+      success: true,
+      message: "",
+      comments: [],
+      paging: { initialPageSize: 10, loadMorePageSize: 10 },
+      hasMore: false,
+    });
+    createSocialThreadEntryMock.mockResolvedValue({
+      success: true,
+      message: "ok",
+      entryId: "thread-entry-1",
+    });
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/api/social/posts/permalink")) {

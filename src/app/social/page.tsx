@@ -31,6 +31,12 @@ import {
   LOAD_MORE_THREAD_REPLIES,
   LOAD_MORE_TOP_LEVEL_COMMENTS,
 } from "@/modules/social/threadPresentation";
+import {
+  createSocialThreadEntry,
+  getSocialCommentsPage,
+  getSocialThreadRepliesPage,
+  type SocialThreadEntryContract,
+} from "@/modules/social/ThreadService";
 import { SocialPostComposerCard } from "./components/SocialPostComposerCard";
 import { usePostPermalink } from "./hooks/usePostPermalink";
 
@@ -54,12 +60,16 @@ const EMPTY_REACTIONS = { "👍": 0, "❤️": 0, "😂": 0, "😮": 0, "😢": 
 
 type ReplyItem = {
   id: string;
+  serverEntryId?: string;
   author: string;
+  authorPublicAddress?: string;
+  authorCommitment?: string;
   time: string;
   text: string;
   reactions: Record<string, number>;
   threadRootId: string | null;
   createdAtMs: number;
+  childReplyCount?: number;
 };
 
 type PostItem = {
@@ -300,6 +310,21 @@ function normalizePublicAddress(address?: string | null): string {
   return (address ?? "").trim().toLowerCase();
 }
 
+function getEntryServerId(entry: ReplyItem | undefined): string | null {
+  if (!entry) {
+    return null;
+  }
+
+  return entry.serverEntryId ?? entry.id;
+}
+
+function buildThreadReactionSummary(reactionCount: number): Record<string, number> {
+  return {
+    ...EMPTY_REACTIONS,
+    "👍": reactionCount,
+  };
+}
+
 function normalizeFeedId(feedId?: string | null): string {
   return (feedId ?? "").trim().toLowerCase();
 }
@@ -380,7 +405,13 @@ export default function SocialPage() {
   const [expandedReplyThreads, setExpandedReplyThreads] = useState<Record<string, boolean>>({});
   const [visibleRepliesPerThread, setVisibleRepliesPerThread] = useState<Record<string, number>>({});
   const [isLoadingMoreComments, setIsLoadingMoreComments] = useState(false);
+  const [isLoadingInitialComments, setIsLoadingInitialComments] = useState(false);
   const [threadLoadingState, setThreadLoadingState] = useState<Record<string, "opening" | "loading-more">>({});
+  const [hasMoreTopLevelComments, setHasMoreTopLevelComments] = useState(false);
+  const [topLevelBeforeEntryId, setTopLevelBeforeEntryId] = useState<string | null>(null);
+  const [loadedReplyThreads, setLoadedReplyThreads] = useState<Record<string, boolean>>({});
+  const [threadHasMoreReplies, setThreadHasMoreReplies] = useState<Record<string, boolean>>({});
+  const [threadBeforeEntryIds, setThreadBeforeEntryIds] = useState<Record<string, string | null>>({});
   const [pointerDragMemberAddress, setPointerDragMemberAddress] = useState<string | null>(null);
   const [selectedMemberAddress, setSelectedMemberAddress] = useState<string | null>(null);
   const [creatingCircle, setCreatingCircle] = useState(false);
@@ -720,7 +751,13 @@ export default function SocialPage() {
       setExpandedReplyThreads({});
       setVisibleRepliesPerThread({});
       setIsLoadingMoreComments(false);
+      setIsLoadingInitialComments(false);
       setThreadLoadingState({});
+      setHasMoreTopLevelComments(false);
+      setTopLevelBeforeEntryId(null);
+      setLoadedReplyThreads({});
+      setThreadHasMoreReplies({});
+      setThreadBeforeEntryIds({});
       setTopReplyDraft("");
       setIsTopComposerOpen(false);
       setInlineReplyDraft("");
@@ -729,18 +766,113 @@ export default function SocialPage() {
       return;
     }
 
-    setActivePostMediaIndex(0);
-    setOverlayReplies(activePost.replies);
-    setVisibleTopLevelReplyCount(INITIAL_TOP_LEVEL_COMMENTS);
-    setExpandedReplyThreads({});
-    setVisibleRepliesPerThread({});
-    setIsLoadingMoreComments(false);
-    setThreadLoadingState({});
-    setTopReplyDraft("");
-    setIsTopComposerOpen(false);
-    setInlineReplyDraft("");
-    setInlineComposerTargetId(null);
-    setInlineComposerRootId(null);
+    let cancelled = false;
+
+    const resolveAuthorNames = async (entries: SocialThreadEntryContract[]): Promise<ReplyItem[]> => {
+      const uniqueAddresses = Array.from(
+        new Set(
+          entries
+            .map((entry) => normalizePublicAddress(entry.authorPublicAddress))
+            .filter((address) => address.length > 0 && address !== ownAddressNormalized)
+        )
+      );
+
+      const namesByAddress = new Map<string, string>();
+      await Promise.all(
+        uniqueAddresses.map(async (address) => {
+          try {
+            const identity = await checkIdentityExists(address);
+            const profileName = identity.profileName?.trim();
+            if (profileName) {
+              namesByAddress.set(address, profileName);
+            }
+          } catch {
+            // Keep address fallback when lookup fails.
+          }
+        })
+      );
+
+      return entries.map((entry) => {
+        const normalizedAuthor = normalizePublicAddress(entry.authorPublicAddress);
+        const authorLabel =
+          normalizedAuthor && normalizedAuthor === ownAddressNormalized
+            ? ownAuthorLabel
+            : namesByAddress.get(normalizedAuthor) ??
+              (entry.authorPublicAddress
+                ? `${entry.authorPublicAddress.slice(0, 8)}...${entry.authorPublicAddress.slice(-6)}`
+                : "Unknown");
+
+        return {
+          id: entry.entryId,
+          author: authorLabel,
+          authorPublicAddress: entry.authorPublicAddress,
+          authorCommitment: entry.authorCommitment,
+          time: entry.createdAtUnixMs ? formatRelativeTime(entry.createdAtUnixMs) : "now",
+          text: entry.content ?? "",
+          reactions: buildThreadReactionSummary(entry.reactionCount),
+          threadRootId: entry.kind === "reply" ? entry.threadRootId : null,
+          createdAtMs: entry.createdAtUnixMs ?? Date.now(),
+          childReplyCount: entry.childReplyCount ?? 0,
+        };
+      });
+    };
+
+    const loadInitialComments = async () => {
+      setActivePostMediaIndex(0);
+      setOverlayReplies([]);
+      setVisibleTopLevelReplyCount(INITIAL_TOP_LEVEL_COMMENTS);
+      setExpandedReplyThreads({});
+      setVisibleRepliesPerThread({});
+      setIsLoadingMoreComments(false);
+      setIsLoadingInitialComments(true);
+      setThreadLoadingState({});
+      setHasMoreTopLevelComments(false);
+      setTopLevelBeforeEntryId(null);
+      setLoadedReplyThreads({});
+      setThreadHasMoreReplies({});
+      setThreadBeforeEntryIds({});
+      setTopReplyDraft("");
+      setIsTopComposerOpen(false);
+      setInlineReplyDraft("");
+      setInlineComposerTargetId(null);
+      setInlineComposerRootId(null);
+
+      const result = await getSocialCommentsPage(
+        activePost.id,
+        credentials?.signingPublicKey ?? null,
+        !!credentials?.signingPublicKey,
+        INITIAL_TOP_LEVEL_COMMENTS
+      );
+
+      if (cancelled) {
+        return;
+      }
+
+      if (!result.success) {
+        setIsLoadingInitialComments(false);
+        addUiToast(result.message || "Failed to load comments.");
+        return;
+      }
+
+      const mapped = await resolveAuthorNames(result.comments);
+      if (cancelled) {
+        return;
+      }
+
+      setOverlayReplies((current) => [
+        ...current,
+        ...mapped.filter((reply) => !current.some((entry) => entry.id === reply.id)),
+      ]);
+      setHasMoreTopLevelComments(result.hasMore);
+      setTopLevelBeforeEntryId(mapped.length > 0 ? mapped[mapped.length - 1].id : null);
+      setIsLoadingInitialComments(false);
+    };
+
+    void loadInitialComments();
+
+    return () => {
+      cancelled = true;
+    };
   }, [activePost]);
 
   useEffect(() => {
@@ -900,44 +1032,107 @@ export default function SocialPage() {
     const trimmed = topReplyDraft.trim();
     if (!trimmed) return;
 
+    if (!activePost) {
+      return;
+    }
+
+    const optimisticId = `reply-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
     const newReply: ReplyItem = {
-      id: `reply-${Date.now()}`,
-      author: "You",
+      id: optimisticId,
+      serverEntryId: undefined,
+      author: ownAuthorLabel,
+      authorPublicAddress: credentials?.signingPublicKey,
       time: "now",
       text: trimmed,
       reactions: { ...EMPTY_REACTIONS },
+      authorCommitment: undefined,
       threadRootId: null,
       createdAtMs: Date.now(),
+      childReplyCount: 0,
     };
 
     setOverlayReplies((prev) => [newReply, ...prev]);
     setTopReplyDraft("");
-    if (activePost) {
-      clearPendingSocialThreadDraft(activePost.id);
-    }
+    clearPendingSocialThreadDraft(activePost.id);
+
+    void (async () => {
+      const result = await createSocialThreadEntry(activePost.id, trimmed);
+      if (!result.success || !result.entryId) {
+        setOverlayReplies((current) => current.filter((entry) => entry.id !== optimisticId));
+        addUiToast(result.message || "Failed to submit comment.");
+        return;
+      }
+
+      setOverlayReplies((current) =>
+        current.map((entry) =>
+          entry.id === optimisticId
+            ? { ...entry, serverEntryId: result.entryId! }
+            : entry
+        )
+      );
+    })();
   };
 
   const submitInlineReply = () => {
     const trimmed = inlineReplyDraft.trim();
     if (!trimmed || !inlineComposerRootId) return;
 
+    if (!activePost) {
+      return;
+    }
+
+    const replyTargetId = inlineComposerTargetId ?? inlineComposerRootId;
+    const replyTarget = overlayReplies.find((entry) => entry.id === replyTargetId);
+    const resolvedReplyTargetId = getEntryServerId(replyTarget) ?? replyTargetId;
+    const optimisticId = `reply-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
     const newReply: ReplyItem = {
-      id: `reply-${Date.now()}`,
-      author: "You",
+      id: optimisticId,
+      serverEntryId: undefined,
+      author: ownAuthorLabel,
+      authorPublicAddress: credentials?.signingPublicKey,
       time: "now",
       text: trimmed,
       reactions: { ...EMPTY_REACTIONS },
+      authorCommitment: undefined,
       threadRootId: inlineComposerRootId,
       createdAtMs: Date.now(),
+      childReplyCount: 0,
     };
 
-    setOverlayReplies((prev) => insertReplyInThread(prev, newReply, inlineComposerRootId));
+    setOverlayReplies((prev) => {
+      const nextWithCount = prev.map((entry) =>
+        entry.id === inlineComposerRootId
+          ? { ...entry, childReplyCount: (entry.childReplyCount ?? 0) + 1 }
+          : entry
+      );
+      return insertReplyInThread(nextWithCount, newReply, inlineComposerRootId);
+    });
+    setLoadedReplyThreads((current) => ({ ...current, [inlineComposerRootId]: true }));
+    setVisibleRepliesPerThread((current) => ({
+      ...current,
+      [inlineComposerRootId]: current[inlineComposerRootId] ?? INITIAL_THREAD_REPLIES,
+    }));
     setInlineReplyDraft("");
     setInlineComposerTargetId(null);
     setInlineComposerRootId(null);
-    if (activePost) {
-      clearPendingSocialThreadDraft(activePost.id);
-    }
+    clearPendingSocialThreadDraft(activePost.id);
+
+    void (async () => {
+      const result = await createSocialThreadEntry(activePost.id, trimmed, resolvedReplyTargetId);
+      if (!result.success || !result.entryId) {
+        setOverlayReplies((current) => current.filter((entry) => entry.id !== optimisticId));
+        addUiToast(result.message || "Failed to submit reply.");
+        return;
+      }
+
+      setOverlayReplies((current) =>
+        current.map((entry) =>
+          entry.id === optimisticId
+            ? { ...entry, serverEntryId: result.entryId! }
+            : entry
+        )
+      );
+    })();
   };
 
   const addUiToast = (message: string) => {
@@ -971,29 +1166,162 @@ export default function SocialPage() {
     return true;
   };
 
-  const toggleReplyThread = (threadRootId: string) => {
+  const hydrateThreadEntries = async (entries: SocialThreadEntryContract[]) => {
+    const uniqueAddresses = Array.from(
+      new Set(
+        entries
+          .map((entry) => normalizePublicAddress(entry.authorPublicAddress))
+          .filter((address) => address.length > 0 && address !== ownAddressNormalized)
+      )
+    );
+    const namesByAddress = new Map<string, string>();
+    await Promise.all(
+      uniqueAddresses.map(async (address) => {
+        try {
+          const identity = await checkIdentityExists(address);
+          const profileName = identity.profileName?.trim();
+          if (profileName) {
+            namesByAddress.set(address, profileName);
+          }
+        } catch {
+          // Keep address fallback when lookup fails.
+        }
+      })
+    );
+
+    return entries.map((entry) => ({
+      id: entry.entryId,
+      serverEntryId: entry.entryId,
+      author:
+        normalizePublicAddress(entry.authorPublicAddress) === ownAddressNormalized
+          ? ownAuthorLabel
+          : namesByAddress.get(normalizePublicAddress(entry.authorPublicAddress)) ??
+            (entry.authorPublicAddress
+              ? `${entry.authorPublicAddress.slice(0, 8)}...${entry.authorPublicAddress.slice(-6)}`
+              : "Unknown"),
+      authorPublicAddress: entry.authorPublicAddress,
+      authorCommitment: entry.authorCommitment,
+      time: entry.createdAtUnixMs ? formatRelativeTime(entry.createdAtUnixMs) : "now",
+      text: entry.content ?? "",
+      reactions: buildThreadReactionSummary(entry.reactionCount),
+      threadRootId: entry.kind === "reply" ? entry.threadRootId : null,
+      createdAtMs: entry.createdAtUnixMs ?? Date.now(),
+      childReplyCount: entry.childReplyCount ?? 0,
+    }));
+  };
+
+  const toggleReplyThread = async (threadRootId: string) => {
     const isExpanded = expandedReplyThreads[threadRootId] ?? false;
     if (isExpanded) {
       setExpandedReplyThreads((current) => ({ ...current, [threadRootId]: false }));
       return;
     }
 
-    setThreadLoadingState((current) => ({ ...current, [threadRootId]: "opening" }));
-    window.setTimeout(() => {
+    if (loadedReplyThreads[threadRootId]) {
       setExpandedReplyThreads((current) => ({ ...current, [threadRootId]: true }));
       setVisibleRepliesPerThread((current) => ({
         ...current,
-        [threadRootId]: current[threadRootId] ?? INITIAL_THREAD_REPLIES,
+        [threadRootId]: current[threadRootId] ?? Math.max(INITIAL_THREAD_REPLIES, getThreadReplies(overlayReplies, threadRootId).length),
       }));
+      return;
+    }
+
+    if (!activePost) {
+      return;
+    }
+
+    const threadRootEntry = overlayReplies.find((entry) => entry.id === threadRootId);
+    const resolvedThreadRootId = getEntryServerId(threadRootEntry) ?? threadRootId;
+    setThreadLoadingState((current) => ({ ...current, [threadRootId]: "opening" }));
+    const response = await getSocialThreadRepliesPage(
+      activePost.id,
+      resolvedThreadRootId,
+      credentials?.signingPublicKey ?? null,
+      !!credentials?.signingPublicKey,
+      INITIAL_THREAD_REPLIES
+    );
+
+    if (response.success) {
+      const mapped = await hydrateThreadEntries(response.replies);
+      setOverlayReplies((current) => {
+        let next = [...current];
+        for (const reply of mapped) {
+          if (next.some((entry) => entry.id === reply.id)) {
+            continue;
+          }
+          next = insertReplyInThread(next, reply, threadRootId);
+        }
+        return next;
+      });
+      setLoadedReplyThreads((current) => ({ ...current, [threadRootId]: true }));
+      setThreadHasMoreReplies((current) => ({ ...current, [threadRootId]: response.hasMore }));
+      setThreadBeforeEntryIds((current) => ({
+        ...current,
+        [threadRootId]: mapped.length > 0 ? mapped[mapped.length - 1].id : null,
+      }));
+      setExpandedReplyThreads((current) => ({ ...current, [threadRootId]: true }));
+      setVisibleRepliesPerThread((current) => ({
+        ...current,
+        [threadRootId]: Math.max(INITIAL_THREAD_REPLIES, mapped.length),
+      }));
+    } else {
+      addUiToast(response.message || "Failed to load replies.");
+    }
+
+    setThreadLoadingState((current) => {
+      const next = { ...current };
+      delete next[threadRootId];
+      return next;
+    });
+  };
+
+  const loadMoreThreadReplies = async (threadRootId: string) => {
+    if (threadHasMoreReplies[threadRootId] && activePost) {
+      const threadRootEntry = overlayReplies.find((entry) => entry.id === threadRootId);
+      const resolvedThreadRootId = getEntryServerId(threadRootEntry) ?? threadRootId;
+      setThreadLoadingState((current) => ({ ...current, [threadRootId]: "loading-more" }));
+      const response = await getSocialThreadRepliesPage(
+        activePost.id,
+        resolvedThreadRootId,
+        credentials?.signingPublicKey ?? null,
+        !!credentials?.signingPublicKey,
+        LOAD_MORE_THREAD_REPLIES,
+        threadBeforeEntryIds[threadRootId] ?? undefined
+      );
+
+      if (response.success) {
+        const mapped = await hydrateThreadEntries(response.replies);
+        setOverlayReplies((current) => {
+          let next = [...current];
+          for (const reply of mapped) {
+            if (next.some((entry) => entry.id === reply.id)) {
+              continue;
+            }
+            next = insertReplyInThread(next, reply, threadRootId);
+          }
+          return next;
+        });
+        setThreadHasMoreReplies((current) => ({ ...current, [threadRootId]: response.hasMore }));
+        setThreadBeforeEntryIds((current) => ({
+          ...current,
+          [threadRootId]: mapped.length > 0 ? mapped[mapped.length - 1].id : current[threadRootId] ?? null,
+        }));
+        setVisibleRepliesPerThread((current) => ({
+          ...current,
+          [threadRootId]: (current[threadRootId] ?? INITIAL_THREAD_REPLIES) + mapped.length,
+        }));
+      } else {
+        addUiToast(response.message || "Failed to load more replies.");
+      }
+
       setThreadLoadingState((current) => {
         const next = { ...current };
         delete next[threadRootId];
         return next;
       });
-    }, 120);
-  };
+      return;
+    }
 
-  const loadMoreThreadReplies = (threadRootId: string) => {
     setThreadLoadingState((current) => ({ ...current, [threadRootId]: "loading-more" }));
     window.setTimeout(() => {
       setVisibleRepliesPerThread((current) => ({
@@ -1008,7 +1336,31 @@ export default function SocialPage() {
     }, 120);
   };
 
-  const loadMoreTopLevelComments = () => {
+  const loadMoreTopLevelComments = async () => {
+    if (hasMoreTopLevelComments && activePost) {
+      setIsLoadingMoreComments(true);
+      const response = await getSocialCommentsPage(
+        activePost.id,
+        credentials?.signingPublicKey ?? null,
+        !!credentials?.signingPublicKey,
+        LOAD_MORE_TOP_LEVEL_COMMENTS,
+        topLevelBeforeEntryId ?? undefined
+      );
+
+      if (response.success) {
+        const mapped = await hydrateThreadEntries(response.comments);
+        setOverlayReplies((current) => [...current, ...mapped.filter((reply) => !current.some((item) => item.id === reply.id))]);
+        setVisibleTopLevelReplyCount((current) => current + mapped.length);
+        setHasMoreTopLevelComments(response.hasMore);
+        setTopLevelBeforeEntryId(mapped.length > 0 ? mapped[mapped.length - 1].id : topLevelBeforeEntryId);
+      } else {
+        addUiToast(response.message || "Failed to load more comments.");
+      }
+
+      setIsLoadingMoreComments(false);
+      return;
+    }
+
     setIsLoadingMoreComments(true);
     window.setTimeout(() => {
       setVisibleTopLevelReplyCount((current) => current + LOAD_MORE_TOP_LEVEL_COMMENTS);
@@ -2382,14 +2734,18 @@ export default function SocialPage() {
                           <SmilePlus className="w-3 h-3" />
                           Add
                         </button>
-                        {threadReplies.length > 0 ? (
+                        {(reply.childReplyCount ?? threadReplies.length) > 0 ? (
                           <button
                             type="button"
                             className="inline-flex items-center gap-1 rounded-full border border-hush-bg-hover px-2 py-1 text-[11px] text-hush-text-accent hover:bg-hush-bg-hover"
                             data-testid={`post-detail-thread-toggle-${reply.id}`}
-                            onClick={() => toggleReplyThread(reply.id)}
+                            onClick={() => void toggleReplyThread(reply.id)}
                           >
-                            {threadLoadingMode === "opening" ? "Loading replies..." : isExpanded ? `Hide replies (${threadReplies.length})` : `View replies (${threadReplies.length})`}
+                            {threadLoadingMode === "opening"
+                              ? "Loading replies..."
+                              : isExpanded
+                                ? `Hide replies (${reply.childReplyCount ?? threadReplies.length})`
+                                : `View replies (${reply.childReplyCount ?? threadReplies.length})`}
                           </button>
                         ) : null}
                       </div>
@@ -2511,7 +2867,7 @@ export default function SocialPage() {
                           Loading replies...
                         </div>
                       ) : null}
-                      {isExpanded && threadReplies.length === 0 ? (
+                      {isExpanded && !threadLoadingMode && threadReplies.length === 0 ? (
                         <div
                           className="mt-2 ml-4 rounded-md border border-dashed border-hush-bg-hover bg-hush-bg-dark/40 px-3 py-2 text-[11px] text-hush-text-accent"
                           data-testid={`post-detail-thread-empty-${reply.id}`}
@@ -2519,12 +2875,12 @@ export default function SocialPage() {
                           No replies yet. Use Reply to continue this thread.
                         </div>
                       ) : null}
-                      {isExpanded && threadReplies.length > visibleThreadReplies.length ? (
+                      {isExpanded && ((threadHasMoreReplies[reply.id] ?? false) || threadReplies.length > visibleThreadReplies.length) ? (
                         <button
                           type="button"
                           className="mt-2 ml-4 inline-flex rounded-md border border-hush-bg-hover px-3 py-1 text-[11px] text-hush-text-accent hover:bg-hush-bg-hover"
                           data-testid={`post-detail-thread-load-more-${reply.id}`}
-                          onClick={() => loadMoreThreadReplies(reply.id)}
+                          onClick={() => void loadMoreThreadReplies(reply.id)}
                         >
                           {threadLoadingMode === "loading-more" ? "Loading more replies..." : "Load more replies"}
                         </button>
@@ -2532,6 +2888,14 @@ export default function SocialPage() {
                     </div>
                   );
                 })}
+                {isLoadingInitialComments ? (
+                  <div
+                    className="rounded-lg border border-hush-bg-hover bg-hush-bg-dark/40 px-4 py-5 text-sm text-hush-text-accent"
+                    data-testid="post-detail-comments-loading"
+                  >
+                    Loading comments...
+                  </div>
+                ) : null}
                 {visibleTopLevelReplies.length === 0 ? (
                   <div
                     className="rounded-lg border border-dashed border-hush-bg-hover bg-hush-bg-dark/40 px-4 py-5 text-sm text-hush-text-accent"
@@ -2542,12 +2906,12 @@ export default function SocialPage() {
                       : "No comments yet. Create your account to join the discussion."}
                   </div>
                 ) : null}
-                {sortedTopLevelReplies.length > visibleTopLevelReplies.length ? (
+                {(hasMoreTopLevelComments || sortedTopLevelReplies.length > visibleTopLevelReplies.length) ? (
                   <button
                     type="button"
                     className="inline-flex rounded-md border border-hush-bg-hover px-3 py-1 text-xs text-hush-text-accent hover:bg-hush-bg-hover"
                     data-testid="post-detail-comments-load-more"
-                    onClick={loadMoreTopLevelComments}
+                    onClick={() => void loadMoreTopLevelComments()}
                   >
                     {isLoadingMoreComments ? "Loading more comments..." : "Load more comments"}
                   </button>

@@ -1,11 +1,13 @@
 export type SocialThreadEntry = {
   id: string;
+  serverEntryId?: string;
   author: string;
   time: string;
   text: string;
   reactions: Record<string, number>;
   threadRootId: string | null;
   createdAtMs: number;
+  childReplyCount?: number;
 };
 
 export const INITIAL_TOP_LEVEL_COMMENTS = 10;

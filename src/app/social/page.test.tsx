@@ -12,6 +12,9 @@ const triggerSyncNowMock = vi.fn();
 const clipboardWriteTextMock = vi.fn();
 const getSocialFeedWallMock = vi.fn();
 const createSocialPostMock = vi.fn();
+const getSocialCommentsPageMock = vi.fn();
+const getSocialThreadRepliesPageMock = vi.fn();
+const createSocialThreadEntryMock = vi.fn();
 const computeSha256Mock = vi.fn();
 let mockCredentials: {
   signingPublicKey?: string;
@@ -136,6 +139,12 @@ vi.mock('@/modules/social/SocialService', () => ({
   createSocialPost: (...args: unknown[]) => createSocialPostMock(...args),
 }));
 
+vi.mock('@/modules/social/ThreadService', () => ({
+  getSocialCommentsPage: (...args: unknown[]) => getSocialCommentsPageMock(...args),
+  getSocialThreadRepliesPage: (...args: unknown[]) => getSocialThreadRepliesPageMock(...args),
+  createSocialThreadEntry: (...args: unknown[]) => createSocialThreadEntryMock(...args),
+}));
+
 vi.mock('@/components/social/SocialPostReactions', () => ({
   SocialPostReactions: ({ testIdPrefix }: { testIdPrefix: string }) => (
     <div data-testid={testIdPrefix}>
@@ -172,6 +181,9 @@ describe('SocialPage', () => {
     checkIdentityExistsMock.mockReset();
     triggerSyncNowMock.mockReset();
     createSocialPostMock.mockReset();
+    getSocialCommentsPageMock.mockReset();
+    getSocialThreadRepliesPageMock.mockReset();
+    createSocialThreadEntryMock.mockReset();
     createCustomCircleMock.mockResolvedValue({ success: true, message: 'ok' });
     addMembersToCustomCircleMock.mockResolvedValue({ success: true, message: 'ok' });
     checkIdentityExistsMock.mockResolvedValue({
@@ -184,6 +196,25 @@ describe('SocialPage', () => {
       message: 'ok',
       permalink: '/social/post/test-post',
     });
+    getSocialCommentsPageMock.mockResolvedValue({
+      success: true,
+      message: 'ok',
+      comments: [],
+      paging: { initialPageSize: 10, loadMorePageSize: 10 },
+      hasMore: false,
+    });
+    getSocialThreadRepliesPageMock.mockResolvedValue({
+      success: true,
+      message: 'ok',
+      replies: [],
+      paging: { initialPageSize: 5, loadMorePageSize: 5 },
+      hasMore: false,
+    });
+    createSocialThreadEntryMock.mockImplementation(async (_postId: string, _content: string) => ({
+      success: true,
+      message: 'ok',
+      entryId: `thread-entry-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    }));
     getSocialFeedWallMock.mockResolvedValue({
       success: true,
       message: 'ok',
