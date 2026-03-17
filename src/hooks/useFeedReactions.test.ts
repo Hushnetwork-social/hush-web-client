@@ -26,6 +26,14 @@ const { initializeReactionsSystemMock } = vi.hoisted(() => ({
   initializeReactionsSystemMock: vi.fn().mockResolvedValue(true),
 }));
 
+const { deriveGlobalMembershipMock } = vi.hoisted(() => ({
+  deriveGlobalMembershipMock: vi.fn().mockResolvedValue({
+    userSecretHex: "0309",
+    userCommitmentHex: "0378",
+    userCommitmentBase64: "unused",
+  }),
+}));
+
 const mockReactionsState = {
   reactions: {},
   pendingReactions: {},
@@ -75,6 +83,12 @@ vi.mock('@/stores', () => ({
   ),
 }));
 
+vi.mock('@/lib/grpc/services/membership-binary', () => ({
+  membershipServiceBinary: {
+    deriveGlobalMembership: deriveGlobalMembershipMock,
+  },
+}));
+
 vi.mock('@/lib/crypto/reactions', () => ({
   deriveFeedElGamalKey: vi.fn().mockResolvedValue(123456n),
   deriveDeterministicReactionScopeKey: vi.fn().mockResolvedValue(654321n),
@@ -115,6 +129,7 @@ import {
 import { debugLog } from '@/lib/debug-logger';
 import { reactionsServiceInstance } from '@/modules/reactions/ReactionsService';
 import { GLOBAL_HUSH_MEMBERS_SCOPE_ID } from '@/modules/reactions/publicScope';
+import { membershipServiceBinary } from '@/lib/grpc/services/membership-binary';
 
 describe('useFeedReactions', () => {
   beforeEach(() => {
@@ -130,6 +145,11 @@ describe('useFeedReactions', () => {
       authorCommitment: btoa(String.fromCharCode(...new Uint8Array(32).fill(1))),
     });
     process.env.NEXT_PUBLIC_REACTIONS_ALLOW_DEV_MODE = 'false';
+    deriveGlobalMembershipMock.mockResolvedValue({
+      userSecretHex: '0309',
+      userCommitmentHex: '0378',
+      userCommitmentBase64: 'unused',
+    });
   });
 
   afterEach(() => {
@@ -409,6 +429,36 @@ describe('useFeedReactions', () => {
 
       await result.current.handleReactionSelect('message-1', 2);
 
+      expect(membershipServiceBinary.deriveGlobalMembership).toHaveBeenCalledWith(
+        '0349f6768a0751dce9e3775cde70468e6eb4977c9484003f661fa04f82ca629ee7'
+      );
+      expect(ensureCommitmentRegisteredMock).toHaveBeenCalledWith(
+        GLOBAL_HUSH_MEMBERS_SCOPE_ID,
+        888n
+      );
+      expect(reactionsServiceInstance.submitReaction).toHaveBeenCalled();
+      expect(deriveAddressMembershipSecret).not.toHaveBeenCalled();
+    });
+
+    it('falls back to local derivation when the global membership proxy is unavailable', async () => {
+      mockReactionsState.isProverReady = true;
+      deriveGlobalMembershipMock.mockRejectedValueOnce(new Error('proxy unavailable'));
+
+      const { result } = renderHook(() =>
+        useFeedReactions({
+          feedId: '62ab0d24-96a4-420e-bffd-5ce2eaf079b8',
+          publicReactionKeyScopeId: '62ab0d24-96a4-420e-bffd-5ce2eaf079b8',
+          membershipFeedId: GLOBAL_HUSH_MEMBERS_SCOPE_ID,
+        })
+      );
+
+      await waitFor(() => {
+        expect(reactionsServiceInstance.submitReaction).not.toHaveBeenCalled();
+      });
+
+      await result.current.handleReactionSelect('message-1', 2);
+
+      expect(membershipServiceBinary.deriveGlobalMembership).toHaveBeenCalled();
       expect(deriveAddressMembershipSecret).toHaveBeenCalledWith(
         '0349f6768a0751dce9e3775cde70468e6eb4977c9484003f661fa04f82ca629ee7'
       );
@@ -417,7 +467,6 @@ describe('useFeedReactions', () => {
         GLOBAL_HUSH_MEMBERS_SCOPE_ID,
         888n
       );
-      expect(reactionsServiceInstance.submitReaction).toHaveBeenCalled();
     });
 
     it('reverts the first reaction and exposes the error when non-dev proof generation times out', async () => {

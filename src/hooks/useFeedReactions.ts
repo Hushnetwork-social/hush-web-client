@@ -31,6 +31,7 @@ import { debugLog, debugWarn, debugError } from "@/lib/debug-logger";
 import { useFeedsStore } from "@/modules/feeds/useFeedsStore";
 import { useAppStore } from "@/stores";
 import { GLOBAL_HUSH_MEMBERS_SCOPE_ID } from "@/modules/reactions/publicScope";
+import { membershipServiceBinary } from "@/lib/grpc/services/membership-binary";
 
 // Module-level guards to prevent duplicate operations across React Strict Mode remounts
 // These persist across component unmount/remount cycles
@@ -44,6 +45,11 @@ interface DerivedKeyResult {
   privateKey: bigint;
 }
 const derivationPromises = new Map<string, Promise<DerivedKeyResult>>(); // derivationKey -> Promise
+
+function hexToBigint(hex: string): bigint {
+  return BigInt(`0x${hex}`);
+}
+
 function isReactionDevModeAllowed(): boolean {
   return process.env.NEXT_PUBLIC_REACTIONS_ALLOW_DEV_MODE === "true";
 }
@@ -487,8 +493,24 @@ export function useFeedReactions({
           return;
         }
 
-        effectiveUserSecret = await deriveAddressMembershipSecret(publicSigningAddress);
-        effectiveUserCommitment = await computeCommitment(effectiveUserSecret);
+        try {
+          const globalMembership = await membershipServiceBinary.deriveGlobalMembership(
+            publicSigningAddress
+          );
+          effectiveUserSecret = hexToBigint(globalMembership.userSecretHex);
+          effectiveUserCommitment = hexToBigint(globalMembership.userCommitmentHex);
+          debugLog(
+            `[useFeedReactions] Loaded global membership identity from server for ${publicSigningAddress.substring(0, 20)}...`
+          );
+        } catch (globalMembershipError) {
+          debugWarn(
+            "[useFeedReactions] Falling back to local global membership derivation",
+            globalMembershipError
+          );
+          effectiveUserSecret = await deriveAddressMembershipSecret(publicSigningAddress);
+          effectiveUserCommitment = await computeCommitment(effectiveUserSecret);
+        }
+
         debugLog(
           `[useFeedReactions] Derived global membership commitment for ${publicSigningAddress.substring(0, 20)}...`
         );
