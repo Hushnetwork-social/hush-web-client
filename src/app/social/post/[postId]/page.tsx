@@ -13,6 +13,7 @@ import {
   clearPendingSocialThreadDraft,
   savePendingSocialThreadDraft,
 } from "@/modules/social/threadDrafts";
+import { getSocialPostRoute } from "@/lib/navigation/appRoutes";
 import { resolveGuestIntentResumeAction } from "@/modules/social/guestIntentResume";
 import { createSocialThreadEntry, getSocialCommentsPage } from "@/modules/social/ThreadService";
 
@@ -672,7 +673,10 @@ export default function SocialPostPermalinkPage() {
         </article>
       </div>
       {showAuthOverlay ? (
-        <SocialAuthPromptOverlay onClose={() => setShowAuthOverlay(false)} />
+        <SocialAuthPromptOverlay
+          onClose={() => setShowAuthOverlay(false)}
+          returnTo={getSocialPostRoute(permalink?.postId ?? routePostId)}
+        />
       ) : null}
     </section>
   );

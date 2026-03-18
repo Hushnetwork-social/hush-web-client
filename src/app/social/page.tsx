@@ -37,6 +37,7 @@ import {
   getSocialThreadRepliesPage,
   type SocialThreadEntryContract,
 } from "@/modules/social/ThreadService";
+import { getSocialPostRoute } from "@/lib/navigation/appRoutes";
 import { SocialPostComposerCard } from "./components/SocialPostComposerCard";
 import { usePostPermalink } from "./hooks/usePostPermalink";
 
@@ -435,6 +436,7 @@ export default function SocialPage() {
   const [newPostMediaError, setNewPostMediaError] = useState<string | null>(null);
   const [feedWallPosts, setFeedWallPosts] = useState<PostItem[]>([]);
   const [showAuthOverlay, setShowAuthOverlay] = useState(false);
+  const [authOverlayReturnTo, setAuthOverlayReturnTo] = useState<string | null>(null);
   const authorNamesByAddressRef = useRef<Record<string, string>>({});
   const mediaPreviewUrlsRef = useRef<Set<string>>(new Set());
   const topComposerInputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -511,6 +513,13 @@ export default function SocialPage() {
 
   const viewState = useMemo(() => resolveViewState(queryViewState), [queryViewState]);
   const activePost = useMemo(() => feedWallPosts.find((post) => post.id === activePostId) ?? null, [activePostId, feedWallPosts]);
+  const resolvedAuthOverlayReturnTo = useMemo(() => {
+    if (authOverlayReturnTo) {
+      return authOverlayReturnTo;
+    }
+
+    return activePost ? getSocialPostRoute(activePost.id) : null;
+  }, [activePost, authOverlayReturnTo]);
   const sortedTopLevelReplies = useMemo(() => getTopLevelEntries(overlayReplies), [overlayReplies]);
   const visibleTopLevelReplies = useMemo(
     () => sortedTopLevelReplies.slice(0, visibleTopLevelReplyCount),
@@ -1228,7 +1237,7 @@ export default function SocialPage() {
     setUiToasts((current) => current.filter((toast) => toast.id !== toastId));
   };
 
-  const handleGuestInteractiveAttempt = (visibility: PostItem["visibility"]) => {
+  const handleGuestInteractiveAttempt = (visibility: PostItem["visibility"], postId: string) => {
     if (visibility !== "open" || credentials?.signingPublicKey) {
       return false;
     }
@@ -1245,6 +1254,7 @@ export default function SocialPage() {
       });
     }
 
+    setAuthOverlayReturnTo(getSocialPostRoute(postId));
     setShowAuthOverlay(true);
     return true;
   };
@@ -2237,7 +2247,7 @@ export default function SocialPage() {
                   className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-hush-text-accent hover:bg-hush-bg-hover"
                   data-testid={`post-action-reply-${post.id}`}
                   onClick={() => {
-                    if (handleGuestInteractiveAttempt(post.visibility)) {
+                    if (handleGuestInteractiveAttempt(post.visibility, post.id)) {
                       return;
                     }
 
@@ -2281,7 +2291,10 @@ export default function SocialPage() {
                 isOwnMessage={normalizePublicAddress(post.authorPublicAddress) === ownAddressNormalized}
                 canInteract={!!credentials?.signingPublicKey}
                 testIdPrefix={`post-reaction-strip-${post.id}`}
-                onRequireAccount={() => setShowAuthOverlay(true)}
+                onRequireAccount={() => {
+                  setAuthOverlayReturnTo(getSocialPostRoute(post.id));
+                  setShowAuthOverlay(true);
+                }}
               />
             </div>
             {post.replyCount > 0 && (
@@ -2649,7 +2662,10 @@ export default function SocialPage() {
 
       <SystemToastContainer toasts={uiToasts} onDismiss={removeUiToast} />
       {showAuthOverlay ? (
-        <SocialAuthPromptOverlay onClose={() => setShowAuthOverlay(false)} />
+        <SocialAuthPromptOverlay
+          onClose={() => setShowAuthOverlay(false)}
+          returnTo={resolvedAuthOverlayReturnTo}
+        />
       ) : null}
       {renderCreateCircleDialog()}
 
@@ -2691,7 +2707,7 @@ export default function SocialPage() {
                 className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-hush-text-accent hover:bg-hush-bg-hover"
                 data-testid={`post-detail-action-reply-${activePost.id}`}
                 onClick={() => {
-                  if (handleGuestInteractiveAttempt(activePost.visibility)) {
+                  if (handleGuestInteractiveAttempt(activePost.visibility, activePost.id)) {
                     return;
                   }
 
@@ -2730,7 +2746,10 @@ export default function SocialPage() {
               isOwnMessage={normalizePublicAddress(activePost.authorPublicAddress) === ownAddressNormalized}
               canInteract={!!credentials?.signingPublicKey}
               testIdPrefix={`post-detail-reaction-strip-${activePost.id}`}
-              onRequireAccount={() => setShowAuthOverlay(true)}
+              onRequireAccount={() => {
+                setAuthOverlayReturnTo(getSocialPostRoute(activePost.id));
+                setShowAuthOverlay(true);
+              }}
             />
 
             {isTopComposerOpen && (
@@ -2827,6 +2846,7 @@ export default function SocialPage() {
                             source: "feed-wall",
                             createdAtMs: Date.now(),
                           });
+                          setAuthOverlayReturnTo(getSocialPostRoute(activePost.id));
                           setShowAuthOverlay(true);
                         }}
                       />
@@ -2901,6 +2921,7 @@ export default function SocialPage() {
                                 source: "feed-wall",
                                 createdAtMs: Date.now(),
                               });
+                              setAuthOverlayReturnTo(getSocialPostRoute(activePost.id));
                               setShowAuthOverlay(true);
                             }}
                           />

@@ -172,7 +172,10 @@ describe("SocialPostPermalinkPage", () => {
     fireEvent.click(await screen.findByTestId("social-permalink-comment"));
 
     expect(screen.getByTestId("social-auth-overlay")).toBeInTheDocument();
-    expect(screen.getByTestId("social-auth-overlay-cta")).toBeInTheDocument();
+    expect(screen.getByTestId("social-auth-overlay-cta")).toHaveAttribute(
+      "href",
+      "/auth?returnTo=%2Fsocial%2Fpost%2Fpost-123"
+    );
   });
 
   it("restores a pending draft after the user returns authenticated to the same permalink", async () => {

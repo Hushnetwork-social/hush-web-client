@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AUTH_ROUTE,
   FEEDS_HOME_ROUTE,
+  getAuthRoute,
   getAppDisplayName,
   LEGACY_DASHBOARD_ROUTE,
   getSocialPostRoute,
@@ -34,6 +35,12 @@ describe('appRoutes', () => {
 
   it('builds canonical social post routes with encoded post ids', () => {
     expect(getSocialPostRoute('abc 123')).toBe(`${SOCIAL_POST_ROUTE}/abc%20123`);
+  });
+
+  it('builds auth routes with optional safe social return targets', () => {
+    expect(getAuthRoute('/social/post/post-123')).toBe('/auth?returnTo=%2Fsocial%2Fpost%2Fpost-123');
+    expect(getAuthRoute('/feeds')).toBe(AUTH_ROUTE);
+    expect(getAuthRoute(null)).toBe(AUTH_ROUTE);
   });
 
   it('resolves entry route from auth state', () => {

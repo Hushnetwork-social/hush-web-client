@@ -1,12 +1,16 @@
 "use client";
 
 import Link from "next/link";
+import { getAuthRoute } from "@/lib/navigation/appRoutes";
 
 interface SocialAuthPromptOverlayProps {
   onClose: () => void;
+  returnTo?: string | null;
 }
 
-export function SocialAuthPromptOverlay({ onClose }: SocialAuthPromptOverlayProps) {
+export function SocialAuthPromptOverlay({ onClose, returnTo }: SocialAuthPromptOverlayProps) {
+  const authRoute = getAuthRoute(returnTo);
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
@@ -22,15 +26,18 @@ export function SocialAuthPromptOverlay({ onClose }: SocialAuthPromptOverlayProp
           Create your HushNetwork account
         </h2>
         <p className="mt-2 text-sm text-hush-text-accent">
-          Public posts are visible to everyone, but reacting and replying require a valid Hush identity.
+          Public posts stay visible to everyone, but reactions, comments, and replies require a valid Hush identity.
+        </p>
+        <p className="mt-2 text-sm text-hush-text-accent" data-testid="social-auth-overlay-return-copy">
+          Create or import your account and you&apos;ll come right back to this same post.
         </p>
         <div className="mt-5 flex items-center gap-3">
           <Link
-            href="/register"
+            href={authRoute}
             className="inline-flex rounded-md bg-hush-purple px-4 py-2 text-sm font-semibold text-hush-bg-dark"
             data-testid="social-auth-overlay-cta"
           >
-            Create account
+            Continue to auth
           </Link>
           <button
             type="button"

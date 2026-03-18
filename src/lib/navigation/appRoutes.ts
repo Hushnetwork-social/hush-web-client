@@ -22,6 +22,14 @@ export function getSocialPostRoute(postId: string): string {
   return `${SOCIAL_POST_ROUTE}/${encodeURIComponent(postId)}`;
 }
 
+export function getAuthRoute(returnTo?: string | null): string {
+  if (!isSafeSocialReturnRoute(returnTo)) {
+    return AUTH_ROUTE;
+  }
+
+  return `${AUTH_ROUTE}?returnTo=${encodeURIComponent(returnTo)}`;
+}
+
 export function resolveEntryRoute(isAuthenticated: boolean): string {
   return isAuthenticated ? FEEDS_HOME_ROUTE : AUTH_ROUTE;
 }
