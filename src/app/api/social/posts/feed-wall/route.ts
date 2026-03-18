@@ -9,6 +9,7 @@ type SocialFeedWallPostDto = {
   content: string;
   createdAtBlock: number;
   createdAtUnixMs: number;
+  replyCount?: number;
   visibility: "open" | "private";
   circleFeedIds: string[];
   attachments: {
@@ -122,6 +123,8 @@ function parseSocialFeedWallPost(messageBytes: Uint8Array): SocialFeedWallPostDt
         result.visibility = valueInfo.value === 2 ? "private" : "open";
       } else if (fieldNumber === 7) {
         result.createdAtUnixMs = valueInfo.value;
+      } else if (fieldNumber === 11) {
+        result.replyCount = valueInfo.value;
       }
       continue;
     }

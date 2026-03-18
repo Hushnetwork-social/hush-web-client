@@ -151,6 +151,59 @@ describe("SocialPostReactions", () => {
     expect(hydrateMyReactionsMock).toHaveBeenCalledTimes(1);
   });
 
+  it("does not poll tallies or hydrate reactions before a server message id exists", async () => {
+    render(
+      <SocialPostReactions
+        postId="optimistic-comment-1"
+        reactionMessageId={null}
+        visibility="open"
+        circleFeedIds={[]}
+        canInteract={true}
+        testIdPrefix="social-post-reactions"
+      />
+    );
+
+    await vi.advanceTimersByTimeAsync(9000);
+
+    expect(fetchTalliesForMessagesMock).not.toHaveBeenCalled();
+    expect(hydrateMyReactionsMock).not.toHaveBeenCalled();
+  });
+
+  it("renders own messages as read-only reactions", () => {
+    render(
+      <SocialPostReactions
+        postId="post-1"
+        visibility="open"
+        circleFeedIds={[]}
+        isOwnMessage={true}
+        canInteract={true}
+        testIdPrefix="social-post-reactions"
+      />
+    );
+
+    expect(screen.queryByTestId("social-post-reactions-add")).not.toBeInTheDocument();
+    expect(screen.getByTestId("social-post-reactions-own-message-note")).toHaveTextContent(
+      "cannot react to own message"
+    );
+  });
+
+  it("does not allow clicking existing reactions on own messages", () => {
+    render(
+      <SocialPostReactions
+        postId="post-1"
+        visibility="open"
+        circleFeedIds={[]}
+        isOwnMessage={true}
+        canInteract={true}
+        testIdPrefix="social-post-reactions"
+      />
+    );
+
+    fireEvent.click(screen.getByTestId("reaction-badge-👍"));
+
+    expect(handleReactionSelectMock).not.toHaveBeenCalled();
+  });
+
 });
 
 

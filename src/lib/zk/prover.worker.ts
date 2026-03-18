@@ -1,5 +1,6 @@
 import { getApprovedCircuitArtifacts } from './artifactManifest';
 import type { CircuitInputs, Groth16Proof, WorkerMessage } from './types';
+import * as snarkjsModule from 'snarkjs';
 
 type SnarkJsGroth16 = {
   fullProve(
@@ -17,26 +18,7 @@ type SnarkJsModule = {
 let wasmPath: string | null = null;
 let zkeyPath: string | null = null;
 
-async function loadSnarkJs(): Promise<SnarkJsModule> {
-  try {
-    return (await import('snarkjs')) as SnarkJsModule;
-  } catch (nativeImportError) {
-    try {
-      const dynamicImport = new Function('specifier', 'return import(specifier);') as (
-        specifier: string
-      ) => Promise<unknown>;
-      return (await dynamicImport('snarkjs')) as SnarkJsModule;
-    } catch (fallbackError) {
-      const detail =
-        fallbackError instanceof Error
-          ? fallbackError.message
-          : nativeImportError instanceof Error
-            ? nativeImportError.message
-            : String(fallbackError);
-      throw new Error(`snarkjs is required for browser proof generation: ${detail}`);
-    }
-  }
-}
+const snarkjs = snarkjsModule as SnarkJsModule;
 
 /**
  * Handle messages from the main thread
@@ -106,7 +88,6 @@ async function handleProve(payload: { inputs: CircuitInputs }): Promise<void> {
     }
 
     const startedAt = performance.now();
-    const snarkjs = await loadSnarkJs();
     const { proof, publicSignals } = await snarkjs.groth16.fullProve(
       payload.inputs,
       wasmPath,

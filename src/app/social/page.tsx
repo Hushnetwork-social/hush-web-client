@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import { AlertCircle, Check, Link2, Loader2, MessageCircle, SmilePlus, Sparkles, X } from "lucide-react";
+import { AlertCircle, Check, Link2, Loader2, MessageCircle, Sparkles, X } from "lucide-react";
 import { buildApiUrl } from "@/lib/api-config";
 import { useAppStore } from "@/stores";
 import { useFeedsStore } from "@/modules/feeds/useFeedsStore";
@@ -17,6 +17,26 @@ import { computeSha256 } from "@/lib/attachments/attachmentHash";
 import { ContentCarousel } from "@/components/chat/ContentCarousel";
 import { SocialAuthPromptOverlay } from "@/components/social/SocialAuthPromptOverlay";
 import { SocialPostReactions } from "@/components/social/SocialPostReactions";
+import {
+  clearPendingSocialThreadDraft,
+  readPendingSocialThreadDraft,
+  savePendingSocialThreadDraft,
+} from "@/modules/social/threadDrafts";
+import {
+  getThreadReplies,
+  getTopLevelEntries,
+  INITIAL_THREAD_REPLIES,
+  INITIAL_TOP_LEVEL_COMMENTS,
+  insertReplyInThread,
+  LOAD_MORE_THREAD_REPLIES,
+  LOAD_MORE_TOP_LEVEL_COMMENTS,
+} from "@/modules/social/threadPresentation";
+import {
+  createSocialThreadEntry,
+  getSocialCommentsPage,
+  getSocialThreadRepliesPage,
+  type SocialThreadEntryContract,
+} from "@/modules/social/ThreadService";
 import { SocialPostComposerCard } from "./components/SocialPostComposerCard";
 import { usePostPermalink } from "./hooks/usePostPermalink";
 
@@ -40,11 +60,18 @@ const EMPTY_REACTIONS = { "👍": 0, "❤️": 0, "😂": 0, "😮": 0, "😢": 
 
 type ReplyItem = {
   id: string;
+  serverEntryId?: string;
+  isPending?: boolean;
   author: string;
+  authorPublicAddress?: string;
+  reactionScopeId?: string;
+  authorCommitment?: string;
   time: string;
   text: string;
   reactions: Record<string, number>;
   threadRootId: string | null;
+  createdAtMs: number;
+  childReplyCount?: number;
 };
 
 type PostItem = {
@@ -285,6 +312,21 @@ function normalizePublicAddress(address?: string | null): string {
   return (address ?? "").trim().toLowerCase();
 }
 
+function getEntryServerId(entry: ReplyItem | undefined): string | null {
+  if (!entry) {
+    return null;
+  }
+
+  return entry.serverEntryId ?? entry.id;
+}
+
+function buildThreadReactionSummary(reactionCount: number): Record<string, number> {
+  return {
+    ...EMPTY_REACTIONS,
+    "👍": reactionCount,
+  };
+}
+
 function normalizeFeedId(feedId?: string | null): string {
   return (feedId ?? "").trim().toLowerCase();
 }
@@ -361,6 +403,17 @@ export default function SocialPage() {
   const [inlineComposerTargetId, setInlineComposerTargetId] = useState<string | null>(null);
   const [inlineComposerRootId, setInlineComposerRootId] = useState<string | null>(null);
   const [overlayReplies, setOverlayReplies] = useState<ReplyItem[]>([]);
+  const [visibleTopLevelReplyCount, setVisibleTopLevelReplyCount] = useState(INITIAL_TOP_LEVEL_COMMENTS);
+  const [expandedReplyThreads, setExpandedReplyThreads] = useState<Record<string, boolean>>({});
+  const [visibleRepliesPerThread, setVisibleRepliesPerThread] = useState<Record<string, number>>({});
+  const [isLoadingMoreComments, setIsLoadingMoreComments] = useState(false);
+  const [isLoadingInitialComments, setIsLoadingInitialComments] = useState(false);
+  const [threadLoadingState, setThreadLoadingState] = useState<Record<string, "opening" | "loading-more">>({});
+  const [hasMoreTopLevelComments, setHasMoreTopLevelComments] = useState(false);
+  const [topLevelBeforeEntryId, setTopLevelBeforeEntryId] = useState<string | null>(null);
+  const [loadedReplyThreads, setLoadedReplyThreads] = useState<Record<string, boolean>>({});
+  const [threadHasMoreReplies, setThreadHasMoreReplies] = useState<Record<string, boolean>>({});
+  const [threadBeforeEntryIds, setThreadBeforeEntryIds] = useState<Record<string, string | null>>({});
   const [pointerDragMemberAddress, setPointerDragMemberAddress] = useState<string | null>(null);
   const [selectedMemberAddress, setSelectedMemberAddress] = useState<string | null>(null);
   const [creatingCircle, setCreatingCircle] = useState(false);
@@ -384,6 +437,8 @@ export default function SocialPage() {
   const [showAuthOverlay, setShowAuthOverlay] = useState(false);
   const authorNamesByAddressRef = useRef<Record<string, string>>({});
   const mediaPreviewUrlsRef = useRef<Set<string>>(new Set());
+  const topComposerInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const inlineComposerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const [isFeedWallLoading, setIsFeedWallLoading] = useState(true);
   const feedWallRegionRef = useRef<HTMLElement | null>(null);
   const activePostDialogRef = useRef<HTMLDivElement | null>(null);
@@ -456,6 +511,11 @@ export default function SocialPage() {
 
   const viewState = useMemo(() => resolveViewState(queryViewState), [queryViewState]);
   const activePost = useMemo(() => feedWallPosts.find((post) => post.id === activePostId) ?? null, [activePostId, feedWallPosts]);
+  const sortedTopLevelReplies = useMemo(() => getTopLevelEntries(overlayReplies), [overlayReplies]);
+  const visibleTopLevelReplies = useMemo(
+    () => sortedTopLevelReplies.slice(0, visibleTopLevelReplyCount),
+    [sortedTopLevelReplies, visibleTopLevelReplyCount]
+  );
   const followingItems = useMemo<FollowingItem[]>(() => {
     const ownAddress = credentials?.signingPublicKey;
     const circleFeeds = feeds.filter((feed) => feed.type === "group" && isCircleFeed(feed.name, feed.description));
@@ -688,9 +748,20 @@ export default function SocialPage() {
   }, [pendingAssignments]);
 
   useEffect(() => {
-    if (!activePost) {
+    if (!activePostId) {
       setActivePostMediaIndex(0);
       setOverlayReplies([]);
+      setVisibleTopLevelReplyCount(INITIAL_TOP_LEVEL_COMMENTS);
+      setExpandedReplyThreads({});
+      setVisibleRepliesPerThread({});
+      setIsLoadingMoreComments(false);
+      setIsLoadingInitialComments(false);
+      setThreadLoadingState({});
+      setHasMoreTopLevelComments(false);
+      setTopLevelBeforeEntryId(null);
+      setLoadedReplyThreads({});
+      setThreadHasMoreReplies({});
+      setThreadBeforeEntryIds({});
       setTopReplyDraft("");
       setIsTopComposerOpen(false);
       setInlineReplyDraft("");
@@ -699,14 +770,176 @@ export default function SocialPage() {
       return;
     }
 
-    setActivePostMediaIndex(0);
-    setOverlayReplies(activePost.replies);
-    setTopReplyDraft("");
-    setIsTopComposerOpen(false);
-    setInlineReplyDraft("");
-    setInlineComposerTargetId(null);
-    setInlineComposerRootId(null);
-  }, [activePost]);
+    let cancelled = false;
+
+    const resolveAuthorNames = async (entries: SocialThreadEntryContract[]): Promise<ReplyItem[]> => {
+      const uniqueAddresses = Array.from(
+        new Set(
+          entries
+            .map((entry) => normalizePublicAddress(entry.authorPublicAddress))
+            .filter((address) => address.length > 0 && address !== ownAddressNormalized)
+        )
+      );
+
+      const namesByAddress = new Map<string, string>();
+      await Promise.all(
+        uniqueAddresses.map(async (address) => {
+          try {
+            const identity = await checkIdentityExists(address);
+            const profileName = identity.profileName?.trim();
+            if (profileName) {
+              namesByAddress.set(address, profileName);
+            }
+          } catch {
+            // Keep address fallback when lookup fails.
+          }
+        })
+      );
+
+      return entries.map((entry) => {
+        const normalizedAuthor = normalizePublicAddress(entry.authorPublicAddress);
+        const authorLabel =
+          normalizedAuthor && normalizedAuthor === ownAddressNormalized
+            ? ownAuthorLabel
+            : namesByAddress.get(normalizedAuthor) ??
+              (entry.authorPublicAddress
+                ? `${entry.authorPublicAddress.slice(0, 8)}...${entry.authorPublicAddress.slice(-6)}`
+                : "Unknown");
+
+        return {
+          id: entry.entryId,
+          serverEntryId: entry.entryId,
+          isPending: false,
+          author: authorLabel,
+          authorPublicAddress: entry.authorPublicAddress,
+          reactionScopeId: entry.reactionScopeId,
+          authorCommitment: entry.authorCommitment,
+          time: entry.createdAtUnixMs ? formatRelativeTime(entry.createdAtUnixMs) : "now",
+          text: entry.content ?? "",
+          reactions: buildThreadReactionSummary(entry.reactionCount),
+          threadRootId: entry.kind === "reply" ? entry.threadRootId : null,
+          createdAtMs: entry.createdAtUnixMs ?? Date.now(),
+          childReplyCount: entry.childReplyCount ?? 0,
+        };
+      });
+    };
+
+    const loadInitialComments = async () => {
+      setActivePostMediaIndex(0);
+      setOverlayReplies([]);
+      setVisibleTopLevelReplyCount(INITIAL_TOP_LEVEL_COMMENTS);
+      setExpandedReplyThreads({});
+      setVisibleRepliesPerThread({});
+      setIsLoadingMoreComments(false);
+      setIsLoadingInitialComments(true);
+      setThreadLoadingState({});
+      setHasMoreTopLevelComments(false);
+      setTopLevelBeforeEntryId(null);
+      setLoadedReplyThreads({});
+      setThreadHasMoreReplies({});
+      setThreadBeforeEntryIds({});
+      setTopReplyDraft("");
+      setIsTopComposerOpen(false);
+      setInlineReplyDraft("");
+      setInlineComposerTargetId(null);
+      setInlineComposerRootId(null);
+
+      const result = await getSocialCommentsPage(
+        activePostId,
+        credentials?.signingPublicKey ?? null,
+        !!credentials?.signingPublicKey,
+        INITIAL_TOP_LEVEL_COMMENTS
+      );
+
+      if (cancelled) {
+        return;
+      }
+
+      if (!result.success) {
+        setIsLoadingInitialComments(false);
+        addUiToast(result.message || "Failed to load comments.");
+        return;
+      }
+
+      const mapped = await resolveAuthorNames(result.comments);
+      if (cancelled) {
+        return;
+      }
+
+      setOverlayReplies((current) => [
+        ...current,
+        ...mapped.filter((reply) => !current.some((entry) => entry.id === reply.id)),
+      ]);
+      setHasMoreTopLevelComments(result.hasMore);
+      setTopLevelBeforeEntryId(mapped.length > 0 ? mapped[mapped.length - 1].id : null);
+      setIsLoadingInitialComments(false);
+    };
+
+    void loadInitialComments();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activePostId, credentials?.signingPublicKey, ownAddressNormalized, ownAuthorLabel]);
+
+  useEffect(() => {
+    if (!credentials?.signingPublicKey || !feedWallPosts.length) {
+      return;
+    }
+
+    if (activePostId) {
+      return;
+    }
+
+    const pendingDraft = typeof window === "undefined"
+      ? null
+      : (() => {
+          try {
+            const raw = window.sessionStorage.getItem("hush.social.thread-draft.v1");
+            return raw ? (JSON.parse(raw) as { postId?: string; source?: string }) : null;
+          } catch {
+            return null;
+          }
+        })();
+
+    if (!pendingDraft?.postId || pendingDraft.source !== "feed-wall") {
+      return;
+    }
+
+    const matchingPost = feedWallPosts.find((post) => post.id === pendingDraft.postId);
+    if (matchingPost) {
+      setActivePostId(matchingPost.id);
+    }
+  }, [activePostId, credentials?.signingPublicKey, feedWallPosts]);
+
+  useEffect(() => {
+    if (!activePost || !credentials?.signingPublicKey) {
+      return;
+    }
+
+    const pendingDraft = readPendingSocialThreadDraft(activePost.id);
+    if (!pendingDraft || pendingDraft.source !== "feed-wall") {
+      return;
+    }
+
+    if (pendingDraft.mode === "top-level") {
+      setIsTopComposerOpen(true);
+      setTopReplyDraft(pendingDraft.draft);
+    } else {
+      setInlineComposerTargetId(pendingDraft.targetReplyId);
+      setInlineComposerRootId(pendingDraft.threadRootId);
+      setInlineReplyDraft(pendingDraft.draft);
+      if (pendingDraft.threadRootId) {
+        setExpandedReplyThreads((current) => ({ ...current, [pendingDraft.threadRootId!]: true }));
+        setVisibleRepliesPerThread((current) => ({
+          ...current,
+          [pendingDraft.threadRootId!]: current[pendingDraft.threadRootId!] ?? INITIAL_THREAD_REPLIES,
+        }));
+      }
+    }
+
+    clearPendingSocialThreadDraft(activePost.id);
+  }, [activePost, credentials?.signingPublicKey]);
 
   useEffect(() => {
     if (!activePost) {
@@ -715,6 +948,21 @@ export default function SocialPage() {
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        if (inlineComposerTargetId || inlineReplyDraft.trim().length > 0) {
+          event.preventDefault();
+          setInlineComposerTargetId(null);
+          setInlineComposerRootId(null);
+          setInlineReplyDraft("");
+          return;
+        }
+
+        if (isTopComposerOpen || topReplyDraft.trim().length > 0) {
+          event.preventDefault();
+          setIsTopComposerOpen(false);
+          setTopReplyDraft("");
+          return;
+        }
+
         setActivePostId(null);
         return;
       }
@@ -738,10 +986,10 @@ export default function SocialPage() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activePost]);
+  }, [activePost, inlineComposerTargetId, inlineReplyDraft, isTopComposerOpen, topReplyDraft]);
 
   useEffect(() => {
-    if (!activePost) {
+    if (!activePostId) {
       return;
     }
 
@@ -753,7 +1001,37 @@ export default function SocialPage() {
     window.setTimeout(() => {
       focusTarget.focus();
     }, 0);
-  }, [activePost]);
+  }, [activePostId]);
+
+  useEffect(() => {
+    if (!activePost || !isTopComposerOpen) {
+      return;
+    }
+
+    const composerInput = topComposerInputRef.current;
+    if (!composerInput) {
+      return;
+    }
+
+    window.setTimeout(() => {
+      composerInput.focus();
+    }, 0);
+  }, [activePost, isTopComposerOpen]);
+
+  useEffect(() => {
+    if (!activePost || !inlineComposerTargetId) {
+      return;
+    }
+
+    const composerInput = inlineComposerInputRef.current;
+    if (!composerInput) {
+      return;
+    }
+
+    window.setTimeout(() => {
+      composerInput.focus();
+    }, 0);
+  }, [activePost, inlineComposerTargetId]);
 
   useEffect(() => {
     if (!isFeedComposerExpanded || activePost) {
@@ -790,62 +1068,154 @@ export default function SocialPage() {
     openPostDetail(postId);
   };
 
-  const insertReplyInThread = (replies: ReplyItem[], newReply: ReplyItem, rootId: string) => {
-    const lastThreadIndex = replies.reduce((lastIdx, item, index) => {
-      if (item.id === rootId || item.threadRootId === rootId) {
-        return index;
-      }
-      return lastIdx;
-    }, -1);
-
-    if (lastThreadIndex < 0) {
-      return [newReply, ...replies];
-    }
-
-    return [...replies.slice(0, lastThreadIndex + 1), newReply, ...replies.slice(lastThreadIndex + 1)];
-  };
-
   const openReplyToReplyComposer = (targetReply: ReplyItem) => {
     const rootId = targetReply.threadRootId ?? targetReply.id;
     setInlineComposerTargetId(targetReply.id);
     setInlineComposerRootId(rootId);
-    setInlineReplyDraft(`${targetReply.author}, `);
+    setInlineReplyDraft("");
+    setExpandedReplyThreads((current) => ({ ...current, [rootId]: true }));
+    setVisibleRepliesPerThread((current) => ({
+      ...current,
+      [rootId]: current[rootId] ?? INITIAL_THREAD_REPLIES,
+    }));
   };
 
   const submitTopLevelReply = () => {
     const trimmed = topReplyDraft.trim();
     if (!trimmed) return;
 
+    if (!activePost) {
+      return;
+    }
+
+    const optimisticId = `reply-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
     const newReply: ReplyItem = {
-      id: `reply-${Date.now()}`,
-      author: "You",
+      id: optimisticId,
+      serverEntryId: undefined,
+      isPending: true,
+      author: ownAuthorLabel,
+      authorPublicAddress: credentials?.signingPublicKey,
       time: "now",
       text: trimmed,
       reactions: { ...EMPTY_REACTIONS },
+      authorCommitment: undefined,
       threadRootId: null,
+      createdAtMs: Date.now(),
+      childReplyCount: 0,
     };
 
     setOverlayReplies((prev) => [newReply, ...prev]);
+    setFeedWallPosts((current) =>
+      current.map((post) =>
+        post.id === activePost.id
+          ? { ...post, replyCount: post.replyCount + 1 }
+          : post
+      )
+    );
+    setIsTopComposerOpen(false);
     setTopReplyDraft("");
+    clearPendingSocialThreadDraft(activePost.id);
+
+    void (async () => {
+      const result = await createSocialThreadEntry(activePost.id, trimmed);
+      if (!result.success || !result.entryId) {
+        setOverlayReplies((current) => current.filter((entry) => entry.id !== optimisticId));
+        setFeedWallPosts((current) =>
+          current.map((post) =>
+            post.id === activePost.id
+              ? { ...post, replyCount: Math.max(0, post.replyCount - 1) }
+              : post
+          )
+        );
+        addUiToast(result.message || "Failed to submit comment.");
+        return;
+      }
+
+      setOverlayReplies((current) =>
+        current.map((entry) =>
+          entry.id === optimisticId
+            ? { ...entry, serverEntryId: result.entryId!, isPending: false }
+            : entry
+        )
+      );
+    })();
   };
 
   const submitInlineReply = () => {
     const trimmed = inlineReplyDraft.trim();
     if (!trimmed || !inlineComposerRootId) return;
 
+    if (!activePost) {
+      return;
+    }
+
+    const replyTargetId = inlineComposerTargetId ?? inlineComposerRootId;
+    const replyTarget = overlayReplies.find((entry) => entry.id === replyTargetId);
+    const resolvedReplyTargetId = getEntryServerId(replyTarget) ?? replyTargetId;
+    const optimisticId = `reply-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
     const newReply: ReplyItem = {
-      id: `reply-${Date.now()}`,
-      author: "You",
+      id: optimisticId,
+      serverEntryId: undefined,
+      isPending: true,
+      author: ownAuthorLabel,
+      authorPublicAddress: credentials?.signingPublicKey,
       time: "now",
       text: trimmed,
       reactions: { ...EMPTY_REACTIONS },
+      authorCommitment: undefined,
       threadRootId: inlineComposerRootId,
+      createdAtMs: Date.now(),
+      childReplyCount: 0,
     };
 
-    setOverlayReplies((prev) => insertReplyInThread(prev, newReply, inlineComposerRootId));
+    setOverlayReplies((prev) => {
+      const nextWithCount = prev.map((entry) =>
+        entry.id === inlineComposerRootId
+          ? { ...entry, childReplyCount: (entry.childReplyCount ?? 0) + 1 }
+          : entry
+      );
+      return insertReplyInThread(nextWithCount, newReply, inlineComposerRootId);
+    });
+    setFeedWallPosts((current) =>
+      current.map((post) =>
+        post.id === activePost.id
+          ? { ...post, replyCount: post.replyCount + 1 }
+          : post
+      )
+    );
+    setLoadedReplyThreads((current) => ({ ...current, [inlineComposerRootId]: true }));
+    setVisibleRepliesPerThread((current) => ({
+      ...current,
+      [inlineComposerRootId]: current[inlineComposerRootId] ?? INITIAL_THREAD_REPLIES,
+    }));
     setInlineReplyDraft("");
     setInlineComposerTargetId(null);
     setInlineComposerRootId(null);
+    clearPendingSocialThreadDraft(activePost.id);
+
+    void (async () => {
+      const result = await createSocialThreadEntry(activePost.id, trimmed, resolvedReplyTargetId);
+      if (!result.success || !result.entryId) {
+        setOverlayReplies((current) => current.filter((entry) => entry.id !== optimisticId));
+        setFeedWallPosts((current) =>
+          current.map((post) =>
+            post.id === activePost.id
+              ? { ...post, replyCount: Math.max(0, post.replyCount - 1) }
+              : post
+          )
+        );
+        addUiToast(result.message || "Failed to submit reply.");
+        return;
+      }
+
+      setOverlayReplies((current) =>
+        current.map((entry) =>
+          entry.id === optimisticId
+            ? { ...entry, serverEntryId: result.entryId!, isPending: false }
+            : entry
+        )
+      );
+    })();
   };
 
   const addUiToast = (message: string) => {
@@ -863,8 +1233,223 @@ export default function SocialPage() {
       return false;
     }
 
+    if (activePost) {
+      savePendingSocialThreadDraft({
+        postId: activePost.id,
+        mode: inlineComposerTargetId ? "inline" : "top-level",
+        draft: inlineComposerTargetId ? inlineReplyDraft : topReplyDraft,
+        targetReplyId: inlineComposerTargetId,
+        threadRootId: inlineComposerRootId,
+        source: "feed-wall",
+        createdAtMs: Date.now(),
+      });
+    }
+
     setShowAuthOverlay(true);
     return true;
+  };
+
+  const hydrateThreadEntries = async (entries: SocialThreadEntryContract[]) => {
+    const uniqueAddresses = Array.from(
+      new Set(
+        entries
+          .map((entry) => normalizePublicAddress(entry.authorPublicAddress))
+          .filter((address) => address.length > 0 && address !== ownAddressNormalized)
+      )
+    );
+    const namesByAddress = new Map<string, string>();
+    await Promise.all(
+      uniqueAddresses.map(async (address) => {
+        try {
+          const identity = await checkIdentityExists(address);
+          const profileName = identity.profileName?.trim();
+          if (profileName) {
+            namesByAddress.set(address, profileName);
+          }
+        } catch {
+          // Keep address fallback when lookup fails.
+        }
+      })
+    );
+
+    return entries.map((entry) => ({
+      id: entry.entryId,
+      serverEntryId: entry.entryId,
+      author:
+        normalizePublicAddress(entry.authorPublicAddress) === ownAddressNormalized
+          ? ownAuthorLabel
+          : namesByAddress.get(normalizePublicAddress(entry.authorPublicAddress)) ??
+            (entry.authorPublicAddress
+              ? `${entry.authorPublicAddress.slice(0, 8)}...${entry.authorPublicAddress.slice(-6)}`
+              : "Unknown"),
+      authorPublicAddress: entry.authorPublicAddress,
+      reactionScopeId: entry.reactionScopeId,
+      authorCommitment: entry.authorCommitment,
+      time: entry.createdAtUnixMs ? formatRelativeTime(entry.createdAtUnixMs) : "now",
+      text: entry.content ?? "",
+      reactions: buildThreadReactionSummary(entry.reactionCount),
+      threadRootId: entry.kind === "reply" ? entry.threadRootId : null,
+      createdAtMs: entry.createdAtUnixMs ?? Date.now(),
+      childReplyCount: entry.childReplyCount ?? 0,
+    }));
+  };
+
+  const toggleReplyThread = async (threadRootId: string) => {
+    const isExpanded = expandedReplyThreads[threadRootId] ?? false;
+    if (isExpanded) {
+      setExpandedReplyThreads((current) => ({ ...current, [threadRootId]: false }));
+      return;
+    }
+
+    if (loadedReplyThreads[threadRootId]) {
+      setExpandedReplyThreads((current) => ({ ...current, [threadRootId]: true }));
+      setVisibleRepliesPerThread((current) => ({
+        ...current,
+        [threadRootId]: current[threadRootId] ?? Math.max(INITIAL_THREAD_REPLIES, getThreadReplies(overlayReplies, threadRootId).length),
+      }));
+      return;
+    }
+
+    if (!activePost) {
+      return;
+    }
+
+    const threadRootEntry = overlayReplies.find((entry) => entry.id === threadRootId);
+    const resolvedThreadRootId = getEntryServerId(threadRootEntry) ?? threadRootId;
+    setThreadLoadingState((current) => ({ ...current, [threadRootId]: "opening" }));
+    const response = await getSocialThreadRepliesPage(
+      activePost.id,
+      resolvedThreadRootId,
+      credentials?.signingPublicKey ?? null,
+      !!credentials?.signingPublicKey,
+      INITIAL_THREAD_REPLIES
+    );
+
+    if (response.success) {
+      const mapped = await hydrateThreadEntries(response.replies);
+      setOverlayReplies((current) => {
+        let next = [...current];
+        for (const reply of mapped) {
+          if (next.some((entry) => entry.id === reply.id)) {
+            continue;
+          }
+          next = insertReplyInThread(next, reply, threadRootId);
+        }
+        return next;
+      });
+      setLoadedReplyThreads((current) => ({ ...current, [threadRootId]: true }));
+      setThreadHasMoreReplies((current) => ({ ...current, [threadRootId]: response.hasMore }));
+      setThreadBeforeEntryIds((current) => ({
+        ...current,
+        [threadRootId]: mapped.length > 0 ? mapped[mapped.length - 1].id : null,
+      }));
+      setExpandedReplyThreads((current) => ({ ...current, [threadRootId]: true }));
+      setVisibleRepliesPerThread((current) => ({
+        ...current,
+        [threadRootId]: Math.max(INITIAL_THREAD_REPLIES, mapped.length),
+      }));
+    } else {
+      addUiToast(response.message || "Failed to load replies.");
+    }
+
+    setThreadLoadingState((current) => {
+      const next = { ...current };
+      delete next[threadRootId];
+      return next;
+    });
+  };
+
+  const loadMoreThreadReplies = async (threadRootId: string) => {
+    if (threadHasMoreReplies[threadRootId] && activePost) {
+      const threadRootEntry = overlayReplies.find((entry) => entry.id === threadRootId);
+      const resolvedThreadRootId = getEntryServerId(threadRootEntry) ?? threadRootId;
+      setThreadLoadingState((current) => ({ ...current, [threadRootId]: "loading-more" }));
+      const response = await getSocialThreadRepliesPage(
+        activePost.id,
+        resolvedThreadRootId,
+        credentials?.signingPublicKey ?? null,
+        !!credentials?.signingPublicKey,
+        LOAD_MORE_THREAD_REPLIES,
+        threadBeforeEntryIds[threadRootId] ?? undefined
+      );
+
+      if (response.success) {
+        const mapped = await hydrateThreadEntries(response.replies);
+        setOverlayReplies((current) => {
+          let next = [...current];
+          for (const reply of mapped) {
+            if (next.some((entry) => entry.id === reply.id)) {
+              continue;
+            }
+            next = insertReplyInThread(next, reply, threadRootId);
+          }
+          return next;
+        });
+        setThreadHasMoreReplies((current) => ({ ...current, [threadRootId]: response.hasMore }));
+        setThreadBeforeEntryIds((current) => ({
+          ...current,
+          [threadRootId]: mapped.length > 0 ? mapped[mapped.length - 1].id : current[threadRootId] ?? null,
+        }));
+        setVisibleRepliesPerThread((current) => ({
+          ...current,
+          [threadRootId]: (current[threadRootId] ?? INITIAL_THREAD_REPLIES) + mapped.length,
+        }));
+      } else {
+        addUiToast(response.message || "Failed to load more replies.");
+      }
+
+      setThreadLoadingState((current) => {
+        const next = { ...current };
+        delete next[threadRootId];
+        return next;
+      });
+      return;
+    }
+
+    setThreadLoadingState((current) => ({ ...current, [threadRootId]: "loading-more" }));
+    window.setTimeout(() => {
+      setVisibleRepliesPerThread((current) => ({
+        ...current,
+        [threadRootId]: (current[threadRootId] ?? INITIAL_THREAD_REPLIES) + LOAD_MORE_THREAD_REPLIES,
+      }));
+      setThreadLoadingState((current) => {
+        const next = { ...current };
+        delete next[threadRootId];
+        return next;
+      });
+    }, 120);
+  };
+
+  const loadMoreTopLevelComments = async () => {
+    if (hasMoreTopLevelComments && activePost) {
+      setIsLoadingMoreComments(true);
+      const response = await getSocialCommentsPage(
+        activePost.id,
+        credentials?.signingPublicKey ?? null,
+        !!credentials?.signingPublicKey,
+        LOAD_MORE_TOP_LEVEL_COMMENTS,
+        topLevelBeforeEntryId ?? undefined
+      );
+
+      if (response.success) {
+        const mapped = await hydrateThreadEntries(response.comments);
+        setOverlayReplies((current) => [...current, ...mapped.filter((reply) => !current.some((item) => item.id === reply.id))]);
+        setVisibleTopLevelReplyCount((current) => current + mapped.length);
+        setHasMoreTopLevelComments(response.hasMore);
+        setTopLevelBeforeEntryId(mapped.length > 0 ? mapped[mapped.length - 1].id : topLevelBeforeEntryId);
+      } else {
+        addUiToast(response.message || "Failed to load more comments.");
+      }
+
+      setIsLoadingMoreComments(false);
+      return;
+    }
+
+    setIsLoadingMoreComments(true);
+    window.setTimeout(() => {
+      setVisibleTopLevelReplyCount((current) => current + LOAD_MORE_TOP_LEVEL_COMMENTS);
+      setIsLoadingMoreComments(false);
+    }, 120);
   };
 
   useEffect(() => {
@@ -1003,7 +1588,7 @@ export default function SocialPage() {
             confirmedAtText,
             confirmationState: "confirmed" as const,
             text: post.content,
-            replyCount: existing?.replyCount ?? 0,
+            replyCount: post.replyCount ?? existing?.replyCount ?? 0,
             reactions: existing?.reactions ?? { ...EMPTY_REACTIONS },
             replies: existing?.replies ?? [],
             attachments: attachmentItems.length > 0 ? attachmentItems : existing?.attachments ?? [],
@@ -1693,6 +2278,7 @@ export default function SocialPage() {
                 visibility={post.visibility}
                 circleFeedIds={post.circleFeedIds}
                 authorCommitment={post.authorCommitment}
+                isOwnMessage={normalizePublicAddress(post.authorPublicAddress) === ownAddressNormalized}
                 canInteract={!!credentials?.signingPublicKey}
                 testIdPrefix={`post-reaction-strip-${post.id}`}
                 onRequireAccount={() => setShowAuthOverlay(true)}
@@ -2141,6 +2727,7 @@ export default function SocialPage() {
               visibility={activePost.visibility}
               circleFeedIds={activePost.circleFeedIds}
               authorCommitment={activePost.authorCommitment}
+              isOwnMessage={normalizePublicAddress(activePost.authorPublicAddress) === ownAddressNormalized}
               canInteract={!!credentials?.signingPublicKey}
               testIdPrefix={`post-detail-reaction-strip-${activePost.id}`}
               onRequireAccount={() => setShowAuthOverlay(true)}
@@ -2148,13 +2735,14 @@ export default function SocialPage() {
 
             {isTopComposerOpen && (
               <div className="mt-3 rounded-lg border border-hush-bg-hover p-3" data-testid="post-detail-composer-top">
-                <p className="text-[11px] text-hush-text-accent mb-2">Replying to post (mock rich text)</p>
+                <p className="text-[11px] text-hush-text-accent mb-2">Commenting on post (mock rich text)</p>
                 <textarea
+                  ref={topComposerInputRef}
                   className="w-full min-h-24 rounded-md border border-hush-bg-hover bg-hush-bg-dark px-3 py-2 text-sm text-hush-text-primary outline-none focus:border-hush-purple"
                   value={topReplyDraft}
                   onChange={(event) => setTopReplyDraft(event.currentTarget.value)}
                   data-testid="post-detail-composer-input"
-                  placeholder="Write your reply..."
+                  placeholder="Write your comment..."
                   onKeyDown={(event) => {
                     if (event.key === "Enter" && !event.ctrlKey) {
                       event.preventDefault();
@@ -2171,7 +2759,7 @@ export default function SocialPage() {
                     disabled={topReplyDraft.trim().length === 0}
                     data-testid="post-detail-composer-send"
                   >
-                    Reply
+                    Comment
                   </button>
                 </div>
               </div>
@@ -2180,75 +2768,98 @@ export default function SocialPage() {
             <div className="mt-4">
               <h3 className="text-sm font-semibold text-hush-text-primary mb-2">Replies ({overlayReplies.length})</h3>
               <div className="space-y-2" data-testid="post-detail-replies-scroll">
-                {overlayReplies
-                  .filter((reply) => reply.threadRootId === null)
-                  .map((reply) => (
-                  <div key={reply.id} className="rounded-lg border border-hush-bg-hover p-3" data-testid={`post-detail-reply-${reply.id}`}>
-                    <div className="flex items-center justify-between mb-1">
-                      <p className="text-xs font-semibold text-hush-text-primary">{reply.author}</p>
-                      <span className="text-[10px] text-hush-text-accent">{reply.time}</span>
-                    </div>
-                    <p className="text-xs text-hush-text-accent">{reply.text}</p>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      {Object.entries(reply.reactions).map(([emoji, count]) => (
+                {visibleTopLevelReplies.map((reply) => {
+                  const threadReplies = getThreadReplies(overlayReplies, reply.id);
+                  const isExpanded = expandedReplyThreads[reply.id] ?? false;
+                  const visibleReplyCount = visibleRepliesPerThread[reply.id] ?? INITIAL_THREAD_REPLIES;
+                  const visibleThreadReplies = isExpanded ? threadReplies.slice(0, visibleReplyCount) : [];
+                  const threadLoadingMode = threadLoadingState[reply.id];
+
+                  return (
+                    <div key={reply.id} className="rounded-lg border border-hush-bg-hover p-3" data-testid={`post-detail-reply-${reply.id}`}>
+                      <div className="flex items-center justify-between mb-1">
+                        <p className="text-xs font-semibold text-hush-text-primary">{reply.author}</p>
+                        <span className="text-[10px] text-hush-text-accent">{reply.time}</span>
+                      </div>
+                      <p className="text-xs text-hush-text-accent">{reply.text}</p>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
                         <button
-                          key={emoji}
                           type="button"
                           className="inline-flex items-center gap-1 rounded-full border border-hush-bg-hover px-2 py-1 text-[11px] text-hush-text-accent hover:bg-hush-bg-hover"
+                          data-testid={`post-detail-reply-reply-${reply.id}`}
+                          onClick={() => openReplyToReplyComposer(reply)}
                         >
-                          <span>{emoji}</span>
-                          <span>{count}</span>
+                          <MessageCircle className="w-3 h-3" />
+                          Reply
                         </button>
-                      ))}
-                      <button
-                        type="button"
-                        className="inline-flex items-center gap-1 rounded-full border border-hush-bg-hover px-2 py-1 text-[11px] text-hush-text-accent hover:bg-hush-bg-hover"
-                        data-testid={`post-detail-reply-reply-${reply.id}`}
-                        onClick={() => openReplyToReplyComposer(reply)}
-                      >
-                        <MessageCircle className="w-3 h-3" />
-                        Reply
-                      </button>
-                      <button
-                        type="button"
-                        className="inline-flex items-center gap-1 rounded-full border border-hush-purple/40 px-2 py-1 text-[11px] text-hush-purple hover:bg-hush-purple/10"
-                        data-testid={`post-detail-reply-add-${reply.id}`}
-                      >
-                        <SmilePlus className="w-3 h-3" />
-                        Add
-                      </button>
-                    </div>
-                    {inlineComposerTargetId === reply.id && (
-                      <div className="mt-2 rounded-lg border border-hush-bg-hover p-2 bg-hush-bg-dark/60" data-testid={`inline-composer-${reply.id}`}>
-                        <textarea
-                          className="w-full min-h-20 rounded-md border border-hush-bg-hover bg-hush-bg-dark px-2 py-1 text-xs text-hush-text-primary outline-none focus:border-hush-purple"
-                          value={inlineReplyDraft}
-                          onChange={(event) => setInlineReplyDraft(event.currentTarget.value)}
-                          data-testid="inline-composer-input"
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" && !event.ctrlKey) {
-                              event.preventDefault();
-                              submitInlineReply();
-                            }
-                          }}
-                        />
-                        <div className="mt-2 flex items-center justify-between">
-                          <p className="text-[10px] text-hush-text-accent">Enter = send, Ctrl+Enter = new line</p>
+                        {(reply.childReplyCount ?? threadReplies.length) > 0 ? (
                           <button
                             type="button"
-                            className="rounded-md bg-hush-purple px-2 py-1 text-[11px] font-semibold text-hush-bg-dark disabled:opacity-50"
-                            onClick={submitInlineReply}
-                            disabled={inlineReplyDraft.trim().length === 0}
-                            data-testid="inline-composer-send"
+                            className="inline-flex items-center gap-1 rounded-full border border-hush-bg-hover px-2 py-1 text-[11px] text-hush-text-accent hover:bg-hush-bg-hover"
+                            data-testid={`post-detail-thread-toggle-${reply.id}`}
+                            onClick={() => void toggleReplyThread(reply.id)}
                           >
-                            Reply
+                            {threadLoadingMode === "opening"
+                              ? "Loading replies..."
+                              : isExpanded
+                                ? `Hide replies (${reply.childReplyCount ?? threadReplies.length})`
+                                : `View replies (${reply.childReplyCount ?? threadReplies.length})`}
                           </button>
-                        </div>
+                        ) : null}
                       </div>
-                    )}
-                    {overlayReplies
-                      .filter((childReply) => childReply.threadRootId === reply.id)
-                      .map((childReply) => (
+                      <SocialPostReactions
+                        postId={reply.id}
+                        reactionMessageId={reply.isPending ? null : (reply.serverEntryId ?? reply.id)}
+                        reactionScopeId={reply.reactionScopeId ?? activePost.reactionScopeId ?? activePost.id}
+                        visibility={activePost.visibility}
+                        circleFeedIds={activePost.circleFeedIds}
+                        authorCommitment={reply.authorCommitment}
+                        isOwnMessage={normalizePublicAddress(reply.authorPublicAddress) === ownAddressNormalized}
+                        canInteract={!!credentials?.signingPublicKey}
+                        testIdPrefix={`post-detail-comment-reactions-${reply.id}`}
+                        onRequireAccount={() => {
+                          savePendingSocialThreadDraft({
+                            postId: activePost.id,
+                            mode: inlineComposerTargetId ? "inline" : "top-level",
+                            draft: inlineComposerTargetId ? inlineReplyDraft : topReplyDraft,
+                            targetReplyId: inlineComposerTargetId,
+                            threadRootId: inlineComposerRootId,
+                            source: "feed-wall",
+                            createdAtMs: Date.now(),
+                          });
+                          setShowAuthOverlay(true);
+                        }}
+                      />
+                      {inlineComposerTargetId === reply.id && (
+                        <div className="mt-2 rounded-lg border border-hush-bg-hover p-2 bg-hush-bg-dark/60" data-testid={`inline-composer-${reply.id}`}>
+                          <textarea
+                            ref={inlineComposerInputRef}
+                            className="w-full min-h-20 rounded-md border border-hush-bg-hover bg-hush-bg-dark px-2 py-1 text-xs text-hush-text-primary outline-none focus:border-hush-purple"
+                            value={inlineReplyDraft}
+                            onChange={(event) => setInlineReplyDraft(event.currentTarget.value)}
+                            data-testid="inline-composer-input"
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" && !event.ctrlKey) {
+                                event.preventDefault();
+                                submitInlineReply();
+                              }
+                            }}
+                          />
+                          <div className="mt-2 flex items-center justify-between">
+                            <p className="text-[10px] text-hush-text-accent">Enter = send, Ctrl+Enter = new line</p>
+                            <button
+                              type="button"
+                              className="rounded-md bg-hush-purple px-2 py-1 text-[11px] font-semibold text-hush-bg-dark disabled:opacity-50"
+                              onClick={submitInlineReply}
+                              disabled={inlineReplyDraft.trim().length === 0}
+                              data-testid="inline-composer-send"
+                            >
+                              Reply
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                      {visibleThreadReplies.map((childReply) => (
                         <div
                           key={childReply.id}
                           className="mt-2 ml-4 rounded-lg border border-hush-bg-hover p-3 bg-hush-bg-dark/50"
@@ -2260,16 +2871,6 @@ export default function SocialPage() {
                           </div>
                           <p className="text-xs text-hush-text-accent">{childReply.text}</p>
                           <div className="mt-2 flex flex-wrap items-center gap-2">
-                            {Object.entries(childReply.reactions).map(([emoji, count]) => (
-                              <button
-                                key={emoji}
-                                type="button"
-                                className="inline-flex items-center gap-1 rounded-full border border-hush-bg-hover px-2 py-1 text-[11px] text-hush-text-accent hover:bg-hush-bg-hover"
-                              >
-                                <span>{emoji}</span>
-                                <span>{count}</span>
-                              </button>
-                            ))}
                             <button
                               type="button"
                               className="inline-flex items-center gap-1 rounded-full border border-hush-bg-hover px-2 py-1 text-[11px] text-hush-text-accent hover:bg-hush-bg-hover"
@@ -2279,18 +2880,34 @@ export default function SocialPage() {
                               <MessageCircle className="w-3 h-3" />
                               Reply
                             </button>
-                            <button
-                              type="button"
-                              className="inline-flex items-center gap-1 rounded-full border border-hush-purple/40 px-2 py-1 text-[11px] text-hush-purple hover:bg-hush-purple/10"
-                              data-testid={`post-detail-reply-add-${childReply.id}`}
-                            >
-                              <SmilePlus className="w-3 h-3" />
-                              Add
-                            </button>
                           </div>
+                          <SocialPostReactions
+                            postId={childReply.id}
+                            reactionMessageId={childReply.isPending ? null : (childReply.serverEntryId ?? childReply.id)}
+                            reactionScopeId={childReply.reactionScopeId ?? activePost.reactionScopeId ?? activePost.id}
+                            visibility={activePost.visibility}
+                            circleFeedIds={activePost.circleFeedIds}
+                            authorCommitment={childReply.authorCommitment}
+                            isOwnMessage={normalizePublicAddress(childReply.authorPublicAddress) === ownAddressNormalized}
+                            canInteract={!!credentials?.signingPublicKey}
+                            testIdPrefix={`post-detail-comment-reactions-${childReply.id}`}
+                            onRequireAccount={() => {
+                              savePendingSocialThreadDraft({
+                                postId: activePost.id,
+                                mode: "inline",
+                                draft: inlineReplyDraft,
+                                targetReplyId: childReply.id,
+                                threadRootId: childReply.threadRootId,
+                                source: "feed-wall",
+                                createdAtMs: Date.now(),
+                              });
+                              setShowAuthOverlay(true);
+                            }}
+                          />
                           {inlineComposerTargetId === childReply.id && (
                             <div className="mt-2 rounded-lg border border-hush-bg-hover p-2 bg-hush-bg-dark/60" data-testid={`inline-composer-${childReply.id}`}>
                               <textarea
+                                ref={inlineComposerInputRef}
                                 className="w-full min-h-20 rounded-md border border-hush-bg-hover bg-hush-bg-dark px-2 py-1 text-xs text-hush-text-primary outline-none focus:border-hush-purple"
                                 value={inlineReplyDraft}
                                 onChange={(event) => setInlineReplyDraft(event.currentTarget.value)}
@@ -2318,8 +2935,64 @@ export default function SocialPage() {
                           )}
                         </div>
                       ))}
+                      {threadLoadingMode === "opening" ? (
+                        <div
+                          className="mt-2 ml-4 inline-flex items-center gap-2 rounded-md border border-hush-bg-hover bg-hush-bg-dark/60 px-3 py-2 text-[11px] text-hush-text-accent"
+                          data-testid={`post-detail-thread-loading-${reply.id}`}
+                        >
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          Loading replies...
+                        </div>
+                      ) : null}
+                      {isExpanded && !threadLoadingMode && threadReplies.length === 0 ? (
+                        <div
+                          className="mt-2 ml-4 rounded-md border border-dashed border-hush-bg-hover bg-hush-bg-dark/40 px-3 py-2 text-[11px] text-hush-text-accent"
+                          data-testid={`post-detail-thread-empty-${reply.id}`}
+                        >
+                          No replies yet. Use Reply to continue this thread.
+                        </div>
+                      ) : null}
+                      {isExpanded && ((threadHasMoreReplies[reply.id] ?? false) || threadReplies.length > visibleThreadReplies.length) ? (
+                        <button
+                          type="button"
+                          className="mt-2 ml-4 inline-flex rounded-md border border-hush-bg-hover px-3 py-1 text-[11px] text-hush-text-accent hover:bg-hush-bg-hover"
+                          data-testid={`post-detail-thread-load-more-${reply.id}`}
+                          onClick={() => void loadMoreThreadReplies(reply.id)}
+                        >
+                          {threadLoadingMode === "loading-more" ? "Loading more replies..." : "Load more replies"}
+                        </button>
+                      ) : null}
+                    </div>
+                  );
+                })}
+                {isLoadingInitialComments ? (
+                  <div
+                    className="rounded-lg border border-hush-bg-hover bg-hush-bg-dark/40 px-4 py-5 text-sm text-hush-text-accent"
+                    data-testid="post-detail-comments-loading"
+                  >
+                    Loading comments...
                   </div>
-                ))}
+                ) : null}
+                {visibleTopLevelReplies.length === 0 ? (
+                  <div
+                    className="rounded-lg border border-dashed border-hush-bg-hover bg-hush-bg-dark/40 px-4 py-5 text-sm text-hush-text-accent"
+                    data-testid="post-detail-comments-empty"
+                  >
+                    {credentials?.signingPublicKey
+                      ? "No comments yet. Be the first to reply."
+                      : "No comments yet. Create your account to join the discussion."}
+                  </div>
+                ) : null}
+                {(hasMoreTopLevelComments || sortedTopLevelReplies.length > visibleTopLevelReplies.length) ? (
+                  <button
+                    type="button"
+                    className="inline-flex rounded-md border border-hush-bg-hover px-3 py-1 text-xs text-hush-text-accent hover:bg-hush-bg-hover"
+                    data-testid="post-detail-comments-load-more"
+                    onClick={() => void loadMoreTopLevelComments()}
+                  >
+                    {isLoadingMoreComments ? "Loading more comments..." : "Load more comments"}
+                  </button>
+                ) : null}
               </div>
             </div>
           </div>

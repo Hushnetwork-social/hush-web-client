@@ -12,7 +12,11 @@ const triggerSyncNowMock = vi.fn();
 const clipboardWriteTextMock = vi.fn();
 const getSocialFeedWallMock = vi.fn();
 const createSocialPostMock = vi.fn();
+const getSocialCommentsPageMock = vi.fn();
+const getSocialThreadRepliesPageMock = vi.fn();
+const createSocialThreadEntryMock = vi.fn();
 const computeSha256Mock = vi.fn();
+const socialPostReactionsPropsMock = vi.fn();
 let mockCredentials: {
   signingPublicKey?: string;
   signingPrivateKey?: string;
@@ -136,12 +140,21 @@ vi.mock('@/modules/social/SocialService', () => ({
   createSocialPost: (...args: unknown[]) => createSocialPostMock(...args),
 }));
 
+vi.mock('@/modules/social/ThreadService', () => ({
+  getSocialCommentsPage: (...args: unknown[]) => getSocialCommentsPageMock(...args),
+  getSocialThreadRepliesPage: (...args: unknown[]) => getSocialThreadRepliesPageMock(...args),
+  createSocialThreadEntry: (...args: unknown[]) => createSocialThreadEntryMock(...args),
+}));
+
 vi.mock('@/components/social/SocialPostReactions', () => ({
-  SocialPostReactions: ({ testIdPrefix }: { testIdPrefix: string }) => (
-    <div data-testid={testIdPrefix}>
-      <button data-testid={`${testIdPrefix}-add`}>Add</button>
-    </div>
-  ),
+  SocialPostReactions: (props: { testIdPrefix: string }) => {
+    socialPostReactionsPropsMock(props);
+    return (
+      <div data-testid={props.testIdPrefix}>
+        <button data-testid={`${props.testIdPrefix}-add`}>Add</button>
+      </div>
+    );
+  },
 }));
 
 vi.mock('@/lib/attachments/attachmentHash', () => ({
@@ -172,6 +185,10 @@ describe('SocialPage', () => {
     checkIdentityExistsMock.mockReset();
     triggerSyncNowMock.mockReset();
     createSocialPostMock.mockReset();
+    getSocialCommentsPageMock.mockReset();
+    getSocialThreadRepliesPageMock.mockReset();
+    createSocialThreadEntryMock.mockReset();
+    socialPostReactionsPropsMock.mockReset();
     createCustomCircleMock.mockResolvedValue({ success: true, message: 'ok' });
     addMembersToCustomCircleMock.mockResolvedValue({ success: true, message: 'ok' });
     checkIdentityExistsMock.mockResolvedValue({
@@ -184,6 +201,25 @@ describe('SocialPage', () => {
       message: 'ok',
       permalink: '/social/post/test-post',
     });
+    getSocialCommentsPageMock.mockResolvedValue({
+      success: true,
+      message: 'ok',
+      comments: [],
+      paging: { initialPageSize: 10, loadMorePageSize: 10 },
+      hasMore: false,
+    });
+    getSocialThreadRepliesPageMock.mockResolvedValue({
+      success: true,
+      message: 'ok',
+      replies: [],
+      paging: { initialPageSize: 5, loadMorePageSize: 5 },
+      hasMore: false,
+    });
+    createSocialThreadEntryMock.mockImplementation(async () => ({
+      success: true,
+      message: 'ok',
+      entryId: `thread-entry-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    }));
     getSocialFeedWallMock.mockResolvedValue({
       success: true,
       message: 'ok',
@@ -720,8 +756,12 @@ describe('SocialPage', () => {
     expect(screen.queryByTestId('post-detail-composer-top')).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId('post-detail-action-reply-post-1'));
     expect(screen.getByTestId('post-detail-composer-top')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId('post-detail-composer-input')).toHaveFocus();
+    });
     expect(screen.queryByTestId('post-detail-reply-reply-post-1-reply-1')).not.toBeInTheDocument();
     expect(screen.getByText('Replies (0)')).toBeInTheDocument();
+    expect(screen.getByTestId('post-detail-comments-empty')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('close-post-detail'));
     expect(screen.queryByTestId('post-detail-overlay')).not.toBeInTheDocument();
@@ -753,11 +793,303 @@ describe('SocialPage', () => {
     fireEvent.change(input, { target: { value: 'New top reply' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
+    expect(screen.queryByTestId('post-detail-composer-top')).not.toBeInTheDocument();
     expect(screen.getByText('Replies (1)')).toBeInTheDocument();
+    expect(screen.getByTestId('post-action-reply-post-1')).toHaveTextContent('Reply (1)');
     const replyCards = screen.getAllByTestId(/post-detail-reply-/);
     expect(replyCards[0]).toHaveTextContent('You');
     expect(replyCards[0]).toHaveTextContent('New top reply');
   });
+
+  it('closes the comment composer on Escape before closing the post detail overlay', async () => {
+    await renderFeedWallAndWaitReady();
+
+    fireEvent.click(screen.getByTestId('open-post-detail-post-1'));
+    fireEvent.click(screen.getByTestId('post-detail-action-reply-post-1'));
+
+    const input = screen.getByTestId('post-detail-composer-input');
+    fireEvent.change(input, { target: { value: 'Draft comment' } });
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByTestId('post-detail-composer-top')).not.toBeInTheDocument();
+    expect(screen.getByTestId('post-detail-overlay')).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByTestId('post-detail-overlay')).not.toBeInTheDocument();
+  });
+
+  it('passes thread-entry reaction metadata to comment and reply reaction strips', async () => {
+    getSocialCommentsPageMock.mockResolvedValueOnce({
+      success: true,
+      message: 'ok',
+      comments: [
+        {
+          postId: 'post-1',
+          entryId: 'comment-1',
+          kind: 'comment',
+          threadRootId: 'comment-1',
+          reactionScopeId: 'post-1',
+          createdAtUnixMs: Date.now() - 1_000,
+          reactionCount: 1,
+          authorPublicAddress: 'alice-address',
+          authorCommitment: 'comment-commitment',
+          content: 'Looks good',
+          childReplyCount: 1,
+        },
+      ],
+      paging: { initialPageSize: 10, loadMorePageSize: 10 },
+      hasMore: false,
+    });
+    getSocialThreadRepliesPageMock.mockResolvedValueOnce({
+      success: true,
+      message: 'ok',
+      replies: [
+        {
+          postId: 'post-1',
+          entryId: 'reply-1',
+          kind: 'reply',
+          parentCommentId: 'comment-1',
+          threadRootId: 'comment-1',
+          reactionScopeId: 'post-1',
+          createdAtUnixMs: Date.now(),
+          reactionCount: 1,
+          authorPublicAddress: 'me-address',
+          authorCommitment: 'reply-commitment',
+          content: 'Thanks for feedback',
+          childReplyCount: 0,
+        },
+      ],
+      paging: { initialPageSize: 5, loadMorePageSize: 5 },
+      hasMore: false,
+    });
+
+    await renderFeedWallAndWaitReady();
+
+    fireEvent.click(screen.getByTestId('open-post-detail-post-1'));
+    await waitFor(() => {
+      expect(screen.getByTestId('post-detail-reply-comment-1')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('post-detail-thread-toggle-comment-1'));
+    await waitFor(() => {
+      expect(screen.getByTestId('post-detail-reply-reply-1')).toBeInTheDocument();
+    });
+
+    const commentReactionProps = socialPostReactionsPropsMock.mock.calls
+      .map(([props]) => props)
+      .find((props) => props.testIdPrefix === 'post-detail-comment-reactions-comment-1');
+    expect(commentReactionProps).toMatchObject({
+      postId: 'comment-1',
+      reactionMessageId: 'comment-1',
+      reactionScopeId: 'post-1',
+      authorCommitment: 'comment-commitment',
+    });
+
+    const replyReactionProps = socialPostReactionsPropsMock.mock.calls
+      .map(([props]) => props)
+      .find((props) => props.testIdPrefix === 'post-detail-comment-reactions-reply-1');
+    expect(replyReactionProps).toMatchObject({
+      postId: 'reply-1',
+      reactionMessageId: 'reply-1',
+      reactionScopeId: 'post-1',
+      authorCommitment: 'reply-commitment',
+    });
+  });
+
+  it('renders a single reaction add affordance per thread entry', async () => {
+    getSocialCommentsPageMock.mockResolvedValueOnce({
+      success: true,
+      message: 'ok',
+      comments: [
+        {
+          postId: 'post-1',
+          entryId: 'comment-1',
+          kind: 'comment',
+          threadRootId: 'comment-1',
+          reactionScopeId: 'post-1',
+          createdAtUnixMs: Date.now() - 1_000,
+          reactionCount: 1,
+          authorPublicAddress: 'alice-address',
+          authorCommitment: 'comment-commitment',
+          content: 'Looks good',
+          childReplyCount: 1,
+        },
+      ],
+      paging: { initialPageSize: 10, loadMorePageSize: 10 },
+      hasMore: false,
+    });
+    getSocialThreadRepliesPageMock.mockResolvedValueOnce({
+      success: true,
+      message: 'ok',
+      replies: [
+        {
+          postId: 'post-1',
+          entryId: 'reply-1',
+          kind: 'reply',
+          parentCommentId: 'comment-1',
+          threadRootId: 'comment-1',
+          reactionScopeId: 'post-1',
+          createdAtUnixMs: Date.now(),
+          reactionCount: 1,
+          authorPublicAddress: 'me-address',
+          authorCommitment: 'reply-commitment',
+          content: 'Thanks for feedback',
+          childReplyCount: 0,
+        },
+      ],
+      paging: { initialPageSize: 5, loadMorePageSize: 5 },
+      hasMore: false,
+    });
+
+    await renderFeedWallAndWaitReady();
+
+    fireEvent.click(screen.getByTestId('open-post-detail-post-1'));
+    await waitFor(() => {
+      expect(screen.getByTestId('post-detail-reply-comment-1')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('post-detail-thread-toggle-comment-1'));
+    await waitFor(() => {
+      expect(screen.getByTestId('post-detail-reply-reply-1')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('post-detail-comment-reactions-comment-1-add')).toBeInTheDocument();
+    expect(screen.getByTestId('post-detail-comment-reactions-reply-1-add')).toBeInTheDocument();
+    expect(screen.queryByTestId('post-detail-reply-add-comment-1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('post-detail-reply-add-reply-1')).not.toBeInTheDocument();
+  });
+
+  it('renders thread entry actions before the reaction strip', async () => {
+    getSocialCommentsPageMock.mockResolvedValueOnce({
+      success: true,
+      message: 'ok',
+      comments: [
+        {
+          postId: 'post-1',
+          entryId: 'comment-1',
+          kind: 'comment',
+          threadRootId: 'comment-1',
+          reactionScopeId: 'post-1',
+          createdAtUnixMs: Date.now() - 1_000,
+          reactionCount: 1,
+          authorPublicAddress: 'alice-address',
+          authorCommitment: 'comment-commitment',
+          content: 'Looks good',
+          childReplyCount: 0,
+        },
+      ],
+      paging: { initialPageSize: 10, loadMorePageSize: 10 },
+      hasMore: false,
+    });
+
+    await renderFeedWallAndWaitReady();
+
+    fireEvent.click(screen.getByTestId('open-post-detail-post-1'));
+    const commentCard = await screen.findByTestId('post-detail-reply-comment-1');
+    const replyButton = within(commentCard).getByTestId('post-detail-reply-reply-comment-1');
+    const reactionAddButton = within(commentCard).getByTestId('post-detail-comment-reactions-comment-1-add');
+
+    expect(
+      replyButton.compareDocumentPosition(reactionAddButton) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+  });
+
+  it('focuses and closes the inline reply composer on Escape before closing the overlay', async () => {
+    getSocialCommentsPageMock.mockResolvedValueOnce({
+      success: true,
+      message: 'ok',
+      comments: [
+        {
+          postId: 'post-1',
+          entryId: 'comment-1',
+          kind: 'comment',
+          threadRootId: 'comment-1',
+          reactionScopeId: 'post-1',
+          createdAtUnixMs: Date.now() - 1_000,
+          reactionCount: 1,
+          authorPublicAddress: 'alice-address',
+          authorCommitment: 'comment-commitment',
+          content: 'Looks good',
+          childReplyCount: 0,
+        },
+      ],
+      paging: { initialPageSize: 10, loadMorePageSize: 10 },
+      hasMore: false,
+    });
+
+    await renderFeedWallAndWaitReady();
+
+    fireEvent.click(screen.getByTestId('open-post-detail-post-1'));
+    const replyButton = await screen.findByTestId('post-detail-reply-reply-comment-1');
+    fireEvent.click(replyButton);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('inline-composer-input')).toHaveFocus();
+    });
+
+    fireEvent.change(screen.getByTestId('inline-composer-input'), {
+      target: { value: 'Draft reply' },
+    });
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByTestId('inline-composer-input')).not.toBeInTheDocument();
+    expect(screen.getByTestId('post-detail-overlay')).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByTestId('post-detail-overlay')).not.toBeInTheDocument();
+  });
+
+  it(
+    'keeps the top composer open across background feed refreshes for the same post',
+    async () => {
+      await renderFeedWallAndWaitReady();
+
+      fireEvent.click(screen.getByTestId('open-post-detail-post-1'));
+      fireEvent.click(screen.getByTestId('post-detail-action-reply-post-1'));
+
+      const input = screen.getByTestId('post-detail-composer-input') as HTMLTextAreaElement;
+      fireEvent.change(input, { target: { value: 'Draft that should survive refresh' } });
+      input.focus();
+      expect(screen.getByTestId('post-detail-composer-top')).toBeInTheDocument();
+      expect(input.value).toBe('Draft that should survive refresh');
+      expect(input).toHaveFocus();
+
+      getSocialFeedWallMock.mockResolvedValueOnce({
+        success: true,
+        message: 'ok',
+        posts: [
+          {
+            postId: 'post-1',
+            authorPublicAddress: 'me-address',
+            content: 'A'.repeat(1205),
+            createdAtBlock: 2540,
+            visibility: 'open',
+            circleFeedIds: [],
+          },
+          {
+            postId: 'post-2',
+            authorPublicAddress: 'alice-address',
+            content: 'Built a merchant flow on Kasmart for handmade products. Feedback welcome.',
+            createdAtBlock: 2538,
+            visibility: 'open',
+            circleFeedIds: [],
+          },
+        ],
+      });
+
+      await new Promise((resolve) => window.setTimeout(resolve, 3200));
+
+      await waitFor(() => {
+        expect(getSocialFeedWallMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+      });
+
+      expect(screen.getByTestId('post-detail-composer-top')).toBeInTheDocument();
+      const refreshedInput = screen.getByTestId('post-detail-composer-input') as HTMLTextAreaElement;
+      expect(refreshedInput.value).toBe('Draft that should survive refresh');
+      expect(refreshedInput).toHaveFocus();
+    },
+    10000
+  );
 
   it('keeps top reply composer hidden when entering through card Reply action', async () => {
     await renderFeedWallAndWaitReady();
@@ -832,7 +1164,7 @@ describe('SocialPage', () => {
     expect(within(mediaContainer).getByTestId('page-indicator')).toHaveTextContent('1 / 2');
   });
 
-  it('reply-to-reply pre-fills mention prefix and Ctrl+Enter adds newline', async () => {
+  it('reply-to-reply keeps the composer blank and Ctrl+Enter adds newline', async () => {
     await renderFeedWallAndWaitReady();
 
     fireEvent.click(screen.getByTestId('open-post-detail-post-1'));
@@ -851,12 +1183,92 @@ describe('SocialPage', () => {
       expect(screen.getByTestId('inline-composer-input')).toBeInTheDocument();
     });
     const input = screen.getByTestId('inline-composer-input') as HTMLTextAreaElement;
-    expect(input.value).toBe('You, ');
+    expect(input.value).toBe('');
 
     fireEvent.change(input, { target: { value: 'Zbid, first line' } });
     fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true });
     fireEvent.change(input, { target: { value: 'Zbid, first line\nsecond line' } });
 
     expect(input.value).toContain('\n');
+  });
+
+  it('shows loading and load-more states for thread replies', async () => {
+    await renderFeedWallAndWaitReady();
+
+    fireEvent.click(screen.getByTestId('open-post-detail-post-1'));
+    fireEvent.click(screen.getByTestId('post-detail-action-reply-post-1'));
+    const topComposerInput = screen.getByTestId('post-detail-composer-input');
+    fireEvent.change(topComposerInput, { target: { value: 'Root comment' } });
+    fireEvent.keyDown(topComposerInput, { key: 'Enter' });
+
+    const rootReply = await screen.findByText('Root comment');
+    const rootContainer = rootReply.closest('[data-testid^="post-detail-reply-"]') as HTMLElement;
+    const rootReplyTestId = rootContainer.dataset.testid;
+    expect(rootReplyTestId).toBeTruthy();
+    const rootReplyId = rootReplyTestId?.replace('post-detail-reply-', '');
+    expect(rootReplyId).toBeTruthy();
+    const rootReplyButtonTestId = `post-detail-reply-reply-${rootReplyId}`;
+    const rootThreadLoadMoreTestId = `post-detail-thread-load-more-${rootReplyId}`;
+    const clickRootReplyButton = () => {
+      fireEvent.click(screen.getByTestId(rootReplyButtonTestId));
+    };
+
+    clickRootReplyButton();
+    fireEvent.change(screen.getByTestId('inline-composer-input'), { target: { value: 'Child reply 1' } });
+    fireEvent.click(screen.getByTestId('inline-composer-send'));
+
+    clickRootReplyButton();
+    fireEvent.change(screen.getByTestId('inline-composer-input'), { target: { value: 'Child reply 2' } });
+    fireEvent.click(screen.getByTestId('inline-composer-send'));
+
+    clickRootReplyButton();
+    fireEvent.change(screen.getByTestId('inline-composer-input'), { target: { value: 'Child reply 3' } });
+    fireEvent.click(screen.getByTestId('inline-composer-send'));
+
+    clickRootReplyButton();
+    fireEvent.change(screen.getByTestId('inline-composer-input'), { target: { value: 'Child reply 4' } });
+    fireEvent.click(screen.getByTestId('inline-composer-send'));
+
+    clickRootReplyButton();
+    fireEvent.change(screen.getByTestId('inline-composer-input'), { target: { value: 'Child reply 5' } });
+    fireEvent.click(screen.getByTestId('inline-composer-send'));
+
+    clickRootReplyButton();
+    fireEvent.change(screen.getByTestId('inline-composer-input'), { target: { value: 'Child reply 6' } });
+    fireEvent.click(screen.getByTestId('inline-composer-send'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId(rootThreadLoadMoreTestId)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId(rootThreadLoadMoreTestId));
+    expect(screen.getByText('Loading more replies...')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Child reply 6')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('Child reply 6')).toBeInTheDocument();
+  });
+
+  it('shows loading and load-more states for top-level comments', async () => {
+    await renderFeedWallAndWaitReady();
+
+    fireEvent.click(screen.getByTestId('open-post-detail-post-1'));
+
+    for (let index = 1; index <= 11; index += 1) {
+      fireEvent.click(screen.getByTestId('post-detail-action-reply-post-1'));
+      const input = screen.getByTestId('post-detail-composer-input');
+      fireEvent.change(input, { target: { value: `Top comment ${index}` } });
+      fireEvent.click(screen.getByTestId('post-detail-composer-send'));
+    }
+
+    expect(screen.getByTestId('post-detail-comments-load-more')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('post-detail-comments-load-more'));
+    expect(screen.getByText('Loading more comments...')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Top comment 1')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('Top comment 1')).toBeInTheDocument();
   });
 });

@@ -7,6 +7,12 @@ import { buildApiUrl } from "@/lib/api-config";
 import { ContentCarousel } from "@/components/chat/ContentCarousel";
 import { SocialAuthPromptOverlay } from "@/components/social/SocialAuthPromptOverlay";
 import { SocialPostReactions } from "@/components/social/SocialPostReactions";
+import {
+  clearPendingSocialThreadDraft,
+  readPendingSocialThreadDraft,
+  savePendingSocialThreadDraft,
+} from "@/modules/social/threadDrafts";
+import { createSocialThreadEntry, getSocialCommentsPage } from "@/modules/social/ThreadService";
 
 type AccessState = "allowed" | "guest_denied" | "unauthorized_denied" | "not_found";
 
@@ -31,6 +37,15 @@ type PermalinkPayload = {
     hash: string;
     kind: "image" | "video";
   }[];
+};
+
+type PermalinkThreadReply = {
+  id: string;
+  author: string;
+  authorPublicAddress?: string;
+  time: string;
+  text: string;
+  createdAtMs: number;
 };
 
 function normalizePermalinkPayload(payload: PermalinkPayload): PermalinkPayload {
@@ -69,6 +84,10 @@ function readRequesterAddressFromStorage(): string | null {
   }
 }
 
+function normalizePublicAddress(address?: string | null): string {
+  return (address ?? "").trim().toLowerCase();
+}
+
 export default function SocialPostPermalinkPage() {
   const params = useParams<{ postId: string }>();
   const searchParams = useSearchParams();
@@ -79,6 +98,9 @@ export default function SocialPostPermalinkPage() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [activeMediaIndex, setActiveMediaIndex] = useState(0);
   const [showAuthOverlay, setShowAuthOverlay] = useState(false);
+  const [isTopComposerOpen, setIsTopComposerOpen] = useState(false);
+  const [topReplyDraft, setTopReplyDraft] = useState("");
+  const [localReplies, setLocalReplies] = useState<PermalinkThreadReply[]>([]);
 
   const accessOverride = useMemo(() => resolveAccessOverride(searchParams.get("access")), [searchParams]);
 
@@ -218,6 +240,115 @@ export default function SocialPostPermalinkPage() {
   }, [permalink?.postId]);
 
   useEffect(() => {
+    if (!permalink?.postId) {
+      return;
+    }
+
+    setIsTopComposerOpen(false);
+    setTopReplyDraft("");
+    setLocalReplies([]);
+  }, [permalink?.postId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadComments(): Promise<void> {
+      if (!permalink?.postId || permalink.accessState !== "allowed") {
+        return;
+      }
+
+      const requesterAddress = readRequesterAddressFromStorage();
+      const response = await getSocialCommentsPage(
+        permalink.postId,
+        requesterAddress,
+        !!requesterAddress,
+        10
+      );
+
+      if (cancelled || !response.success) {
+        return;
+      }
+
+      setLocalReplies(
+        response.comments.map((entry) => ({
+          id: entry.entryId,
+          author: entry.authorPublicAddress
+            ? `${entry.authorPublicAddress.slice(0, 8)}...${entry.authorPublicAddress.slice(-6)}`
+            : "Unknown",
+          authorPublicAddress: entry.authorPublicAddress,
+          time: entry.createdAtUnixMs ? new Date(entry.createdAtUnixMs).toLocaleString("en-GB") : "now",
+          text: entry.content ?? "",
+          createdAtMs: entry.createdAtUnixMs ?? Date.now(),
+        }))
+      );
+    }
+
+    void loadComments();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [permalink?.accessState, permalink?.postId]);
+
+  useEffect(() => {
+    if (!permalink?.postId || !permalink.canInteract) {
+      return;
+    }
+
+    const pendingDraft = readPendingSocialThreadDraft(permalink.postId);
+    if (!pendingDraft || pendingDraft.source !== "permalink") {
+      return;
+    }
+
+    setIsTopComposerOpen(true);
+    setTopReplyDraft(pendingDraft.draft);
+    clearPendingSocialThreadDraft(permalink.postId);
+  }, [permalink?.canInteract, permalink?.postId]);
+
+  const savePermalinkDraft = () => {
+    if (!permalink?.postId) {
+      return;
+    }
+
+    savePendingSocialThreadDraft({
+      postId: permalink.postId,
+      mode: "top-level",
+      draft: topReplyDraft,
+      targetReplyId: null,
+      threadRootId: null,
+      source: "permalink",
+      createdAtMs: Date.now(),
+    });
+  };
+
+  const submitTopLevelReply = async () => {
+    const trimmed = topReplyDraft.trim();
+    if (!trimmed || !permalink?.postId) {
+      return;
+    }
+
+    const result = await createSocialThreadEntry(permalink.postId, trimmed);
+    const entryId = result.entryId;
+    if (!result.success || !entryId) {
+      return;
+    }
+
+    setLocalReplies((current) => [
+      {
+        id: entryId,
+        author: "You",
+        authorPublicAddress: readRequesterAddressFromStorage() ?? undefined,
+        time: "now",
+        text: trimmed,
+        createdAtMs: Date.now(),
+      },
+      ...current,
+    ]);
+    setTopReplyDraft("");
+    clearPendingSocialThreadDraft(permalink.postId);
+  };
+
+  useEffect(() => {
     if (!permalink || permalink.accessState !== "allowed") {
       return;
     }
@@ -307,6 +438,7 @@ export default function SocialPostPermalinkPage() {
         ? `Confirmed at block ${permalink.createdAtBlock}`
         : "Confirmed";
   const requesterForMedia = readRequesterAddressFromStorage();
+  const requesterAddressNormalized = normalizePublicAddress(requesterForMedia);
 
   return (
     <section className="h-full w-full overflow-y-auto p-4" data-testid="social-permalink-layout">
@@ -398,11 +530,15 @@ export default function SocialPostPermalinkPage() {
               data-testid="social-permalink-comment"
               onClick={() => {
                 if (!permalink.canInteract && permalink.circleFeedIds.length === 0) {
+                  savePermalinkDraft();
                   setShowAuthOverlay(true);
+                  return;
                 }
+
+                setIsTopComposerOpen(true);
               }}
             >
-              Reply (0)
+              Reply ({localReplies.length})
             </button>
             <button
               type="button"
@@ -425,14 +561,74 @@ export default function SocialPostPermalinkPage() {
             visibility={permalink.circleFeedIds.length > 0 ? "private" : "open"}
             circleFeedIds={permalink.circleFeedIds}
             authorCommitment={permalink.authorCommitment}
+            isOwnMessage={normalizePublicAddress(permalink.authorPublicAddress) === requesterAddressNormalized}
             canInteract={permalink.canInteract}
             testIdPrefix="social-permalink-reactions"
-            onRequireAccount={() => setShowAuthOverlay(true)}
+            onRequireAccount={() => {
+              savePermalinkDraft();
+              setShowAuthOverlay(true);
+            }}
           />
 
+          {isTopComposerOpen ? (
+            <div className="mt-3 rounded-lg border border-hush-bg-hover p-3" data-testid="social-permalink-composer-top">
+              <p className="mb-2 text-[11px] text-hush-text-accent">Replying to post</p>
+              <textarea
+                className="w-full min-h-24 rounded-md border border-hush-bg-hover bg-hush-bg-dark px-3 py-2 text-sm text-hush-text-primary outline-none focus:border-hush-purple"
+                value={topReplyDraft}
+                onChange={(event) => setTopReplyDraft(event.currentTarget.value)}
+                data-testid="social-permalink-composer-input"
+                placeholder="Write your reply..."
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.ctrlKey) {
+                    event.preventDefault();
+                    submitTopLevelReply();
+                  }
+                }}
+              />
+              <div className="mt-2 flex items-center justify-between">
+                <p className="text-[10px] text-hush-text-accent">Enter = send, Ctrl+Enter = new line</p>
+                <button
+                  type="button"
+                  className="rounded-md bg-hush-purple px-3 py-1 text-xs font-semibold text-hush-bg-dark disabled:opacity-50"
+                  onClick={submitTopLevelReply}
+                  disabled={topReplyDraft.trim().length === 0}
+                  data-testid="social-permalink-composer-send"
+                >
+                  Reply
+                </button>
+              </div>
+            </div>
+          ) : null}
+
           <p className="mt-3 text-sm font-semibold text-hush-text-primary" data-testid="social-permalink-replies-title">
-            Replies (0)
+            Replies ({localReplies.length})
           </p>
+          <div className="mt-2 space-y-2" data-testid="social-permalink-replies-list">
+            {localReplies.length === 0 ? (
+              <div
+                className="rounded-lg border border-dashed border-hush-bg-hover bg-hush-bg-dark/40 px-4 py-5 text-sm text-hush-text-accent"
+                data-testid="social-permalink-replies-empty"
+              >
+                {permalink.canInteract
+                  ? "No comments yet. Start the conversation from this permalink."
+                  : "No comments yet. Create your account to reply from this permalink."}
+              </div>
+            ) : null}
+            {localReplies.map((reply) => (
+              <div
+                key={reply.id}
+                className="rounded-lg border border-hush-bg-hover p-3"
+                data-testid={`social-permalink-reply-${reply.id}`}
+              >
+                <div className="mb-1 flex items-center justify-between">
+                  <p className="text-xs font-semibold text-hush-text-primary">{reply.author}</p>
+                  <span className="text-[10px] text-hush-text-accent">{reply.time}</span>
+                </div>
+                <p className="text-xs text-hush-text-accent">{reply.text}</p>
+              </div>
+            ))}
+          </div>
         </article>
       </div>
       {showAuthOverlay ? (
