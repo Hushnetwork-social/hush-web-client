@@ -21,6 +21,8 @@ interface SocialPostReactionsProps {
   canInteract: boolean;
   testIdPrefix: string;
   onRequireAccount?: () => void;
+  pendingAutoReactionIndex?: number | null;
+  onPendingAutoReactionHandled?: () => void;
 }
 
 function resolveReactionFeedAesKey(circleFeedIds: string[]): string | undefined {
@@ -50,6 +52,8 @@ export function SocialPostReactions({
   canInteract,
   testIdPrefix,
   onRequireAccount,
+  pendingAutoReactionIndex,
+  onPendingAutoReactionHandled,
 }: SocialPostReactionsProps) {
   const [showPicker, setShowPicker] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
@@ -125,17 +129,6 @@ export function SocialPostReactions({
     hasHydratedMyReactionRef.current = false;
   }, [resolvedReactionMessageId, credentials?.signingPublicKey]);
 
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (pickerRef.current && !pickerRef.current.contains(event.target as Node)) {
-        setShowPicker(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
   const counts = getReactionCounts(resolvedReactionMessageId ?? postId);
   const myReaction = getMyReaction(resolvedReactionMessageId ?? postId);
   const pending = isPending(resolvedReactionMessageId ?? postId);
@@ -147,6 +140,45 @@ export function SocialPostReactions({
       onRequireAccount?.();
     }
   };
+
+  useEffect(() => {
+    if (
+      pendingAutoReactionIndex === null ||
+      pendingAutoReactionIndex === undefined ||
+      !resolvedReactionMessageId ||
+      !hasInteractiveIdentity ||
+      pending ||
+      isReadOnlyOwnMessage ||
+      myReaction === pendingAutoReactionIndex
+    ) {
+      return;
+    }
+
+    void handleReactionSelect(resolvedReactionMessageId, pendingAutoReactionIndex)
+      .finally(() => {
+        onPendingAutoReactionHandled?.();
+      });
+  }, [
+    handleReactionSelect,
+    hasInteractiveIdentity,
+    isReadOnlyOwnMessage,
+    myReaction,
+    onPendingAutoReactionHandled,
+    pending,
+    pendingAutoReactionIndex,
+    resolvedReactionMessageId,
+  ]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(event.target as Node)) {
+        setShowPicker(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const visibleChipCount = useMemo(
     () =>

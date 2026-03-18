@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { UserPlus, Download, Key, FolderOpen, Lock, RefreshCw, Copy, Eye, EyeOff, Loader2 } from "lucide-react";
 import { useAppStore } from "@/stores";
 import { useFeedsStore } from "@/modules/feeds";
@@ -18,7 +18,7 @@ import {
 import { markIdentityCreatedByAuthPage } from "@/modules/identity";
 import { buildApiUrl } from "@/lib/api-config";
 import { getVersionDisplay } from "@/lib/version";
-import { FEEDS_HOME_ROUTE } from "@/lib/navigation/appRoutes";
+import { resolveAuthSuccessRoute } from "@/lib/navigation/appRoutes";
 
 type Tab = "create" | "import";
 type ImportSubTab = "words" | "file";
@@ -43,10 +43,15 @@ const STATUS_MESSAGES: Record<CreationStatus, string> = {
   done: "Account created!",
 };
 
-export default function AuthPage() {
+function AuthPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { setAuthenticated, setLoading, setCurrentUser, setCredentials } = useAppStore();
   const blockHeight = useBlockchainStore((state) => state.blockHeight);
+  const authSuccessRoute = useMemo(
+    () => resolveAuthSuccessRoute(searchParams.get("returnTo")),
+    [searchParams]
+  );
 
   const [activeTab, setActiveTab] = useState<Tab>("create");
   const [importSubTab, setImportSubTab] = useState<ImportSubTab>("words");
@@ -214,8 +219,7 @@ export default function AuthPage() {
       setLoading(false);
       setAuthenticated(true);
 
-      // Navigate to feeds home
-      router.push(FEEDS_HOME_ROUTE);
+      router.push(authSuccessRoute);
     } catch (err) {
       console.error("[Auth] Account creation failed:", err);
       setLoading(false);
@@ -302,8 +306,7 @@ export default function AuthPage() {
       setLoading(false);
       setAuthenticated(true);
 
-      // Navigate to feeds home
-      router.push(FEEDS_HOME_ROUTE);
+      router.push(authSuccessRoute);
     } catch (err) {
       console.error("[Auth] Import failed:", err);
       setLoading(false);
@@ -497,8 +500,7 @@ export default function AuthPage() {
       setLoading(false);
       setAuthenticated(true);
 
-      // Navigate to feeds home
-      router.push(FEEDS_HOME_ROUTE);
+      router.push(authSuccessRoute);
     } catch (err) {
       console.error("[Auth] Import from file failed:", err);
       setLoading(false);
@@ -829,5 +831,23 @@ export default function AuthPage() {
           )}
       </div>
     </main>
+  );
+}
+
+function AuthPageFallback() {
+  return (
+    <main className="min-h-screen bg-hush-bg-dark flex items-center justify-center p-4">
+      <div className="w-full max-w-md bg-hush-bg-element rounded-2xl overflow-hidden shadow-2xl">
+        <div className="p-6 text-center text-sm text-hush-text-accent">Loading auth...</div>
+      </div>
+    </main>
+  );
+}
+
+export default function AuthPage() {
+  return (
+    <Suspense fallback={<AuthPageFallback />}>
+      <AuthPageContent />
+    </Suspense>
   );
 }

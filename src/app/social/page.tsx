@@ -923,8 +923,8 @@ export default function SocialPage() {
     }
 
     if (pendingDraft.mode === "top-level") {
-      setIsTopComposerOpen(true);
       setTopReplyDraft(pendingDraft.draft);
+      setIsTopComposerOpen(true);
     } else {
       setInlineComposerTargetId(pendingDraft.targetReplyId);
       setInlineComposerRootId(pendingDraft.threadRootId);

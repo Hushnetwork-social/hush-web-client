@@ -4,7 +4,11 @@ import {
   FEEDS_HOME_ROUTE,
   getAppDisplayName,
   LEGACY_DASHBOARD_ROUTE,
+  getSocialPostRoute,
+  isSafeSocialReturnRoute,
+  resolveAuthSuccessRoute,
   SOCIAL_HOME_ROUTE,
+  SOCIAL_POST_ROUTE,
   getActiveAppFromPath,
   getAppHomeRoute,
   getFeedNavigationRoute,
@@ -28,9 +32,29 @@ describe('appRoutes', () => {
     expect(getFeedNavigationRoute('abc 123')).toBe('/feeds?feed=abc%20123');
   });
 
+  it('builds canonical social post routes with encoded post ids', () => {
+    expect(getSocialPostRoute('abc 123')).toBe(`${SOCIAL_POST_ROUTE}/abc%20123`);
+  });
+
   it('resolves entry route from auth state', () => {
     expect(resolveEntryRoute(true)).toBe(FEEDS_HOME_ROUTE);
     expect(resolveEntryRoute(false)).toBe(AUTH_ROUTE);
+  });
+
+  it('allows only safe relative social return routes', () => {
+    expect(isSafeSocialReturnRoute('/social')).toBe(true);
+    expect(isSafeSocialReturnRoute('/social/post/post-123?resume=1')).toBe(true);
+    expect(isSafeSocialReturnRoute('/feeds')).toBe(false);
+    expect(isSafeSocialReturnRoute('https://example.com/social/post/post-123')).toBe(false);
+    expect(isSafeSocialReturnRoute('//example.com/social/post/post-123')).toBe(false);
+    expect(isSafeSocialReturnRoute('/\\evil')).toBe(false);
+  });
+
+  it('resolves auth success to safe social return routes or feeds fallback', () => {
+    expect(resolveAuthSuccessRoute('/social/post/post-123')).toBe('/social/post/post-123');
+    expect(resolveAuthSuccessRoute('/feeds')).toBe(FEEDS_HOME_ROUTE);
+    expect(resolveAuthSuccessRoute('https://example.com/social/post/post-123')).toBe(FEEDS_HOME_ROUTE);
+    expect(resolveAuthSuccessRoute(null)).toBe(FEEDS_HOME_ROUTE);
   });
 
   it('normalizes legacy dashboard to feeds home only', () => {

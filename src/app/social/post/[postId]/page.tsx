@@ -2,16 +2,18 @@
 
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { buildApiUrl } from "@/lib/api-config";
 import { ContentCarousel } from "@/components/chat/ContentCarousel";
 import { SocialAuthPromptOverlay } from "@/components/social/SocialAuthPromptOverlay";
 import { SocialPostReactions } from "@/components/social/SocialPostReactions";
 import {
+  clearPendingSocialGuestIntent,
+  readPendingSocialGuestIntent,
   clearPendingSocialThreadDraft,
-  readPendingSocialThreadDraft,
   savePendingSocialThreadDraft,
 } from "@/modules/social/threadDrafts";
+import { resolveGuestIntentResumeAction } from "@/modules/social/guestIntentResume";
 import { createSocialThreadEntry, getSocialCommentsPage } from "@/modules/social/ThreadService";
 
 type AccessState = "allowed" | "guest_denied" | "unauthorized_denied" | "not_found";
@@ -100,7 +102,19 @@ export default function SocialPostPermalinkPage() {
   const [showAuthOverlay, setShowAuthOverlay] = useState(false);
   const [isTopComposerOpen, setIsTopComposerOpen] = useState(false);
   const [topReplyDraft, setTopReplyDraft] = useState("");
+  const [topReplyTargetId, setTopReplyTargetId] = useState<string | null>(null);
+  const [topReplyThreadRootId, setTopReplyThreadRootId] = useState<string | null>(null);
   const [localReplies, setLocalReplies] = useState<PermalinkThreadReply[]>([]);
+  const [pendingAutoReactionIndex, setPendingAutoReactionIndex] = useState<number | null>(null);
+  const pendingPermalinkIntentRef = useRef<{
+    postId: string | null;
+    intent: ReturnType<typeof readPendingSocialGuestIntent>;
+    applied: boolean;
+  }>({
+    postId: null,
+    intent: null,
+    applied: false,
+  });
 
   const accessOverride = useMemo(() => resolveAccessOverride(searchParams.get("access")), [searchParams]);
 
@@ -244,10 +258,43 @@ export default function SocialPostPermalinkPage() {
       return;
     }
 
-    setIsTopComposerOpen(false);
-    setTopReplyDraft("");
+    if (pendingPermalinkIntentRef.current.postId !== permalink.postId) {
+      pendingPermalinkIntentRef.current = {
+        postId: permalink.postId,
+        intent: readPendingSocialGuestIntent(permalink.postId),
+        applied: false,
+      };
+    }
+
     setLocalReplies([]);
-  }, [permalink?.postId]);
+
+    const pendingIntent = pendingPermalinkIntentRef.current;
+    const resumeAction =
+      pendingIntent.intent?.source === "permalink"
+        ? resolveGuestIntentResumeAction(pendingIntent.intent)
+        : null;
+    if (permalink.canInteract && resumeAction && !pendingIntent.applied) {
+      pendingIntent.applied = true;
+      if (resumeAction.kind === "restore-draft") {
+        setTopReplyDraft(resumeAction.intent.draft);
+        setTopReplyTargetId(resumeAction.intent.targetReplyId);
+        setTopReplyThreadRootId(resumeAction.intent.threadRootId);
+        setIsTopComposerOpen(true);
+      } else {
+        setPendingAutoReactionIndex(resumeAction.intent.reactionEmojiIndex);
+      }
+      clearPendingSocialGuestIntent(permalink.postId);
+      return;
+    }
+
+    if (!pendingIntent.applied) {
+      setIsTopComposerOpen(false);
+      setTopReplyDraft("");
+      setTopReplyTargetId(null);
+      setTopReplyThreadRootId(null);
+      setPendingAutoReactionIndex(null);
+    }
+  }, [permalink?.canInteract, permalink?.postId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -290,21 +337,6 @@ export default function SocialPostPermalinkPage() {
     };
   }, [permalink?.accessState, permalink?.postId]);
 
-  useEffect(() => {
-    if (!permalink?.postId || !permalink.canInteract) {
-      return;
-    }
-
-    const pendingDraft = readPendingSocialThreadDraft(permalink.postId);
-    if (!pendingDraft || pendingDraft.source !== "permalink") {
-      return;
-    }
-
-    setIsTopComposerOpen(true);
-    setTopReplyDraft(pendingDraft.draft);
-    clearPendingSocialThreadDraft(permalink.postId);
-  }, [permalink?.canInteract, permalink?.postId]);
-
   const savePermalinkDraft = () => {
     if (!permalink?.postId) {
       return;
@@ -327,7 +359,7 @@ export default function SocialPostPermalinkPage() {
       return;
     }
 
-    const result = await createSocialThreadEntry(permalink.postId, trimmed);
+    const result = await createSocialThreadEntry(permalink.postId, trimmed, topReplyTargetId ?? undefined);
     const entryId = result.entryId;
     if (!result.success || !entryId) {
       return;
@@ -345,6 +377,8 @@ export default function SocialPostPermalinkPage() {
       ...current,
     ]);
     setTopReplyDraft("");
+    setTopReplyTargetId(null);
+    setTopReplyThreadRootId(null);
     clearPendingSocialThreadDraft(permalink.postId);
   };
 
@@ -564,6 +598,8 @@ export default function SocialPostPermalinkPage() {
             isOwnMessage={normalizePublicAddress(permalink.authorPublicAddress) === requesterAddressNormalized}
             canInteract={permalink.canInteract}
             testIdPrefix="social-permalink-reactions"
+            pendingAutoReactionIndex={pendingAutoReactionIndex}
+            onPendingAutoReactionHandled={() => setPendingAutoReactionIndex(null)}
             onRequireAccount={() => {
               savePermalinkDraft();
               setShowAuthOverlay(true);
@@ -572,7 +608,11 @@ export default function SocialPostPermalinkPage() {
 
           {isTopComposerOpen ? (
             <div className="mt-3 rounded-lg border border-hush-bg-hover p-3" data-testid="social-permalink-composer-top">
-              <p className="mb-2 text-[11px] text-hush-text-accent">Replying to post</p>
+              <p className="mb-2 text-[11px] text-hush-text-accent" data-testid="social-permalink-composer-context">
+                {topReplyTargetId
+                  ? `Replying in thread${topReplyThreadRootId ? ` (${topReplyThreadRootId})` : ""}`
+                  : "Replying to post"}
+              </p>
               <textarea
                 className="w-full min-h-24 rounded-md border border-hush-bg-hover bg-hush-bg-dark px-3 py-2 text-sm text-hush-text-primary outline-none focus:border-hush-purple"
                 value={topReplyDraft}

@@ -14,12 +14,40 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
+const pendingAutoReactionHandledMock = vi.fn();
+const lastReactionProps = {
+  pendingAutoReactionIndex: null as number | null,
+};
+
 vi.mock("@/components/social/SocialPostReactions", () => ({
-  SocialPostReactions: ({ testIdPrefix }: { testIdPrefix: string }) => (
+  SocialPostReactions: ({
+    testIdPrefix,
+    pendingAutoReactionIndex,
+    onPendingAutoReactionHandled,
+  }: {
+    testIdPrefix: string;
+    pendingAutoReactionIndex?: number | null;
+    onPendingAutoReactionHandled?: () => void;
+  }) => {
+    lastReactionProps.pendingAutoReactionIndex = pendingAutoReactionIndex ?? null;
+    return (
     <div data-testid={testIdPrefix}>
       <button data-testid={`${testIdPrefix}-add`}>Add</button>
+      <span data-testid={`${testIdPrefix}-pending-auto-reaction`}>
+        {pendingAutoReactionIndex ?? "none"}
+      </span>
+      <button
+        data-testid={`${testIdPrefix}-pending-auto-reaction-handled`}
+        onClick={() => {
+          pendingAutoReactionHandledMock();
+          onPendingAutoReactionHandled?.();
+        }}
+      >
+        handled
+      </button>
     </div>
-  ),
+    );
+  },
 }));
 
 vi.mock("@/modules/social/ThreadService", () => ({
@@ -31,6 +59,10 @@ describe("SocialPostPermalinkPage", () => {
   beforeEach(() => {
     accessParam = null;
     postIdParam = "post-123";
+    window.sessionStorage.clear();
+    window.localStorage.clear();
+    lastReactionProps.pendingAutoReactionIndex = null;
+    pendingAutoReactionHandledMock.mockReset();
     vi.restoreAllMocks();
     getSocialCommentsPageMock.mockReset();
     createSocialThreadEntryMock.mockReset();
@@ -160,7 +192,78 @@ describe("SocialPostPermalinkPage", () => {
     render(<SocialPostPermalinkPage />);
 
     expect(await screen.findByTestId("social-permalink-composer-top")).toBeInTheDocument();
-    expect(screen.getByTestId("social-permalink-composer-input")).toHaveValue("Restore me");
+    await waitFor(() => {
+      expect(screen.getByTestId("social-permalink-composer-input")).toHaveValue("Restore me");
+    });
+  });
+
+  it("restores a pending reply draft with thread context after the user returns authenticated", async () => {
+    window.sessionStorage.setItem(
+      "hush.social.guest-intent.v1",
+      JSON.stringify({
+        postId: "post-123",
+        returnTo: "/social/post/post-123",
+        interactionType: "reply",
+        mode: "inline",
+        draft: "Restore reply",
+        targetReplyId: "reply-7",
+        threadRootId: "root-3",
+        source: "permalink",
+        createdAtMs: Date.now(),
+      })
+    );
+
+    render(<SocialPostPermalinkPage />);
+
+    expect(await screen.findByTestId("social-permalink-composer-top")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId("social-permalink-composer-input")).toHaveValue("Restore reply");
+    });
+    expect(screen.getByTestId("social-permalink-composer-context")).toHaveTextContent("Replying in thread (root-3)");
+  });
+
+  it("restores a pending reaction as an auto-apply entry and clears it once handled", async () => {
+    window.sessionStorage.setItem(
+      "hush.social.guest-intent.v1",
+      JSON.stringify({
+        postId: "post-123",
+        returnTo: "/social/post/post-123",
+        interactionType: "reaction",
+        reactionEmojiIndex: 4,
+        source: "permalink",
+        createdAtMs: Date.now(),
+      })
+    );
+
+    render(<SocialPostPermalinkPage />);
+
+    expect(await screen.findByTestId("social-permalink-reactions")).toBeInTheDocument();
+    expect(screen.getByTestId("social-permalink-reactions-pending-auto-reaction")).toHaveTextContent("4");
+    fireEvent.click(screen.getByTestId("social-permalink-reactions-pending-auto-reaction-handled"));
+    expect(pendingAutoReactionHandledMock).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(screen.getByTestId("social-permalink-reactions-pending-auto-reaction")).toHaveTextContent("none");
+    });
+  });
+
+  it("ignores invalid pending intent data and falls back safely", async () => {
+    window.sessionStorage.setItem(
+      "hush.social.guest-intent.v1",
+      JSON.stringify({
+        postId: "post-123",
+        returnTo: "/social/post/post-123",
+        interactionType: "reaction",
+        reactionEmojiIndex: "bad-data",
+        source: "permalink",
+        createdAtMs: Date.now(),
+      })
+    );
+
+    render(<SocialPostPermalinkPage />);
+
+    expect(await screen.findByTestId("social-permalink-public")).toBeInTheDocument();
+    expect(screen.queryByTestId("social-permalink-composer-top")).not.toBeInTheDocument();
+    expect(screen.getByTestId("social-permalink-reactions-pending-auto-reaction")).toHaveTextContent("none");
   });
 
   it("renders guest denial with create-account CTA", () => {

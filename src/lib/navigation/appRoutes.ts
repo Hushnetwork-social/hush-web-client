@@ -2,6 +2,7 @@ import type { AppId } from '@/stores/useAppStore';
 
 export const FEEDS_HOME_ROUTE = '/feeds';
 export const SOCIAL_HOME_ROUTE = '/social';
+export const SOCIAL_POST_ROUTE = `${SOCIAL_HOME_ROUTE}/post`;
 export const AUTH_ROUTE = '/auth';
 export const LEGACY_DASHBOARD_ROUTE = '/dashboard';
 
@@ -17,8 +18,30 @@ export function getFeedNavigationRoute(feedId: string): string {
   return `${FEEDS_HOME_ROUTE}?feed=${encodeURIComponent(feedId)}`;
 }
 
+export function getSocialPostRoute(postId: string): string {
+  return `${SOCIAL_POST_ROUTE}/${encodeURIComponent(postId)}`;
+}
+
 export function resolveEntryRoute(isAuthenticated: boolean): string {
   return isAuthenticated ? FEEDS_HOME_ROUTE : AUTH_ROUTE;
+}
+
+export function isSafeSocialReturnRoute(returnTo: string | null | undefined): returnTo is string {
+  if (!returnTo || !returnTo.startsWith('/') || returnTo.startsWith('//') || returnTo.includes('\\')) {
+    return false;
+  }
+
+  try {
+    const baseUrl = new URL('https://hushnetwork.local');
+    const candidateUrl = new URL(returnTo, baseUrl);
+    return candidateUrl.origin === baseUrl.origin && candidateUrl.pathname.startsWith(SOCIAL_HOME_ROUTE);
+  } catch {
+    return false;
+  }
+}
+
+export function resolveAuthSuccessRoute(returnTo: string | null | undefined): string {
+  return isSafeSocialReturnRoute(returnTo) ? returnTo : FEEDS_HOME_ROUTE;
 }
 
 export function normalizeLegacyAppRoute(pathname: string): string {
