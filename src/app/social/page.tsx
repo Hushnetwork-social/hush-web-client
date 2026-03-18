@@ -18,6 +18,7 @@ import { ContentCarousel } from "@/components/chat/ContentCarousel";
 import { SocialAuthPromptOverlay } from "@/components/social/SocialAuthPromptOverlay";
 import { SocialPostReactions } from "@/components/social/SocialPostReactions";
 import {
+  savePendingSocialGuestIntent,
   clearPendingSocialThreadDraft,
   readPendingSocialThreadDraft,
   savePendingSocialThreadDraft,
@@ -1259,6 +1260,22 @@ export default function SocialPage() {
     return true;
   };
 
+  const handleGuestReactionAttempt = (postId: string, reactionEmojiIndex?: number) => {
+    if (!credentials?.signingPublicKey && typeof reactionEmojiIndex === "number") {
+      savePendingSocialGuestIntent({
+        postId,
+        returnTo: getSocialPostRoute(postId),
+        interactionType: "reaction",
+        reactionEmojiIndex,
+        source: "feed-wall",
+        createdAtMs: Date.now(),
+      });
+    }
+
+    setAuthOverlayReturnTo(getSocialPostRoute(postId));
+    setShowAuthOverlay(true);
+  };
+
   const hydrateThreadEntries = async (entries: SocialThreadEntryContract[]) => {
     const uniqueAddresses = Array.from(
       new Set(
@@ -2291,9 +2308,8 @@ export default function SocialPage() {
                 isOwnMessage={normalizePublicAddress(post.authorPublicAddress) === ownAddressNormalized}
                 canInteract={!!credentials?.signingPublicKey}
                 testIdPrefix={`post-reaction-strip-${post.id}`}
-                onRequireAccount={() => {
-                  setAuthOverlayReturnTo(getSocialPostRoute(post.id));
-                  setShowAuthOverlay(true);
+                onRequireAccount={(reactionEmojiIndex) => {
+                  handleGuestReactionAttempt(post.id, reactionEmojiIndex);
                 }}
               />
             </div>
@@ -2746,9 +2762,8 @@ export default function SocialPage() {
               isOwnMessage={normalizePublicAddress(activePost.authorPublicAddress) === ownAddressNormalized}
               canInteract={!!credentials?.signingPublicKey}
               testIdPrefix={`post-detail-reaction-strip-${activePost.id}`}
-              onRequireAccount={() => {
-                setAuthOverlayReturnTo(getSocialPostRoute(activePost.id));
-                setShowAuthOverlay(true);
+              onRequireAccount={(reactionEmojiIndex) => {
+                handleGuestReactionAttempt(activePost.id, reactionEmojiIndex);
               }}
             />
 

@@ -24,15 +24,23 @@ vi.mock("@/components/social/SocialPostReactions", () => ({
     testIdPrefix,
     pendingAutoReactionIndex,
     onPendingAutoReactionHandled,
+    onRequireAccount,
   }: {
     testIdPrefix: string;
     pendingAutoReactionIndex?: number | null;
     onPendingAutoReactionHandled?: () => void;
+    onRequireAccount?: (reactionEmojiIndex?: number) => void;
   }) => {
     lastReactionProps.pendingAutoReactionIndex = pendingAutoReactionIndex ?? null;
     return (
     <div data-testid={testIdPrefix}>
       <button data-testid={`${testIdPrefix}-add`}>Add</button>
+      <button
+        data-testid={`${testIdPrefix}-guest-react`}
+        onClick={() => onRequireAccount?.(4)}
+      >
+        Guest react
+      </button>
       <span data-testid={`${testIdPrefix}-pending-auto-reaction`}>
         {pendingAutoReactionIndex ?? "none"}
       </span>
@@ -178,6 +186,61 @@ describe("SocialPostPermalinkPage", () => {
     );
   });
 
+  it("stores canonical reaction resume intent when a guest reacts on a public permalink", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/social/posts/permalink")) {
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            message: "",
+            accessState: "allowed",
+            postId: "post-123",
+            authorPublicAddress: "02abcdef1234567890fedcba1234567890abcdef1234567890fedcba1234567890",
+            content: "Hello public world",
+            canInteract: false,
+            circleFeedIds: [],
+          }),
+        } as Response;
+      }
+
+      if (url.includes("/api/identity/check")) {
+        return {
+          ok: true,
+          json: async () => ({
+            exists: true,
+            identity: {
+              profileName: "Owner",
+            },
+          }),
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        json: async () => ({}),
+      } as Response;
+    }));
+
+    render(<SocialPostPermalinkPage />);
+
+    fireEvent.click(await screen.findByTestId("social-permalink-reactions-guest-react"));
+
+    expect(screen.getByTestId("social-auth-overlay")).toBeInTheDocument();
+    expect(screen.getByTestId("social-auth-overlay-cta")).toHaveAttribute(
+      "href",
+      "/auth?returnTo=%2Fsocial%2Fpost%2Fpost-123"
+    );
+    expect(JSON.parse(sessionStorage.getItem("hush.social.guest-intent.v1") ?? "null")).toMatchObject({
+      postId: "post-123",
+      returnTo: "/social/post/post-123",
+      interactionType: "reaction",
+      reactionEmojiIndex: 4,
+      source: "permalink",
+    });
+  });
+
   it("restores a pending draft after the user returns authenticated to the same permalink", async () => {
     window.sessionStorage.setItem(
       "hush.social.thread-draft.v1",
@@ -274,7 +337,10 @@ describe("SocialPostPermalinkPage", () => {
     render(<SocialPostPermalinkPage />);
 
     expect(screen.getByTestId("social-permalink-guest")).toBeInTheDocument();
-    expect(screen.getByTestId("social-permalink-guest-cta")).toBeInTheDocument();
+    expect(screen.getByTestId("social-permalink-guest-cta")).toHaveAttribute(
+      "href",
+      "/auth?returnTo=%2Fsocial%2Fpost%2Fpost-123"
+    );
   });
 
   it("renders privacy-safe unauthorized state for logged-in user without permission", () => {

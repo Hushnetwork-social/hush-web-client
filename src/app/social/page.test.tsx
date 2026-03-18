@@ -147,11 +147,17 @@ vi.mock('@/modules/social/ThreadService', () => ({
 }));
 
 vi.mock('@/components/social/SocialPostReactions', () => ({
-  SocialPostReactions: (props: { testIdPrefix: string }) => {
+  SocialPostReactions: (props: { testIdPrefix: string; onRequireAccount?: (reactionEmojiIndex?: number) => void }) => {
     socialPostReactionsPropsMock(props);
     return (
       <div data-testid={props.testIdPrefix}>
         <button data-testid={`${props.testIdPrefix}-add`}>Add</button>
+        <button
+          data-testid={`${props.testIdPrefix}-guest-react`}
+          onClick={() => props.onRequireAccount?.(4)}
+        >
+          Guest react
+        </button>
       </div>
     );
   },
@@ -346,6 +352,39 @@ describe('SocialPage', () => {
 
     expect(screen.getByTestId('social-auth-overlay')).toBeInTheDocument();
     expect(screen.getByTestId('social-auth-overlay-cta')).toBeInTheDocument();
+  });
+
+  it('stores canonical reaction resume intent when a guest reacts from the feed wall', async () => {
+    mockCredentials = null;
+
+    await renderFeedWallAndWaitReady();
+    fireEvent.click(screen.getByTestId('post-reaction-strip-post-1-guest-react'));
+
+    expect(screen.getByTestId('social-auth-overlay')).toBeInTheDocument();
+    expect(JSON.parse(sessionStorage.getItem('hush.social.guest-intent.v1') ?? 'null')).toMatchObject({
+      postId: 'post-1',
+      returnTo: '/social/post/post-1',
+      interactionType: 'reaction',
+      reactionEmojiIndex: 4,
+      source: 'feed-wall',
+    });
+  });
+
+  it('stores canonical reaction resume intent when a guest reacts from post detail', async () => {
+    mockCredentials = null;
+
+    await renderFeedWallAndWaitReady();
+    fireEvent.click(screen.getByTestId('open-post-detail-post-1'));
+    fireEvent.click(screen.getByTestId('post-detail-reaction-strip-post-1-guest-react'));
+
+    expect(screen.getByTestId('social-auth-overlay')).toBeInTheDocument();
+    expect(JSON.parse(sessionStorage.getItem('hush.social.guest-intent.v1') ?? 'null')).toMatchObject({
+      postId: 'post-1',
+      returnTo: '/social/post/post-1',
+      interactionType: 'reaction',
+      reactionEmojiIndex: 4,
+      source: 'feed-wall',
+    });
   });
 
   it('renders following list with user circles', () => {

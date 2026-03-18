@@ -100,7 +100,29 @@ describe("SocialPostReactions", () => {
     fireEvent.click(screen.getByTestId("social-post-reactions-add"));
 
     expect(onRequireAccount).toHaveBeenCalledTimes(1);
+    expect(onRequireAccount).toHaveBeenCalledWith(undefined);
     expect(screen.queryByTestId("social-post-reactions-picker")).not.toBeInTheDocument();
+  });
+
+  it("passes the selected emoji index when a guest taps an existing public reaction", () => {
+    mockCredentials = null;
+    const onRequireAccount = vi.fn();
+
+    render(
+      <SocialPostReactions
+        postId="post-1"
+        visibility="open"
+        circleFeedIds={[]}
+        canInteract={false}
+        testIdPrefix="social-post-reactions"
+        onRequireAccount={onRequireAccount}
+      />
+    );
+
+    fireEvent.click(screen.getByTestId("reaction-badge-👍"));
+
+    expect(onRequireAccount).toHaveBeenCalledTimes(1);
+    expect(onRequireAccount).toHaveBeenCalledWith(0);
   });
 
   it("hydrates my reaction once while continuing forced tally refresh polling", async () => {

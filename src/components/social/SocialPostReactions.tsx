@@ -20,7 +20,7 @@ interface SocialPostReactionsProps {
   isOwnMessage?: boolean;
   canInteract: boolean;
   testIdPrefix: string;
-  onRequireAccount?: () => void;
+  onRequireAccount?: (reactionEmojiIndex?: number) => void;
   pendingAutoReactionIndex?: number | null;
   onPendingAutoReactionHandled?: () => void;
 }
@@ -135,9 +135,9 @@ export function SocialPostReactions({
   const hasInteractiveIdentity = canInteract && !!credentials?.signingPublicKey;
   const isReadOnlyOwnMessage = isOwnMessage;
   const canOpenPicker = visibility === "open" || canInteract;
-  const handleGuestInteraction = () => {
+  const handleGuestInteraction = (reactionEmojiIndex?: number) => {
     if (!hasInteractiveIdentity && visibility === "open") {
-      onRequireAccount?.();
+      onRequireAccount?.(reactionEmojiIndex);
     }
   };
 
@@ -201,7 +201,7 @@ export function SocialPostReactions({
               ? void handleReactionSelect(resolvedReactionMessageId, emojiIndex)
               : undefined
             : visibility === "open"
-              ? () => handleGuestInteraction()
+              ? (emojiIndex) => handleGuestInteraction(emojiIndex)
               : undefined
         }
       />

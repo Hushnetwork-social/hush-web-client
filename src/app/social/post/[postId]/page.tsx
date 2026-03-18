@@ -11,9 +11,10 @@ import {
   clearPendingSocialGuestIntent,
   readPendingSocialGuestIntent,
   clearPendingSocialThreadDraft,
+  savePendingSocialGuestIntent,
   savePendingSocialThreadDraft,
 } from "@/modules/social/threadDrafts";
-import { getSocialPostRoute } from "@/lib/navigation/appRoutes";
+import { getAuthRoute, getSocialPostRoute } from "@/lib/navigation/appRoutes";
 import { resolveGuestIntentResumeAction } from "@/modules/social/guestIntentResume";
 import { createSocialThreadEntry, getSocialCommentsPage } from "@/modules/social/ThreadService";
 
@@ -430,7 +431,7 @@ export default function SocialPostPermalinkPage() {
           Create your HushNetwork account to view this content.
         </p>
         <Link
-          href="/social"
+          href={getAuthRoute(getSocialPostRoute(routePostId))}
           className="mt-4 inline-flex rounded-md bg-hush-purple px-4 py-2 text-sm font-semibold text-hush-bg-dark"
           data-testid="social-permalink-guest-cta"
         >
@@ -601,8 +602,19 @@ export default function SocialPostPermalinkPage() {
             testIdPrefix="social-permalink-reactions"
             pendingAutoReactionIndex={pendingAutoReactionIndex}
             onPendingAutoReactionHandled={() => setPendingAutoReactionIndex(null)}
-            onRequireAccount={() => {
-              savePermalinkDraft();
+            onRequireAccount={(reactionEmojiIndex) => {
+              if (typeof reactionEmojiIndex === "number" && permalink?.postId) {
+                savePendingSocialGuestIntent({
+                  postId: permalink.postId,
+                  returnTo: getSocialPostRoute(permalink.postId),
+                  interactionType: "reaction",
+                  reactionEmojiIndex,
+                  source: "permalink",
+                  createdAtMs: Date.now(),
+                });
+              } else {
+                savePermalinkDraft();
+              }
               setShowAuthOverlay(true);
             }}
           />
