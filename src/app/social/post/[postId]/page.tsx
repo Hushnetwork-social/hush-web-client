@@ -17,31 +17,11 @@ import {
 import { getAuthRoute, getSocialPostRoute } from "@/lib/navigation/appRoutes";
 import { resolveGuestIntentResumeAction } from "@/modules/social/guestIntentResume";
 import { createSocialThreadEntry, getSocialCommentsPage } from "@/modules/social/ThreadService";
+import { getSocialPostPermalink, type SocialPermalinkPayloadContract } from "@/modules/social/PermalinkService";
 
 type AccessState = "allowed" | "guest_denied" | "unauthorized_denied" | "not_found";
 
-type PermalinkPayload = {
-  success: boolean;
-  message: string;
-  accessState: AccessState;
-  postId?: string;
-  reactionScopeId?: string;
-  authorPublicAddress?: string;
-  authorCommitment?: string;
-  content?: string;
-  createdAtBlock?: number;
-  createdAtUnixMs?: number;
-  canInteract: boolean;
-  circleFeedIds: string[];
-  attachments: {
-    attachmentId: string;
-    mimeType: string;
-    size: number;
-    fileName: string;
-    hash: string;
-    kind: "image" | "video";
-  }[];
-};
+type PermalinkPayload = SocialPermalinkPayloadContract;
 
 type PermalinkThreadReply = {
   id: string;
@@ -181,11 +161,11 @@ export default function SocialPostPermalinkPage() {
       }
 
       try {
-        const response = await fetch(buildApiUrl(`/api/social/posts/permalink?${qs.toString()}`), {
-          method: "GET",
-          cache: "no-store",
-        });
-        const payload = (await response.json()) as PermalinkPayload;
+        const payload = await getSocialPostPermalink(
+          routePostId,
+          requesterAddress,
+          requesterAddress !== null
+        );
 
         if (
           payload.accessState === "allowed" &&

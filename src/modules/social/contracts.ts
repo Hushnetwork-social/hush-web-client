@@ -10,6 +10,30 @@ export interface SocialAuthorFollowStateContract {
   canFollow: boolean;
 }
 
+export function resolveSocialFollowButtonState(
+  isAuthenticated: boolean,
+  followState: SocialAuthorFollowStateContract | undefined,
+  isPending: boolean
+): SocialFollowButtonState {
+  if (!isAuthenticated) {
+    return 'hidden';
+  }
+
+  if (isPending) {
+    return 'pending';
+  }
+
+  if (followState?.isFollowing) {
+    return 'following';
+  }
+
+  if (followState?.canFollow) {
+    return 'follow';
+  }
+
+  return 'hidden';
+}
+
 export interface FollowSocialAuthorContract {
   viewerPublicAddress: string;
   authorPublicAddress: string;
