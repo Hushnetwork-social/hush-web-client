@@ -7,6 +7,7 @@ let postIdParam = "post-123";
 const getSocialCommentsPageMock = vi.fn();
 const createSocialThreadEntryMock = vi.fn();
 const followSocialAuthorMock = vi.fn();
+const triggerSyncNowMock = vi.fn();
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ postId: postIdParam }),
@@ -68,6 +69,12 @@ vi.mock("@/modules/social/FollowService", () => ({
   followSocialAuthor: (...args: unknown[]) => followSocialAuthorMock(...args),
 }));
 
+vi.mock("@/lib/sync", () => ({
+  useSyncContext: () => ({
+    triggerSyncNow: triggerSyncNowMock,
+  }),
+}));
+
 describe("SocialPostPermalinkPage", () => {
   beforeEach(() => {
     accessParam = null;
@@ -80,6 +87,7 @@ describe("SocialPostPermalinkPage", () => {
     getSocialCommentsPageMock.mockReset();
     createSocialThreadEntryMock.mockReset();
     followSocialAuthorMock.mockReset();
+    triggerSyncNowMock.mockReset();
     getSocialCommentsPageMock.mockResolvedValue({
       success: true,
       message: "",
@@ -98,6 +106,7 @@ describe("SocialPostPermalinkPage", () => {
       alreadyFollowing: false,
       requiresSyncRefresh: true,
     });
+    triggerSyncNowMock.mockResolvedValue(true);
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/api/social/posts/permalink")) {
@@ -270,6 +279,7 @@ describe("SocialPostPermalinkPage", () => {
         requesterPublicAddress: "02viewer1234567890fedcba1234567890abcdef1234567890fedcba1234567890",
       });
     });
+    expect(triggerSyncNowMock).toHaveBeenCalled();
     expect(screen.getByTestId("social-permalink-follow-author")).toHaveTextContent("Following");
     expect(await screen.findByTestId("social-permalink-reply-reply-1")).toHaveTextContent("Reply User");
     expect(screen.getByTestId("social-permalink-reply-reply-1")).toHaveTextContent("Reply content");

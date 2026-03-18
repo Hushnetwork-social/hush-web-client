@@ -394,6 +394,9 @@ describe('SocialPage', () => {
 
     expect(await screen.findByText('Already following')).toBeInTheDocument();
     await waitFor(() => {
+      expect(triggerSyncNowMock).toHaveBeenCalled();
+    });
+    await waitFor(() => {
       expect(screen.getByTestId('follow-author-post-post-2')).toHaveTextContent('Follow');
     });
   });

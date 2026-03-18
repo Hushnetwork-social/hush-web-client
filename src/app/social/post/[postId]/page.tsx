@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { buildApiUrl } from "@/lib/api-config";
+import { useSyncContext } from "@/lib/sync";
 import { ContentCarousel } from "@/components/chat/ContentCarousel";
 import { FollowAuthorButton } from "@/components/social/FollowAuthorButton";
 import { SocialAuthPromptOverlay } from "@/components/social/SocialAuthPromptOverlay";
@@ -85,6 +86,7 @@ export default function SocialPostPermalinkPage() {
   const params = useParams<{ postId: string }>();
   const searchParams = useSearchParams();
   const routePostId = typeof params?.postId === "string" ? params.postId : "";
+  const { triggerSyncNow } = useSyncContext();
 
   const [permalink, setPermalink] = useState<PermalinkPayload | null>(null);
   const [authorName, setAuthorName] = useState<string>("Owner");
@@ -96,6 +98,7 @@ export default function SocialPostPermalinkPage() {
   const [topReplyTargetId, setTopReplyTargetId] = useState<string | null>(null);
   const [topReplyThreadRootId, setTopReplyThreadRootId] = useState<string | null>(null);
   const [localReplies, setLocalReplies] = useState<PermalinkThreadReply[]>([]);
+  const [followRefreshNonce, setFollowRefreshNonce] = useState(0);
   const [pendingFollowAuthors, setPendingFollowAuthors] = useState<Record<string, boolean>>({});
   const [followStateOverrides, setFollowStateOverrides] = useState<Record<string, SocialAuthorFollowStateContract>>({});
   const [followError, setFollowError] = useState<string | null>(null);
@@ -260,7 +263,7 @@ export default function SocialPostPermalinkPage() {
     return () => {
       cancelled = true;
     };
-  }, [accessOverride, routePostId]);
+  }, [accessOverride, routePostId, followRefreshNonce]);
 
   useEffect(() => {
     setActiveMediaIndex(0);
@@ -399,7 +402,7 @@ export default function SocialPostPermalinkPage() {
     return () => {
       cancelled = true;
     };
-  }, [permalink?.accessState, permalink?.postId]);
+  }, [permalink?.accessState, permalink?.postId, followRefreshNonce]);
 
   const savePermalinkDraft = () => {
     if (!permalink?.postId) {
@@ -594,6 +597,10 @@ export default function SocialPostPermalinkPage() {
       });
 
       if (!result.success) {
+        if (result.requiresSyncRefresh || result.alreadyFollowing) {
+          await triggerSyncNow();
+          setFollowRefreshNonce((current) => current + 1);
+        }
         setFollowError(result.message || "Failed to follow author.");
         return;
       }
@@ -602,6 +609,10 @@ export default function SocialPostPermalinkPage() {
         ...current,
         [normalizedAuthorAddress]: { isFollowing: true, canFollow: false },
       }));
+      if (result.requiresSyncRefresh) {
+        await triggerSyncNow();
+      }
+      setFollowRefreshNonce((current) => current + 1);
     } finally {
       setPendingFollowAuthors((current) => {
         const next = { ...current };

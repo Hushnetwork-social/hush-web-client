@@ -444,6 +444,7 @@ export default function SocialPage() {
   const [draftMediaItems, setDraftMediaItems] = useState<DraftMediaItem[]>([]);
   const [newPostMediaError, setNewPostMediaError] = useState<string | null>(null);
   const [feedWallPosts, setFeedWallPosts] = useState<PostItem[]>([]);
+  const [followRefreshNonce, setFollowRefreshNonce] = useState(0);
   const [pendingFollowAuthors, setPendingFollowAuthors] = useState<Record<string, boolean>>({});
   const [followStateOverrides, setFollowStateOverrides] = useState<Record<string, SocialAuthorFollowStateContract>>({});
   const [showAuthOverlay, setShowAuthOverlay] = useState(false);
@@ -910,7 +911,7 @@ export default function SocialPage() {
     return () => {
       cancelled = true;
     };
-  }, [activePostId, credentials?.signingPublicKey, ownAddressNormalized, ownAuthorLabel]);
+  }, [activePostId, credentials?.signingPublicKey, ownAddressNormalized, ownAuthorLabel, followRefreshNonce]);
 
   useEffect(() => {
     if (!credentials?.signingPublicKey || !feedWallPosts.length) {
@@ -1309,6 +1310,10 @@ export default function SocialPage() {
       });
 
       if (!result.success) {
+        if (result.requiresSyncRefresh || result.alreadyFollowing) {
+          await triggerSyncNow();
+          setFollowRefreshNonce((current) => current + 1);
+        }
         addUiToast(result.message || "Failed to follow author.");
         return;
       }
@@ -1317,7 +1322,10 @@ export default function SocialPage() {
         ...current,
         [normalizedAuthorAddress]: { isFollowing: true, canFollow: false },
       }));
-      void triggerSyncNow();
+      if (result.requiresSyncRefresh) {
+        await triggerSyncNow();
+      }
+      setFollowRefreshNonce((current) => current + 1);
     } finally {
       setPendingFollowAuthors((current) => {
         const next = { ...current };
@@ -1732,7 +1740,7 @@ export default function SocialPage() {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [credentials?.signingPublicKey, ownAuthorLabel, renderFollowingItems, currentBlockHeight]);
+  }, [credentials?.signingPublicKey, ownAuthorLabel, renderFollowingItems, currentBlockHeight, followRefreshNonce]);
 
   const getDisplayNameForAddress = (address: string) => {
     const normalizedAddress = normalizePublicAddress(address);
