@@ -6,6 +6,10 @@ type SocialFeedWallPostDto = {
   reactionScopeId?: string;
   authorPublicAddress: string;
   authorCommitment?: string;
+  followState?: {
+    isFollowing: boolean;
+    canFollow: boolean;
+  };
   content: string;
   createdAtBlock: number;
   createdAtUnixMs: number;
@@ -21,6 +25,32 @@ type SocialFeedWallPostDto = {
     kind: "image" | "video";
   }[];
 };
+
+function parseFollowState(bytes: Uint8Array): { isFollowing: boolean; canFollow: boolean } {
+  const followState = { isFollowing: false, canFollow: false };
+  let offset = 0;
+
+  while (offset < bytes.length) {
+    const tagInfo = parseVarint(bytes, offset);
+    offset += tagInfo.bytesRead;
+    const fieldNumber = tagInfo.value >>> 3;
+    const wireType = tagInfo.value & 0x07;
+
+    if (wireType !== 0) {
+      break;
+    }
+
+    const valueInfo = parseVarint(bytes, offset);
+    offset += valueInfo.bytesRead;
+    if (fieldNumber === 1) {
+      followState.isFollowing = valueInfo.value === 1;
+    } else if (fieldNumber === 2) {
+      followState.canFollow = valueInfo.value === 1;
+    }
+  }
+
+  return followState;
+}
 
 type SocialFeedWallResponseDto = {
   success: boolean;
@@ -139,6 +169,12 @@ function parseSocialFeedWallPost(messageBytes: Uint8Array): SocialFeedWallPostDt
           binary += String.fromCharCode(value);
         }
         result.authorCommitment = btoa(binary);
+        offset += lengthInfo.value;
+        continue;
+      }
+      if (fieldNumber === 12) {
+        const bytes = messageBytes.slice(offset, offset + lengthInfo.value);
+        result.followState = parseFollowState(bytes);
         offset += lengthInfo.value;
         continue;
       }

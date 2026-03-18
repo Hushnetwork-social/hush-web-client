@@ -4,6 +4,7 @@ import { submitTransaction } from "@/modules/blockchain/BlockchainService";
 import { initializeReactionsSystem } from "@/modules/reactions/initializeReactions";
 import { useReactionsStore } from "@/modules/reactions/useReactionsStore";
 import { useAppStore } from "@/stores";
+import type { SocialAuthorFollowStateContract } from "./contracts";
 
 export type SocialThreadEntryContract = {
   postId: string;
@@ -15,6 +16,7 @@ export type SocialThreadEntryContract = {
   createdAtUnixMs?: number;
   reactionCount: number;
   authorPublicAddress?: string;
+  followState?: SocialAuthorFollowStateContract;
   content?: string;
   authorCommitment?: string;
   childReplyCount?: number;

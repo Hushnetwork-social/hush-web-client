@@ -1,10 +1,12 @@
 import { buildApiUrl } from "@/lib/api-config";
+import type { SocialAuthorFollowStateContract } from "./contracts";
 
 export type FeedWallPostContract = {
   postId: string;
   reactionScopeId?: string;
   authorPublicAddress: string;
   authorCommitment?: string;
+  followState?: SocialAuthorFollowStateContract;
   content: string;
   createdAtBlock: number;
   createdAtUnixMs: number;

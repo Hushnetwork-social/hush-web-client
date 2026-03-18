@@ -3,6 +3,28 @@ import { MAX_ATTACHMENT_SIZE, MAX_ATTACHMENTS_PER_MESSAGE } from '@/lib/attachme
 export type SocialPostVisibility = 'open' | 'private';
 export type SocialPermalinkAccessState = 'allowed' | 'guest_denied' | 'unauthorized_denied' | 'not_found';
 export type SocialAttachmentKind = 'image' | 'video';
+export type SocialFollowButtonState = 'hidden' | 'follow' | 'pending' | 'following';
+
+export interface SocialAuthorFollowStateContract {
+  isFollowing: boolean;
+  canFollow: boolean;
+}
+
+export interface FollowSocialAuthorContract {
+  viewerPublicAddress: string;
+  authorPublicAddress: string;
+  authorPublicEncryptAddress?: string;
+  requesterPublicAddress: string;
+}
+
+export interface FollowSocialAuthorResultContract {
+  success: boolean;
+  message: string;
+  errorCode?: string;
+  innerCircleFeedId?: string;
+  alreadyFollowing: boolean;
+  requiresSyncRefresh: boolean;
+}
 
 export interface SocialPostAttachmentContract {
   attachmentId: string;
@@ -41,6 +63,7 @@ export interface SocialPermalinkViewContract {
   isAuthenticated: boolean;
   canInteract: boolean;
   authorPublicAddress?: string;
+  followState?: SocialAuthorFollowStateContract;
   content?: string;
   createdAtBlock?: number;
   circleFeedIds: string[];

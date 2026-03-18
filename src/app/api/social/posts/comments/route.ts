@@ -11,10 +11,40 @@ type SocialThreadEntryDto = {
   createdAtUnixMs?: number;
   reactionCount: number;
   authorPublicAddress?: string;
+  followState?: {
+    isFollowing: boolean;
+    canFollow: boolean;
+  };
   content?: string;
   authorCommitment?: string;
   childReplyCount?: number;
 };
+
+function parseFollowState(bytes: Uint8Array): { isFollowing: boolean; canFollow: boolean } {
+  const followState = { isFollowing: false, canFollow: false };
+  let offset = 0;
+
+  while (offset < bytes.length) {
+    const tag = parseVarint(bytes, offset);
+    offset += tag.bytesRead;
+    const fieldNumber = tag.value >>> 3;
+    const wireType = tag.value & 0x07;
+
+    if (wireType !== 0) {
+      break;
+    }
+
+    const value = parseVarint(bytes, offset);
+    offset += value.bytesRead;
+    if (fieldNumber === 1) {
+      followState.isFollowing = value.value === 1;
+    } else if (fieldNumber === 2) {
+      followState.canFollow = value.value === 1;
+    }
+  }
+
+  return followState;
+}
 
 type SocialCommentsPageDto = {
   success: boolean;
@@ -100,6 +130,8 @@ function parseThreadEntry(bytes: Uint8Array): SocialThreadEntryDto {
         result.content = stringValue;
       } else if (fieldNumber === 11) {
         result.authorCommitment = Buffer.from(fieldBytes).toString("base64");
+      } else if (fieldNumber === 13) {
+        result.followState = parseFollowState(fieldBytes);
       }
       continue;
     }

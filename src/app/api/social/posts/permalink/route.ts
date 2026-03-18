@@ -11,6 +11,10 @@ type PermalinkDto = {
   reactionScopeId?: string;
   authorPublicAddress?: string;
   authorCommitment?: string;
+  followState?: {
+    isFollowing: boolean;
+    canFollow: boolean;
+  };
   content?: string;
   createdAtBlock?: number;
   createdAtUnixMs?: number;
@@ -26,6 +30,32 @@ type PermalinkDto = {
   }[];
   errorCode?: string;
 };
+
+function parseFollowState(bytes: Uint8Array): { isFollowing: boolean; canFollow: boolean } {
+  const followState = { isFollowing: false, canFollow: false };
+  let offset = 0;
+
+  while (offset < bytes.length) {
+    const tagInfo = parseVarint(bytes, offset);
+    offset += tagInfo.bytesRead;
+    const fieldNumber = tagInfo.value >>> 3;
+    const wireType = tagInfo.value & 0x07;
+
+    if (wireType !== 0) {
+      break;
+    }
+
+    const valueInfo = parseVarint(bytes, offset);
+    offset += valueInfo.bytesRead;
+    if (fieldNumber === 1) {
+      followState.isFollowing = valueInfo.value === 1;
+    } else if (fieldNumber === 2) {
+      followState.canFollow = valueInfo.value === 1;
+    }
+  }
+
+  return followState;
+}
 
 function mapAccessState(value: number): AccessState {
   switch (value) {
@@ -146,6 +176,12 @@ function parsePermalinkResponse(messageBytes: Uint8Array): PermalinkDto {
           binary += String.fromCharCode(value);
         }
         result.authorCommitment = btoa(binary);
+        offset += lengthInfo.value;
+        continue;
+      }
+      if (fieldNumber === 21) {
+        const bytes = messageBytes.slice(offset, offset + lengthInfo.value);
+        result.followState = parseFollowState(bytes);
         offset += lengthInfo.value;
         continue;
       }
