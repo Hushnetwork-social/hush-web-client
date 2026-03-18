@@ -15,6 +15,10 @@ interface BottomNavProps {
   onDownloadKeys?: () => void;
   onAccountDetails?: () => void;
   onLogout?: () => void;
+  guestMode?: boolean;
+  onGuestAction?: () => void;
+  guestActionLabel?: string;
+  guestActionInitials?: string;
 }
 
 export function BottomNav({
@@ -26,6 +30,10 @@ export function BottomNav({
   onDownloadKeys,
   onAccountDetails,
   onLogout,
+  guestMode = false,
+  onGuestAction,
+  guestActionLabel = "Create User",
+  guestActionInitials = "CU",
 }: BottomNavProps) {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const navItems = getAppNavItems(activeApp, crossAppBadges);
@@ -36,18 +44,28 @@ export function BottomNav({
         {navItems.map((item) => (
           <button
             key={item.id}
-            onClick={() => !item.comingSoon && onNavSelect(item.id)}
+            onClick={() => {
+              if (item.comingSoon) {
+                return;
+              }
+              if (guestMode) {
+                onGuestAction?.();
+                return;
+              }
+              onNavSelect(item.id);
+            }}
             disabled={item.comingSoon}
             className={`
               flex flex-col items-center space-y-0.5 px-3 py-2 rounded-lg
               transition-colors duration-150
-              ${item.comingSoon ? "cursor-not-allowed opacity-50" : "cursor-pointer"}
+              ${item.comingSoon ? "cursor-not-allowed opacity-50" : guestMode ? "cursor-pointer opacity-75" : "cursor-pointer"}
               ${
-                selectedNav === item.id && !item.comingSoon
+                selectedNav === item.id && !item.comingSoon && !guestMode
                   ? "text-hush-purple"
                   : "text-hush-text-accent hover:bg-hush-bg-hover"
               }
             `}
+            aria-disabled={guestMode || item.comingSoon}
           >
             {item.icon}
             <span className="text-[10px]">{item.label}</span>
@@ -67,15 +85,21 @@ export function BottomNav({
 
         {/* Profile Button */}
         <button
-          onClick={() => setShowUserMenu(!showUserMenu)}
+          onClick={() => {
+            if (guestMode) {
+              onGuestAction?.();
+              return;
+            }
+            setShowUserMenu(!showUserMenu);
+          }}
           className="flex flex-col items-center space-y-1 px-3 py-2 rounded-lg text-hush-text-accent hover:bg-hush-bg-hover transition-colors cursor-pointer"
         >
           <div className="w-6 h-6 rounded-full bg-hush-purple flex items-center justify-center">
             <span className="text-[10px] font-bold text-hush-bg-dark">
-              {userInitials}
+              {guestMode ? guestActionInitials : userInitials}
             </span>
           </div>
-          <span className="text-[10px]">Profile</span>
+          <span className="text-[10px]">{guestMode ? guestActionLabel : "Profile"}</span>
         </button>
       </div>
 

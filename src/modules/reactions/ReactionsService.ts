@@ -50,7 +50,12 @@ function logReactionProofSnapshot(
   stage: string,
   payload: Record<string, unknown>
 ): void {
-  console.log(`[ReactionsService] ${stage}`, payload);
+  console.log(
+    `[ReactionsService] ${stage}: ${JSON.stringify(
+      payload,
+      (_, value) => (typeof value === 'bigint' ? value.toString() : value)
+    )}`
+  );
 }
 
 /**
@@ -157,6 +162,7 @@ class ReactionsServiceClass {
         membershipFeedId,
         emojiIndex,
         circuitVersion: circuitManager.getCurrentVersion(),
+        userSecret: userSecret.toString(),
         userCommitment: userCommitment.toString(),
         nullifier: circuitInputs.nullifier,
         message_id: circuitInputs.message_id,
@@ -164,11 +170,11 @@ class ReactionsServiceClass {
         members_root: circuitInputs.members_root,
         author_commitment: circuitInputs.author_commitment,
         feed_pk: circuitInputs.feed_pk,
+        encryption_nonce: circuitInputs.encryption_nonce,
         merkle_indices: circuitInputs.merkle_indices,
-        merkle_path_head: circuitInputs.merkle_path.slice(0, 4),
-        merkle_path_tail: circuitInputs.merkle_path.slice(-4),
-        ciphertext_c1_0: circuitInputs.ciphertext_c1[0],
-        ciphertext_c2_0: circuitInputs.ciphertext_c2[0],
+        merkle_path: circuitInputs.merkle_path,
+        ciphertext_c1: circuitInputs.ciphertext_c1,
+        ciphertext_c2: circuitInputs.ciphertext_c2,
       });
 
       console.log('[ReactionsService] submitReaction: generateProof start');

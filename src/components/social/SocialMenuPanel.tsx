@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { useAppStore } from "@/stores";
+import { SOCIAL_HOME_ROUTE } from "@/lib/navigation/appRoutes";
 
 const SOCIAL_MENU_ITEMS = [
   { id: "feed-wall", label: "Feed Wall" },
@@ -16,7 +18,14 @@ const SOCIAL_MENU_ITEMS = [
 
 const SOCIAL_MENU_IDS = new Set(SOCIAL_MENU_ITEMS.map((item) => item.id));
 
-export function SocialMenuPanel() {
+interface SocialMenuPanelProps {
+  guestMode?: boolean;
+  onGuestAction?: () => void;
+}
+
+export function SocialMenuPanel({ guestMode = false, onGuestAction }: SocialMenuPanelProps) {
+  const router = useRouter();
+  const pathname = usePathname();
   const selectedNav = useAppStore((state) => state.selectedNav);
   const setSelectedNav = useAppStore((state) => state.setSelectedNav);
 
@@ -39,7 +48,17 @@ export function SocialMenuPanel() {
             key={item.id}
             type="button"
             data-testid={`social-menu-${item.id}`}
-            onClick={() => setSelectedNav(item.id)}
+            onClick={() => {
+              if (guestMode) {
+                onGuestAction?.();
+                return;
+              }
+              setSelectedNav(item.id);
+              if (pathname !== SOCIAL_HOME_ROUTE) {
+                router.push(SOCIAL_HOME_ROUTE);
+              }
+            }}
+            aria-disabled={guestMode}
             className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
               isSelected
                 ? "bg-hush-purple text-hush-bg-dark font-semibold"

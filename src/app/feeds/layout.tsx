@@ -15,7 +15,7 @@ import { Loader2 } from "lucide-react";
 import { debugLog, debugError } from "@/lib/debug-logger";
 import { GroupCreationWizard } from "@/components/groups/GroupCreationWizard";
 import { checkPendingNavigation, setupVisibilityChangeListener } from "@/lib/push";
-import { getActiveAppFromPath, getAppDisplayName, getAppHomeRoute } from "@/lib/navigation/appRoutes";
+import { getActiveAppFromPath, getAppDisplayName, getAppHomeRoute, getAuthRoute } from "@/lib/navigation/appRoutes";
 import { SocialMenuPanel } from "@/components/social/SocialMenuPanel";
 
 // Dynamic imports to prevent dev mode race condition
@@ -63,6 +63,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     setActiveApp,
     selectFeed,
   } = useAppStore();
+  const isGuestSocialRoute = isSocialRoute && !isAuthenticated;
   const blockHeight = useBlockchainStore((state) => state.blockHeight);
   const [isMobile, setIsMobile] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
@@ -179,6 +180,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     router.push('/account');
   }, [router]);
 
+  const handleGuestSocialAction = useCallback(() => {
+    router.push(getAuthRoute(pathname));
+  }, [pathname, router]);
+
   const handlePasswordConfirm = useCallback(async (password: string) => {
     if (!credentials || !currentUser) return;
 
@@ -277,8 +282,17 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               onDownloadKeys={handleDownloadKeys}
               onAccountDetails={handleAccountDetails}
               onLogout={handleLogout}
+              guestMode={isGuestSocialRoute}
+              onGuestAction={handleGuestSocialAction}
+              guestActionLabel="Create User"
+              guestActionInitials="CU"
             >
-              {activeApp === "social" ? <SocialMenuPanel /> : <FeedList />}
+              {activeApp === "social" ? (
+                <SocialMenuPanel
+                  guestMode={isGuestSocialRoute}
+                  onGuestAction={handleGuestSocialAction}
+                />
+              ) : <FeedList />}
             </Sidebar>
 
             {/* Center Content */}
@@ -314,6 +328,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               onDownloadKeys={handleDownloadKeys}
               onAccountDetails={handleAccountDetails}
               onLogout={handleLogout}
+              guestMode={isGuestSocialRoute}
+              onGuestAction={handleGuestSocialAction}
+              guestActionLabel="Create User"
+              guestActionInitials="CU"
             />
           )}
           <Footer blockHeight={blockHeight} />

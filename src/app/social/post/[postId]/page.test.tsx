@@ -132,10 +132,124 @@ describe("SocialPostPermalinkPage", () => {
     expect(await screen.findByTestId("social-permalink-content")).toHaveTextContent("Hello public world");
     expect(screen.getByTestId("social-permalink-reactions")).toBeInTheDocument();
     expect(screen.getByTestId("social-permalink-reactions-add")).toBeInTheDocument();
-    expect(screen.getByTestId("social-permalink-comment")).toBeInTheDocument();
+    expect(screen.getByTestId("social-permalink-comment")).toHaveTextContent("Reply");
     expect(screen.getByTestId("social-permalink-link")).toBeInTheDocument();
-    expect(screen.getByTestId("social-permalink-replies-title")).toHaveTextContent("Replies (0)");
-    expect(screen.getByTestId("social-permalink-replies-empty")).toBeInTheDocument();
+    expect(screen.queryByTestId("social-permalink-replies-title")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("social-permalink-replies-empty")).not.toBeInTheDocument();
+  });
+
+  it("hides replies for unauthenticated public permalink viewers", async () => {
+    getSocialCommentsPageMock.mockResolvedValue({
+      success: true,
+      message: "",
+      comments: [
+        {
+          entryId: "reply-1",
+          authorPublicAddress: "03replyuser1234567890fedcba1234567890abcdef1234567890fedcba1234567890",
+          createdAtUnixMs: 1735689600000,
+          content: "Reply content",
+        },
+      ],
+      paging: { initialPageSize: 10, loadMorePageSize: 10 },
+      hasMore: false,
+    });
+
+    render(<SocialPostPermalinkPage />);
+
+    expect(await screen.findByTestId("social-permalink-public")).toBeInTheDocument();
+    expect(screen.getByTestId("social-permalink-comment")).toHaveTextContent("Reply");
+    expect(screen.queryByTestId("social-permalink-replies-title")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("social-permalink-replies-list")).not.toBeInTheDocument();
+  });
+
+  it("renders public reply authors with identity names for logged-in viewers", async () => {
+    vi.mocked(window.localStorage.getItem).mockImplementation((key: string) => {
+      if (key === "hush-app-storage") {
+        return JSON.stringify({
+          state: {
+            credentials: {
+              signingPublicKey: "02viewer1234567890fedcba1234567890abcdef1234567890fedcba1234567890",
+            },
+          },
+        });
+      }
+
+      return null;
+    });
+
+    getSocialCommentsPageMock.mockResolvedValue({
+      success: true,
+      message: "",
+      comments: [
+        {
+          entryId: "reply-1",
+          authorPublicAddress: "03replyuser1234567890fedcba1234567890abcdef1234567890fedcba1234567890",
+          createdAtUnixMs: 1735689600000,
+          content: "Reply content",
+        },
+      ],
+      paging: { initialPageSize: 10, loadMorePageSize: 10 },
+      hasMore: false,
+    });
+
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/social/posts/permalink")) {
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            message: "",
+            accessState: "allowed",
+            postId: "post-123",
+            authorPublicAddress: "02abcdef1234567890fedcba1234567890abcdef1234567890fedcba1234567890",
+            content: "Hello public world",
+            canInteract: true,
+            circleFeedIds: [],
+          }),
+        } as Response;
+      }
+
+      if (url.includes("03replyuser1234567890fedcba1234567890abcdef1234567890fedcba1234567890")) {
+        return {
+          ok: true,
+          json: async () => ({
+            exists: true,
+            identity: {
+              profileName: "Reply User",
+            },
+          }),
+        } as Response;
+      }
+
+      if (url.includes("/api/identity/check")) {
+        return {
+          ok: true,
+          json: async () => ({
+            exists: true,
+            identity: {
+              profileName: "Owner",
+            },
+          }),
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        json: async () => ({}),
+      } as Response;
+    }));
+
+    render(<SocialPostPermalinkPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("social-permalink-comment")).toHaveTextContent("Reply (1)");
+      expect(screen.getByTestId("social-permalink-replies-title")).toHaveTextContent("Replies (1)");
+    });
+    expect(await screen.findByTestId("social-permalink-reply-reply-1")).toHaveTextContent("Reply User");
+    expect(screen.getByTestId("social-permalink-reply-reply-1")).toHaveTextContent("Reply content");
+    expect(screen.getByTestId("social-permalink-reply-reactions-reply-1")).toBeInTheDocument();
+    expect(screen.getByTestId("social-permalink-reply-reactions-reply-1-add")).toBeInTheDocument();
   });
 
   it("opens create-account overlay when guest attempts to reply on a public permalink", async () => {
@@ -263,6 +377,19 @@ describe("SocialPostPermalinkPage", () => {
     });
   });
 
+  it("closes the permalink composer when Escape is pressed", async () => {
+    render(<SocialPostPermalinkPage />);
+
+    fireEvent.click(await screen.findByTestId("social-permalink-comment"));
+    expect(screen.getByTestId("social-permalink-composer-top")).toBeInTheDocument();
+
+    fireEvent.keyDown(screen.getByTestId("social-permalink-composer-input"), { key: "Escape" });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("social-permalink-composer-top")).not.toBeInTheDocument();
+    });
+  });
+
   it("restores a pending reply draft with thread context after the user returns authenticated", async () => {
     window.sessionStorage.setItem(
       "hush.social.guest-intent.v1",
@@ -288,6 +415,32 @@ describe("SocialPostPermalinkPage", () => {
     expect(screen.getByTestId("social-permalink-composer-context")).toHaveTextContent("Replying in thread (root-3)");
   });
 
+  it("resets an open threaded composer back to top-level when replying to the post", async () => {
+    window.sessionStorage.setItem(
+      "hush.social.guest-intent.v1",
+      JSON.stringify({
+        postId: "post-123",
+        returnTo: "/social/post/post-123",
+        interactionType: "reply",
+        mode: "inline",
+        draft: "Restore reply",
+        targetReplyId: "reply-7",
+        threadRootId: "root-3",
+        source: "permalink",
+        createdAtMs: Date.now(),
+      })
+    );
+
+    render(<SocialPostPermalinkPage />);
+
+    expect(await screen.findByTestId("social-permalink-composer-top")).toBeInTheDocument();
+    expect(screen.getByTestId("social-permalink-composer-context")).toHaveTextContent("Replying in thread (root-3)");
+
+    fireEvent.click(screen.getByTestId("social-permalink-comment"));
+
+    expect(screen.getByTestId("social-permalink-composer-context")).toHaveTextContent("Replying to post");
+  });
+
   it("restores a pending reaction as an auto-apply entry and clears it once handled", async () => {
     window.sessionStorage.setItem(
       "hush.social.guest-intent.v1",
@@ -304,7 +457,9 @@ describe("SocialPostPermalinkPage", () => {
     render(<SocialPostPermalinkPage />);
 
     expect(await screen.findByTestId("social-permalink-reactions")).toBeInTheDocument();
-    expect(screen.getByTestId("social-permalink-reactions-pending-auto-reaction")).toHaveTextContent("4");
+    await waitFor(() => {
+      expect(screen.getByTestId("social-permalink-reactions-pending-auto-reaction")).toHaveTextContent("4");
+    });
     fireEvent.click(screen.getByTestId("social-permalink-reactions-pending-auto-reaction-handled"));
     expect(pendingAutoReactionHandledMock).toHaveBeenCalledTimes(1);
     await waitFor(() => {

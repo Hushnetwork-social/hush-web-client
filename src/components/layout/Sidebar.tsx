@@ -17,6 +17,10 @@ interface SidebarProps {
   onDownloadKeys?: () => void;
   onAccountDetails?: () => void;
   onLogout?: () => void;
+  guestMode?: boolean;
+  onGuestAction?: () => void;
+  guestActionLabel?: string;
+  guestActionInitials?: string;
 }
 
 export function Sidebar({
@@ -30,6 +34,10 @@ export function Sidebar({
   onDownloadKeys,
   onAccountDetails,
   onLogout,
+  guestMode = false,
+  onGuestAction,
+  guestActionLabel = "Create User",
+  guestActionInitials = "CU",
 }: SidebarProps) {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const navItems = getAppNavItems(activeApp, crossAppBadges);
@@ -42,14 +50,24 @@ export function Sidebar({
           <button
             key={item.id}
             data-testid={`nav-${item.id}`}
-            onClick={() => !item.comingSoon && onNavSelect(item.id)}
+            onClick={() => {
+              if (item.comingSoon) {
+                return;
+              }
+              if (guestMode) {
+                onGuestAction?.();
+                return;
+              }
+              onNavSelect(item.id);
+            }}
             disabled={item.comingSoon}
+            aria-disabled={guestMode || item.comingSoon}
             className={`
               w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl
               transition-colors duration-150
-              ${item.comingSoon ? "cursor-not-allowed opacity-60" : "cursor-pointer"}
+              ${item.comingSoon ? "cursor-not-allowed opacity-60" : guestMode ? "cursor-pointer opacity-75" : "cursor-pointer"}
               ${
-                selectedNav === item.id && !item.comingSoon
+                selectedNav === item.id && !item.comingSoon && !guestMode
                   ? "bg-hush-purple text-hush-bg-dark"
                   : "text-hush-text-accent hover:bg-hush-bg-hover"
               }
@@ -89,23 +107,29 @@ export function Sidebar({
         <div className="relative">
           <button
             data-testid="user-menu-trigger"
-            onClick={() => setShowUserMenu(!showUserMenu)}
+            onClick={() => {
+              if (guestMode) {
+                onGuestAction?.();
+                return;
+              }
+              setShowUserMenu(!showUserMenu);
+            }}
             className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl hover:bg-hush-bg-hover transition-colors cursor-pointer"
           >
             {/* Avatar */}
             <div className="w-10 h-10 rounded-full bg-hush-purple flex items-center justify-center flex-shrink-0">
               <span className="text-sm font-bold text-hush-bg-dark">
-                {userInitials}
+                {guestMode ? guestActionInitials : userInitials}
               </span>
             </div>
             {/* Name */}
             <span className="text-sm text-hush-text-primary truncate">
-              {userDisplayName}
+              {guestMode ? guestActionLabel : userDisplayName}
             </span>
           </button>
 
           {/* Dropdown Menu */}
-          {showUserMenu && (
+          {showUserMenu && !guestMode && (
             <div className="absolute bottom-full left-0 right-0 mb-2 bg-hush-bg-dark rounded-xl border border-hush-bg-element shadow-lg p-1.5 space-y-1">
               <button
                 onClick={() => {

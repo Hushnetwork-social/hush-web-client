@@ -187,5 +187,28 @@ describe('BottomNav', () => {
 
       expect(defaultProps.onNavSelect).toHaveBeenCalledWith('create-group');
     });
+
+    it('routes guest bottom-nav clicks through guest action', () => {
+      const onGuestAction = vi.fn();
+      render(<BottomNav {...defaultProps} activeApp="social" guestMode={true} onGuestAction={onGuestAction} />);
+
+      fireEvent.click(screen.getByText('Search'));
+
+      expect(onGuestAction).toHaveBeenCalledTimes(1);
+      expect(defaultProps.onNavSelect).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Guest Mode', () => {
+    it('shows Create User in the profile slot and routes click through guest action', () => {
+      const onGuestAction = vi.fn();
+      render(<BottomNav {...defaultProps} guestMode={true} onGuestAction={onGuestAction} />);
+
+      expect(screen.getByText('Create User')).toBeInTheDocument();
+      fireEvent.click(screen.getByText('Create User'));
+
+      expect(onGuestAction).toHaveBeenCalledTimes(1);
+      expect(screen.queryByText('Download keys')).not.toBeInTheDocument();
+    });
   });
 });

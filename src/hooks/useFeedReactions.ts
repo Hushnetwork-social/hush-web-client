@@ -66,6 +66,12 @@ function getForcedE2EReactionMode(): "dev" | "non-dev" | null {
   return forcedMode === "dev" || forcedMode === "non-dev" ? forcedMode : null;
 }
 
+function serializeReactionDebugPayload(payload: Record<string, unknown>): string {
+  return JSON.stringify(payload, (_, value) =>
+    typeof value === "bigint" ? value.toString() : value
+  );
+}
+
 interface UseFeedReactionsOptions {
   /** Feed ID */
   feedId: string;
@@ -502,6 +508,18 @@ export function useFeedReactions({
           debugLog(
             `[useFeedReactions] Loaded global membership identity from server for ${publicSigningAddress.substring(0, 20)}...`
           );
+          debugLog(
+            `[useFeedReactions] Global membership identity: ${serializeReactionDebugPayload({
+              source: "server",
+              publicSigningAddress,
+              effectiveMembershipFeedId: membershipFeedId ?? feedId,
+              effectiveUserSecret,
+              effectiveUserCommitment,
+              feedId,
+              messageId,
+              currentFeedPublicKey,
+            })}`
+          );
         } catch (globalMembershipError) {
           debugWarn(
             "[useFeedReactions] Falling back to local global membership derivation",
@@ -509,6 +527,18 @@ export function useFeedReactions({
           );
           effectiveUserSecret = await deriveAddressMembershipSecret(publicSigningAddress);
           effectiveUserCommitment = await computeCommitment(effectiveUserSecret);
+          debugLog(
+            `[useFeedReactions] Global membership identity: ${serializeReactionDebugPayload({
+              source: "local-fallback",
+              publicSigningAddress,
+              effectiveMembershipFeedId: membershipFeedId ?? feedId,
+              effectiveUserSecret,
+              effectiveUserCommitment,
+              feedId,
+              messageId,
+              currentFeedPublicKey,
+            })}`
+          );
         }
 
         debugLog(
@@ -572,6 +602,21 @@ export function useFeedReactions({
         }
       }
       try {
+        debugLog(
+          `[useFeedReactions] Reaction submit context: ${serializeReactionDebugPayload({
+            feedId,
+            messageId,
+            emojiIndex,
+            isRemoval,
+            membershipFeedId: membershipFeedId ?? feedId,
+            currentFeedPublicKey,
+            effectiveUserSecret,
+            effectiveUserCommitment,
+            authorCommitment,
+            isProverReady,
+            useDevMode,
+          })}`
+        );
         if (useDevMode) {
           // DEV MODE: Submit without ZK proof
           if (isRemoval) {

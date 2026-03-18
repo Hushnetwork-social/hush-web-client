@@ -47,6 +47,8 @@ type PermalinkThreadReply = {
   id: string;
   author: string;
   authorPublicAddress?: string;
+  reactionScopeId?: string;
+  authorCommitment?: string;
   time: string;
   text: string;
   createdAtMs: number;
@@ -117,6 +119,25 @@ export default function SocialPostPermalinkPage() {
     intent: null,
     applied: false,
   });
+
+  const closeTopComposer = () => {
+    setIsTopComposerOpen(false);
+    setTopReplyTargetId(null);
+    setTopReplyThreadRootId(null);
+  };
+
+  const openTopComposer = (options?: {
+    targetReplyId?: string | null;
+    threadRootId?: string | null;
+    draft?: string;
+  }) => {
+    setTopReplyTargetId(options?.targetReplyId ?? null);
+    setTopReplyThreadRootId(options?.threadRootId ?? null);
+    if (typeof options?.draft === "string") {
+      setTopReplyDraft(options.draft);
+    }
+    setIsTopComposerOpen(true);
+  };
 
   const accessOverride = useMemo(() => resolveAccessOverride(searchParams.get("access")), [searchParams]);
 
@@ -275,13 +296,14 @@ export default function SocialPostPermalinkPage() {
       pendingIntent.intent?.source === "permalink"
         ? resolveGuestIntentResumeAction(pendingIntent.intent)
         : null;
-    if (permalink.canInteract && resumeAction && !pendingIntent.applied) {
+      if (permalink.canInteract && resumeAction && !pendingIntent.applied) {
       pendingIntent.applied = true;
       if (resumeAction.kind === "restore-draft") {
-        setTopReplyDraft(resumeAction.intent.draft);
-        setTopReplyTargetId(resumeAction.intent.targetReplyId);
-        setTopReplyThreadRootId(resumeAction.intent.threadRootId);
-        setIsTopComposerOpen(true);
+        openTopComposer({
+          draft: resumeAction.intent.draft,
+          targetReplyId: resumeAction.intent.targetReplyId,
+          threadRootId: resumeAction.intent.threadRootId,
+        });
       } else {
         setPendingAutoReactionIndex(resumeAction.intent.reactionEmojiIndex);
       }
@@ -290,10 +312,8 @@ export default function SocialPostPermalinkPage() {
     }
 
     if (!pendingIntent.applied) {
-      setIsTopComposerOpen(false);
+      closeTopComposer();
       setTopReplyDraft("");
-      setTopReplyTargetId(null);
-      setTopReplyThreadRootId(null);
       setPendingAutoReactionIndex(null);
     }
   }, [permalink?.canInteract, permalink?.postId]);
@@ -307,6 +327,11 @@ export default function SocialPostPermalinkPage() {
       }
 
       const requesterAddress = readRequesterAddressFromStorage();
+      if (!requesterAddress) {
+        setLocalReplies([]);
+        return;
+      }
+      const requesterAddressNormalized = normalizePublicAddress(requesterAddress);
       const response = await getSocialCommentsPage(
         permalink.postId,
         requesterAddress,
@@ -318,13 +343,48 @@ export default function SocialPostPermalinkPage() {
         return;
       }
 
+      const uniqueAddresses = Array.from(
+        new Set(
+          response.comments
+            .map((entry) => normalizePublicAddress(entry.authorPublicAddress))
+            .filter((address) => address.length > 0 && address !== requesterAddressNormalized)
+        )
+      );
+      const namesByAddress = new Map<string, string>();
+      await Promise.all(
+        uniqueAddresses.map(async (address) => {
+          try {
+            const identityResponse = await fetch(
+              buildApiUrl(`/api/identity/check?address=${encodeURIComponent(address)}`),
+              { method: "GET", cache: "no-store" }
+            );
+            const identityPayload = (await identityResponse.json()) as {
+              exists?: boolean;
+              identity?: { profileName?: string | null };
+            };
+            const profileName = identityPayload.identity?.profileName?.trim();
+            if (profileName) {
+              namesByAddress.set(address, profileName);
+            }
+          } catch {
+            // Keep address fallback when identity lookup fails.
+          }
+        })
+      );
+
       setLocalReplies(
         response.comments.map((entry) => ({
           id: entry.entryId,
-          author: entry.authorPublicAddress
-            ? `${entry.authorPublicAddress.slice(0, 8)}...${entry.authorPublicAddress.slice(-6)}`
-            : "Unknown",
+          author:
+            normalizePublicAddress(entry.authorPublicAddress) === requesterAddressNormalized
+              ? "You"
+              : namesByAddress.get(normalizePublicAddress(entry.authorPublicAddress)) ??
+                (entry.authorPublicAddress
+                  ? `${entry.authorPublicAddress.slice(0, 8)}...${entry.authorPublicAddress.slice(-6)}`
+                  : "Unknown"),
           authorPublicAddress: entry.authorPublicAddress,
+          reactionScopeId: entry.reactionScopeId,
+          authorCommitment: entry.authorCommitment,
           time: entry.createdAtUnixMs ? new Date(entry.createdAtUnixMs).toLocaleString("en-GB") : "now",
           text: entry.content ?? "",
           createdAtMs: entry.createdAtUnixMs ?? Date.now(),
@@ -372,6 +432,7 @@ export default function SocialPostPermalinkPage() {
         id: entryId,
         author: "You",
         authorPublicAddress: readRequesterAddressFromStorage() ?? undefined,
+        reactionScopeId: permalink.reactionScopeId ?? permalink.postId ?? routePostId,
         time: "now",
         text: trimmed,
         createdAtMs: Date.now(),
@@ -379,8 +440,7 @@ export default function SocialPostPermalinkPage() {
       ...current,
     ]);
     setTopReplyDraft("");
-    setTopReplyTargetId(null);
-    setTopReplyThreadRootId(null);
+    closeTopComposer();
     clearPendingSocialThreadDraft(permalink.postId);
   };
 
@@ -404,6 +464,12 @@ export default function SocialPostPermalinkPage() {
       if (event.key === "ArrowRight") {
         event.preventDefault();
         setActiveMediaIndex((current) => Math.min(attachmentCount - 1, current + 1));
+        return;
+      }
+
+      if (event.key === "Escape" && isTopComposerOpen) {
+        event.preventDefault();
+        closeTopComposer();
       }
     };
 
@@ -413,7 +479,7 @@ export default function SocialPostPermalinkPage() {
       window.removeEventListener("keydown", handleKeyDown);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [permalink]);
+  }, [isTopComposerOpen, permalink]);
 
   if (isLoading) {
     return (
@@ -475,6 +541,7 @@ export default function SocialPostPermalinkPage() {
         : "Confirmed";
   const requesterForMedia = readRequesterAddressFromStorage();
   const requesterAddressNormalized = normalizePublicAddress(requesterForMedia);
+  const isAuthenticatedViewer = requesterAddressNormalized.length > 0;
 
   return (
     <section className="h-full w-full overflow-y-auto p-4" data-testid="social-permalink-layout">
@@ -571,10 +638,10 @@ export default function SocialPostPermalinkPage() {
                   return;
                 }
 
-                setIsTopComposerOpen(true);
+                openTopComposer();
               }}
             >
-              Reply ({localReplies.length})
+              {isAuthenticatedViewer ? `Reply (${localReplies.length})` : "Reply"}
             </button>
             <button
               type="button"
@@ -633,6 +700,12 @@ export default function SocialPostPermalinkPage() {
                 data-testid="social-permalink-composer-input"
                 placeholder="Write your reply..."
                 onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    closeTopComposer();
+                    return;
+                  }
+
                   if (event.key === "Enter" && !event.ctrlKey) {
                     event.preventDefault();
                     submitTopLevelReply();
@@ -654,34 +727,62 @@ export default function SocialPostPermalinkPage() {
             </div>
           ) : null}
 
-          <p className="mt-3 text-sm font-semibold text-hush-text-primary" data-testid="social-permalink-replies-title">
-            Replies ({localReplies.length})
-          </p>
-          <div className="mt-2 space-y-2" data-testid="social-permalink-replies-list">
-            {localReplies.length === 0 ? (
-              <div
-                className="rounded-lg border border-dashed border-hush-bg-hover bg-hush-bg-dark/40 px-4 py-5 text-sm text-hush-text-accent"
-                data-testid="social-permalink-replies-empty"
-              >
-                {permalink.canInteract
-                  ? "No comments yet. Start the conversation from this permalink."
-                  : "No comments yet. Create your account to reply from this permalink."}
+          {isAuthenticatedViewer ? (
+            <>
+              <p className="mt-3 text-sm font-semibold text-hush-text-primary" data-testid="social-permalink-replies-title">
+                Replies ({localReplies.length})
+              </p>
+              <div className="mt-2 space-y-2" data-testid="social-permalink-replies-list">
+                {localReplies.length === 0 ? (
+                  <div
+                    className="rounded-lg border border-dashed border-hush-bg-hover bg-hush-bg-dark/40 px-4 py-5 text-sm text-hush-text-accent"
+                    data-testid="social-permalink-replies-empty"
+                  >
+                    {permalink.canInteract
+                      ? "No comments yet. Start the conversation from this permalink."
+                      : "No comments yet. Create your account to reply from this permalink."}
+                  </div>
+                ) : null}
+                {localReplies.map((reply) => (
+                  <div
+                    key={reply.id}
+                    className="rounded-lg border border-hush-bg-hover p-3"
+                    data-testid={`social-permalink-reply-${reply.id}`}
+                  >
+                    <div className="mb-1 flex items-center justify-between">
+                      <p className="text-xs font-semibold text-hush-text-primary">{reply.author}</p>
+                      <span className="text-[10px] text-hush-text-accent">{reply.time}</span>
+                    </div>
+                    <p className="text-xs text-hush-text-accent">{reply.text}</p>
+                    <SocialPostReactions
+                      postId={reply.id}
+                      reactionMessageId={reply.id}
+                      reactionScopeId={reply.reactionScopeId ?? permalink.reactionScopeId ?? permalink.postId ?? routePostId}
+                      visibility={permalink.circleFeedIds.length > 0 ? "private" : "open"}
+                      circleFeedIds={permalink.circleFeedIds}
+                      authorCommitment={reply.authorCommitment}
+                      isOwnMessage={normalizePublicAddress(reply.authorPublicAddress) === requesterAddressNormalized}
+                      canInteract={permalink.canInteract}
+                      testIdPrefix={`social-permalink-reply-reactions-${reply.id}`}
+                      onRequireAccount={(reactionEmojiIndex) => {
+                        if (typeof reactionEmojiIndex === "number" && permalink.postId) {
+                          savePendingSocialGuestIntent({
+                            postId: permalink.postId,
+                            returnTo: getSocialPostRoute(permalink.postId),
+                            interactionType: "reaction",
+                            reactionEmojiIndex,
+                            source: "permalink",
+                            createdAtMs: Date.now(),
+                          });
+                        }
+                        setShowAuthOverlay(true);
+                      }}
+                    />
+                  </div>
+                ))}
               </div>
-            ) : null}
-            {localReplies.map((reply) => (
-              <div
-                key={reply.id}
-                className="rounded-lg border border-hush-bg-hover p-3"
-                data-testid={`social-permalink-reply-${reply.id}`}
-              >
-                <div className="mb-1 flex items-center justify-between">
-                  <p className="text-xs font-semibold text-hush-text-primary">{reply.author}</p>
-                  <span className="text-[10px] text-hush-text-accent">{reply.time}</span>
-                </div>
-                <p className="text-xs text-hush-text-accent">{reply.text}</p>
-              </div>
-            ))}
-          </div>
+            </>
+          ) : null}
         </article>
       </div>
       {showAuthOverlay ? (
