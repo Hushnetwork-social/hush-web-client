@@ -15,6 +15,7 @@ describe("SocialAuthPromptOverlay", () => {
       "href",
       "/auth?returnTo=%2Fsocial%2Fpost%2Fpost-123"
     );
+    expect(screen.getByTestId("social-auth-overlay-cta")).toHaveTextContent("Create account");
     expect(screen.getByTestId("social-auth-overlay-return-copy")).toHaveTextContent(
       "you'll come right back to this same post"
     );
@@ -32,6 +33,7 @@ describe("SocialAuthPromptOverlay", () => {
       "href",
       "/auth"
     );
+    expect(screen.getByTestId("social-auth-overlay-cta")).toHaveTextContent("Create account");
   });
 
   it("supports both button and backdrop dismissal", () => {

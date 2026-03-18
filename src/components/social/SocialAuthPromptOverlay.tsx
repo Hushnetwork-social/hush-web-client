@@ -37,7 +37,7 @@ export function SocialAuthPromptOverlay({ onClose, returnTo }: SocialAuthPromptO
             className="inline-flex rounded-md bg-hush-purple px-4 py-2 text-sm font-semibold text-hush-bg-dark"
             data-testid="social-auth-overlay-cta"
           >
-            Continue to auth
+            Create account
           </Link>
           <button
             type="button"
