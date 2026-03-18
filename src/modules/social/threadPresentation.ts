@@ -1,3 +1,5 @@
+import type { SocialAuthorFollowStateContract } from "./contracts";
+
 export type SocialThreadEntry = {
   id: string;
   serverEntryId?: string;
@@ -12,6 +14,7 @@ export type SocialThreadEntry = {
   threadRootId: string | null;
   createdAtMs: number;
   childReplyCount?: number;
+  followState?: SocialAuthorFollowStateContract;
 };
 
 export const INITIAL_TOP_LEVEL_COMMENTS = 10;

@@ -15,6 +15,7 @@ const createSocialPostMock = vi.fn();
 const getSocialCommentsPageMock = vi.fn();
 const getSocialThreadRepliesPageMock = vi.fn();
 const createSocialThreadEntryMock = vi.fn();
+const followSocialAuthorMock = vi.fn();
 const computeSha256Mock = vi.fn();
 const socialPostReactionsPropsMock = vi.fn();
 let mockCredentials: {
@@ -146,6 +147,10 @@ vi.mock('@/modules/social/ThreadService', () => ({
   createSocialThreadEntry: (...args: unknown[]) => createSocialThreadEntryMock(...args),
 }));
 
+vi.mock('@/modules/social/FollowService', () => ({
+  followSocialAuthor: (...args: unknown[]) => followSocialAuthorMock(...args),
+}));
+
 vi.mock('@/components/social/SocialPostReactions', () => ({
   SocialPostReactions: (props: { testIdPrefix: string; onRequireAccount?: (reactionEmojiIndex?: number) => void }) => {
     socialPostReactionsPropsMock(props);
@@ -194,6 +199,7 @@ describe('SocialPage', () => {
     getSocialCommentsPageMock.mockReset();
     getSocialThreadRepliesPageMock.mockReset();
     createSocialThreadEntryMock.mockReset();
+    followSocialAuthorMock.mockReset();
     socialPostReactionsPropsMock.mockReset();
     createCustomCircleMock.mockResolvedValue({ success: true, message: 'ok' });
     addMembersToCustomCircleMock.mockResolvedValue({ success: true, message: 'ok' });
@@ -226,6 +232,12 @@ describe('SocialPage', () => {
       message: 'ok',
       entryId: `thread-entry-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
     }));
+    followSocialAuthorMock.mockResolvedValue({
+      success: true,
+      message: 'ok',
+      alreadyFollowing: false,
+      requiresSyncRefresh: true,
+    });
     getSocialFeedWallMock.mockResolvedValue({
       success: true,
       message: 'ok',
@@ -237,6 +249,7 @@ describe('SocialPage', () => {
           createdAtBlock: 2539,
           visibility: 'open',
           circleFeedIds: [],
+          followState: { isFollowing: false, canFollow: false },
         },
         {
           postId: 'post-2',
@@ -245,6 +258,7 @@ describe('SocialPage', () => {
           createdAtBlock: 2538,
           visibility: 'open',
           circleFeedIds: [],
+          followState: { isFollowing: false, canFollow: true },
         },
       ],
     });
@@ -342,6 +356,94 @@ describe('SocialPage', () => {
 
     expect(getSocialFeedWallMock).toHaveBeenCalledWith(null, false, 100);
     expect(screen.getByTestId('post-reaction-strip-post-1')).toBeInTheDocument();
+    expect(screen.queryByTestId('follow-author-post-post-2')).not.toBeInTheDocument();
+  });
+
+  it('submits follow from the feed wall and flips to Following after success', async () => {
+    await renderFeedWallAndWaitReady();
+
+    const button = screen.getByTestId('follow-author-post-post-2');
+    expect(button).toHaveTextContent('Follow');
+
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(followSocialAuthorMock).toHaveBeenCalledWith({
+        viewerPublicAddress: 'me-address',
+        authorPublicAddress: 'alice-address',
+        requesterPublicAddress: 'me-address',
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('follow-author-post-post-2')).toHaveTextContent('Following');
+    });
+    expect(triggerSyncNowMock).toHaveBeenCalled();
+    expect(screen.queryByTestId('follow-author-post-post-1')).not.toBeInTheDocument();
+  });
+
+  it('re-enables follow and shows an error toast when the follow request fails', async () => {
+    followSocialAuthorMock.mockResolvedValueOnce({
+      success: false,
+      message: 'Already following',
+      alreadyFollowing: true,
+      requiresSyncRefresh: true,
+    });
+
+    await renderFeedWallAndWaitReady();
+    fireEvent.click(screen.getByTestId('follow-author-post-post-2'));
+
+    expect(await screen.findByText('Already following')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId('follow-author-post-post-2')).toHaveTextContent('Follow');
+    });
+  });
+
+  it('renders follow controls across post detail comments and replies', async () => {
+    getSocialCommentsPageMock.mockResolvedValue({
+      success: true,
+      message: 'ok',
+      comments: [
+        {
+          entryId: 'comment-1',
+          kind: 'comment',
+          authorPublicAddress: 'bob-address',
+          createdAtUnixMs: Date.now(),
+          content: 'Top level comment',
+          reactionCount: {},
+          childReplyCount: 1,
+          followState: { isFollowing: false, canFollow: true },
+        },
+      ],
+      paging: { initialPageSize: 10, loadMorePageSize: 10 },
+      hasMore: false,
+    });
+    getSocialThreadRepliesPageMock.mockResolvedValue({
+      success: true,
+      message: 'ok',
+      replies: [
+        {
+          entryId: 'reply-1',
+          kind: 'reply',
+          threadRootId: 'comment-1',
+          authorPublicAddress: 'carol-address',
+          createdAtUnixMs: Date.now(),
+          content: 'Nested reply',
+          reactionCount: {},
+          childReplyCount: 0,
+          followState: { isFollowing: false, canFollow: true },
+        },
+      ],
+      paging: { initialPageSize: 5, loadMorePageSize: 5 },
+      hasMore: false,
+    });
+
+    await renderFeedWallAndWaitReady();
+    fireEvent.click(screen.getByTestId('social-post-post-2'));
+
+    expect(await screen.findByTestId('follow-author-post-detail-post-2')).toBeInTheDocument();
+    expect(await screen.findByTestId('follow-author-comment-comment-1')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('post-detail-thread-toggle-comment-1'));
+    expect(await screen.findByTestId('follow-author-reply-reply-1')).toBeInTheDocument();
   });
 
   it('opens create-account overlay when a guest attempts to reply on a public post', async () => {
