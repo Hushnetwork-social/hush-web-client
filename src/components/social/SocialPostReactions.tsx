@@ -12,10 +12,12 @@ import { useFeedsStore } from "@/modules/feeds/useFeedsStore";
 
 interface SocialPostReactionsProps {
   postId: string;
+  reactionMessageId?: string | null;
   reactionScopeId?: string;
   visibility: "open" | "private";
   circleFeedIds: string[];
   authorCommitment?: string;
+  isOwnMessage?: boolean;
   canInteract: boolean;
   testIdPrefix: string;
   onRequireAccount?: () => void;
@@ -39,10 +41,12 @@ function resolveReactionFeedAesKey(circleFeedIds: string[]): string | undefined 
 
 export function SocialPostReactions({
   postId,
+  reactionMessageId,
   reactionScopeId,
   visibility,
   circleFeedIds,
   authorCommitment,
+  isOwnMessage = false,
   canInteract,
   testIdPrefix,
   onRequireAccount,
@@ -53,6 +57,7 @@ export function SocialPostReactions({
   const credentials = useAppStore((s) => s.credentials);
   const isGeneratingProof = useReactionsStore((s) => s.isGeneratingProof);
   const reactionScope = reactionScopeId ?? postId;
+  const resolvedReactionMessageId = reactionMessageId === undefined ? postId : reactionMessageId;
   const membershipFeedId = visibility === "private"
     ? circleFeedIds[0]
     : GLOBAL_HUSH_MEMBERS_SCOPE_ID;
@@ -77,7 +82,11 @@ export function SocialPostReactions({
   });
 
   useEffect(() => {
-    const messageIds = [postId];
+    if (!resolvedReactionMessageId) {
+      return;
+    }
+
+    const messageIds = [resolvedReactionMessageId];
 
     const refreshReactions = async () => {
       if (useReactionsStore.getState().isGeneratingProof) {
@@ -95,10 +104,14 @@ export function SocialPostReactions({
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [fetchTalliesForMessages, isGeneratingProof, postId]);
+  }, [fetchTalliesForMessages, isGeneratingProof, resolvedReactionMessageId]);
 
   useEffect(() => {
-    const messageIds = [postId];
+    if (!resolvedReactionMessageId) {
+      return;
+    }
+
+    const messageIds = [resolvedReactionMessageId];
 
     if (!credentials?.mnemonic || hasHydratedMyReactionRef.current) {
       return;
@@ -106,11 +119,11 @@ export function SocialPostReactions({
 
     hasHydratedMyReactionRef.current = true;
     void hydrateMyReactions(messageIds);
-  }, [credentials?.mnemonic, hydrateMyReactions, postId]);
+  }, [credentials?.mnemonic, hydrateMyReactions, resolvedReactionMessageId]);
 
   useEffect(() => {
     hasHydratedMyReactionRef.current = false;
-  }, [postId, credentials?.signingPublicKey]);
+  }, [resolvedReactionMessageId, credentials?.signingPublicKey]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -123,10 +136,11 @@ export function SocialPostReactions({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const counts = getReactionCounts(postId);
-  const myReaction = getMyReaction(postId);
-  const pending = isPending(postId);
+  const counts = getReactionCounts(resolvedReactionMessageId ?? postId);
+  const myReaction = getMyReaction(resolvedReactionMessageId ?? postId);
+  const pending = isPending(resolvedReactionMessageId ?? postId);
   const hasInteractiveIdentity = canInteract && !!credentials?.signingPublicKey;
+  const isReadOnlyOwnMessage = isOwnMessage;
   const canOpenPicker = visibility === "open" || canInteract;
   const handleGuestInteraction = () => {
     if (!hasInteractiveIdentity && visibility === "open") {
@@ -147,49 +161,67 @@ export function SocialPostReactions({
         counts={counts}
         myReaction={myReaction}
         isPending={pending}
-        disabled={pending}
+        isOwnMessage={isReadOnlyOwnMessage}
+        disabled={pending || isReadOnlyOwnMessage}
         onReactionClick={
-          hasInteractiveIdentity && !pending
-            ? (emojiIndex) => void handleReactionSelect(postId, emojiIndex)
+          hasInteractiveIdentity && !pending && !isReadOnlyOwnMessage
+            ? (emojiIndex) => resolvedReactionMessageId
+              ? void handleReactionSelect(resolvedReactionMessageId, emojiIndex)
+              : undefined
             : visibility === "open"
               ? () => handleGuestInteraction()
               : undefined
         }
       />
 
-      <div className="relative" ref={pickerRef}>
-        <button
-          type="button"
-          className="inline-flex items-center gap-1 rounded-full border border-hush-purple/40 px-2 py-1 text-[11px] text-hush-purple hover:bg-hush-purple/10 disabled:opacity-60"
-          data-testid={`${testIdPrefix}-add`}
-          onClick={() => {
-            if (!hasInteractiveIdentity) {
-              handleGuestInteraction();
-              return;
-            }
-
-            setShowPicker((current) => !current);
-          }}
-          disabled={!canOpenPicker || pending}
-          title={hasInteractiveIdentity ? "Add reaction" : "Sign in to react"}
+      {isReadOnlyOwnMessage ? (
+        <p
+          className="text-[11px] text-hush-text-accent"
+          data-testid={`${testIdPrefix}-own-message-note`}
         >
-          <SmilePlus className="h-3 w-3" />
-          <span>{visibleChipCount > 0 ? "Add" : "React"}</span>
-        </button>
+          cannot react to own message
+        </p>
+      ) : (
+        <div className="relative" ref={pickerRef}>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 rounded-full border border-hush-purple/40 px-2 py-1 text-[11px] text-hush-purple hover:bg-hush-purple/10 disabled:opacity-60"
+            data-testid={`${testIdPrefix}-add`}
+            onClick={() => {
+              if (!hasInteractiveIdentity) {
+                handleGuestInteraction();
+                return;
+              }
 
-        {showPicker ? (
-          <div className="absolute z-20 mt-2" data-testid={`${testIdPrefix}-picker`}>
-            <ReactionPicker
-              onSelect={(emojiIndex) => void handleReactionSelect(postId, emojiIndex)}
-              selectedEmoji={myReaction}
-              disabled={!hasInteractiveIdentity || pending}
-              onClose={() => setShowPicker(false)}
-            />
-          </div>
-        ) : null}
-      </div>
+              setShowPicker((current) => !current);
+            }}
+            disabled={!canOpenPicker || pending}
+            title={hasInteractiveIdentity ? "Add reaction" : "Sign in to react"}
+          >
+            <SmilePlus className="h-3 w-3" />
+            <span>{visibleChipCount > 0 ? "Add" : "React"}</span>
+          </button>
 
-      {error ? (
+          {showPicker ? (
+            <div className="absolute z-20 mt-2" data-testid={`${testIdPrefix}-picker`}>
+              <ReactionPicker
+                onSelect={(emojiIndex) => {
+                  if (!resolvedReactionMessageId) {
+                    return;
+                  }
+
+                  void handleReactionSelect(resolvedReactionMessageId, emojiIndex);
+                }}
+                selectedEmoji={myReaction}
+                disabled={!hasInteractiveIdentity || pending}
+                onClose={() => setShowPicker(false)}
+              />
+            </div>
+          ) : null}
+        </div>
+      )}
+
+      {error && !isReadOnlyOwnMessage ? (
         <p
           className="basis-full text-[11px] text-red-400"
           data-testid={`${testIdPrefix}-error`}

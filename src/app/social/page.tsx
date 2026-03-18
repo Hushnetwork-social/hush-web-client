@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import { AlertCircle, Check, Link2, Loader2, MessageCircle, SmilePlus, Sparkles, X } from "lucide-react";
+import { AlertCircle, Check, Link2, Loader2, MessageCircle, Sparkles, X } from "lucide-react";
 import { buildApiUrl } from "@/lib/api-config";
 import { useAppStore } from "@/stores";
 import { useFeedsStore } from "@/modules/feeds/useFeedsStore";
@@ -61,8 +61,10 @@ const EMPTY_REACTIONS = { "👍": 0, "❤️": 0, "😂": 0, "😮": 0, "😢": 
 type ReplyItem = {
   id: string;
   serverEntryId?: string;
+  isPending?: boolean;
   author: string;
   authorPublicAddress?: string;
+  reactionScopeId?: string;
   authorCommitment?: string;
   time: string;
   text: string;
@@ -435,6 +437,8 @@ export default function SocialPage() {
   const [showAuthOverlay, setShowAuthOverlay] = useState(false);
   const authorNamesByAddressRef = useRef<Record<string, string>>({});
   const mediaPreviewUrlsRef = useRef<Set<string>>(new Set());
+  const topComposerInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const inlineComposerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const [isFeedWallLoading, setIsFeedWallLoading] = useState(true);
   const feedWallRegionRef = useRef<HTMLElement | null>(null);
   const activePostDialogRef = useRef<HTMLDivElement | null>(null);
@@ -744,7 +748,7 @@ export default function SocialPage() {
   }, [pendingAssignments]);
 
   useEffect(() => {
-    if (!activePost) {
+    if (!activePostId) {
       setActivePostMediaIndex(0);
       setOverlayReplies([]);
       setVisibleTopLevelReplyCount(INITIAL_TOP_LEVEL_COMMENTS);
@@ -804,8 +808,11 @@ export default function SocialPage() {
 
         return {
           id: entry.entryId,
+          serverEntryId: entry.entryId,
+          isPending: false,
           author: authorLabel,
           authorPublicAddress: entry.authorPublicAddress,
+          reactionScopeId: entry.reactionScopeId,
           authorCommitment: entry.authorCommitment,
           time: entry.createdAtUnixMs ? formatRelativeTime(entry.createdAtUnixMs) : "now",
           text: entry.content ?? "",
@@ -838,7 +845,7 @@ export default function SocialPage() {
       setInlineComposerRootId(null);
 
       const result = await getSocialCommentsPage(
-        activePost.id,
+        activePostId,
         credentials?.signingPublicKey ?? null,
         !!credentials?.signingPublicKey,
         INITIAL_TOP_LEVEL_COMMENTS
@@ -873,7 +880,7 @@ export default function SocialPage() {
     return () => {
       cancelled = true;
     };
-  }, [activePost, credentials?.signingPublicKey, ownAddressNormalized, ownAuthorLabel]);
+  }, [activePostId, credentials?.signingPublicKey, ownAddressNormalized, ownAuthorLabel]);
 
   useEffect(() => {
     if (!credentials?.signingPublicKey || !feedWallPosts.length) {
@@ -941,6 +948,21 @@ export default function SocialPage() {
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        if (inlineComposerTargetId || inlineReplyDraft.trim().length > 0) {
+          event.preventDefault();
+          setInlineComposerTargetId(null);
+          setInlineComposerRootId(null);
+          setInlineReplyDraft("");
+          return;
+        }
+
+        if (isTopComposerOpen || topReplyDraft.trim().length > 0) {
+          event.preventDefault();
+          setIsTopComposerOpen(false);
+          setTopReplyDraft("");
+          return;
+        }
+
         setActivePostId(null);
         return;
       }
@@ -964,10 +986,10 @@ export default function SocialPage() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activePost]);
+  }, [activePost, inlineComposerTargetId, inlineReplyDraft, isTopComposerOpen, topReplyDraft]);
 
   useEffect(() => {
-    if (!activePost) {
+    if (!activePostId) {
       return;
     }
 
@@ -979,7 +1001,37 @@ export default function SocialPage() {
     window.setTimeout(() => {
       focusTarget.focus();
     }, 0);
-  }, [activePost]);
+  }, [activePostId]);
+
+  useEffect(() => {
+    if (!activePost || !isTopComposerOpen) {
+      return;
+    }
+
+    const composerInput = topComposerInputRef.current;
+    if (!composerInput) {
+      return;
+    }
+
+    window.setTimeout(() => {
+      composerInput.focus();
+    }, 0);
+  }, [activePost, isTopComposerOpen]);
+
+  useEffect(() => {
+    if (!activePost || !inlineComposerTargetId) {
+      return;
+    }
+
+    const composerInput = inlineComposerInputRef.current;
+    if (!composerInput) {
+      return;
+    }
+
+    window.setTimeout(() => {
+      composerInput.focus();
+    }, 0);
+  }, [activePost, inlineComposerTargetId]);
 
   useEffect(() => {
     if (!isFeedComposerExpanded || activePost) {
@@ -1040,6 +1092,7 @@ export default function SocialPage() {
     const newReply: ReplyItem = {
       id: optimisticId,
       serverEntryId: undefined,
+      isPending: true,
       author: ownAuthorLabel,
       authorPublicAddress: credentials?.signingPublicKey,
       time: "now",
@@ -1052,6 +1105,14 @@ export default function SocialPage() {
     };
 
     setOverlayReplies((prev) => [newReply, ...prev]);
+    setFeedWallPosts((current) =>
+      current.map((post) =>
+        post.id === activePost.id
+          ? { ...post, replyCount: post.replyCount + 1 }
+          : post
+      )
+    );
+    setIsTopComposerOpen(false);
     setTopReplyDraft("");
     clearPendingSocialThreadDraft(activePost.id);
 
@@ -1059,6 +1120,13 @@ export default function SocialPage() {
       const result = await createSocialThreadEntry(activePost.id, trimmed);
       if (!result.success || !result.entryId) {
         setOverlayReplies((current) => current.filter((entry) => entry.id !== optimisticId));
+        setFeedWallPosts((current) =>
+          current.map((post) =>
+            post.id === activePost.id
+              ? { ...post, replyCount: Math.max(0, post.replyCount - 1) }
+              : post
+          )
+        );
         addUiToast(result.message || "Failed to submit comment.");
         return;
       }
@@ -1066,7 +1134,7 @@ export default function SocialPage() {
       setOverlayReplies((current) =>
         current.map((entry) =>
           entry.id === optimisticId
-            ? { ...entry, serverEntryId: result.entryId! }
+            ? { ...entry, serverEntryId: result.entryId!, isPending: false }
             : entry
         )
       );
@@ -1088,6 +1156,7 @@ export default function SocialPage() {
     const newReply: ReplyItem = {
       id: optimisticId,
       serverEntryId: undefined,
+      isPending: true,
       author: ownAuthorLabel,
       authorPublicAddress: credentials?.signingPublicKey,
       time: "now",
@@ -1107,6 +1176,13 @@ export default function SocialPage() {
       );
       return insertReplyInThread(nextWithCount, newReply, inlineComposerRootId);
     });
+    setFeedWallPosts((current) =>
+      current.map((post) =>
+        post.id === activePost.id
+          ? { ...post, replyCount: post.replyCount + 1 }
+          : post
+      )
+    );
     setLoadedReplyThreads((current) => ({ ...current, [inlineComposerRootId]: true }));
     setVisibleRepliesPerThread((current) => ({
       ...current,
@@ -1121,6 +1197,13 @@ export default function SocialPage() {
       const result = await createSocialThreadEntry(activePost.id, trimmed, resolvedReplyTargetId);
       if (!result.success || !result.entryId) {
         setOverlayReplies((current) => current.filter((entry) => entry.id !== optimisticId));
+        setFeedWallPosts((current) =>
+          current.map((post) =>
+            post.id === activePost.id
+              ? { ...post, replyCount: Math.max(0, post.replyCount - 1) }
+              : post
+          )
+        );
         addUiToast(result.message || "Failed to submit reply.");
         return;
       }
@@ -1128,7 +1211,7 @@ export default function SocialPage() {
       setOverlayReplies((current) =>
         current.map((entry) =>
           entry.id === optimisticId
-            ? { ...entry, serverEntryId: result.entryId! }
+            ? { ...entry, serverEntryId: result.entryId!, isPending: false }
             : entry
         )
       );
@@ -1200,6 +1283,7 @@ export default function SocialPage() {
               ? `${entry.authorPublicAddress.slice(0, 8)}...${entry.authorPublicAddress.slice(-6)}`
               : "Unknown"),
       authorPublicAddress: entry.authorPublicAddress,
+      reactionScopeId: entry.reactionScopeId,
       authorCommitment: entry.authorCommitment,
       time: entry.createdAtUnixMs ? formatRelativeTime(entry.createdAtUnixMs) : "now",
       text: entry.content ?? "",
@@ -1504,7 +1588,7 @@ export default function SocialPage() {
             confirmedAtText,
             confirmationState: "confirmed" as const,
             text: post.content,
-            replyCount: existing?.replyCount ?? 0,
+            replyCount: post.replyCount ?? existing?.replyCount ?? 0,
             reactions: existing?.reactions ?? { ...EMPTY_REACTIONS },
             replies: existing?.replies ?? [],
             attachments: attachmentItems.length > 0 ? attachmentItems : existing?.attachments ?? [],
@@ -2194,6 +2278,7 @@ export default function SocialPage() {
                 visibility={post.visibility}
                 circleFeedIds={post.circleFeedIds}
                 authorCommitment={post.authorCommitment}
+                isOwnMessage={normalizePublicAddress(post.authorPublicAddress) === ownAddressNormalized}
                 canInteract={!!credentials?.signingPublicKey}
                 testIdPrefix={`post-reaction-strip-${post.id}`}
                 onRequireAccount={() => setShowAuthOverlay(true)}
@@ -2642,6 +2727,7 @@ export default function SocialPage() {
               visibility={activePost.visibility}
               circleFeedIds={activePost.circleFeedIds}
               authorCommitment={activePost.authorCommitment}
+              isOwnMessage={normalizePublicAddress(activePost.authorPublicAddress) === ownAddressNormalized}
               canInteract={!!credentials?.signingPublicKey}
               testIdPrefix={`post-detail-reaction-strip-${activePost.id}`}
               onRequireAccount={() => setShowAuthOverlay(true)}
@@ -2649,13 +2735,14 @@ export default function SocialPage() {
 
             {isTopComposerOpen && (
               <div className="mt-3 rounded-lg border border-hush-bg-hover p-3" data-testid="post-detail-composer-top">
-                <p className="text-[11px] text-hush-text-accent mb-2">Replying to post (mock rich text)</p>
+                <p className="text-[11px] text-hush-text-accent mb-2">Commenting on post (mock rich text)</p>
                 <textarea
+                  ref={topComposerInputRef}
                   className="w-full min-h-24 rounded-md border border-hush-bg-hover bg-hush-bg-dark px-3 py-2 text-sm text-hush-text-primary outline-none focus:border-hush-purple"
                   value={topReplyDraft}
                   onChange={(event) => setTopReplyDraft(event.currentTarget.value)}
                   data-testid="post-detail-composer-input"
-                  placeholder="Write your reply..."
+                  placeholder="Write your comment..."
                   onKeyDown={(event) => {
                     if (event.key === "Enter" && !event.ctrlKey) {
                       event.preventDefault();
@@ -2672,7 +2759,7 @@ export default function SocialPage() {
                     disabled={topReplyDraft.trim().length === 0}
                     data-testid="post-detail-composer-send"
                   >
-                    Reply
+                    Comment
                   </button>
                 </div>
               </div>
@@ -2695,27 +2782,6 @@ export default function SocialPage() {
                         <span className="text-[10px] text-hush-text-accent">{reply.time}</span>
                       </div>
                       <p className="text-xs text-hush-text-accent">{reply.text}</p>
-                      <SocialPostReactions
-                        postId={reply.id}
-                        reactionScopeId={activePost.reactionScopeId ?? activePost.id}
-                        visibility={activePost.visibility}
-                        circleFeedIds={activePost.circleFeedIds}
-                        authorCommitment={activePost.authorCommitment}
-                        canInteract={!!credentials?.signingPublicKey}
-                        testIdPrefix={`post-detail-comment-reactions-${reply.id}`}
-                        onRequireAccount={() => {
-                          savePendingSocialThreadDraft({
-                            postId: activePost.id,
-                            mode: inlineComposerTargetId ? "inline" : "top-level",
-                            draft: inlineComposerTargetId ? inlineReplyDraft : topReplyDraft,
-                            targetReplyId: inlineComposerTargetId,
-                            threadRootId: inlineComposerRootId,
-                            source: "feed-wall",
-                            createdAtMs: Date.now(),
-                          });
-                          setShowAuthOverlay(true);
-                        }}
-                      />
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         <button
                           type="button"
@@ -2725,14 +2791,6 @@ export default function SocialPage() {
                         >
                           <MessageCircle className="w-3 h-3" />
                           Reply
-                        </button>
-                        <button
-                          type="button"
-                          className="inline-flex items-center gap-1 rounded-full border border-hush-purple/40 px-2 py-1 text-[11px] text-hush-purple hover:bg-hush-purple/10"
-                          data-testid={`post-detail-reply-add-${reply.id}`}
-                        >
-                          <SmilePlus className="w-3 h-3" />
-                          Add
                         </button>
                         {(reply.childReplyCount ?? threadReplies.length) > 0 ? (
                           <button
@@ -2749,9 +2807,33 @@ export default function SocialPage() {
                           </button>
                         ) : null}
                       </div>
+                      <SocialPostReactions
+                        postId={reply.id}
+                        reactionMessageId={reply.isPending ? null : (reply.serverEntryId ?? reply.id)}
+                        reactionScopeId={reply.reactionScopeId ?? activePost.reactionScopeId ?? activePost.id}
+                        visibility={activePost.visibility}
+                        circleFeedIds={activePost.circleFeedIds}
+                        authorCommitment={reply.authorCommitment}
+                        isOwnMessage={normalizePublicAddress(reply.authorPublicAddress) === ownAddressNormalized}
+                        canInteract={!!credentials?.signingPublicKey}
+                        testIdPrefix={`post-detail-comment-reactions-${reply.id}`}
+                        onRequireAccount={() => {
+                          savePendingSocialThreadDraft({
+                            postId: activePost.id,
+                            mode: inlineComposerTargetId ? "inline" : "top-level",
+                            draft: inlineComposerTargetId ? inlineReplyDraft : topReplyDraft,
+                            targetReplyId: inlineComposerTargetId,
+                            threadRootId: inlineComposerRootId,
+                            source: "feed-wall",
+                            createdAtMs: Date.now(),
+                          });
+                          setShowAuthOverlay(true);
+                        }}
+                      />
                       {inlineComposerTargetId === reply.id && (
                         <div className="mt-2 rounded-lg border border-hush-bg-hover p-2 bg-hush-bg-dark/60" data-testid={`inline-composer-${reply.id}`}>
                           <textarea
+                            ref={inlineComposerInputRef}
                             className="w-full min-h-20 rounded-md border border-hush-bg-hover bg-hush-bg-dark px-2 py-1 text-xs text-hush-text-primary outline-none focus:border-hush-purple"
                             value={inlineReplyDraft}
                             onChange={(event) => setInlineReplyDraft(event.currentTarget.value)}
@@ -2788,12 +2870,25 @@ export default function SocialPage() {
                             <span className="text-[10px] text-hush-text-accent">{childReply.time}</span>
                           </div>
                           <p className="text-xs text-hush-text-accent">{childReply.text}</p>
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1 rounded-full border border-hush-bg-hover px-2 py-1 text-[11px] text-hush-text-accent hover:bg-hush-bg-hover"
+                              data-testid={`post-detail-reply-reply-${childReply.id}`}
+                              onClick={() => openReplyToReplyComposer(childReply)}
+                            >
+                              <MessageCircle className="w-3 h-3" />
+                              Reply
+                            </button>
+                          </div>
                           <SocialPostReactions
                             postId={childReply.id}
-                            reactionScopeId={activePost.reactionScopeId ?? activePost.id}
+                            reactionMessageId={childReply.isPending ? null : (childReply.serverEntryId ?? childReply.id)}
+                            reactionScopeId={childReply.reactionScopeId ?? activePost.reactionScopeId ?? activePost.id}
                             visibility={activePost.visibility}
                             circleFeedIds={activePost.circleFeedIds}
-                            authorCommitment={activePost.authorCommitment}
+                            authorCommitment={childReply.authorCommitment}
+                            isOwnMessage={normalizePublicAddress(childReply.authorPublicAddress) === ownAddressNormalized}
                             canInteract={!!credentials?.signingPublicKey}
                             testIdPrefix={`post-detail-comment-reactions-${childReply.id}`}
                             onRequireAccount={() => {
@@ -2809,28 +2904,10 @@ export default function SocialPage() {
                               setShowAuthOverlay(true);
                             }}
                           />
-                          <div className="mt-2 flex flex-wrap items-center gap-2">
-                            <button
-                              type="button"
-                              className="inline-flex items-center gap-1 rounded-full border border-hush-bg-hover px-2 py-1 text-[11px] text-hush-text-accent hover:bg-hush-bg-hover"
-                              data-testid={`post-detail-reply-reply-${childReply.id}`}
-                              onClick={() => openReplyToReplyComposer(childReply)}
-                            >
-                              <MessageCircle className="w-3 h-3" />
-                              Reply
-                            </button>
-                            <button
-                              type="button"
-                              className="inline-flex items-center gap-1 rounded-full border border-hush-purple/40 px-2 py-1 text-[11px] text-hush-purple hover:bg-hush-purple/10"
-                              data-testid={`post-detail-reply-add-${childReply.id}`}
-                            >
-                              <SmilePlus className="w-3 h-3" />
-                              Add
-                            </button>
-                          </div>
                           {inlineComposerTargetId === childReply.id && (
                             <div className="mt-2 rounded-lg border border-hush-bg-hover p-2 bg-hush-bg-dark/60" data-testid={`inline-composer-${childReply.id}`}>
                               <textarea
+                                ref={inlineComposerInputRef}
                                 className="w-full min-h-20 rounded-md border border-hush-bg-hover bg-hush-bg-dark px-2 py-1 text-xs text-hush-text-primary outline-none focus:border-hush-purple"
                                 value={inlineReplyDraft}
                                 onChange={(event) => setInlineReplyDraft(event.currentTarget.value)}

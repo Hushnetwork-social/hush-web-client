@@ -8,6 +8,7 @@ export type FeedWallPostContract = {
   content: string;
   createdAtBlock: number;
   createdAtUnixMs: number;
+  replyCount?: number;
   visibility: "open" | "private";
   circleFeedIds: string[];
   attachments: {

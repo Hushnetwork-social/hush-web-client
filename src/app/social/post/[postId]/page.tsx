@@ -84,6 +84,10 @@ function readRequesterAddressFromStorage(): string | null {
   }
 }
 
+function normalizePublicAddress(address?: string | null): string {
+  return (address ?? "").trim().toLowerCase();
+}
+
 export default function SocialPostPermalinkPage() {
   const params = useParams<{ postId: string }>();
   const searchParams = useSearchParams();
@@ -434,6 +438,7 @@ export default function SocialPostPermalinkPage() {
         ? `Confirmed at block ${permalink.createdAtBlock}`
         : "Confirmed";
   const requesterForMedia = readRequesterAddressFromStorage();
+  const requesterAddressNormalized = normalizePublicAddress(requesterForMedia);
 
   return (
     <section className="h-full w-full overflow-y-auto p-4" data-testid="social-permalink-layout">
@@ -556,6 +561,7 @@ export default function SocialPostPermalinkPage() {
             visibility={permalink.circleFeedIds.length > 0 ? "private" : "open"}
             circleFeedIds={permalink.circleFeedIds}
             authorCommitment={permalink.authorCommitment}
+            isOwnMessage={normalizePublicAddress(permalink.authorPublicAddress) === requesterAddressNormalized}
             canInteract={permalink.canInteract}
             testIdPrefix="social-permalink-reactions"
             onRequireAccount={() => {

@@ -1,7 +1,11 @@
 export type SocialThreadEntry = {
   id: string;
   serverEntryId?: string;
+  isPending?: boolean;
   author: string;
+  authorPublicAddress?: string;
+  reactionScopeId?: string;
+  authorCommitment?: string;
   time: string;
   text: string;
   reactions: Record<string, number>;
