@@ -2807,9 +2807,12 @@ export default function SocialPage() {
             onClick={(event) => event.stopPropagation()}
             tabIndex={-1}
           >
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div className="min-w-0 flex items-center gap-2">
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div className="min-w-0">
                 <p className="text-hush-text-primary font-semibold">{activePost.author}</p>
+                <p className="mt-1 text-xs text-hush-text-accent" data-testid="post-detail-confirmed-at">
+                  {activePost.time}
+                </p>
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <FollowAuthorButton
@@ -2817,15 +2820,14 @@ export default function SocialPage() {
                   testId={`follow-author-post-detail-${activePost.id}`}
                   onClick={() => void submitFollowAuthor(activePost.authorPublicAddress, activePost.followState)}
                 />
-                <span className="text-xs text-hush-text-accent">{activePost.time}</span>
                 <button
                   type="button"
-                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-hush-text-accent hover:bg-hush-bg-hover"
+                  aria-label="Close post detail"
+                  className="inline-flex items-center rounded-md px-2 py-1 text-xs text-hush-text-accent hover:bg-hush-bg-hover"
                   onClick={() => setActivePostId(null)}
                   data-testid="close-post-detail"
                 >
                   <X className="w-3.5 h-3.5" />
-                  Close
                 </button>
               </div>
             </div>

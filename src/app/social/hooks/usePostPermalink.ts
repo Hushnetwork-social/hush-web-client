@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
+import { getApiBaseUrl, isTauri } from "@/lib/api-config";
 
 type UsePostPermalinkParams = {
   onToast: (message: string) => void;
@@ -11,7 +12,9 @@ export function usePostPermalink({ onToast }: UsePostPermalinkParams) {
     if (typeof window === "undefined") {
       return `/social/post/${postId}`;
     }
-    return `${window.location.origin}/social/post/${postId}`;
+
+    const baseUrl = isTauri() ? getApiBaseUrl() : window.location.origin;
+    return `${baseUrl}/social/post/${postId}`;
   }, []);
 
   const copyPostPermalink = useCallback(
