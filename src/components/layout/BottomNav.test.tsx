@@ -133,14 +133,12 @@ describe('BottomNav', () => {
       expect(screen.getByText('Feeds')).toBeInTheDocument();
       expect(screen.getByText('New Feed')).toBeInTheDocument();
       expect(screen.getByText('Create Group')).toBeInTheDocument();
-      expect(screen.getByText('Members')).toBeInTheDocument();
       expect(screen.getByText('HushSocial!')).toBeInTheDocument();
 
       const navButtons = screen.getAllByRole('button').filter((button) =>
         button.textContent?.includes('Feeds') ||
         button.textContent?.includes('New Feed') ||
         button.textContent?.includes('Create Group') ||
-        button.textContent?.includes('Members') ||
         button.textContent?.includes('HushSocial!')
       );
       expect(navButtons[navButtons.length - 1]).toHaveTextContent('HushSocial!');

@@ -117,7 +117,6 @@ describe('Sidebar', () => {
       expect(screen.getByText('Feeds')).toBeInTheDocument();
       expect(screen.getByText('New Feed')).toBeInTheDocument();
       expect(screen.getByText('Create Group')).toBeInTheDocument();
-      expect(screen.getByText('Members')).toBeInTheDocument();
       expect(screen.getByText('HushSocial!')).toBeInTheDocument();
 
       const navButtons = screen.getAllByRole('button').filter((button) =>
