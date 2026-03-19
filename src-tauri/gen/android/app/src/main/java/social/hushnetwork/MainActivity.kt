@@ -111,18 +111,24 @@ class MainActivity : TauriActivity() {
             // Only handle VIEW actions with data URI
             if (it.action == Intent.ACTION_VIEW && it.data != null) {
                 val uri: Uri = it.data!!
-                // Only handle our domain
-                if (uri.host == "chat.hushnetwork.social") {
-                    val path = uri.path
-                    if (!path.isNullOrEmpty()) {
-                        Log.d(TAG, "Deep link received: $path")
-                        // Store for TypeScript to consume via Tauri command
-                        FcmService.setPendingDeepLink(this, path)
-                    } else {
-                        Log.d(TAG, "Deep link with empty path, ignoring")
+                val path = when {
+                    uri.scheme == "hushfeeds" && uri.host == "social" && uri.path?.startsWith("/post/") == true -> {
+                        "/social${uri.path}"
                     }
+                    uri.scheme == "hushfeeds" && uri.host == "join" && !uri.path.isNullOrEmpty() -> {
+                        "/join${uri.path}"
+                    }
+                    uri.host == "chat.hushnetwork.social" && !uri.path.isNullOrEmpty() -> {
+                        uri.path
+                    }
+                    else -> null
+                }
+
+                if (!path.isNullOrEmpty()) {
+                    Log.d(TAG, "Deep link received: $path")
+                    FcmService.setPendingDeepLink(this, path)
                 } else {
-                    Log.d(TAG, "Deep link from unknown host: ${uri.host}")
+                    Log.d(TAG, "Unsupported deep link received: $uri")
                 }
             }
         }

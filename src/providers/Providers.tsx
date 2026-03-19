@@ -2,7 +2,7 @@
 
 import { type ReactNode } from 'react';
 import { SyncProvider } from '@/lib/sync';
-import { useUnreadBadge, useAutoUpdate, usePushInitializer } from '@/hooks';
+import { useUnreadBadge, useAutoUpdate, usePushInitializer, useDeepLinkNavigation } from '@/hooks';
 import { UpdateOverlay } from '@/components/updates';
 
 // Sync interval in milliseconds (configurable via environment variable)
@@ -43,12 +43,18 @@ function PushInitializer(): null {
   return null;
 }
 
+function DeepLinkInitializer(): null {
+  useDeepLinkNavigation();
+  return null;
+}
+
 export function Providers({ children }: ProvidersProps) {
   return (
     <SyncProvider config={{ intervalMs: SYNC_INTERVAL_MS }}>
       <UnreadBadgeInitializer />
       <AutoUpdateInitializer />
       <PushInitializer />
+      <DeepLinkInitializer />
       {children}
       <UpdateOverlay />
     </SyncProvider>

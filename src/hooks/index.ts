@@ -9,6 +9,7 @@ export * from './useCopyToClipboard';
 export * from './useUnreadBadge';
 export * from './useAutoUpdate';
 export * from './usePushInitializer';
+export * from './useDeepLinkNavigation';
 export * from './useVirtualKeyboard';
 export * from './useVisualViewportHeight';
 export * from './useMentionDataLossCheck';

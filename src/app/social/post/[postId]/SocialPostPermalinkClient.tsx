@@ -25,6 +25,8 @@ import {
   resolveSocialFollowButtonState,
   type SocialAuthorFollowStateContract,
 } from "@/modules/social/contracts";
+import { buildTauriPostDeepLink } from "@/lib/deepLinks";
+import { isTauri } from "@/lib/platform";
 
 type AccessState = "allowed" | "guest_denied" | "unauthorized_denied" | "not_found";
 
@@ -133,6 +135,30 @@ export default function SocialPostPermalinkClient() {
   };
 
   const accessOverride = useMemo(() => resolveAccessOverride(searchParams.get("access")), [searchParams]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || process.env.NODE_ENV === "test" || isTauri()) {
+      return;
+    }
+
+    if (!routePostId || routePostId === "_placeholder") {
+      return;
+    }
+
+    const handoffKey = `hush.deep-link.handoff:${routePostId}`;
+    if (window.sessionStorage.getItem(handoffKey) === "1") {
+      return;
+    }
+
+    window.sessionStorage.setItem(handoffKey, "1");
+    const timer = window.setTimeout(() => {
+      window.location.href = buildTauriPostDeepLink(routePostId);
+    }, 150);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [routePostId]);
 
   useEffect(() => {
     let cancelled = false;
