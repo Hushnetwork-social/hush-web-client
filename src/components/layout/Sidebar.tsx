@@ -40,7 +40,9 @@ export function Sidebar({
   guestActionInitials = "CU",
 }: SidebarProps) {
   const [showUserMenu, setShowUserMenu] = useState(false);
-  const navItems = getAppNavItems(activeApp, crossAppBadges);
+  const navItems = getAppNavItems(activeApp, crossAppBadges).filter(
+    (item) => !(activeApp === "social" && item.id === "new-post")
+  );
 
   return (
     <aside className="w-[280px] flex-shrink-0 flex flex-col min-h-0 max-h-full overflow-hidden">

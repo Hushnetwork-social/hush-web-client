@@ -135,7 +135,7 @@ describe('Sidebar', () => {
       );
 
       expect(screen.getByText('Search')).toBeInTheDocument();
-      expect(screen.getByText('New Post')).toBeInTheDocument();
+      expect(screen.queryByText('New Post')).not.toBeInTheDocument();
       expect(screen.getByText('HushFeeds!')).toBeInTheDocument();
       expect(screen.queryByText('Feeds')).not.toBeInTheDocument();
     });
