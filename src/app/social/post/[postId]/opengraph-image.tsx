@@ -37,6 +37,8 @@ export default async function OpenGraphImage({ params }: PageProps) {
       ? summarizePostContent(payload.content || payload.openGraph?.description)
       : payload?.openGraph?.description?.trim() || "Sign in to view this post.";
   const initials = getDisplayInitials(displayName);
+  const compactPreview =
+    previewText.length > 120 ? `${previewText.slice(0, 117).trimEnd()}...` : previewText;
 
   return new ImageResponse(
     (
@@ -46,13 +48,35 @@ export default async function OpenGraphImage({ params }: PageProps) {
           width: "100%",
           height: "100%",
           background:
-            "linear-gradient(135deg, rgba(15,24,45,1) 0%, rgba(31,44,79,1) 55%, rgba(80,64,153,1) 100%)",
+            "linear-gradient(135deg, rgba(11,17,33,1) 0%, rgba(21,31,59,1) 52%, rgba(71,61,132,1) 100%)",
           color: "#f4eeff",
-          padding: "48px",
+          padding: "42px",
           fontFamily: "Arial, sans-serif",
           position: "relative",
         }}
       >
+        <div
+          style={{
+            position: "absolute",
+            width: "420px",
+            height: "420px",
+            right: "-120px",
+            top: "-90px",
+            borderRadius: "999px",
+            background: "radial-gradient(circle, rgba(177,146,255,0.26) 0%, rgba(177,146,255,0) 68%)",
+          }}
+        />
+        <div
+          style={{
+            position: "absolute",
+            width: "320px",
+            height: "320px",
+            left: "-90px",
+            bottom: "-120px",
+            borderRadius: "999px",
+            background: "radial-gradient(circle, rgba(80,224,210,0.14) 0%, rgba(80,224,210,0) 70%)",
+          }}
+        />
         <div
           style={{
             position: "absolute",
@@ -69,33 +93,56 @@ export default async function OpenGraphImage({ params }: PageProps) {
             width: "100%",
             height: "100%",
             borderRadius: "24px",
-            padding: "28px",
-            background: "rgba(7, 11, 24, 0.46)",
+            padding: "30px",
+            background: "rgba(6, 10, 22, 0.52)",
+            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: "24px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "24px" }}>
             <div
               style={{
                 display: "flex",
-                width: "112px",
-                height: "112px",
-                borderRadius: "999px",
                 alignItems: "center",
-                justifyContent: "center",
-                background: "rgba(140, 108, 255, 0.18)",
-                border: "3px solid rgba(170, 145, 255, 0.55)",
-                fontSize: "40px",
-                fontWeight: 700,
-                letterSpacing: "0.04em",
+                gap: "22px",
               }}
             >
-              {initials}
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-              <div style={{ display: "flex", fontSize: "20px", color: "#bfaeff", fontWeight: 700 }}>
-                HushSocial!
+              <div
+                style={{
+                  display: "flex",
+                  width: "120px",
+                  height: "120px",
+                  borderRadius: "999px",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "linear-gradient(180deg, rgba(144,112,255,0.28) 0%, rgba(104,84,208,0.18) 100%)",
+                  border: "3px solid rgba(191,174,255,0.55)",
+                  fontSize: "42px",
+                  fontWeight: 700,
+                  letterSpacing: "0.04em",
+                }}
+              >
+                {initials}
               </div>
-              <div style={{ display: "flex", fontSize: "42px", fontWeight: 700 }}>{displayName}</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px", maxWidth: "660px" }}>
+                <div style={{ display: "flex", fontSize: "18px", color: "#c7b6ff", fontWeight: 700, letterSpacing: "0.08em" }}>
+                  HUSHSOCIAL
+                </div>
+                <div style={{ display: "flex", fontSize: "46px", fontWeight: 700, lineHeight: 1.05 }}>{displayName}</div>
+              </div>
+            </div>
+            <div
+              style={{
+                display: "flex",
+                padding: "12px 18px",
+                borderRadius: "999px",
+                border: "1px solid rgba(190,171,255,0.28)",
+                background: "rgba(135,109,255,0.12)",
+                color: "#d6c9ff",
+                fontSize: "18px",
+                fontWeight: 600,
+              }}
+            >
+              HushNetwork.social
             </div>
           </div>
 
@@ -103,20 +150,21 @@ export default async function OpenGraphImage({ params }: PageProps) {
             style={{
               display: "flex",
               flexDirection: "column",
-              gap: "18px",
-              marginTop: "24px",
+              gap: "20px",
+              marginTop: "18px",
             }}
           >
             <div
               style={{
                 display: "flex",
-                fontSize: "44px",
+                fontSize: "48px",
                 fontWeight: 600,
-                lineHeight: 1.2,
+                lineHeight: 1.14,
                 whiteSpace: "pre-wrap",
+                maxWidth: "900px",
               }}
             >
-              {previewText}
+              {compactPreview}
             </div>
           </div>
 
@@ -125,12 +173,12 @@ export default async function OpenGraphImage({ params }: PageProps) {
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
-              color: "#c8b7ff",
-              fontSize: "24px",
+              color: "#bbaaff",
+              fontSize: "22px",
             }}
           >
-            <div style={{ display: "flex" }}>HushNetwork.social</div>
-            <div style={{ display: "flex" }}>Secure decentralized social posts</div>
+            <div style={{ display: "flex" }}>Secure decentralized social post</div>
+            <div style={{ display: "flex", color: "#8f83c7" }}>Reply, react, and follow on HushSocial</div>
           </div>
         </div>
       </div>
