@@ -179,6 +179,12 @@ export function useAutoUpdate(): void {
     }
   }, [setStatus, setUpdateInfo, setShowOverlay]);
 
+  // Dismiss the overlay
+  const dismiss = useCallback(() => {
+    setShowOverlay(false);
+    reset();
+  }, [setShowOverlay, reset]);
+
   // Open download URL
   const openDownloadPage = useCallback(async () => {
     const url = currentDownloadUrl || DOWNLOADS_PAGE;
@@ -186,6 +192,22 @@ export function useAutoUpdate(): void {
 
     if (isTauri()) {
       try {
+        const platform = await detectPlatformAsync();
+
+        if (
+          platform === 'tauri-android' &&
+          typeof window !== 'undefined' &&
+          typeof window.HushNative?.downloadAndInstallApk === 'function'
+        ) {
+          const started = window.HushNative.downloadAndInstallApk(url);
+          if (!started) {
+            throw new Error('Android updater bridge did not start the download');
+          }
+
+          dismiss();
+          return;
+        }
+
         const { open } = await import('@tauri-apps/plugin-shell');
         await open(url);
       } catch (error) {
@@ -196,13 +218,7 @@ export function useAutoUpdate(): void {
     } else {
       window.open(url, '_blank');
     }
-  }, []);
-
-  // Dismiss the overlay
-  const dismiss = useCallback(() => {
-    setShowOverlay(false);
-    reset();
-  }, [setShowOverlay, reset]);
+  }, [dismiss]);
 
   // Check for updates on mount (with delay)
   useEffect(() => {

@@ -1,9 +1,16 @@
 package social.hushnetwork
 
+import android.app.DownloadManager
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.database.Cursor
 import android.os.Build
-import android.webkit.JavascriptInterface
+import android.os.Environment
 import android.util.Log
+import android.webkit.JavascriptInterface
+import androidx.core.content.FileProvider
+import java.io.File
 
 /**
  * JavaScript bridge for exposing native Android functionality to the WebView.
@@ -145,5 +152,109 @@ class HushNativeBridge(private val context: Context) {
     fun clearPendingDeepLink() {
         Log.d(TAG, "clearPendingDeepLink called")
         FcmService.clearPendingDeepLink(context)
+    }
+
+    /**
+     * Download an APK via Android's DownloadManager and hand it off to the
+     * package installer when the download completes.
+     *
+     * @return true if the download was successfully queued
+     */
+    @JavascriptInterface
+    fun downloadAndInstallApk(url: String): Boolean {
+        return try {
+            val uri = android.net.Uri.parse(url)
+            val downloadManager =
+                context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
+                    ?: return false
+
+            val fileName = uri.lastPathSegment?.takeIf { it.endsWith(".apk") }
+                ?: "hush-feeds-update.apk"
+
+            val request = DownloadManager.Request(uri)
+                .setTitle("Hush Feeds update")
+                .setDescription("Downloading update package")
+                .setMimeType("application/vnd.android.package-archive")
+                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                .setAllowedOverMetered(true)
+                .setAllowedOverRoaming(true)
+                .setDestinationInExternalFilesDir(
+                    context,
+                    Environment.DIRECTORY_DOWNLOADS,
+                    fileName
+                )
+
+            val downloadId = downloadManager.enqueue(request)
+            Log.d(TAG, "downloadAndInstallApk queued: id=$downloadId, file=$fileName")
+
+            val receiver = object : android.content.BroadcastReceiver() {
+                override fun onReceive(ctx: Context?, intent: Intent?) {
+                    val completedDownloadId = intent?.getLongExtra(
+                        DownloadManager.EXTRA_DOWNLOAD_ID,
+                        -1L
+                    ) ?: -1L
+
+                    if (completedDownloadId != downloadId) {
+                        return
+                    }
+
+                    try {
+                        context.unregisterReceiver(this)
+                    } catch (_: IllegalArgumentException) {
+                    }
+
+                    val query = DownloadManager.Query().setFilterById(downloadId)
+                    val cursor: Cursor = downloadManager.query(query) ?: return
+                    cursor.use {
+                        if (!it.moveToFirst()) {
+                            Log.w(TAG, "downloadAndInstallApk: download row not found")
+                            return
+                        }
+
+                        val status = it.getInt(
+                            it.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)
+                        )
+
+                        if (status != DownloadManager.STATUS_SUCCESSFUL) {
+                            val reason = it.getInt(
+                                it.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON)
+                            )
+                            Log.w(TAG, "downloadAndInstallApk failed: status=$status reason=$reason")
+                            return
+                        }
+
+                        val downloadsDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+                        val downloadedFile = File(downloadsDir, fileName)
+                        val apkUri = FileProvider.getUriForFile(
+                            context,
+                            "${context.packageName}.fileprovider",
+                            downloadedFile
+                        )
+
+                        val installIntent = Intent(Intent.ACTION_VIEW).apply {
+                            setDataAndType(apkUri, "application/vnd.android.package-archive")
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+
+                        Log.d(TAG, "Launching installer for downloaded APK: $fileName")
+                        context.startActivity(installIntent)
+                    }
+                }
+            }
+
+            val filter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("DEPRECATION")
+                context.registerReceiver(receiver, filter)
+            }
+
+            true
+        } catch (error: Exception) {
+            Log.e(TAG, "downloadAndInstallApk failed", error)
+            false
+        }
     }
 }

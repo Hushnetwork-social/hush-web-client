@@ -41,6 +41,7 @@ interface HushNativeBridge {
   clearPendingNavigation(): void;
   getPendingDeepLink(): string;
   clearPendingDeepLink(): void;
+  downloadAndInstallApk(url: string): boolean;
 }
 
 // Extend Window interface to include the native bridge
