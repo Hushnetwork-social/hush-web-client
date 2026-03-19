@@ -2,9 +2,15 @@ mod fcm;
 
 #[cfg(desktop)]
 use tauri::{
+    image::Image,
     tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState},
     Manager,
 };
+
+#[cfg(desktop)]
+fn app_icon() -> tauri::Result<Image<'static>> {
+    Image::from_bytes(include_bytes!("../icons/icon.png")).map(|icon| icon.to_owned())
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -34,8 +40,14 @@ pub fn run() {
             // Create system tray icon (desktop only)
             #[cfg(desktop)]
             {
+                let app_icon = app_icon()?;
+
+                if let Some(window) = app.get_webview_window("main") {
+                    window.set_icon(app_icon.clone())?;
+                }
+
                 let _tray = TrayIconBuilder::new()
-                    .icon(app.default_window_icon().unwrap().clone())
+                    .icon(app_icon)
                     .tooltip("Hush Feeds")
                     .on_tray_icon_event(|tray, event| {
                         // Show/focus main window on tray click
