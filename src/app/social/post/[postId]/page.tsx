@@ -4,7 +4,9 @@ import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { buildApiUrl } from "@/lib/api-config";
+import { useSyncContext } from "@/lib/sync";
 import { ContentCarousel } from "@/components/chat/ContentCarousel";
+import { FollowAuthorButton } from "@/components/social/FollowAuthorButton";
 import { SocialAuthPromptOverlay } from "@/components/social/SocialAuthPromptOverlay";
 import { SocialPostReactions } from "@/components/social/SocialPostReactions";
 import {
@@ -17,31 +19,16 @@ import {
 import { getAuthRoute, getSocialPostRoute } from "@/lib/navigation/appRoutes";
 import { resolveGuestIntentResumeAction } from "@/modules/social/guestIntentResume";
 import { createSocialThreadEntry, getSocialCommentsPage } from "@/modules/social/ThreadService";
+import { getSocialPostPermalink, type SocialPermalinkPayloadContract } from "@/modules/social/PermalinkService";
+import { followSocialAuthor } from "@/modules/social/FollowService";
+import {
+  resolveSocialFollowButtonState,
+  type SocialAuthorFollowStateContract,
+} from "@/modules/social/contracts";
 
 type AccessState = "allowed" | "guest_denied" | "unauthorized_denied" | "not_found";
 
-type PermalinkPayload = {
-  success: boolean;
-  message: string;
-  accessState: AccessState;
-  postId?: string;
-  reactionScopeId?: string;
-  authorPublicAddress?: string;
-  authorCommitment?: string;
-  content?: string;
-  createdAtBlock?: number;
-  createdAtUnixMs?: number;
-  canInteract: boolean;
-  circleFeedIds: string[];
-  attachments: {
-    attachmentId: string;
-    mimeType: string;
-    size: number;
-    fileName: string;
-    hash: string;
-    kind: "image" | "video";
-  }[];
-};
+type PermalinkPayload = SocialPermalinkPayloadContract;
 
 type PermalinkThreadReply = {
   id: string;
@@ -52,6 +39,7 @@ type PermalinkThreadReply = {
   time: string;
   text: string;
   createdAtMs: number;
+  followState?: SocialAuthorFollowStateContract;
 };
 
 function normalizePermalinkPayload(payload: PermalinkPayload): PermalinkPayload {
@@ -98,6 +86,7 @@ export default function SocialPostPermalinkPage() {
   const params = useParams<{ postId: string }>();
   const searchParams = useSearchParams();
   const routePostId = typeof params?.postId === "string" ? params.postId : "";
+  const { triggerSyncNow } = useSyncContext();
 
   const [permalink, setPermalink] = useState<PermalinkPayload | null>(null);
   const [authorName, setAuthorName] = useState<string>("Owner");
@@ -109,6 +98,10 @@ export default function SocialPostPermalinkPage() {
   const [topReplyTargetId, setTopReplyTargetId] = useState<string | null>(null);
   const [topReplyThreadRootId, setTopReplyThreadRootId] = useState<string | null>(null);
   const [localReplies, setLocalReplies] = useState<PermalinkThreadReply[]>([]);
+  const [followRefreshNonce, setFollowRefreshNonce] = useState(0);
+  const [pendingFollowAuthors, setPendingFollowAuthors] = useState<Record<string, boolean>>({});
+  const [followStateOverrides, setFollowStateOverrides] = useState<Record<string, SocialAuthorFollowStateContract>>({});
+  const [followError, setFollowError] = useState<string | null>(null);
   const [pendingAutoReactionIndex, setPendingAutoReactionIndex] = useState<number | null>(null);
   const pendingPermalinkIntentRef = useRef<{
     postId: string | null;
@@ -181,11 +174,11 @@ export default function SocialPostPermalinkPage() {
       }
 
       try {
-        const response = await fetch(buildApiUrl(`/api/social/posts/permalink?${qs.toString()}`), {
-          method: "GET",
-          cache: "no-store",
-        });
-        const payload = (await response.json()) as PermalinkPayload;
+        const payload = await getSocialPostPermalink(
+          routePostId,
+          requesterAddress,
+          requesterAddress !== null
+        );
 
         if (
           payload.accessState === "allowed" &&
@@ -270,10 +263,21 @@ export default function SocialPostPermalinkPage() {
     return () => {
       cancelled = true;
     };
-  }, [accessOverride, routePostId]);
+  }, [accessOverride, routePostId, followRefreshNonce]);
 
   useEffect(() => {
     setActiveMediaIndex(0);
+  }, [permalink?.postId]);
+
+  useEffect(() => {
+    const requesterAddress = readRequesterAddressFromStorage();
+    if (requesterAddress) {
+      return;
+    }
+
+    setPendingFollowAuthors({});
+    setFollowStateOverrides({});
+    setFollowError(null);
   }, [permalink?.postId]);
 
   useEffect(() => {
@@ -388,6 +392,7 @@ export default function SocialPostPermalinkPage() {
           time: entry.createdAtUnixMs ? new Date(entry.createdAtUnixMs).toLocaleString("en-GB") : "now",
           text: entry.content ?? "",
           createdAtMs: entry.createdAtUnixMs ?? Date.now(),
+          followState: entry.followState,
         }))
       );
     }
@@ -397,7 +402,7 @@ export default function SocialPostPermalinkPage() {
     return () => {
       cancelled = true;
     };
-  }, [permalink?.accessState, permalink?.postId]);
+  }, [permalink?.accessState, permalink?.postId, followRefreshNonce]);
 
   const savePermalinkDraft = () => {
     if (!permalink?.postId) {
@@ -436,6 +441,7 @@ export default function SocialPostPermalinkPage() {
         time: "now",
         text: trimmed,
         createdAtMs: Date.now(),
+        followState: undefined,
       },
       ...current,
     ]);
@@ -542,6 +548,79 @@ export default function SocialPostPermalinkPage() {
   const requesterForMedia = readRequesterAddressFromStorage();
   const requesterAddressNormalized = normalizePublicAddress(requesterForMedia);
   const isAuthenticatedViewer = requesterAddressNormalized.length > 0;
+  const getEffectiveFollowState = (
+    authorPublicAddress: string | undefined,
+    followState: SocialAuthorFollowStateContract | undefined
+  ) => {
+    const normalizedAuthorAddress = normalizePublicAddress(authorPublicAddress);
+    if (!normalizedAuthorAddress) {
+      return followState;
+    }
+
+    return followStateOverrides[normalizedAuthorAddress] ?? followState;
+  };
+
+  const getFollowButtonState = (
+    authorPublicAddress: string | undefined,
+    followState: SocialAuthorFollowStateContract | undefined
+  ) => {
+    const normalizedAuthorAddress = normalizePublicAddress(authorPublicAddress);
+    return resolveSocialFollowButtonState(
+      isAuthenticatedViewer,
+      getEffectiveFollowState(authorPublicAddress, followState),
+      normalizedAuthorAddress.length > 0 && pendingFollowAuthors[normalizedAuthorAddress] === true
+    );
+  };
+
+  const submitFollowAuthor = async (
+    authorPublicAddress: string | undefined,
+    followState: SocialAuthorFollowStateContract | undefined
+  ) => {
+    if (!requesterForMedia) {
+      setFollowError("Failed to follow author.");
+      return;
+    }
+
+    const normalizedAuthorAddress = normalizePublicAddress(authorPublicAddress);
+    if (!normalizedAuthorAddress || getFollowButtonState(authorPublicAddress, followState) !== "follow") {
+      return;
+    }
+
+    setFollowError(null);
+    setPendingFollowAuthors((current) => ({ ...current, [normalizedAuthorAddress]: true }));
+
+    try {
+      const result = await followSocialAuthor({
+        viewerPublicAddress: requesterForMedia,
+        authorPublicAddress: authorPublicAddress!.trim(),
+        requesterPublicAddress: requesterForMedia,
+      });
+
+      if (!result.success) {
+        if (result.requiresSyncRefresh || result.alreadyFollowing) {
+          await triggerSyncNow();
+          setFollowRefreshNonce((current) => current + 1);
+        }
+        setFollowError(result.message || "Failed to follow author.");
+        return;
+      }
+
+      setFollowStateOverrides((current) => ({
+        ...current,
+        [normalizedAuthorAddress]: { isFollowing: true, canFollow: false },
+      }));
+      if (result.requiresSyncRefresh) {
+        await triggerSyncNow();
+      }
+      setFollowRefreshNonce((current) => current + 1);
+    } finally {
+      setPendingFollowAuthors((current) => {
+        const next = { ...current };
+        delete next[normalizedAuthorAddress];
+        return next;
+      });
+    }
+  };
 
   return (
     <section className="h-full w-full overflow-y-auto p-4" data-testid="social-permalink-layout">
@@ -556,13 +635,28 @@ export default function SocialPostPermalinkPage() {
 
         <article className="mt-3 w-full min-h-[calc(100%-2rem)] rounded-xl border border-hush-bg-hover bg-hush-bg-dark p-4" data-testid="social-permalink-post-card">
           <div className="mb-2 flex items-center justify-between gap-3">
-            <p className="text-sm font-semibold text-hush-text-primary" data-testid="social-permalink-author-name">
-              {authorName}
-            </p>
-            <span className="text-xs text-hush-text-accent" data-testid="social-permalink-confirmed-at">
-              {createdAtLabel}
-            </span>
+            <div className="min-w-0 flex items-center gap-2">
+              <p className="text-sm font-semibold text-hush-text-primary" data-testid="social-permalink-author-name">
+                {authorName}
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <FollowAuthorButton
+                state={getFollowButtonState(permalink.authorPublicAddress, permalink.followState)}
+                testId="social-permalink-follow-author"
+                onClick={() => void submitFollowAuthor(permalink.authorPublicAddress, permalink.followState)}
+              />
+              <span className="text-xs text-hush-text-accent" data-testid="social-permalink-confirmed-at">
+                {createdAtLabel}
+              </span>
+            </div>
           </div>
+
+          {followError ? (
+            <p className="mb-2 text-xs text-red-300" data-testid="social-permalink-follow-error">
+              {followError}
+            </p>
+          ) : null}
 
           <p className="text-sm text-hush-text-accent whitespace-pre-wrap" data-testid="social-permalink-content">
             {permalink.content}
@@ -749,9 +843,16 @@ export default function SocialPostPermalinkPage() {
                     className="rounded-lg border border-hush-bg-hover p-3"
                     data-testid={`social-permalink-reply-${reply.id}`}
                   >
-                    <div className="mb-1 flex items-center justify-between">
-                      <p className="text-xs font-semibold text-hush-text-primary">{reply.author}</p>
-                      <span className="text-[10px] text-hush-text-accent">{reply.time}</span>
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <p className="min-w-0 text-xs font-semibold text-hush-text-primary">{reply.author}</p>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <FollowAuthorButton
+                          state={getFollowButtonState(reply.authorPublicAddress, reply.followState)}
+                          testId={`social-permalink-follow-reply-${reply.id}`}
+                          onClick={() => void submitFollowAuthor(reply.authorPublicAddress, reply.followState)}
+                        />
+                        <span className="text-[10px] text-hush-text-accent">{reply.time}</span>
+                      </div>
                     </div>
                     <p className="text-xs text-hush-text-accent">{reply.text}</p>
                     <SocialPostReactions

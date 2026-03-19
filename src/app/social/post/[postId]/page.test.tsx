@@ -6,6 +6,8 @@ let accessParam: string | null = null;
 let postIdParam = "post-123";
 const getSocialCommentsPageMock = vi.fn();
 const createSocialThreadEntryMock = vi.fn();
+const followSocialAuthorMock = vi.fn();
+const triggerSyncNowMock = vi.fn();
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ postId: postIdParam }),
@@ -63,6 +65,16 @@ vi.mock("@/modules/social/ThreadService", () => ({
   createSocialThreadEntry: (...args: unknown[]) => createSocialThreadEntryMock(...args),
 }));
 
+vi.mock("@/modules/social/FollowService", () => ({
+  followSocialAuthor: (...args: unknown[]) => followSocialAuthorMock(...args),
+}));
+
+vi.mock("@/lib/sync", () => ({
+  useSyncContext: () => ({
+    triggerSyncNow: triggerSyncNowMock,
+  }),
+}));
+
 describe("SocialPostPermalinkPage", () => {
   beforeEach(() => {
     accessParam = null;
@@ -74,6 +86,8 @@ describe("SocialPostPermalinkPage", () => {
     vi.restoreAllMocks();
     getSocialCommentsPageMock.mockReset();
     createSocialThreadEntryMock.mockReset();
+    followSocialAuthorMock.mockReset();
+    triggerSyncNowMock.mockReset();
     getSocialCommentsPageMock.mockResolvedValue({
       success: true,
       message: "",
@@ -86,6 +100,13 @@ describe("SocialPostPermalinkPage", () => {
       message: "ok",
       entryId: "thread-entry-1",
     });
+    followSocialAuthorMock.mockResolvedValue({
+      success: true,
+      message: "ok",
+      alreadyFollowing: false,
+      requiresSyncRefresh: true,
+    });
+    triggerSyncNowMock.mockResolvedValue(true);
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/api/social/posts/permalink")) {
@@ -134,6 +155,7 @@ describe("SocialPostPermalinkPage", () => {
     expect(screen.getByTestId("social-permalink-reactions-add")).toBeInTheDocument();
     expect(screen.getByTestId("social-permalink-comment")).toHaveTextContent("Reply");
     expect(screen.getByTestId("social-permalink-link")).toBeInTheDocument();
+    expect(screen.queryByTestId("social-permalink-follow-author")).not.toBeInTheDocument();
     expect(screen.queryByTestId("social-permalink-replies-title")).not.toBeInTheDocument();
     expect(screen.queryByTestId("social-permalink-replies-empty")).not.toBeInTheDocument();
   });
@@ -148,6 +170,7 @@ describe("SocialPostPermalinkPage", () => {
           authorPublicAddress: "03replyuser1234567890fedcba1234567890abcdef1234567890fedcba1234567890",
           createdAtUnixMs: 1735689600000,
           content: "Reply content",
+          followState: { isFollowing: false, canFollow: true },
         },
       ],
       paging: { initialPageSize: 10, loadMorePageSize: 10 },
@@ -186,6 +209,7 @@ describe("SocialPostPermalinkPage", () => {
           authorPublicAddress: "03replyuser1234567890fedcba1234567890abcdef1234567890fedcba1234567890",
           createdAtUnixMs: 1735689600000,
           content: "Reply content",
+          followState: { isFollowing: false, canFollow: true },
         },
       ],
       paging: { initialPageSize: 10, loadMorePageSize: 10 },
@@ -203,6 +227,7 @@ describe("SocialPostPermalinkPage", () => {
             accessState: "allowed",
             postId: "post-123",
             authorPublicAddress: "02abcdef1234567890fedcba1234567890abcdef1234567890fedcba1234567890",
+            followState: { isFollowing: false, canFollow: true },
             content: "Hello public world",
             canInteract: true,
             circleFeedIds: [],
@@ -246,8 +271,19 @@ describe("SocialPostPermalinkPage", () => {
       expect(screen.getByTestId("social-permalink-comment")).toHaveTextContent("Reply (1)");
       expect(screen.getByTestId("social-permalink-replies-title")).toHaveTextContent("Replies (1)");
     });
+    fireEvent.click(screen.getByTestId("social-permalink-follow-author"));
+    await waitFor(() => {
+      expect(followSocialAuthorMock).toHaveBeenCalledWith({
+        viewerPublicAddress: "02viewer1234567890fedcba1234567890abcdef1234567890fedcba1234567890",
+        authorPublicAddress: "02abcdef1234567890fedcba1234567890abcdef1234567890fedcba1234567890",
+        requesterPublicAddress: "02viewer1234567890fedcba1234567890abcdef1234567890fedcba1234567890",
+      });
+    });
+    expect(triggerSyncNowMock).toHaveBeenCalled();
+    expect(screen.getByTestId("social-permalink-follow-author")).toHaveTextContent("Following");
     expect(await screen.findByTestId("social-permalink-reply-reply-1")).toHaveTextContent("Reply User");
     expect(screen.getByTestId("social-permalink-reply-reply-1")).toHaveTextContent("Reply content");
+    expect(screen.getByTestId("social-permalink-follow-reply-reply-1")).toHaveTextContent("Follow");
     expect(screen.getByTestId("social-permalink-reply-reactions-reply-1")).toBeInTheDocument();
     expect(screen.getByTestId("social-permalink-reply-reactions-reply-1-add")).toBeInTheDocument();
   });
@@ -519,6 +555,7 @@ describe("SocialPostPermalinkPage", () => {
             accessState: "allowed",
             postId: "post-123",
             authorPublicAddress: "02abcdef1234567890fedcba1234567890abcdef1234567890fedcba1234567890",
+            followState: { isFollowing: false, canFollow: true },
             content: "Hello public world",
             canInteract: true,
             circleFeedIds: [],

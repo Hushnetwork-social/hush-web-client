@@ -1,5 +1,6 @@
 import {
   SocialPostContractErrorCode,
+  resolveSocialFollowButtonState,
   validateSocialPostAttachments,
   validateSocialPostAudience,
 } from './contracts';
@@ -63,5 +64,26 @@ describe('Social post contracts', () => {
 
     expect(result.isValid).toBe(true);
     expect(result.errorCode).toBe(SocialPostContractErrorCode.NONE);
+  });
+
+  it('should hide the follow button for unauthenticated users', () => {
+    expect(
+      resolveSocialFollowButtonState(false, { isFollowing: false, canFollow: true }, false)
+    ).toBe('hidden');
+  });
+
+  it('should resolve pending before success state when a follow request is in flight', () => {
+    expect(
+      resolveSocialFollowButtonState(true, { isFollowing: false, canFollow: true }, true)
+    ).toBe('pending');
+  });
+
+  it('should resolve follow and following button states from follow-state data', () => {
+    expect(
+      resolveSocialFollowButtonState(true, { isFollowing: false, canFollow: true }, false)
+    ).toBe('follow');
+    expect(
+      resolveSocialFollowButtonState(true, { isFollowing: true, canFollow: false }, false)
+    ).toBe('following');
   });
 });

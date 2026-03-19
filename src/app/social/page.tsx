@@ -15,6 +15,7 @@ import { createSocialPost } from "@/modules/social/SocialService";
 import { getSocialFeedWall } from "@/modules/social/FeedWallService";
 import { computeSha256 } from "@/lib/attachments/attachmentHash";
 import { ContentCarousel } from "@/components/chat/ContentCarousel";
+import { FollowAuthorButton } from "@/components/social/FollowAuthorButton";
 import { SocialAuthPromptOverlay } from "@/components/social/SocialAuthPromptOverlay";
 import { SocialPostReactions } from "@/components/social/SocialPostReactions";
 import {
@@ -23,6 +24,11 @@ import {
   readPendingSocialThreadDraft,
   savePendingSocialThreadDraft,
 } from "@/modules/social/threadDrafts";
+import { followSocialAuthor } from "@/modules/social/FollowService";
+import {
+  resolveSocialFollowButtonState,
+  type SocialAuthorFollowStateContract,
+} from "@/modules/social/contracts";
 import {
   getThreadReplies,
   getTopLevelEntries,
@@ -74,6 +80,7 @@ type ReplyItem = {
   threadRootId: string | null;
   createdAtMs: number;
   childReplyCount?: number;
+  followState?: SocialAuthorFollowStateContract;
 };
 
 type PostItem = {
@@ -94,6 +101,7 @@ type PostItem = {
   reactions: Record<string, number>;
   replies: ReplyItem[];
   attachments: PostMediaItem[];
+  followState?: SocialAuthorFollowStateContract;
 };
 
 type FollowingItem = {
@@ -436,6 +444,9 @@ export default function SocialPage() {
   const [draftMediaItems, setDraftMediaItems] = useState<DraftMediaItem[]>([]);
   const [newPostMediaError, setNewPostMediaError] = useState<string | null>(null);
   const [feedWallPosts, setFeedWallPosts] = useState<PostItem[]>([]);
+  const [followRefreshNonce, setFollowRefreshNonce] = useState(0);
+  const [pendingFollowAuthors, setPendingFollowAuthors] = useState<Record<string, boolean>>({});
+  const [followStateOverrides, setFollowStateOverrides] = useState<Record<string, SocialAuthorFollowStateContract>>({});
   const [showAuthOverlay, setShowAuthOverlay] = useState(false);
   const [authOverlayReturnTo, setAuthOverlayReturnTo] = useState<string | null>(null);
   const authorNamesByAddressRef = useRef<Record<string, string>>({});
@@ -502,6 +513,15 @@ export default function SocialPage() {
 
     region.scrollTop = appContexts.social.scrollOffset;
   }, [appContexts.social.scrollOffset]);
+
+  useEffect(() => {
+    if (credentials?.signingPublicKey) {
+      return;
+    }
+
+    setPendingFollowAuthors({});
+    setFollowStateOverrides({});
+  }, [credentials?.signingPublicKey]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -830,6 +850,7 @@ export default function SocialPage() {
           threadRootId: entry.kind === "reply" ? entry.threadRootId : null,
           createdAtMs: entry.createdAtUnixMs ?? Date.now(),
           childReplyCount: entry.childReplyCount ?? 0,
+          followState: entry.followState,
         };
       });
     };
@@ -890,7 +911,7 @@ export default function SocialPage() {
     return () => {
       cancelled = true;
     };
-  }, [activePostId, credentials?.signingPublicKey, ownAddressNormalized, ownAuthorLabel]);
+  }, [activePostId, credentials?.signingPublicKey, ownAddressNormalized, ownAuthorLabel, followRefreshNonce]);
 
   useEffect(() => {
     if (!credentials?.signingPublicKey || !feedWallPosts.length) {
@@ -1112,6 +1133,7 @@ export default function SocialPage() {
       threadRootId: null,
       createdAtMs: Date.now(),
       childReplyCount: 0,
+      followState: undefined,
     };
 
     setOverlayReplies((prev) => [newReply, ...prev]);
@@ -1176,6 +1198,7 @@ export default function SocialPage() {
       threadRootId: inlineComposerRootId,
       createdAtMs: Date.now(),
       childReplyCount: 0,
+      followState: undefined,
     };
 
     setOverlayReplies((prev) => {
@@ -1236,6 +1259,80 @@ export default function SocialPage() {
 
   const removeUiToast = (toastId: string) => {
     setUiToasts((current) => current.filter((toast) => toast.id !== toastId));
+  };
+
+  const getEffectiveFollowState = (
+    authorPublicAddress: string | undefined,
+    followState: SocialAuthorFollowStateContract | undefined
+  ): SocialAuthorFollowStateContract | undefined => {
+    const normalizedAuthorAddress = normalizePublicAddress(authorPublicAddress);
+    if (!normalizedAuthorAddress) {
+      return followState;
+    }
+
+    return followStateOverrides[normalizedAuthorAddress] ?? followState;
+  };
+
+  const getFollowButtonState = (
+    authorPublicAddress: string | undefined,
+    followState: SocialAuthorFollowStateContract | undefined
+  ) => {
+    const normalizedAuthorAddress = normalizePublicAddress(authorPublicAddress);
+    return resolveSocialFollowButtonState(
+      !!credentials?.signingPublicKey,
+      getEffectiveFollowState(authorPublicAddress, followState),
+      normalizedAuthorAddress.length > 0 && pendingFollowAuthors[normalizedAuthorAddress] === true
+    );
+  };
+
+  const submitFollowAuthor = async (
+    authorPublicAddress: string | undefined,
+    followState: SocialAuthorFollowStateContract | undefined
+  ) => {
+    const normalizedAuthorAddress = normalizePublicAddress(authorPublicAddress);
+    const viewerPublicAddress = credentials?.signingPublicKey?.trim();
+    if (!viewerPublicAddress || !normalizedAuthorAddress) {
+      addUiToast("Failed to follow author.");
+      return;
+    }
+
+    if (getFollowButtonState(authorPublicAddress, followState) !== "follow") {
+      return;
+    }
+
+    setPendingFollowAuthors((current) => ({ ...current, [normalizedAuthorAddress]: true }));
+
+    try {
+      const result = await followSocialAuthor({
+        viewerPublicAddress,
+        authorPublicAddress: authorPublicAddress!.trim(),
+        requesterPublicAddress: viewerPublicAddress,
+      });
+
+      if (!result.success) {
+        if (result.requiresSyncRefresh || result.alreadyFollowing) {
+          await triggerSyncNow();
+          setFollowRefreshNonce((current) => current + 1);
+        }
+        addUiToast(result.message || "Failed to follow author.");
+        return;
+      }
+
+      setFollowStateOverrides((current) => ({
+        ...current,
+        [normalizedAuthorAddress]: { isFollowing: true, canFollow: false },
+      }));
+      if (result.requiresSyncRefresh) {
+        await triggerSyncNow();
+      }
+      setFollowRefreshNonce((current) => current + 1);
+    } finally {
+      setPendingFollowAuthors((current) => {
+        const next = { ...current };
+        delete next[normalizedAuthorAddress];
+        return next;
+      });
+    }
   };
 
   const handleGuestInteractiveAttempt = (visibility: PostItem["visibility"], postId: string) => {
@@ -1318,6 +1415,7 @@ export default function SocialPage() {
       threadRootId: entry.kind === "reply" ? entry.threadRootId : null,
       createdAtMs: entry.createdAtUnixMs ?? Date.now(),
       childReplyCount: entry.childReplyCount ?? 0,
+      followState: entry.followState,
     }));
   };
 
@@ -1619,6 +1717,7 @@ export default function SocialPage() {
             reactions: existing?.reactions ?? { ...EMPTY_REACTIONS },
             replies: existing?.replies ?? [],
             attachments: attachmentItems.length > 0 ? attachmentItems : existing?.attachments ?? [],
+            followState: post.followState,
           };
         });
 
@@ -1641,7 +1740,7 @@ export default function SocialPage() {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [credentials?.signingPublicKey, ownAuthorLabel, renderFollowingItems, currentBlockHeight]);
+  }, [credentials?.signingPublicKey, ownAuthorLabel, renderFollowingItems, currentBlockHeight, followRefreshNonce]);
 
   const getDisplayNameForAddress = (address: string) => {
     const normalizedAddress = normalizePublicAddress(address);
@@ -1999,6 +2098,7 @@ export default function SocialPage() {
         replyCount: 0,
         reactions: { ...EMPTY_REACTIONS },
         replies: [],
+        followState: undefined,
         attachments: draftMediaItems.map((item) => ({
           id: item.id,
           kind: item.kind,
@@ -2210,6 +2310,7 @@ export default function SocialPage() {
         ) : null}
         {feedWallPosts.map((post) => {
           const preview = getPostPreview(post.text);
+          const followButtonState = getFollowButtonState(post.authorPublicAddress, post.followState);
 
           return (
             <article
@@ -2225,20 +2326,29 @@ export default function SocialPage() {
                     ? ownInitials
                     : getDisplayInitials(post.author)}
                 </span>
-                <p className="truncate text-sm font-semibold text-hush-text-primary">{post.author}</p>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-hush-text-primary">{post.author}</p>
+                </div>
               </div>
-              <span className="inline-flex items-center gap-1 text-xs text-hush-text-accent" data-testid={`post-status-${post.id}`}>
-                {post.confirmationState === "confirmed" ? (
-                  <Check className="h-3.5 w-3.5 text-green-400" />
-                ) : (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-hush-purple" />
-                )}
-                {post.confirmationState === "confirmed"
-                  ? (post.confirmedAtMs
-                    ? formatRelativeTime(post.confirmedAtMs)
-                    : formatRelativeTimeFromBlockAge(post.createdAtBlock, currentBlockHeight) ?? post.time)
-                  : post.time}
-              </span>
+              <div className="flex shrink-0 items-start gap-2">
+                <FollowAuthorButton
+                  state={followButtonState}
+                  testId={`follow-author-post-${post.id}`}
+                  onClick={() => void submitFollowAuthor(post.authorPublicAddress, post.followState)}
+                />
+                <span className="inline-flex items-center gap-1 text-xs text-hush-text-accent" data-testid={`post-status-${post.id}`}>
+                  {post.confirmationState === "confirmed" ? (
+                    <Check className="h-3.5 w-3.5 text-green-400" />
+                  ) : (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-hush-purple" />
+                  )}
+                  {post.confirmationState === "confirmed"
+                    ? (post.confirmedAtMs
+                      ? formatRelativeTime(post.confirmedAtMs)
+                      : formatRelativeTimeFromBlockAge(post.createdAtBlock, currentBlockHeight) ?? post.time)
+                    : post.time}
+                </span>
+              </div>
             </div>
             <p
               className="text-sm text-hush-text-accent whitespace-pre-wrap break-words"
@@ -2697,19 +2807,28 @@ export default function SocialPage() {
             onClick={(event) => event.stopPropagation()}
             tabIndex={-1}
           >
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-hush-text-primary font-semibold">{activePost.author}</p>
-              <button
-                type="button"
-                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-hush-text-accent hover:bg-hush-bg-hover"
-                onClick={() => setActivePostId(null)}
-                data-testid="close-post-detail"
-              >
-                <X className="w-3.5 h-3.5" />
-                Close
-              </button>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="min-w-0 flex items-center gap-2">
+                <p className="text-hush-text-primary font-semibold">{activePost.author}</p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <FollowAuthorButton
+                  state={getFollowButtonState(activePost.authorPublicAddress, activePost.followState)}
+                  testId={`follow-author-post-detail-${activePost.id}`}
+                  onClick={() => void submitFollowAuthor(activePost.authorPublicAddress, activePost.followState)}
+                />
+                <span className="text-xs text-hush-text-accent">{activePost.time}</span>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-hush-text-accent hover:bg-hush-bg-hover"
+                  onClick={() => setActivePostId(null)}
+                  data-testid="close-post-detail"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  Close
+                </button>
+              </div>
             </div>
-            <p className="text-xs text-hush-text-accent mb-3">{activePost.time}</p>
             <p className="text-sm text-hush-text-accent whitespace-pre-wrap" data-testid="post-detail-full-text">
               {activePost.text}
             </p>
@@ -2811,9 +2930,16 @@ export default function SocialPage() {
 
                   return (
                     <div key={reply.id} className="rounded-lg border border-hush-bg-hover p-3" data-testid={`post-detail-reply-${reply.id}`}>
-                      <div className="flex items-center justify-between mb-1">
-                        <p className="text-xs font-semibold text-hush-text-primary">{reply.author}</p>
-                        <span className="text-[10px] text-hush-text-accent">{reply.time}</span>
+                      <div className="flex items-center justify-between mb-1 gap-2">
+                        <p className="min-w-0 text-xs font-semibold text-hush-text-primary">{reply.author}</p>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <FollowAuthorButton
+                            state={getFollowButtonState(reply.authorPublicAddress, reply.followState)}
+                            testId={`follow-author-comment-${reply.id}`}
+                            onClick={() => void submitFollowAuthor(reply.authorPublicAddress, reply.followState)}
+                          />
+                          <span className="text-[10px] text-hush-text-accent">{reply.time}</span>
+                        </div>
                       </div>
                       <p className="text-xs text-hush-text-accent">{reply.text}</p>
                       <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -2900,9 +3026,16 @@ export default function SocialPage() {
                           className="mt-2 ml-4 rounded-lg border border-hush-bg-hover p-3 bg-hush-bg-dark/50"
                           data-testid={`post-detail-reply-${childReply.id}`}
                         >
-                          <div className="flex items-center justify-between mb-1">
-                            <p className="text-xs font-semibold text-hush-text-primary">{childReply.author}</p>
-                            <span className="text-[10px] text-hush-text-accent">{childReply.time}</span>
+                          <div className="flex items-center justify-between mb-1 gap-2">
+                            <p className="min-w-0 text-xs font-semibold text-hush-text-primary">{childReply.author}</p>
+                            <div className="flex shrink-0 items-center gap-2">
+                              <FollowAuthorButton
+                                state={getFollowButtonState(childReply.authorPublicAddress, childReply.followState)}
+                                testId={`follow-author-reply-${childReply.id}`}
+                                onClick={() => void submitFollowAuthor(childReply.authorPublicAddress, childReply.followState)}
+                              />
+                              <span className="text-[10px] text-hush-text-accent">{childReply.time}</span>
+                            </div>
                           </div>
                           <p className="text-xs text-hush-text-accent">{childReply.text}</p>
                           <div className="mt-2 flex flex-wrap items-center gap-2">
