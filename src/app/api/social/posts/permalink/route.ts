@@ -28,6 +28,13 @@ type PermalinkDto = {
     hash: string;
     kind: "image" | "video";
   }[];
+  openGraph?: {
+    title: string;
+    description: string;
+    imageUrl?: string;
+    isGenericPrivate: boolean;
+    cacheControl: string;
+  };
   errorCode?: string;
 };
 
@@ -88,6 +95,55 @@ function parsePermalinkResponse(messageBytes: Uint8Array): PermalinkDto {
     canInteract: false,
     circleFeedIds: [],
     attachments: [],
+  };
+
+  const parseOpenGraph = (bytes: Uint8Array) => {
+    const openGraph = {
+      title: "",
+      description: "",
+      imageUrl: undefined as string | undefined,
+      isGenericPrivate: false,
+      cacheControl: "",
+    };
+
+    let nestedOffset = 0;
+    while (nestedOffset < bytes.length) {
+      const nestedTag = parseVarint(bytes, nestedOffset);
+      nestedOffset += nestedTag.bytesRead;
+      const nestedField = nestedTag.value >>> 3;
+      const nestedWire = nestedTag.value & 0x07;
+
+      if (nestedWire === 0) {
+        const valueInfo = parseVarint(bytes, nestedOffset);
+        nestedOffset += valueInfo.bytesRead;
+        if (nestedField === 4) {
+          openGraph.isGenericPrivate = valueInfo.value === 1;
+        }
+        continue;
+      }
+
+      if (nestedWire === 2) {
+        const lengthInfo = parseVarint(bytes, nestedOffset);
+        nestedOffset += lengthInfo.bytesRead;
+        const value = parseString(bytes, nestedOffset, lengthInfo.value);
+        nestedOffset += lengthInfo.value;
+
+        if (nestedField === 1) {
+          openGraph.title = value;
+        } else if (nestedField === 2) {
+          openGraph.description = value;
+        } else if (nestedField === 3) {
+          openGraph.imageUrl = value;
+        } else if (nestedField === 5) {
+          openGraph.cacheControl = value;
+        }
+        continue;
+      }
+
+      break;
+    }
+
+    return openGraph;
   };
 
   const parseAttachment = (bytes: Uint8Array) => {
@@ -182,6 +238,12 @@ function parsePermalinkResponse(messageBytes: Uint8Array): PermalinkDto {
       if (fieldNumber === 21) {
         const bytes = messageBytes.slice(offset, offset + lengthInfo.value);
         result.followState = parseFollowState(bytes);
+        offset += lengthInfo.value;
+        continue;
+      }
+      if (fieldNumber === 10) {
+        const bytes = messageBytes.slice(offset, offset + lengthInfo.value);
+        result.openGraph = parseOpenGraph(bytes);
         offset += lengthInfo.value;
         continue;
       }

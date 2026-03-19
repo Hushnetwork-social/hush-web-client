@@ -23,6 +23,13 @@ export type SocialPermalinkPayloadContract = {
     hash: string;
     kind: "image" | "video";
   }[];
+  openGraph?: {
+    title: string;
+    description: string;
+    imageUrl?: string;
+    isGenericPrivate: boolean;
+    cacheControl: string;
+  };
   errorCode?: string;
 };
 

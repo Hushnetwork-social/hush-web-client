@@ -1,6 +1,17 @@
+import type { Metadata } from "next";
 import SocialPostPermalinkClient from "./SocialPostPermalinkClient";
+import {
+  buildPermalinkMetadata,
+  fetchAuthorDisplayName,
+  fetchPermalinkMetadataPayload,
+  getRequestBaseUrl,
+  isStaticExport,
+  skipSsrFetch,
+} from "./permalinkMetadata";
 
-const isStaticExport = process.env.STATIC_EXPORT === "true";
+type PageProps = {
+  params: Promise<{ postId: string }>;
+};
 
 export function generateStaticParams(): Array<{ postId: string }> {
   if (isStaticExport) {
@@ -8,6 +19,30 @@ export function generateStaticParams(): Array<{ postId: string }> {
   }
 
   return [];
+}
+
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+  const { postId } = await params;
+
+  if (isStaticExport || skipSsrFetch || !postId || postId === "_placeholder") {
+    return {
+      title: "Post on HushSocial",
+      description: "Open this post in HushSocial on HushNetwork.social.",
+    };
+  }
+
+  const [baseUrl, payload] = await Promise.all([
+    getRequestBaseUrl(),
+    fetchPermalinkMetadataPayload(postId),
+  ]);
+  const authorName = await fetchAuthorDisplayName(payload?.authorPublicAddress);
+
+  return buildPermalinkMetadata({
+    baseUrl,
+    postId,
+    payload,
+    authorName,
+  });
 }
 
 export default function SocialPostPermalinkPage() {

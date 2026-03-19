@@ -8,7 +8,11 @@ const inter = Inter({
   display: "swap",
 });
 
+const metadataBaseUrl =
+  process.env.NEXT_PUBLIC_API_URL?.trim() || "https://chat.hushnetwork.social";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(metadataBaseUrl),
   title: "HushFeeds! - Decentralized Messaging",
   description: "Secure, decentralized messaging powered by HushNetwork blockchain",
   manifest: "/manifest.json",
