@@ -122,6 +122,7 @@ vi.mock('@/modules/feeds/useFeedsStore', () => ({
 
 import {
   deriveFeedElGamalKey,
+  deriveDeterministicReactionScopeKey,
   deriveAddressMembershipSecret,
   computeCommitment,
   scalarMul,
@@ -626,6 +627,53 @@ describe('useFeedReactions', () => {
       expect(deriveFeedElGamalKey).toHaveBeenCalledWith('proof-guard-aes-key-7==');
       expect(ensureCommitmentRegisteredMock).not.toHaveBeenCalled();
       expect(reactionsServiceInstance.submitReactionDevMode).toHaveBeenCalled();
+    });
+
+    it('derives the public reaction scope key on demand for open-post reactions', async () => {
+      mockReactionsState.isProverReady = true;
+
+      const { result } = renderHook(() =>
+        useFeedReactions({
+          feedId: 'open-scope-message-id',
+          publicReactionKeyScopeId: 'open-scope-message-id',
+          membershipFeedId: GLOBAL_HUSH_MEMBERS_SCOPE_ID,
+        })
+      );
+
+      await result.current.handleReactionSelect('message-1', 2);
+
+      expect(deriveDeterministicReactionScopeKey).toHaveBeenCalledWith('open-scope-message-id');
+      expect(reactionsServiceInstance.submitReaction).toHaveBeenCalled();
+    });
+
+    it('re-reads the initialized user secret before submitting a production reaction', async () => {
+      mockReactionsState.isProverReady = true;
+      mockReactionsState.userSecret = null;
+      initializeReactionsSystemMock.mockImplementation(async () => {
+        mockReactionsState.userSecret = 999n;
+        return true;
+      });
+
+      const { result } = renderHook(() =>
+        useFeedReactions({
+          feedId: 'proof-guard-feed-id-8',
+          feedAesKey: 'proof-guard-aes-key-8==',
+        })
+      );
+
+      await result.current.handleReactionSelect('message-1', 2);
+
+      expect(initializeReactionsSystemMock).toHaveBeenCalledWith(['alpha', 'beta', 'gamma']);
+      expect(reactionsServiceInstance.submitReaction).toHaveBeenCalledWith(
+        'proof-guard-feed-id-8',
+        'message-1',
+        2,
+        { x: 1n, y: 2n },
+        1n,
+        'proof-guard-feed-id-8',
+        999n,
+        undefined
+      );
     });
 
     it('ignores duplicate clicks while a reaction is already pending for the same message', async () => {

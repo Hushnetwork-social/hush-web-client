@@ -160,6 +160,39 @@ export function useFeedReactions({
   const feedPublicKeyRef = useRef<Point | null>(null);
   feedPublicKeyRef.current = feedPublicKey;
 
+  const deriveReactionScopeKey = useCallback(async (): Promise<Point | null> => {
+    if (feedPublicKeyRef.current) {
+      return feedPublicKeyRef.current;
+    }
+
+    try {
+      let privateKey: bigint;
+      if (feedAesKey) {
+        debugLog(
+          `[useFeedReactions] Deriving ElGamal key on demand for feed ${feedId.substring(0, 8)}...`
+        );
+        privateKey = await deriveFeedElGamalKey(feedAesKey);
+        derivedFromAesKeyRef.current = feedAesKey;
+      } else {
+        const deterministicScopeId = publicReactionKeyScopeId ?? feedId;
+        debugLog(
+          `[useFeedReactions] Deriving public reaction key on demand for scope ${deterministicScopeId.substring(0, 8)}...`
+        );
+        privateKey = await deriveDeterministicReactionScopeKey(deterministicScopeId);
+        derivedFromAesKeyRef.current = deterministicScopeId;
+      }
+
+      const publicKey = scalarMul(getGenerator(), privateKey);
+      feedPublicKeyRef.current = publicKey;
+      setFeedPublicKey(publicKey);
+      setFeedPrivateKey(privateKey);
+      return publicKey;
+    } catch (err) {
+      debugWarn("[useFeedReactions] Feed public key derivation failed", err);
+      return null;
+    }
+  }, [feedAesKey, feedId, publicReactionKeyScopeId]);
+
   // Derive feed ElGamal keys from AES key
   useEffect(() => {
     const derivationInput = feedAesKey ?? publicReactionKeyScopeId;
@@ -408,23 +441,10 @@ export function useFeedReactions({
 
       // Check if we can actually submit to the server (use ref for fresh value)
       if (!currentFeedPublicKey) {
-        if (feedAesKey) {
-          try {
-            const privateKey = await deriveFeedElGamalKey(feedAesKey);
-            currentFeedPublicKey = scalarMul(getGenerator(), privateKey);
-            feedPublicKeyRef.current = currentFeedPublicKey;
-            setFeedPublicKey(currentFeedPublicKey);
-            setFeedPrivateKey(privateKey);
-            derivedFromAesKeyRef.current = feedAesKey;
-          } catch (err) {
-            debugWarn("[useFeedReactions] Feed public key derivation failed", err);
-            revertReaction(messageId);
-            setError("Reactions are unavailable because the feed encryption key is not ready.");
-            return;
-          }
-        } else {
-          debugWarn("[useFeedReactions] Feed public key not available, reaction stays pending");
-          // Reaction stays in pending state until server confirms or user cancels
+        currentFeedPublicKey = await deriveReactionScopeKey();
+        if (!currentFeedPublicKey) {
+          revertReaction(messageId);
+          setError("Reactions are unavailable because the reaction key is not ready.");
           return;
         }
       }
@@ -458,7 +478,10 @@ export function useFeedReactions({
         return;
       }
 
-      if (!userSecret) {
+      let effectiveUserSecret = userSecret ?? useReactionsStore.getState().userSecret ?? null;
+      let effectiveUserCommitment: bigint | null = null;
+
+      if (!effectiveUserSecret) {
         const mnemonic = credentials?.mnemonic;
         if (mnemonic && mnemonic.length > 0) {
           const initialized = await initializeReactionsSystem(mnemonic);
@@ -470,15 +493,16 @@ export function useFeedReactions({
             debugWarn(`[useFeedReactions] ${errorMessage}`);
             return;
           }
+          effectiveUserSecret = useReactionsStore.getState().userSecret;
         } else {
-          debugWarn("[useFeedReactions] User secret not set, reaction stays pending");
-          // Reaction stays in pending state
+          revertReaction(messageId);
+          const errorMessage =
+            "Reactions are unavailable because reaction credentials are missing.";
+          setError(errorMessage);
+          debugWarn(`[useFeedReactions] ${errorMessage}`);
           return;
         }
       }
-
-      let effectiveUserSecret = userSecret ?? null;
-      let effectiveUserCommitment: bigint | null = null;
 
       if (membershipFeedId === GLOBAL_HUSH_MEMBERS_SCOPE_ID) {
         const publicSigningAddress = credentials?.signingPublicKey;
@@ -670,12 +694,12 @@ export function useFeedReactions({
     },
     [
       feedId,
-      feedAesKey,
       isProverReady,
       pendingReactions,
       userSecret,
       getMyReaction,
       setPendingReaction,
+      deriveReactionScopeKey,
       confirmReaction,
       revertReaction,
       fetchTalliesForMessages,

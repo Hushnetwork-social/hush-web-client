@@ -5,16 +5,23 @@ import { SocialPostReactions } from "./SocialPostReactions";
 const handleReactionSelectMock = vi.fn();
 const fetchTalliesForMessagesMock = vi.fn(async () => undefined);
 const hydrateMyReactionsMock = vi.fn(async () => undefined);
+const useFeedReactionsMock = vi.fn();
+const getFeedMock = vi.fn(() => undefined);
+const getCurrentGroupKeyMock = vi.fn(() => undefined);
 
 vi.mock("@/hooks/useFeedReactions", () => ({
-  useFeedReactions: () => ({
-    getReactionCounts: () => ({ "👍": 1, "❤️": 0, "😂": 0, "😮": 0, "😢": 0, "😡": 0 }),
-    getMyReaction: () => null,
-    isPending: () => false,
-    handleReactionSelect: (...args: unknown[]) => handleReactionSelectMock(...args),
-    fetchTalliesForMessages: (...args: unknown[]) => fetchTalliesForMessagesMock(...args),
-    hydrateMyReactions: (...args: unknown[]) => hydrateMyReactionsMock(...args),
-  }),
+  useFeedReactions: (...args: unknown[]) => {
+    useFeedReactionsMock(...args);
+    return {
+      getReactionCounts: () => ({ "👍": 1, "❤️": 0, "😂": 0, "😮": 0, "😢": 0, "😡": 0 }),
+      getMyReaction: () => null,
+      isPending: () => false,
+      handleReactionSelect: (...innerArgs: unknown[]) => handleReactionSelectMock(...innerArgs),
+      fetchTalliesForMessages: (...innerArgs: unknown[]) => fetchTalliesForMessagesMock(...innerArgs),
+      hydrateMyReactions: (...innerArgs: unknown[]) => hydrateMyReactionsMock(...innerArgs),
+      error: null,
+    };
+  },
 }));
 
 let mockCredentials: { signingPublicKey?: string; mnemonic?: string } | null = {
@@ -30,8 +37,8 @@ vi.mock("@/stores", () => ({
 vi.mock("@/modules/feeds/useFeedsStore", () => ({
   useFeedsStore: {
     getState: () => ({
-      getFeed: () => undefined,
-      getCurrentGroupKey: () => undefined,
+      getFeed: getFeedMock,
+      getCurrentGroupKey: getCurrentGroupKeyMock,
     }),
   },
 }));
@@ -59,6 +66,11 @@ describe("SocialPostReactions", () => {
     handleReactionSelectMock.mockReset();
     fetchTalliesForMessagesMock.mockClear();
     hydrateMyReactionsMock.mockClear();
+    useFeedReactionsMock.mockReset();
+    getFeedMock.mockReset();
+    getCurrentGroupKeyMock.mockReset();
+    getFeedMock.mockReturnValue(undefined);
+    getCurrentGroupKeyMock.mockReturnValue(undefined);
   });
 
   afterEach(() => {
@@ -226,6 +238,39 @@ describe("SocialPostReactions", () => {
     expect(handleReactionSelectMock).not.toHaveBeenCalled();
   });
 
+  it("uses the first private circle that has an accessible reaction key", () => {
+    getFeedMock.mockImplementation((feedId: string) => {
+      if (feedId === "inner-circle" || feedId === "close-subscribers") {
+        return { id: feedId, type: "group" };
+      }
+
+      return undefined;
+    });
+    getCurrentGroupKeyMock.mockImplementation((feedId: string) => {
+      if (feedId === "close-subscribers") {
+        return "close-subscribers-aes-key";
+      }
+
+      return undefined;
+    });
+
+    render(
+      <SocialPostReactions
+        postId="post-1"
+        reactionScopeId="reaction-scope-1"
+        visibility="private"
+        circleFeedIds={["inner-circle", "close-subscribers"]}
+        canInteract={true}
+        testIdPrefix="social-post-reactions"
+      />
+    );
+
+    expect(useFeedReactionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        feedId: "reaction-scope-1",
+        publicReactionKeyScopeId: "close-subscribers",
+        membershipFeedId: "close-subscribers",
+      })
+    );
+  });
 });
-
-

@@ -25,20 +25,29 @@ interface SocialPostReactionsProps {
   onPendingAutoReactionHandled?: () => void;
 }
 
-function resolveReactionFeedAesKey(circleFeedIds: string[]): string | undefined {
-  if (circleFeedIds.length === 0) {
-    return undefined;
-  }
+type ResolvedPrivateReactionScope = {
+  membershipFeedId?: string;
+};
 
+function resolvePrivateReactionScope(circleFeedIds: string[]): ResolvedPrivateReactionScope {
   const feedsStore = useFeedsStore.getState();
-  const circleFeedId = circleFeedIds[0];
-  const circleFeed = feedsStore.getFeed(circleFeedId);
 
-  if (circleFeed?.type === "group") {
-    return feedsStore.getCurrentGroupKey(circleFeedId);
+  for (const circleFeedId of circleFeedIds) {
+    const circleFeed = feedsStore.getFeed(circleFeedId);
+    const feedAesKey = circleFeed?.type === "group"
+      ? feedsStore.getCurrentGroupKey(circleFeedId)
+      : circleFeed?.aesKey;
+
+    if (feedAesKey) {
+      return {
+        membershipFeedId: circleFeedId,
+      };
+    }
   }
 
-  return circleFeed?.aesKey;
+  return {
+    membershipFeedId: circleFeedIds[0],
+  };
 }
 
 export function SocialPostReactions({
@@ -62,12 +71,15 @@ export function SocialPostReactions({
   const isGeneratingProof = useReactionsStore((s) => s.isGeneratingProof);
   const reactionScope = reactionScopeId ?? postId;
   const resolvedReactionMessageId = reactionMessageId === undefined ? postId : reactionMessageId;
+  const privateReactionScope = visibility === "private"
+    ? resolvePrivateReactionScope(circleFeedIds)
+    : null;
   const membershipFeedId = visibility === "private"
-    ? circleFeedIds[0]
+    ? privateReactionScope?.membershipFeedId
     : GLOBAL_HUSH_MEMBERS_SCOPE_ID;
-  const feedAesKey = visibility === "private"
-    ? resolveReactionFeedAesKey(circleFeedIds)
-    : undefined;
+  const reactionKeyScopeId = visibility === "private"
+    ? privateReactionScope?.membershipFeedId
+    : reactionScope;
 
   const {
     getReactionCounts,
@@ -79,8 +91,7 @@ export function SocialPostReactions({
     error,
   } = useFeedReactions({
     feedId: reactionScope,
-    feedAesKey,
-    publicReactionKeyScopeId: visibility === "open" ? reactionScope : undefined,
+    publicReactionKeyScopeId: reactionKeyScopeId,
     membershipFeedId,
     resolveAuthorCommitment: () => authorCommitment,
   });
