@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import type { Metadata } from "next";
 import SocialPostPermalinkClient from "./SocialPostPermalinkClient";
 import {
@@ -46,5 +47,9 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 }
 
 export default function SocialPostPermalinkPage() {
-  return <SocialPostPermalinkClient />;
+  return (
+    <Suspense fallback={<div className="p-4 text-sm text-hush-text-accent">Loading post...</div>}>
+      <SocialPostPermalinkClient />
+    </Suspense>
+  );
 }
