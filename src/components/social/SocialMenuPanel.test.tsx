@@ -46,7 +46,7 @@ describe('SocialMenuPanel', () => {
     expect(screen.getByTestId('social-menu-notifications')).toHaveTextContent('Notifications');
     expect(screen.getByTestId('social-menu-profile')).toHaveTextContent('Profile');
     expect(screen.getByTestId('social-menu-settings')).toHaveTextContent('Settings');
-    expect(screen.getByTestId('social-menu-logout')).toHaveTextContent('Logout');
+    expect(screen.queryByTestId('social-menu-logout')).not.toBeInTheDocument();
     expect(screen.queryByTestId('social-menu-mentions')).not.toBeInTheDocument();
     expect(screen.queryByTestId('social-menu-users')).not.toBeInTheDocument();
   });
