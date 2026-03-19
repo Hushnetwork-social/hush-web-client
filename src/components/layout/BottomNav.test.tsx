@@ -154,9 +154,26 @@ describe('BottomNav', () => {
       );
 
       expect(screen.getByText('Search')).toBeInTheDocument();
-      expect(screen.getByText('New Post')).toBeInTheDocument();
       expect(screen.getByText('HushFeeds!')).toBeInTheDocument();
+      expect(screen.queryByText('New Post')).not.toBeInTheDocument();
       expect(screen.queryByText('Feeds')).not.toBeInTheDocument();
+    });
+
+    it('opens the social mobile menu without logout', () => {
+      render(
+        <BottomNav
+          {...defaultProps}
+          activeApp="social"
+          selectedNav="feed-wall"
+        />
+      );
+
+      fireEvent.click(screen.getByTestId('nav-social-menu'));
+
+      expect(screen.getByTestId('social-mobile-menu-feed-wall')).toBeInTheDocument();
+      expect(screen.getByTestId('social-mobile-menu-following')).toBeInTheDocument();
+      expect(screen.getByTestId('social-mobile-menu-settings')).toBeInTheDocument();
+      expect(screen.queryByText('Logout')).not.toBeInTheDocument();
     });
 
     it('should render cross-app badge on switch item', () => {

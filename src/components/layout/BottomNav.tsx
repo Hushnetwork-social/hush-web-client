@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, LogOut, UserCircle } from "lucide-react";
+import { Download, LogOut, Menu, MessageSquare, Search, UserCircle } from "lucide-react";
 import { useState } from "react";
 import type { AppId } from "@/stores/useAppStore";
 import { DEFAULT_CROSS_APP_BADGES } from "@/stores/useAppStore";
@@ -21,6 +21,28 @@ interface BottomNavProps {
   guestActionInitials?: string;
 }
 
+type RenderNavItem = {
+  id: string;
+  label: string;
+  icon: React.ReactNode;
+  badgeCount?: number;
+  hideLabel?: boolean;
+  ariaLabel?: string;
+  isActive?: boolean;
+};
+
+const SOCIAL_MOBILE_MENU_ITEMS = [
+  { id: "feed-wall", label: "Feed Wall" },
+  { id: "following", label: "Following" },
+  { id: "my-posts", label: "My Posts" },
+  { id: "my-replies", label: "My Replies" },
+  { id: "notifications", label: "Notifications" },
+  { id: "profile", label: "Profile" },
+  { id: "settings", label: "Settings" },
+];
+
+const SOCIAL_MOBILE_MENU_IDS = new Set(SOCIAL_MOBILE_MENU_ITEMS.map((item) => item.id));
+
 export function BottomNav({
   selectedNav,
   onNavSelect,
@@ -36,7 +58,33 @@ export function BottomNav({
   guestActionInitials = "CU",
 }: BottomNavProps) {
   const [showUserMenu, setShowUserMenu] = useState(false);
-  const navItems = getAppNavItems(activeApp, crossAppBadges);
+  const [showSocialMenu, setShowSocialMenu] = useState(false);
+  const navItems: RenderNavItem[] =
+    activeApp === "social"
+      ? [
+          {
+            id: "social-menu",
+            label: "Menu",
+            ariaLabel: "HushSocial menu",
+            icon: <Menu className="w-5 h-5" />,
+            hideLabel: true,
+            isActive: showSocialMenu || SOCIAL_MOBILE_MENU_IDS.has(selectedNav),
+          },
+          {
+            id: "search",
+            label: "Search",
+            icon: <Search className="w-5 h-5" />,
+            isActive: selectedNav === "search",
+          },
+          {
+            id: "switch-feeds",
+            label: "HushFeeds!",
+            icon: <MessageSquare className="w-5 h-5" />,
+            badgeCount: crossAppBadges.feeds,
+            isActive: false,
+          },
+        ]
+      : getAppNavItems(activeApp, crossAppBadges);
 
   return (
     <nav className="bg-hush-bg-element border-t border-hush-bg-dark px-2 py-2 relative">
@@ -45,30 +93,34 @@ export function BottomNav({
           <button
             key={item.id}
             onClick={() => {
-              if (item.comingSoon) {
-                return;
-              }
               if (guestMode) {
                 onGuestAction?.();
                 return;
               }
+              setShowUserMenu(false);
+              if (item.id === "social-menu") {
+                setShowSocialMenu((current) => !current);
+                return;
+              }
+              setShowSocialMenu(false);
               onNavSelect(item.id);
             }}
-            disabled={item.comingSoon}
             className={`
               flex flex-col items-center space-y-0.5 px-3 py-2 rounded-lg
               transition-colors duration-150
-              ${item.comingSoon ? "cursor-not-allowed opacity-50" : guestMode ? "cursor-pointer opacity-75" : "cursor-pointer"}
+              ${guestMode ? "cursor-pointer opacity-75" : "cursor-pointer"}
               ${
-                selectedNav === item.id && !item.comingSoon && !guestMode
+                (item.isActive ?? selectedNav === item.id) && !guestMode
                   ? "text-hush-purple"
                   : "text-hush-text-accent hover:bg-hush-bg-hover"
               }
             `}
-            aria-disabled={guestMode || item.comingSoon}
+            aria-disabled={guestMode}
+            aria-label={item.ariaLabel ?? item.label}
+            data-testid={`nav-${item.id}`}
           >
             {item.icon}
-            <span className="text-[10px]">{item.label}</span>
+            {!item.hideLabel ? <span className="text-[10px]">{item.label}</span> : null}
             {!!item.badgeCount && item.badgeCount > 0 && (
               <span
                 data-testid={`nav-badge-${item.id}`}
@@ -76,9 +128,6 @@ export function BottomNav({
               >
                 {item.badgeCount}
               </span>
-            )}
-            {item.comingSoon && (
-              <span className="text-[8px] text-hush-text-accent">(Soon)</span>
             )}
           </button>
         ))}
@@ -90,6 +139,7 @@ export function BottomNav({
               onGuestAction?.();
               return;
             }
+            setShowSocialMenu(false);
             setShowUserMenu(!showUserMenu);
           }}
           className="flex flex-col items-center space-y-1 px-3 py-2 rounded-lg text-hush-text-accent hover:bg-hush-bg-hover transition-colors cursor-pointer"
@@ -102,6 +152,39 @@ export function BottomNav({
           <span className="text-[10px]">{guestMode ? guestActionLabel : "Profile"}</span>
         </button>
       </div>
+
+      {showSocialMenu && activeApp === "social" && (
+        <>
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => setShowSocialMenu(false)}
+          />
+          <div className="absolute bottom-full left-2 right-2 mb-2 bg-hush-bg-dark rounded-xl border border-hush-bg-element shadow-lg z-50 p-1.5 space-y-1">
+            {SOCIAL_MOBILE_MENU_ITEMS.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                data-testid={`social-mobile-menu-${item.id}`}
+                onClick={() => {
+                  if (guestMode) {
+                    onGuestAction?.();
+                    return;
+                  }
+                  setShowSocialMenu(false);
+                  onNavSelect(item.id);
+                }}
+                className={`w-full rounded-lg px-3 py-2.5 text-left text-sm transition-colors ${
+                  selectedNav === item.id
+                    ? "bg-hush-purple text-hush-bg-dark font-semibold"
+                    : "text-hush-text-primary hover:bg-hush-bg-hover"
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
 
       {/* User Menu Popup */}
       {showUserMenu && (
