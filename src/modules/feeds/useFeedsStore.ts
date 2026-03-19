@@ -16,6 +16,7 @@ import { feedService } from '@/lib/grpc/services/feed';
 import { useAppStore } from '@/stores/useAppStore';
 import { aesDecrypt } from '@/lib/crypto';
 import { fetchFeedMessages } from './FeedsService';
+import { buildApiUrl } from '@/lib/api-config';
 
 // FEAT-063: Clear mentions for a feed directly via localStorage.
 // Avoids circular dependency with mentionTracker.ts (which imports useFeedsStore).
@@ -1039,14 +1040,25 @@ export const useFeedsStore = create<FeedsStore>()(
         // Step 3: Fetch from server
         debugLog(`[FeedsStore] fetchMessageById: Fetching from server for ${messageId.substring(0, 8)}...`);
         try {
-          const response = await feedService.getMessageById(feedId, messageId);
-          if (!response.Success || !response.Message) {
+          const response = await fetch(
+            buildApiUrl(`/api/feeds/message-by-id?feedId=${encodeURIComponent(feedId)}&messageId=${encodeURIComponent(messageId)}`)
+          );
+
+          if (!response.ok) {
+            debugLog(
+              `[FeedsStore] fetchMessageById: API request failed for ${messageId.substring(0, 8)}... status=${response.status}`
+            );
+            return null;
+          }
+
+          const data = await response.json();
+          if (!data.success || !data.message) {
             debugLog(`[FeedsStore] fetchMessageById: Not found on server for ${messageId.substring(0, 8)}...`);
             return null;
           }
 
           // Transform server message to FeedMessage format
-          const serverMsg = response.Message;
+          const serverMsg = data.message;
           const feed = get().feeds.find((f) => f.id === feedId);
 
           // Decrypt content if needed

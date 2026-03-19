@@ -2157,6 +2157,84 @@ export function parseGetFeedMessagesByIdResponse(messageBytes: Uint8Array): GetF
   return result;
 }
 
+// ============= FEAT-056: GetMessageById for Reply Preview =============
+
+/**
+ * Build GetMessageByIdRequest for binary gRPC.
+ * Proto:
+ * message GetMessageByIdRequest {
+ *   string FeedId = 1;
+ *   string MessageId = 2;
+ * }
+ */
+export function buildGetMessageByIdRequest(
+  feedId: string,
+  messageId: string
+): Uint8Array {
+  return new Uint8Array([
+    ...encodeString(1, feedId),
+    ...encodeString(2, messageId),
+  ]);
+}
+
+export interface GetMessageByIdResult {
+  success: boolean;
+  error?: string;
+  message?: FeedMessage;
+}
+
+/**
+ * Parse GetMessageByIdResponse.
+ * Proto:
+ * message GetMessageByIdResponse {
+ *   bool Success = 1;
+ *   FeedMessage Message = 2;
+ *   string Error = 3;
+ * }
+ */
+export function parseGetMessageByIdResponse(messageBytes: Uint8Array): GetMessageByIdResult {
+  const result: GetMessageByIdResult = {
+    success: false,
+  };
+
+  let offset = 0;
+  while (offset < messageBytes.length) {
+    const tagResult = parseVarint(messageBytes, offset);
+    const tag = tagResult.value;
+    offset += tagResult.bytesRead;
+
+    const fieldNumber = tag >> 3;
+    const wireType = tag & 0x07;
+
+    if (wireType === 0 && fieldNumber === 1) {
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+      result.success = valueResult.value === 1;
+    } else if (wireType === 2 && fieldNumber === 2) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead;
+      const msgBytes = messageBytes.slice(offset, offset + lenResult.value);
+      offset += lenResult.value;
+      result.message = parseSingleMessage(msgBytes);
+    } else if (wireType === 2 && fieldNumber === 3) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead;
+      result.error = parseString(messageBytes, offset, lenResult.value);
+      offset += lenResult.value;
+    } else if (wireType === 0) {
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+    } else if (wireType === 2) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead + lenResult.value;
+    } else {
+      break;
+    }
+  }
+
+  return result;
+}
+
 // ============= Device Token Registration (Push Notifications) =============
 
 /**
