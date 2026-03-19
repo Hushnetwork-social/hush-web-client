@@ -524,6 +524,44 @@ export default function SocialPage() {
   }, [credentials?.signingPublicKey]);
 
   useEffect(() => {
+    if (typeof window === "undefined" || selectedNav !== "feed-wall") {
+      return;
+    }
+
+    const handlePopState = (event: PopStateEvent) => {
+      const state = event.state as { app?: string; view?: string; postId?: string } | null;
+      if (state?.app !== "social") {
+        return;
+      }
+
+      if (state.view === "post-detail" && state.postId) {
+        setActivePostId(state.postId);
+        return;
+      }
+
+      setActivePostId(null);
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, [selectedNav]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || selectedNav !== "feed-wall" || !activePostId) {
+      return;
+    }
+
+    const currentState = window.history.state as { app?: string; view?: string; postId?: string } | null;
+    if (currentState?.app === "social" && currentState.view === "post-detail" && currentState.postId === activePostId) {
+      return;
+    }
+
+    window.history.pushState({ app: "social", view: "post-detail", postId: activePostId }, "");
+  }, [activePostId, selectedNav]);
+
+  useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
@@ -533,7 +571,7 @@ export default function SocialPage() {
   }, []);
 
   const viewState = useMemo(() => resolveViewState(queryViewState), [queryViewState]);
-  const canReturnToFeedWall = selectedNav !== "feed-wall" && selectedNav !== "following";
+  const canReturnToFeedWall = selectedNav !== "feed-wall";
   const activePost = useMemo(() => feedWallPosts.find((post) => post.id === activePostId) ?? null, [activePostId, feedWallPosts]);
   const resolvedAuthOverlayReturnTo = useMemo(() => {
     if (authOverlayReturnTo) {

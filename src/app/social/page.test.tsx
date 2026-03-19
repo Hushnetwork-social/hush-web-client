@@ -602,6 +602,30 @@ describe('SocialPage', () => {
     expect(screen.getByTestId('social-subview-placeholder')).toBeInTheDocument();
   });
 
+  it('closes post detail overlay when social back returns to Feed Wall', async () => {
+    render(<SocialPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('social-post-post-1')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('open-post-detail-post-1'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('post-detail-overlay')).toBeInTheDocument();
+    });
+
+    window.dispatchEvent(
+      new PopStateEvent('popstate', {
+        state: { app: 'social', view: 'feed-wall', socialNav: 'feed-wall' },
+      })
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('post-detail-overlay')).not.toBeInTheDocument();
+    });
+  });
+
   it('defaults private post audience to Inner Circle in new-post composer', () => {
     selectedNav = 'new-post';
     render(<SocialPage />);
