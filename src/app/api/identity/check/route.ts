@@ -2,12 +2,7 @@
 // Checks if an identity exists in the blockchain
 
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  grpcCall,
-  parseGrpcResponse,
-  buildGetIdentityRequest,
-  parseIdentityResponse,
-} from '@/lib/grpc/grpc-web-helper';
+import { getIdentityProfile } from '@/modules/identity/server/getIdentityProfile';
 
 
 export async function GET(request: NextRequest) {
@@ -21,22 +16,11 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const requestBytes = buildGetIdentityRequest(address);
-    const responseBytes = await grpcCall('rpcHush.HushIdentity', 'GetIdentity', requestBytes);
-    const messageBytes = parseGrpcResponse(responseBytes);
-
-    if (!messageBytes) {
-      return NextResponse.json(
-        { error: 'Invalid gRPC response' },
-        { status: 502 }
-      );
-    }
-
-    const identity = parseIdentityResponse(messageBytes);
+    const identity = await getIdentityProfile(address);
 
     return NextResponse.json({
-      exists: identity.successful,
-      identity: identity.successful ? {
+      exists: identity.exists,
+      identity: identity.exists ? {
         profileName: identity.profileName,
         publicSigningAddress: identity.publicSigningAddress,
         publicEncryptAddress: identity.publicEncryptAddress,

@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
+import { getIdentityProfile } from "@/modules/identity/server/getIdentityProfile";
+import { getSocialPermalink, type SocialPermalinkServerPayload } from "@/modules/social/server/getSocialPermalink";
 import type { SocialPermalinkPayloadContract } from "@/modules/social/PermalinkService";
 
 export const isStaticExport = process.env.STATIC_EXPORT === "true";
 export const skipSsrFetch =
   process.env.NODE_ENV === "production" && process.env.GRPC_SERVER_URL?.includes("docker");
 
-export type SocialPermalinkMetadataPayload = SocialPermalinkPayloadContract & {
+export type SocialPermalinkMetadataPayload = SocialPermalinkServerPayload | (SocialPermalinkPayloadContract & {
   openGraph?: {
     title: string;
     description: string;
@@ -13,7 +15,7 @@ export type SocialPermalinkMetadataPayload = SocialPermalinkPayloadContract & {
     isGenericPrivate: boolean;
     cacheControl: string;
   };
-};
+});
 
 export function getDisplayInitials(value: string): string {
   const trimmed = value.trim();
@@ -61,7 +63,19 @@ function resolveAbsoluteUrl(baseUrl: string, candidate: string): string {
 export async function getRequestBaseUrl(): Promise<string> {
   const internalUrl = process.env.INTERNAL_API_URL?.trim();
   const configuredPublicUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
-  return internalUrl || configuredPublicUrl || "https://chat.hushnetwork.social";
+  if (internalUrl) {
+    return internalUrl;
+  }
+
+  if (configuredPublicUrl) {
+    return configuredPublicUrl;
+  }
+
+  if (process.env.NODE_ENV !== "production") {
+    return "http://localhost:3000";
+  }
+
+  return "https://chat.hushnetwork.social";
 }
 
 export async function fetchPermalinkMetadataPayload(
@@ -72,20 +86,7 @@ export async function fetchPermalinkMetadataPayload(
   }
 
   try {
-    const baseUrl = await getRequestBaseUrl();
-    const response = await fetch(
-      `${baseUrl}/api/social/posts/permalink?postId=${encodeURIComponent(postId)}&isAuthenticated=false`,
-      {
-        cache: "no-store",
-        signal: AbortSignal.timeout(5000),
-      }
-    );
-
-    if (!response.ok) {
-      return null;
-    }
-
-    return (await response.json()) as SocialPermalinkMetadataPayload;
+    return await getSocialPermalink(postId, null, false);
   } catch {
     return null;
   }
@@ -98,24 +99,8 @@ export async function fetchAuthorDisplayName(authorPublicAddress?: string): Prom
   }
 
   try {
-    const baseUrl = await getRequestBaseUrl();
-    const response = await fetch(
-      `${baseUrl}/api/identity/check?address=${encodeURIComponent(address)}`,
-      {
-        cache: "no-store",
-        signal: AbortSignal.timeout(5000),
-      }
-    );
-
-    if (!response.ok) {
-      return null;
-    }
-
-    const payload = (await response.json()) as {
-      exists?: boolean;
-      identity?: { profileName?: string | null };
-    };
-    const profileName = payload.identity?.profileName?.trim();
+    const payload = await getIdentityProfile(address);
+    const profileName = payload.profileName?.trim();
     return profileName && profileName.length > 0 ? profileName : null;
   } catch {
     return null;

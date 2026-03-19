@@ -1,0 +1,305 @@
+import {
+  encodeString,
+  encodeVarintField,
+  grpcCall,
+  parseGrpcResponse,
+  parseString,
+  parseVarint,
+} from "@/lib/grpc/grpc-web-helper";
+
+export type SocialPermalinkAccessStateServer = "allowed" | "guest_denied" | "unauthorized_denied" | "not_found";
+
+export type SocialPermalinkServerPayload = {
+  success: boolean;
+  message: string;
+  accessState: SocialPermalinkAccessStateServer;
+  postId?: string;
+  reactionScopeId?: string;
+  authorPublicAddress?: string;
+  authorCommitment?: string;
+  followState?: {
+    isFollowing: boolean;
+    canFollow: boolean;
+  };
+  content?: string;
+  createdAtBlock?: number;
+  createdAtUnixMs?: number;
+  canInteract: boolean;
+  circleFeedIds: string[];
+  attachments: {
+    attachmentId: string;
+    mimeType: string;
+    size: number;
+    fileName: string;
+    hash: string;
+    kind: "image" | "video";
+  }[];
+  openGraph?: {
+    title: string;
+    description: string;
+    imageUrl?: string;
+    isGenericPrivate: boolean;
+    cacheControl: string;
+  };
+  errorCode?: string;
+};
+
+function mapAccessState(value: number): SocialPermalinkAccessStateServer {
+  switch (value) {
+    case 1:
+      return "allowed";
+    case 2:
+      return "guest_denied";
+    case 3:
+      return "unauthorized_denied";
+    default:
+      return "not_found";
+  }
+}
+
+function buildPermalinkRequest(
+  postId: string,
+  requesterPublicAddress: string | null,
+  isAuthenticated: boolean
+): Uint8Array {
+  const bytes: number[] = [];
+  bytes.push(...encodeString(1, postId));
+  if (requesterPublicAddress) {
+    bytes.push(...encodeString(2, requesterPublicAddress));
+  }
+  bytes.push(...encodeVarintField(3, isAuthenticated ? 1 : 0));
+  return new Uint8Array(bytes);
+}
+
+function parseFollowState(bytes: Uint8Array): { isFollowing: boolean; canFollow: boolean } {
+  const followState = { isFollowing: false, canFollow: false };
+  let offset = 0;
+
+  while (offset < bytes.length) {
+    const tagInfo = parseVarint(bytes, offset);
+    offset += tagInfo.bytesRead;
+    const fieldNumber = tagInfo.value >>> 3;
+    const wireType = tagInfo.value & 0x07;
+
+    if (wireType !== 0) {
+      break;
+    }
+
+    const valueInfo = parseVarint(bytes, offset);
+    offset += valueInfo.bytesRead;
+    if (fieldNumber === 1) {
+      followState.isFollowing = valueInfo.value === 1;
+    } else if (fieldNumber === 2) {
+      followState.canFollow = valueInfo.value === 1;
+    }
+  }
+
+  return followState;
+}
+
+function parsePermalinkResponse(messageBytes: Uint8Array): SocialPermalinkServerPayload {
+  const result: SocialPermalinkServerPayload = {
+    success: false,
+    message: "",
+    accessState: "not_found",
+    canInteract: false,
+    circleFeedIds: [],
+    attachments: [],
+  };
+
+  const parseOpenGraph = (bytes: Uint8Array) => {
+    const openGraph = {
+      title: "",
+      description: "",
+      imageUrl: undefined as string | undefined,
+      isGenericPrivate: false,
+      cacheControl: "",
+    };
+
+    let nestedOffset = 0;
+    while (nestedOffset < bytes.length) {
+      const nestedTag = parseVarint(bytes, nestedOffset);
+      nestedOffset += nestedTag.bytesRead;
+      const nestedField = nestedTag.value >>> 3;
+      const nestedWire = nestedTag.value & 0x07;
+
+      if (nestedWire === 0) {
+        const valueInfo = parseVarint(bytes, nestedOffset);
+        nestedOffset += valueInfo.bytesRead;
+        if (nestedField === 4) {
+          openGraph.isGenericPrivate = valueInfo.value === 1;
+        }
+        continue;
+      }
+
+      if (nestedWire === 2) {
+        const lengthInfo = parseVarint(bytes, nestedOffset);
+        nestedOffset += lengthInfo.bytesRead;
+        const value = parseString(bytes, nestedOffset, lengthInfo.value);
+        nestedOffset += lengthInfo.value;
+
+        if (nestedField === 1) {
+          openGraph.title = value;
+        } else if (nestedField === 2) {
+          openGraph.description = value;
+        } else if (nestedField === 3) {
+          openGraph.imageUrl = value;
+        } else if (nestedField === 5) {
+          openGraph.cacheControl = value;
+        }
+        continue;
+      }
+
+      break;
+    }
+
+    return openGraph;
+  };
+
+  const parseAttachment = (bytes: Uint8Array) => {
+    const attachment = {
+      attachmentId: "",
+      mimeType: "",
+      size: 0,
+      fileName: "",
+      hash: "",
+      kind: "image" as "image" | "video",
+    };
+
+    let nestedOffset = 0;
+    while (nestedOffset < bytes.length) {
+      const nestedTag = parseVarint(bytes, nestedOffset);
+      nestedOffset += nestedTag.bytesRead;
+      const nestedField = nestedTag.value >>> 3;
+      const nestedWire = nestedTag.value & 0x07;
+
+      if (nestedWire === 0) {
+        const valueInfo = parseVarint(bytes, nestedOffset);
+        nestedOffset += valueInfo.bytesRead;
+        if (nestedField === 3) {
+          attachment.size = valueInfo.value;
+        } else if (nestedField === 6) {
+          attachment.kind = valueInfo.value === 2 ? "video" : "image";
+        }
+        continue;
+      }
+
+      if (nestedWire === 2) {
+        const lengthInfo = parseVarint(bytes, nestedOffset);
+        nestedOffset += lengthInfo.bytesRead;
+        const value = parseString(bytes, nestedOffset, lengthInfo.value);
+        nestedOffset += lengthInfo.value;
+
+        if (nestedField === 1) {
+          attachment.attachmentId = value;
+        } else if (nestedField === 2) {
+          attachment.mimeType = value;
+        } else if (nestedField === 4) {
+          attachment.fileName = value;
+        } else if (nestedField === 5) {
+          attachment.hash = value;
+        }
+        continue;
+      }
+
+      break;
+    }
+
+    return attachment;
+  };
+
+  let offset = 0;
+  while (offset < messageBytes.length) {
+    const tagInfo = parseVarint(messageBytes, offset);
+    offset += tagInfo.bytesRead;
+    const fieldNumber = tagInfo.value >>> 3;
+    const wireType = tagInfo.value & 0x07;
+
+    if (wireType === 0) {
+      const valueInfo = parseVarint(messageBytes, offset);
+      offset += valueInfo.bytesRead;
+      if (fieldNumber === 1) {
+        result.success = valueInfo.value === 1;
+      } else if (fieldNumber === 3) {
+        result.accessState = mapAccessState(valueInfo.value);
+      } else if (fieldNumber === 7) {
+        result.createdAtBlock = valueInfo.value;
+      } else if (fieldNumber === 9) {
+        result.canInteract = valueInfo.value === 1;
+      } else if (fieldNumber === 18) {
+        result.createdAtUnixMs = valueInfo.value;
+      }
+      continue;
+    }
+
+    if (wireType === 2) {
+      const lengthInfo = parseVarint(messageBytes, offset);
+      offset += lengthInfo.bytesRead;
+      if (fieldNumber === 20) {
+        const bytes = messageBytes.slice(offset, offset + lengthInfo.value);
+        let binary = "";
+        for (const value of bytes) {
+          binary += String.fromCharCode(value);
+        }
+        result.authorCommitment = btoa(binary);
+        offset += lengthInfo.value;
+        continue;
+      }
+      if (fieldNumber === 21) {
+        const bytes = messageBytes.slice(offset, offset + lengthInfo.value);
+        result.followState = parseFollowState(bytes);
+        offset += lengthInfo.value;
+        continue;
+      }
+      if (fieldNumber === 10) {
+        const bytes = messageBytes.slice(offset, offset + lengthInfo.value);
+        result.openGraph = parseOpenGraph(bytes);
+        offset += lengthInfo.value;
+        continue;
+      }
+
+      const value = parseString(messageBytes, offset, lengthInfo.value);
+      offset += lengthInfo.value;
+
+      if (fieldNumber === 2) {
+        result.message = value;
+      } else if (fieldNumber === 4) {
+        result.postId = value;
+      } else if (fieldNumber === 19) {
+        result.reactionScopeId = value;
+      } else if (fieldNumber === 5) {
+        result.authorPublicAddress = value;
+      } else if (fieldNumber === 6) {
+        result.content = value;
+      } else if (fieldNumber === 8) {
+        result.circleFeedIds.push(value);
+      } else if (fieldNumber === 17) {
+        const attachmentBytes = messageBytes.slice(offset - lengthInfo.value, offset);
+        result.attachments.push(parseAttachment(attachmentBytes));
+      } else if (fieldNumber === 11) {
+        result.errorCode = value;
+      }
+      continue;
+    }
+
+    break;
+  }
+
+  return result;
+}
+
+export async function getSocialPermalink(
+  postId: string,
+  requesterPublicAddress: string | null,
+  isAuthenticated: boolean
+): Promise<SocialPermalinkServerPayload> {
+  const requestBytes = buildPermalinkRequest(postId, requesterPublicAddress, isAuthenticated);
+  const responseBytes = await grpcCall("rpcHush.HushFeed", "GetSocialPostPermalink", requestBytes);
+  const messageBytes = parseGrpcResponse(responseBytes);
+
+  if (!messageBytes) {
+    throw new Error("Invalid gRPC response");
+  }
+
+  return parsePermalinkResponse(messageBytes);
+}
