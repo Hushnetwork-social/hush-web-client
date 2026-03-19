@@ -635,19 +635,21 @@ export default function SocialPostPermalinkPage() {
 
         <article className="mt-3 w-full min-h-[calc(100%-2rem)] rounded-xl border border-hush-bg-hover bg-hush-bg-dark p-4" data-testid="social-permalink-post-card">
           <div className="mb-2 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
+            <div className="min-w-0 flex items-center gap-2">
               <p className="text-sm font-semibold text-hush-text-primary" data-testid="social-permalink-author-name">
                 {authorName}
               </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
               <FollowAuthorButton
                 state={getFollowButtonState(permalink.authorPublicAddress, permalink.followState)}
                 testId="social-permalink-follow-author"
                 onClick={() => void submitFollowAuthor(permalink.authorPublicAddress, permalink.followState)}
               />
+              <span className="text-xs text-hush-text-accent" data-testid="social-permalink-confirmed-at">
+                {createdAtLabel}
+              </span>
             </div>
-            <span className="text-xs text-hush-text-accent" data-testid="social-permalink-confirmed-at">
-              {createdAtLabel}
-            </span>
           </div>
 
           {followError ? (
@@ -841,16 +843,16 @@ export default function SocialPostPermalinkPage() {
                     className="rounded-lg border border-hush-bg-hover p-3"
                     data-testid={`social-permalink-reply-${reply.id}`}
                   >
-                    <div className="mb-1 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <p className="text-xs font-semibold text-hush-text-primary">{reply.author}</p>
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <p className="min-w-0 text-xs font-semibold text-hush-text-primary">{reply.author}</p>
+                      <div className="flex shrink-0 items-center gap-2">
                         <FollowAuthorButton
                           state={getFollowButtonState(reply.authorPublicAddress, reply.followState)}
                           testId={`social-permalink-follow-reply-${reply.id}`}
                           onClick={() => void submitFollowAuthor(reply.authorPublicAddress, reply.followState)}
                         />
+                        <span className="text-[10px] text-hush-text-accent">{reply.time}</span>
                       </div>
-                      <span className="text-[10px] text-hush-text-accent">{reply.time}</span>
                     </div>
                     <p className="text-xs text-hush-text-accent">{reply.text}</p>
                     <SocialPostReactions
