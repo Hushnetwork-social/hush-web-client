@@ -13,7 +13,6 @@ const SOCIAL_MENU_ITEMS = [
   { id: "notifications", label: "Notifications" },
   { id: "profile", label: "Profile" },
   { id: "settings", label: "Settings" },
-  { id: "logout", label: "Logout" },
 ];
 
 const SOCIAL_MENU_IDS = new Set(SOCIAL_MENU_ITEMS.map((item) => item.id));
