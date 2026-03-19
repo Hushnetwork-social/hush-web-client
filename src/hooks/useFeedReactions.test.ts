@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { useFeedReactions } from './useFeedReactions';
 
 const hoistedFeedStore = vi.hoisted(() => ({
@@ -309,6 +309,68 @@ describe('useFeedReactions', () => {
         ['message-1'],
         123456n
       );
+    });
+
+    it('allows concurrent tally fetches for different message ids in the same reaction scope', async () => {
+      mockReactionsState.isProverReady = true;
+
+      let resolveFirstFetch: (() => void) | null = null;
+      vi.mocked(reactionsServiceInstance.getTallies)
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveFirstFetch = resolve;
+            })
+        )
+        .mockResolvedValueOnce(undefined);
+
+      const { result: first } = renderHook(() =>
+        useFeedReactions({
+          feedId: 'shared-scope-id',
+          feedAesKey: 'shared-scope-key==',
+        })
+      );
+
+      const { result: second } = renderHook(() =>
+        useFeedReactions({
+          feedId: 'shared-scope-id',
+          feedAesKey: 'shared-scope-key==',
+        })
+      );
+
+      await waitFor(() => {
+        expect(first.current.isReady).toBe(true);
+        expect(second.current.isReady).toBe(true);
+      });
+
+      const firstFetchPromise = act(async () => {
+        await first.current.fetchTalliesForMessages(['message-1']);
+      });
+
+      await waitFor(() => {
+        expect(reactionsServiceInstance.getTallies).toHaveBeenCalledTimes(1);
+      });
+
+      await act(async () => {
+        await second.current.fetchTalliesForMessages(['message-2']);
+      });
+
+      expect(reactionsServiceInstance.getTallies).toHaveBeenCalledTimes(2);
+      expect(reactionsServiceInstance.getTallies).toHaveBeenNthCalledWith(
+        1,
+        'shared-scope-id',
+        ['message-1'],
+        123456n
+      );
+      expect(reactionsServiceInstance.getTallies).toHaveBeenNthCalledWith(
+        2,
+        'shared-scope-id',
+        ['message-2'],
+        123456n
+      );
+
+      resolveFirstFetch?.();
+      await firstFetchPromise;
     });
   });
 

@@ -72,6 +72,10 @@ function serializeReactionDebugPayload(payload: Record<string, unknown>): string
   );
 }
 
+function buildTallyFetchKey(feedId: string, messageIds: string[]): string {
+  return `${feedId}:${[...messageIds].sort().join(",")}`;
+}
+
 interface UseFeedReactionsOptions {
   /** Feed ID */
   feedId: string;
@@ -293,12 +297,15 @@ export function useFeedReactions({
       : messageIds.filter(id => !fetchedTallyMessageIds.current.has(id));
     if (newMessageIds.length === 0) return;
 
-    // Prevent concurrent fetches
-    if (isFetchingTalliesRef.current || activeTallyFetches.has(feedId)) {
+    const fetchKey = buildTallyFetchKey(feedId, newMessageIds);
+
+    // Prevent duplicate concurrent fetches for the same scope + target set, but do
+    // not block sibling social entries sharing the same reaction scope.
+    if (isFetchingTalliesRef.current || activeTallyFetches.has(fetchKey)) {
       return;
     }
     isFetchingTalliesRef.current = true;
-    activeTallyFetches.add(feedId);
+    activeTallyFetches.add(fetchKey);
 
     // Mark these IDs as being fetched (optimistic, to prevent duplicate requests)
     newMessageIds.forEach(id => fetchedTallyMessageIds.current.add(id));
@@ -312,7 +319,7 @@ export function useFeedReactions({
       console.error(`[useFeedReactions] Failed to fetch tallies:`, err);
     } finally {
       isFetchingTalliesRef.current = false;
-      activeTallyFetches.delete(feedId);
+      activeTallyFetches.delete(fetchKey);
     }
   }, [feedId, feedPrivateKey]);
 
@@ -344,21 +351,6 @@ export function useFeedReactions({
       })
     );
   }, [credentials, feedId, userSecret]);
-
-  // Legacy refreshTallies for after reaction submission (refreshes last 20 messages)
-  const refreshTallies = useCallback(async () => {
-    if (!feedPrivateKey) return;
-
-    const messages = useFeedsStore.getState().messages[feedId] ?? [];
-    const confirmedMessageIds = messages
-      .filter((m) => m.isConfirmed && m.id)
-      .map((m) => m.id)
-      .slice(-20);
-
-    // Clear the fetched set for these IDs to force refresh
-    confirmedMessageIds.forEach(id => fetchedTallyMessageIds.current.delete(id));
-    await fetchTalliesForMessages(confirmedMessageIds);
-  }, [feedId, feedPrivateKey, fetchTalliesForMessages]);
 
   // Get reaction counts for a message
   const getReactionCounts = useCallback(
@@ -663,8 +655,11 @@ export function useFeedReactions({
         confirmReaction(messageId);
         debugLog(`[useFeedReactions] Reaction confirmed for ${messageId.substring(0, 8)}...`);
 
-        // Refresh tallies after successful submission to get updated counts
-        refreshTallies();
+        // Refresh the exact target immediately. Social reactions do not live in the
+        // chat message cache keyed by reaction scope, so the legacy "last 20 messages"
+        // refresh can miss the just-reacted entry entirely.
+        fetchedTallyMessageIds.current.delete(messageId);
+        await fetchTalliesForMessages([messageId], { forceRefresh: true });
       } catch (err) {
         // Revert the optimistic update - proof failed or server rejected
         revertReaction(messageId);
@@ -683,7 +678,7 @@ export function useFeedReactions({
       setPendingReaction,
       confirmReaction,
       revertReaction,
-      refreshTallies,
+      fetchTalliesForMessages,
       getMessageById,
       membershipFeedId,
       resolveAuthorCommitment,
