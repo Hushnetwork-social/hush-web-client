@@ -180,7 +180,7 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          npm run tauri android build -- --apk true
+          npm run tauri android build -- --apk --ci
           echo "Android APK built"
 
       - name: Cleanup keystore
