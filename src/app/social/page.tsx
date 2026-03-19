@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import { AlertCircle, Check, Link2, Loader2, MessageCircle, Sparkles, X } from "lucide-react";
+import { AlertCircle, ArrowLeft, Check, Link2, Loader2, MessageCircle, Sparkles, X } from "lucide-react";
 import { buildApiUrl } from "@/lib/api-config";
 import { useAppStore } from "@/stores";
 import { useFeedsStore } from "@/modules/feeds/useFeedsStore";
@@ -533,6 +533,7 @@ export default function SocialPage() {
   }, []);
 
   const viewState = useMemo(() => resolveViewState(queryViewState), [queryViewState]);
+  const canReturnToFeedWall = selectedNav !== "feed-wall" && selectedNav !== "following";
   const activePost = useMemo(() => feedWallPosts.find((post) => post.id === activePostId) ?? null, [activePostId, feedWallPosts]);
   const resolvedAuthOverlayReturnTo = useMemo(() => {
     if (authOverlayReturnTo) {
@@ -2731,6 +2732,17 @@ export default function SocialPage() {
       >
         <div className={`w-full ${selectedNav === "following" ? "min-h-0 flex flex-1 flex-col" : ""}`}>
           <div className="mb-3">
+            {canReturnToFeedWall ? (
+              <button
+                type="button"
+                className="mb-2 inline-flex items-center gap-1 rounded-md border border-hush-bg-hover px-2 py-1 text-xs text-hush-text-accent hover:bg-hush-bg-hover"
+                data-testid="social-back-to-feedwall"
+                onClick={() => setSelectedNav("feed-wall")}
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                Back to Feed Wall
+              </button>
+            ) : null}
             <h2 className="text-xl font-semibold text-hush-text-primary">
               {selectedNav === "following"
                 ? "Following"

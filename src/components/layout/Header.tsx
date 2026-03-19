@@ -8,15 +8,27 @@ interface HeaderProps {
   feedName?: string;
   balance?: number;
   blockHeight?: number;
+  onTitleClick?: () => void;
 }
 
-export function Header({ title = "HushFeeds!", feedName, balance = 0 }: HeaderProps) {
+export function Header({ title = "HushFeeds!", feedName, balance = 0, onTitleClick }: HeaderProps) {
   return (
     <header className="bg-hush-bg-element rounded-t-xl px-4 py-3">
       <div className="flex items-center justify-between">
         {/* Left: Title and Feed Name */}
         <div className="flex items-center">
-          <h1 data-testid="app-title" className="text-xl font-bold text-hush-purple">{title}</h1>
+          {onTitleClick ? (
+            <button
+              type="button"
+              data-testid="app-title"
+              className="text-left text-xl font-bold text-hush-purple"
+              onClick={onTitleClick}
+            >
+              {title}
+            </button>
+          ) : (
+            <h1 data-testid="app-title" className="text-xl font-bold text-hush-purple">{title}</h1>
+          )}
           {feedName && (
             <>
               <span className="mx-3 text-xl text-hush-text-accent">/</span>

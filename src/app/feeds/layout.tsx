@@ -137,6 +137,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const handleNavSelect = useCallback((id: string) => {
     if (id === "switch-social") {
       sessionStorage.setItem("hush_app_switch_to", "social");
+      setSelectedNav("feed-wall");
       setActiveApp("social");
       router.push(getAppHomeRoute("social"));
       return;
@@ -144,6 +145,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
     if (id === "switch-feeds") {
       sessionStorage.setItem("hush_app_switch_to", "feeds");
+      setSelectedNav("feeds");
       setActiveApp("feeds");
       router.push(getAppHomeRoute("feeds"));
       return;
@@ -156,6 +158,18 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       setSelectedNav(id);
     }
   }, [router, setActiveApp, setSelectedNav]);
+
+  const handleHeaderHome = useCallback(() => {
+    const targetApp = activeApp;
+    if (targetApp === "social") {
+      setSelectedNav("feed-wall");
+      router.push(getAppHomeRoute("social"));
+      return;
+    }
+
+    setSelectedNav("feeds");
+    router.push(getAppHomeRoute("feeds"));
+  }, [activeApp, router, setSelectedNav]);
 
   // Handle group created from wizard
   const handleGroupCreated = useCallback((feedId: string) => {
@@ -267,6 +281,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             title={getAppDisplayName(activeApp)}
             balance={balance?.available || 0}
             blockHeight={blockHeight}
+            onTitleClick={handleHeaderHome}
           />
 
           {/* Content Area */}
@@ -313,6 +328,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             title={getAppDisplayName(activeApp)}
             balance={balance?.available || 0}
             blockHeight={blockHeight}
+            onTitleClick={handleHeaderHome}
           />
           <main className="flex-1 flex flex-col min-h-0 overflow-hidden bg-hush-bg-element rounded-xl">
             {children}
