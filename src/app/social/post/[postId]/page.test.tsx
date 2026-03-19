@@ -417,7 +417,7 @@ describe("SocialPostPermalinkPage", () => {
     render(<SocialPostPermalinkPage />);
 
     fireEvent.click(await screen.findByTestId("social-permalink-comment"));
-    expect(screen.getByTestId("social-permalink-composer-top")).toBeInTheDocument();
+    expect(await screen.findByTestId("social-permalink-composer-top")).toBeInTheDocument();
 
     fireEvent.keyDown(screen.getByTestId("social-permalink-composer-input"), { key: "Escape" });
 
