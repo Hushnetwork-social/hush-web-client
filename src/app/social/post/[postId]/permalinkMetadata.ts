@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { headers } from "next/headers";
 import type { SocialPermalinkPayloadContract } from "@/modules/social/PermalinkService";
 
 export const isStaticExport = process.env.STATIC_EXPORT === "true";
@@ -60,12 +59,9 @@ function resolveAbsoluteUrl(baseUrl: string, candidate: string): string {
 }
 
 export async function getRequestBaseUrl(): Promise<string> {
-  const headersList = await headers();
-  const host = headersList.get("host") || "chat.hushnetwork.social";
-  const protocol = headersList.get("x-forwarded-proto") || "https";
   const internalUrl = process.env.INTERNAL_API_URL?.trim();
-
-  return internalUrl || `${protocol}://${host}`;
+  const configuredPublicUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
+  return internalUrl || configuredPublicUrl || "https://chat.hushnetwork.social";
 }
 
 export async function fetchPermalinkMetadataPayload(
