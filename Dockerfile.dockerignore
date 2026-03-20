@@ -35,10 +35,16 @@ hush-network-presentation-v2
 # ===========================================
 # Node.js Build Artifacts (rebuilt in container)
 # ===========================================
-**/node_modules
-hush-web-client/.next
-hush-web-client/out
-hush-web-client/.turbo
+node_modules
+.next
+.next-tauri
+out
+.turbo
+coverage
+playwright-report
+test-results
+tmp
+.tmp
 
 # ===========================================
 # Test Artifacts
@@ -51,12 +57,13 @@ hush-web-client/.turbo
 # ===========================================
 # Tauri Desktop App (separate build)
 # ===========================================
-hush-web-client/src-tauri
+src-tauri
 
 # ===========================================
 # Documentation & Planning
 # ===========================================
 MemoryBank
+memory-bank
 *.md
 !README.md
 
