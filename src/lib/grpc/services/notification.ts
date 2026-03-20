@@ -12,14 +12,30 @@ import {
   buildSubscribeToEventsRequest,
   buildMarkFeedAsReadRequest,
   buildGetUnreadCountsRequest,
+  buildGetSocialNotificationInboxRequest,
+  buildMarkSocialNotificationReadRequest,
+  buildGetSocialNotificationPreferencesRequest,
+  buildUpdateSocialNotificationPreferencesRequest,
   buildRegisterDeviceTokenRequest,
   parseFeedEventResponse,
   parseMarkFeedAsReadResponse,
   parseGetUnreadCountsResponse,
+  parseSocialNotificationInboxResponse,
+  parseMarkSocialNotificationReadResponse,
+  parseGetSocialNotificationPreferencesResponse,
+  parseUpdateSocialNotificationPreferencesResponse,
   parseRegisterDeviceTokenResponse,
   parseGrpcResponse,
   PushPlatform,
+  SocialNotificationKind,
+  SocialNotificationTargetType,
+  SocialNotificationVisibilityClass,
   type FeedEventResponse,
+  type SocialNotificationInboxResponse,
+  type SocialNotificationPreferencesResponse,
+  type UpdateSocialNotificationPreferencesRequest,
+  type UpdateSocialNotificationPreferencesResult,
+  type MarkSocialNotificationReadResult,
   type PushPlatformType,
   type RegisterDeviceTokenResult,
 } from '../grpc-web-helper';
@@ -273,6 +289,126 @@ export async function getUnreadCounts(
   }
 }
 
+export async function getSocialNotificationInbox(
+  userId: string,
+  options: { limit?: number; includeRead?: boolean } = {}
+): Promise<SocialNotificationInboxResponse> {
+  try {
+    const requestBytes = buildGetSocialNotificationInboxRequest(
+      userId,
+      options.limit,
+      options.includeRead
+    );
+    const responseBytes = await browserGrpcCall(SERVICE_NAME, 'GetSocialNotificationInbox', requestBytes);
+    const messageBytes = parseGrpcResponse(responseBytes);
+
+    if (!messageBytes) {
+      return { items: [], hasMore: false };
+    }
+
+    const response = parseSocialNotificationInboxResponse(messageBytes);
+    debugLog(`[NotificationService] GetSocialNotificationInbox response:`, response);
+    return response;
+  } catch (error) {
+    debugError(`[NotificationService] GetSocialNotificationInbox error:`, error);
+    return { items: [], hasMore: false };
+  }
+}
+
+export async function markSocialNotificationRead(
+  userId: string,
+  notificationId?: string,
+  markAll: boolean = false
+): Promise<MarkSocialNotificationReadResult> {
+  try {
+    const requestBytes = buildMarkSocialNotificationReadRequest(userId, notificationId, markAll);
+    const responseBytes = await browserGrpcCall(SERVICE_NAME, 'MarkSocialNotificationRead', requestBytes);
+    const messageBytes = parseGrpcResponse(responseBytes);
+
+    if (!messageBytes) {
+      return { success: false, updatedCount: 0, message: 'Empty response from server' };
+    }
+
+    const response = parseMarkSocialNotificationReadResponse(messageBytes);
+    debugLog(`[NotificationService] MarkSocialNotificationRead response:`, response);
+    return response;
+  } catch (error) {
+    debugError(`[NotificationService] MarkSocialNotificationRead error:`, error);
+    return { success: false, updatedCount: 0, message: error instanceof Error ? error.message : 'Unknown error' };
+  }
+}
+
+export async function getSocialNotificationPreferences(
+  userId: string
+): Promise<SocialNotificationPreferencesResponse> {
+  try {
+    const requestBytes = buildGetSocialNotificationPreferencesRequest(userId);
+    const responseBytes = await browserGrpcCall(SERVICE_NAME, 'GetSocialNotificationPreferences', requestBytes);
+    const messageBytes = parseGrpcResponse(responseBytes);
+
+    if (!messageBytes) {
+      return {
+        openActivityEnabled: true,
+        closeActivityEnabled: true,
+        circleMutes: [],
+        updatedAtUnixMs: 0,
+      };
+    }
+
+    const response = parseGetSocialNotificationPreferencesResponse(messageBytes);
+    debugLog(`[NotificationService] GetSocialNotificationPreferences response:`, response);
+    return response;
+  } catch (error) {
+    debugError(`[NotificationService] GetSocialNotificationPreferences error:`, error);
+    return {
+      openActivityEnabled: true,
+      closeActivityEnabled: true,
+      circleMutes: [],
+      updatedAtUnixMs: 0,
+    };
+  }
+}
+
+export async function updateSocialNotificationPreferences(
+  userId: string,
+  update: UpdateSocialNotificationPreferencesRequest
+): Promise<UpdateSocialNotificationPreferencesResult> {
+  try {
+    const requestBytes = buildUpdateSocialNotificationPreferencesRequest(userId, update);
+    const responseBytes = await browserGrpcCall(SERVICE_NAME, 'UpdateSocialNotificationPreferences', requestBytes);
+    const messageBytes = parseGrpcResponse(responseBytes);
+
+    if (!messageBytes) {
+      return {
+        success: false,
+        message: 'Empty response from server',
+        preferences: {
+          openActivityEnabled: true,
+          closeActivityEnabled: true,
+          circleMutes: [],
+          updatedAtUnixMs: 0,
+        },
+      };
+    }
+
+    const response = parseUpdateSocialNotificationPreferencesResponse(messageBytes);
+    debugLog(`[NotificationService] UpdateSocialNotificationPreferences response:`, response);
+    return response;
+  } catch (error) {
+    debugError(`[NotificationService] UpdateSocialNotificationPreferences error:`, error);
+    return {
+      success: false,
+      message: error instanceof Error ? error.message : 'Unknown error',
+      preferences: {
+        openActivityEnabled: true,
+        closeActivityEnabled: true,
+        circleMutes: [],
+        updatedAtUnixMs: 0,
+      },
+    };
+  }
+}
+
 /**
  * Register a device token for push notifications.
  *
@@ -306,11 +442,27 @@ export async function registerDeviceToken(
   }
 }
 
-export { PushPlatform, type PushPlatformType, type RegisterDeviceTokenResult };
+export {
+  PushPlatform,
+  SocialNotificationKind,
+  SocialNotificationTargetType,
+  SocialNotificationVisibilityClass,
+  type PushPlatformType,
+  type RegisterDeviceTokenResult,
+  type SocialNotificationInboxResponse,
+  type SocialNotificationPreferencesResponse,
+  type UpdateSocialNotificationPreferencesRequest,
+  type UpdateSocialNotificationPreferencesResult,
+  type MarkSocialNotificationReadResult,
+};
 
 export const notificationService = {
   subscribeToEvents,
   markFeedAsRead,
   getUnreadCounts,
+  getSocialNotificationInbox,
+  markSocialNotificationRead,
+  getSocialNotificationPreferences,
+  updateSocialNotificationPreferences,
   registerDeviceToken,
 };

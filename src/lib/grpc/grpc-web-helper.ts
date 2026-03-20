@@ -1121,6 +1121,149 @@ export function buildGetUnreadCountsRequest(userId: string): Uint8Array {
   return new Uint8Array(bytes);
 }
 
+export const SocialNotificationVisibilityClass = {
+  UNSPECIFIED: 0,
+  OPEN: 1,
+  CLOSE: 2,
+} as const;
+
+export type SocialNotificationVisibilityClassType =
+  (typeof SocialNotificationVisibilityClass)[keyof typeof SocialNotificationVisibilityClass];
+
+export const SocialNotificationKind = {
+  UNSPECIFIED: 0,
+  NEW_POST: 1,
+  REACTION: 2,
+  COMMENT: 3,
+  REPLY: 4,
+} as const;
+
+export type SocialNotificationKindType =
+  (typeof SocialNotificationKind)[keyof typeof SocialNotificationKind];
+
+export const SocialNotificationTargetType = {
+  UNSPECIFIED: 0,
+  POST: 1,
+  COMMENT: 2,
+  REPLY: 3,
+} as const;
+
+export type SocialNotificationTargetTypeType =
+  (typeof SocialNotificationTargetType)[keyof typeof SocialNotificationTargetType];
+
+export interface SocialCircleMuteStateResponse {
+  circleId: string;
+  isMuted: boolean;
+}
+
+export interface SocialNotificationPreferencesResponse {
+  openActivityEnabled: boolean;
+  closeActivityEnabled: boolean;
+  circleMutes: SocialCircleMuteStateResponse[];
+  updatedAtUnixMs: number;
+}
+
+export interface SocialNotificationItemResponse {
+  notificationId: string;
+  kind: SocialNotificationKindType;
+  visibilityClass: SocialNotificationVisibilityClassType;
+  targetType: SocialNotificationTargetTypeType;
+  targetId: string;
+  postId: string;
+  parentCommentId: string;
+  actorUserId: string;
+  actorDisplayName: string;
+  title: string;
+  body: string;
+  isRead: boolean;
+  isPrivatePreviewSuppressed: boolean;
+  createdAtUnixMs: number;
+  deepLinkPath: string;
+  matchedCircleIds: string[];
+}
+
+export interface SocialNotificationInboxResponse {
+  items: SocialNotificationItemResponse[];
+  hasMore: boolean;
+}
+
+export interface MarkSocialNotificationReadResult {
+  success: boolean;
+  updatedCount: number;
+  message: string;
+}
+
+export interface UpdateSocialNotificationPreferencesRequest {
+  openActivityEnabled?: boolean;
+  closeActivityEnabled?: boolean;
+  circleMutes?: SocialCircleMuteStateResponse[];
+}
+
+export interface UpdateSocialNotificationPreferencesResult {
+  success: boolean;
+  message: string;
+  preferences: SocialNotificationPreferencesResponse;
+}
+
+export function buildGetSocialNotificationInboxRequest(
+  userId: string,
+  limit?: number,
+  includeRead?: boolean
+): Uint8Array {
+  const bytes = [
+    ...encodeString(1, userId),
+    ...(limit && limit > 0 ? encodeVarintField(2, limit) : []),
+    ...(includeRead ? encodeBoolField(3, true) : []),
+  ];
+  return new Uint8Array(bytes);
+}
+
+export function buildMarkSocialNotificationReadRequest(
+  userId: string,
+  notificationId?: string,
+  markAll: boolean = false
+): Uint8Array {
+  const bytes = [
+    ...encodeString(1, userId),
+    ...(notificationId ? encodeString(2, notificationId) : []),
+    ...(markAll ? encodeBoolField(3, true) : []),
+  ];
+  return new Uint8Array(bytes);
+}
+
+export function buildGetSocialNotificationPreferencesRequest(userId: string): Uint8Array {
+  return new Uint8Array(encodeString(1, userId));
+}
+
+export function buildUpdateSocialNotificationPreferencesRequest(
+  userId: string,
+  update: UpdateSocialNotificationPreferencesRequest
+): Uint8Array {
+  const chunks: Uint8Array[] = [
+    new Uint8Array(encodeString(1, userId)),
+  ];
+
+  if (update.openActivityEnabled !== undefined) {
+    chunks.push(new Uint8Array(encodeBoolField(2, true)));
+    chunks.push(new Uint8Array(encodeBoolField(3, update.openActivityEnabled)));
+  }
+
+  if (update.closeActivityEnabled !== undefined) {
+    chunks.push(new Uint8Array(encodeBoolField(4, true)));
+    chunks.push(new Uint8Array(encodeBoolField(5, update.closeActivityEnabled)));
+  }
+
+  for (const circleMute of update.circleMutes ?? []) {
+    const muteChunks: Uint8Array[] = [new Uint8Array(encodeString(1, circleMute.circleId))];
+    if (circleMute.isMuted) {
+      muteChunks.push(new Uint8Array(encodeBoolField(2, true)));
+    }
+    chunks.push(encodeMessageFromChunks(6, muteChunks));
+  }
+
+  return concatUint8Arrays(chunks);
+}
+
 export interface FeedEventResponse {
   type: number;
   feedId: string;
@@ -2143,6 +2286,306 @@ export function parseGetFeedMessagesByIdResponse(messageBytes: Uint8Array): GetF
       const valueResult = parseVarint(messageBytes, offset);
       offset += valueResult.bytesRead;
       result.newestBlockIndex = valueResult.value;
+    } else if (wireType === 0) {
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+    } else if (wireType === 2) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead + lenResult.value;
+    } else {
+      break;
+    }
+  }
+
+  return result;
+}
+
+export function parseSocialNotificationInboxResponse(
+  messageBytes: Uint8Array
+): SocialNotificationInboxResponse {
+  const result: SocialNotificationInboxResponse = {
+    items: [],
+    hasMore: false,
+  };
+
+  let offset = 0;
+  while (offset < messageBytes.length) {
+    const tagResult = parseVarint(messageBytes, offset);
+    offset += tagResult.bytesRead;
+    const fieldNumber = tagResult.value >> 3;
+    const wireType = tagResult.value & 0x07;
+
+    if (wireType === 2 && fieldNumber === 1) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead;
+      const itemBytes = messageBytes.slice(offset, offset + lenResult.value);
+      offset += lenResult.value;
+      result.items.push(parseSocialNotificationItem(itemBytes));
+    } else if (wireType === 0 && fieldNumber === 2) {
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+      result.hasMore = valueResult.value === 1;
+    } else if (wireType === 0) {
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+    } else if (wireType === 2) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead + lenResult.value;
+    } else {
+      break;
+    }
+  }
+
+  return result;
+}
+
+export function parseMarkSocialNotificationReadResponse(
+  messageBytes: Uint8Array
+): MarkSocialNotificationReadResult {
+  const result: MarkSocialNotificationReadResult = {
+    success: false,
+    updatedCount: 0,
+    message: '',
+  };
+
+  let offset = 0;
+  while (offset < messageBytes.length) {
+    const tagResult = parseVarint(messageBytes, offset);
+    offset += tagResult.bytesRead;
+    const fieldNumber = tagResult.value >> 3;
+    const wireType = tagResult.value & 0x07;
+
+    if (wireType === 0) {
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+      if (fieldNumber === 1) result.success = valueResult.value === 1;
+      if (fieldNumber === 2) result.updatedCount = valueResult.value;
+    } else if (wireType === 2 && fieldNumber === 3) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead;
+      result.message = parseString(messageBytes, offset, lenResult.value);
+      offset += lenResult.value;
+    } else if (wireType === 2) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead + lenResult.value;
+    } else {
+      break;
+    }
+  }
+
+  return result;
+}
+
+export function parseSocialNotificationPreferencesResponse(
+  messageBytes: Uint8Array
+): SocialNotificationPreferencesResponse {
+  const result: SocialNotificationPreferencesResponse = {
+    openActivityEnabled: true,
+    closeActivityEnabled: true,
+    circleMutes: [],
+    updatedAtUnixMs: 0,
+  };
+
+  let offset = 0;
+  while (offset < messageBytes.length) {
+    const tagResult = parseVarint(messageBytes, offset);
+    offset += tagResult.bytesRead;
+    const fieldNumber = tagResult.value >> 3;
+    const wireType = tagResult.value & 0x07;
+
+    if (wireType === 0) {
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+      if (fieldNumber === 1) result.openActivityEnabled = valueResult.value === 1;
+      if (fieldNumber === 2) result.closeActivityEnabled = valueResult.value === 1;
+      if (fieldNumber === 4) result.updatedAtUnixMs = valueResult.value;
+    } else if (wireType === 2 && fieldNumber === 3) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead;
+      const muteBytes = messageBytes.slice(offset, offset + lenResult.value);
+      offset += lenResult.value;
+      result.circleMutes.push(parseSocialCircleMuteState(muteBytes));
+    } else if (wireType === 2) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead + lenResult.value;
+    } else {
+      break;
+    }
+  }
+
+  return result;
+}
+
+export function parseGetSocialNotificationPreferencesResponse(
+  messageBytes: Uint8Array
+): SocialNotificationPreferencesResponse {
+  let offset = 0;
+  while (offset < messageBytes.length) {
+    const tagResult = parseVarint(messageBytes, offset);
+    offset += tagResult.bytesRead;
+    const fieldNumber = tagResult.value >> 3;
+    const wireType = tagResult.value & 0x07;
+
+    if (wireType === 2 && fieldNumber === 1) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead;
+      return parseSocialNotificationPreferencesResponse(
+        messageBytes.slice(offset, offset + lenResult.value)
+      );
+    }
+
+    if (wireType === 0) {
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+    } else if (wireType === 2) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead + lenResult.value;
+    } else {
+      break;
+    }
+  }
+
+  return {
+    openActivityEnabled: true,
+    closeActivityEnabled: true,
+    circleMutes: [],
+    updatedAtUnixMs: 0,
+  };
+}
+
+export function parseUpdateSocialNotificationPreferencesResponse(
+  messageBytes: Uint8Array
+): UpdateSocialNotificationPreferencesResult {
+  const result: UpdateSocialNotificationPreferencesResult = {
+    success: false,
+    message: '',
+    preferences: {
+      openActivityEnabled: true,
+      closeActivityEnabled: true,
+      circleMutes: [],
+      updatedAtUnixMs: 0,
+    },
+  };
+
+  let offset = 0;
+  while (offset < messageBytes.length) {
+    const tagResult = parseVarint(messageBytes, offset);
+    offset += tagResult.bytesRead;
+    const fieldNumber = tagResult.value >> 3;
+    const wireType = tagResult.value & 0x07;
+
+    if (wireType === 0 && fieldNumber === 1) {
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+      result.success = valueResult.value === 1;
+    } else if (wireType === 2 && fieldNumber === 2) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead;
+      result.message = parseString(messageBytes, offset, lenResult.value);
+      offset += lenResult.value;
+    } else if (wireType === 2 && fieldNumber === 3) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead;
+      result.preferences = parseSocialNotificationPreferencesResponse(
+        messageBytes.slice(offset, offset + lenResult.value)
+      );
+      offset += lenResult.value;
+    } else if (wireType === 0) {
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+    } else if (wireType === 2) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead + lenResult.value;
+    } else {
+      break;
+    }
+  }
+
+  return result;
+}
+
+function parseSocialNotificationItem(messageBytes: Uint8Array): SocialNotificationItemResponse {
+  const result: SocialNotificationItemResponse = {
+    notificationId: '',
+    kind: SocialNotificationKind.UNSPECIFIED,
+    visibilityClass: SocialNotificationVisibilityClass.UNSPECIFIED,
+    targetType: SocialNotificationTargetType.UNSPECIFIED,
+    targetId: '',
+    postId: '',
+    parentCommentId: '',
+    actorUserId: '',
+    actorDisplayName: '',
+    title: '',
+    body: '',
+    isRead: false,
+    isPrivatePreviewSuppressed: false,
+    createdAtUnixMs: 0,
+    deepLinkPath: '',
+    matchedCircleIds: [],
+  };
+
+  let offset = 0;
+  while (offset < messageBytes.length) {
+    const tagResult = parseVarint(messageBytes, offset);
+    offset += tagResult.bytesRead;
+    const fieldNumber = tagResult.value >> 3;
+    const wireType = tagResult.value & 0x07;
+
+    if (wireType === 0) {
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+      if (fieldNumber === 2) result.kind = valueResult.value as SocialNotificationKindType;
+      if (fieldNumber === 3) result.visibilityClass = valueResult.value as SocialNotificationVisibilityClassType;
+      if (fieldNumber === 4) result.targetType = valueResult.value as SocialNotificationTargetTypeType;
+      if (fieldNumber === 12) result.isRead = valueResult.value === 1;
+      if (fieldNumber === 13) result.isPrivatePreviewSuppressed = valueResult.value === 1;
+      if (fieldNumber === 14) result.createdAtUnixMs = valueResult.value;
+    } else if (wireType === 2) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead;
+      const strValue = parseString(messageBytes, offset, lenResult.value);
+      offset += lenResult.value;
+
+      if (fieldNumber === 1) result.notificationId = strValue;
+      if (fieldNumber === 5) result.targetId = strValue;
+      if (fieldNumber === 6) result.postId = strValue;
+      if (fieldNumber === 7) result.parentCommentId = strValue;
+      if (fieldNumber === 8) result.actorUserId = strValue;
+      if (fieldNumber === 9) result.actorDisplayName = strValue;
+      if (fieldNumber === 10) result.title = strValue;
+      if (fieldNumber === 11) result.body = strValue;
+      if (fieldNumber === 15) result.deepLinkPath = strValue;
+      if (fieldNumber === 16) result.matchedCircleIds.push(strValue);
+    } else {
+      break;
+    }
+  }
+
+  return result;
+}
+
+function parseSocialCircleMuteState(messageBytes: Uint8Array): SocialCircleMuteStateResponse {
+  const result: SocialCircleMuteStateResponse = {
+    circleId: '',
+    isMuted: false,
+  };
+
+  let offset = 0;
+  while (offset < messageBytes.length) {
+    const tagResult = parseVarint(messageBytes, offset);
+    offset += tagResult.bytesRead;
+    const fieldNumber = tagResult.value >> 3;
+    const wireType = tagResult.value & 0x07;
+
+    if (wireType === 2 && fieldNumber === 1) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead;
+      result.circleId = parseString(messageBytes, offset, lenResult.value);
+      offset += lenResult.value;
+    } else if (wireType === 0 && fieldNumber === 2) {
+      const valueResult = parseVarint(messageBytes, offset);
+      offset += valueResult.bytesRead;
+      result.isMuted = valueResult.value === 1;
     } else if (wireType === 0) {
       const valueResult = parseVarint(messageBytes, offset);
       offset += valueResult.bytesRead;
