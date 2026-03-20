@@ -46,6 +46,10 @@ import {
   getSocialThreadRepliesPage,
   type SocialThreadEntryContract,
 } from "@/modules/social/ThreadService";
+import {
+  isViewingSocialNotificationTarget,
+  resolveSocialNotificationDestination,
+} from "@/modules/social/notificationRouting";
 import { getAppHomeRoute, getSocialPostRoute } from "@/lib/navigation/appRoutes";
 import { SocialPostComposerCard } from "./components/SocialPostComposerCard";
 import { usePostPermalink } from "./hooks/usePostPermalink";
@@ -225,66 +229,6 @@ function formatRelativeTimeFromBlockAge(createdAtBlock: number, currentBlockHeig
   // HushServerNode block production interval defaults to 3 seconds.
   const elapsedMs = (currentBlockHeight - createdAtBlock) * 3000;
   return formatRelativeDuration(elapsedMs);
-}
-
-function normalizeRoutePath(route: string | null | undefined): string {
-  if (!route) {
-    return "";
-  }
-
-  try {
-    const url = new URL(route, "https://hush.local");
-    return `${url.pathname}${url.search}${url.hash}`;
-  } catch {
-    return route.trim();
-  }
-}
-
-function resolveSocialNotificationDestination(item: {
-  deepLinkPath?: string;
-  postId?: string;
-  targetId?: string;
-  parentCommentId?: string;
-  targetType?: number;
-}): string {
-  const deepLinkPath = normalizeRoutePath(item.deepLinkPath);
-  if (deepLinkPath) {
-    return deepLinkPath;
-  }
-
-  if (!item.postId) {
-    return "";
-  }
-
-  const postRoute = getSocialPostRoute(item.postId);
-  if (item.targetType === 2 && item.targetId) {
-    return `${postRoute}?commentId=${encodeURIComponent(item.targetId)}`;
-  }
-
-  if (item.targetType === 3 && item.targetId) {
-    const params = new URLSearchParams();
-    if (item.parentCommentId) {
-      params.set("threadRootId", item.parentCommentId);
-    }
-    params.set("replyId", item.targetId);
-    return `${postRoute}?${params.toString()}`;
-  }
-
-  return postRoute;
-}
-
-function isViewingSocialNotificationTarget(
-  pathname: string,
-  item: {
-    deepLinkPath?: string;
-    postId?: string;
-    targetId?: string;
-    parentCommentId?: string;
-    targetType?: number;
-  }
-): boolean {
-  const destination = resolveSocialNotificationDestination(item);
-  return destination.length > 0 && normalizeRoutePath(pathname) === destination;
 }
 
 function buildSocialNotificationToastMessage(item: {

@@ -869,8 +869,13 @@ export function useSocialNotifications(
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSavingPreferences, setIsSavingPreferences] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const refreshPromiseRef = useRef<Promise<void> | null>(null);
 
   const refresh = useCallback(async () => {
+    if (refreshPromiseRef.current) {
+      return refreshPromiseRef.current;
+    }
+
     if (!enabled || !isAuthenticated || !userId) {
       setItems([]);
       setPreferences(DEFAULT_SOCIAL_NOTIFICATION_PREFERENCES);
@@ -879,26 +884,32 @@ export function useSocialNotifications(
       return;
     }
 
-    setError(null);
-    setIsRefreshing(true);
-    setIsLoading((current) => current || items.length === 0);
+    const pendingRefresh = (async () => {
+      setError(null);
+      setIsRefreshing(true);
+      setIsLoading((current) => current || items.length === 0);
 
-    try {
-      const [inbox, nextPreferences] = await Promise.all([
-        notificationService.getSocialNotificationInbox(userId, { limit, includeRead }),
-        notificationService.getSocialNotificationPreferences(userId),
-      ]);
+      try {
+        const [inbox, nextPreferences] = await Promise.all([
+          notificationService.getSocialNotificationInbox(userId, { limit, includeRead }),
+          notificationService.getSocialNotificationPreferences(userId),
+        ]);
 
-      setItems((current) => mergeSocialNotificationItems(current, inbox.items));
-      setHasMore(inbox.hasMore);
-      setPreferences(nextPreferences);
-    } catch (refreshError) {
-      debugError('[useSocialNotifications] Failed to refresh social notifications:', refreshError);
-      setError(refreshError instanceof Error ? refreshError.message : 'Failed to load social notifications');
-    } finally {
-      setIsRefreshing(false);
-      setIsLoading(false);
-    }
+        setItems((current) => mergeSocialNotificationItems(current, inbox.items));
+        setHasMore(inbox.hasMore);
+        setPreferences(nextPreferences);
+      } catch (refreshError) {
+        debugError('[useSocialNotifications] Failed to refresh social notifications:', refreshError);
+        setError(refreshError instanceof Error ? refreshError.message : 'Failed to load social notifications');
+      } finally {
+        setIsRefreshing(false);
+        setIsLoading(false);
+        refreshPromiseRef.current = null;
+      }
+    })();
+
+    refreshPromiseRef.current = pendingRefresh;
+    return pendingRefresh;
   }, [enabled, includeRead, isAuthenticated, items.length, limit, userId]);
 
   const markNotificationRead = useCallback(async (notificationId: string) => {
@@ -988,6 +999,32 @@ export function useSocialNotifications(
     window.addEventListener('online', handleOnline);
     return () => {
       window.removeEventListener('online', handleOnline);
+    };
+  }, [enabled, isAuthenticated, refresh]);
+
+  useEffect(() => {
+    if (!enabled || !isAuthenticated) {
+      return;
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void refresh();
+      }
+    };
+
+    const handleWindowFocus = () => {
+      if (document.visibilityState !== 'hidden') {
+        void refresh();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleWindowFocus);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleWindowFocus);
     };
   }, [enabled, isAuthenticated, refresh]);
 

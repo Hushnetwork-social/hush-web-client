@@ -3,7 +3,10 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import SocialPostPermalinkPage from "./page";
 
 let accessParam: string | null = null;
+let commentIdParam: string | null = null;
 let postIdParam = "post-123";
+let replyIdParam: string | null = null;
+let threadRootIdParam: string | null = null;
 const getSocialCommentsPageMock = vi.fn();
 const createSocialThreadEntryMock = vi.fn();
 const followSocialAuthorMock = vi.fn();
@@ -12,7 +15,21 @@ const triggerSyncNowMock = vi.fn();
 vi.mock("next/navigation", () => ({
   useParams: () => ({ postId: postIdParam }),
   useSearchParams: () => ({
-    get: (key: string) => (key === "access" ? accessParam : null),
+    get: (key: string) => {
+      if (key === "access") {
+        return accessParam;
+      }
+      if (key === "commentId") {
+        return commentIdParam;
+      }
+      if (key === "replyId") {
+        return replyIdParam;
+      }
+      if (key === "threadRootId") {
+        return threadRootIdParam;
+      }
+      return null;
+    },
   }),
 }));
 
@@ -78,7 +95,10 @@ vi.mock("@/lib/sync", () => ({
 describe("SocialPostPermalinkPage", () => {
   beforeEach(() => {
     accessParam = null;
+    commentIdParam = null;
     postIdParam = "post-123";
+    replyIdParam = null;
+    threadRootIdParam = null;
     window.sessionStorage.clear();
     window.localStorage.clear();
     lastReactionProps.pendingAutoReactionIndex = null;
@@ -613,5 +633,90 @@ describe("SocialPostPermalinkPage", () => {
     await waitFor(() => {
       expect(within(mediaContainer).getByTestId("page-indicator")).toHaveTextContent("1 / 2");
     });
+  });
+
+  it("consumes FEAT-091 reply targeting params and highlights the targeted reply", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/social/posts/permalink")) {
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            message: "",
+            accessState: "allowed",
+            postId: "post-123",
+            authorPublicAddress: "02abcdef1234567890fedcba1234567890abcdef1234567890fedcba1234567890",
+            content: "Hello public world",
+            canInteract: true,
+            circleFeedIds: [],
+          }),
+        } as Response;
+      }
+
+      if (url.includes("/api/identity/check")) {
+        return {
+          ok: true,
+          json: async () => ({
+            exists: true,
+            identity: {
+              profileName: "Owner",
+            },
+          }),
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        json: async () => ({}),
+      } as Response;
+    }));
+
+    vi.mocked(window.localStorage.getItem).mockImplementation((key: string) => {
+      if (key === "hush-app-storage") {
+        return JSON.stringify({
+          state: {
+            credentials: {
+              signingPublicKey: "02viewer1234567890fedcba1234567890abcdef1234567890fedcba1234567890",
+            },
+          },
+        });
+      }
+
+      return null;
+    });
+
+    replyIdParam = "reply-9";
+    threadRootIdParam = "comment-3";
+    getSocialCommentsPageMock.mockResolvedValue({
+      success: true,
+      message: "",
+      comments: [
+        {
+          entryId: "reply-9",
+          authorPublicAddress: "03replyuser1234567890fedcba1234567890abcdef1234567890fedcba1234567890",
+          createdAtUnixMs: 1735689600000,
+          content: "Targeted reply",
+          reactionScopeId: "scope-1",
+          followState: { isFollowing: false, canFollow: true },
+        },
+      ],
+      paging: { initialPageSize: 50, loadMorePageSize: 10 },
+      hasMore: false,
+    });
+
+    const scrollIntoViewMock = vi.fn();
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoViewMock;
+
+    render(<SocialPostPermalinkPage />);
+
+    expect(await screen.findByTestId("social-permalink-reply-reply-9")).toHaveAttribute("data-highlighted", "true");
+    expect(getSocialCommentsPageMock).toHaveBeenCalledWith(
+      "post-123",
+      "02viewer1234567890fedcba1234567890abcdef1234567890fedcba1234567890",
+      true,
+      50
+    );
+    expect(scrollIntoViewMock).toHaveBeenCalled();
   });
 });

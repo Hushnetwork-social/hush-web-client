@@ -18,6 +18,10 @@ import {
 } from "@/modules/social/threadDrafts";
 import { getAuthRoute, getSocialPostRoute } from "@/lib/navigation/appRoutes";
 import { resolveGuestIntentResumeAction } from "@/modules/social/guestIntentResume";
+import {
+  getSocialNotificationTargetEntryId,
+  readSocialNotificationThreadSelection,
+} from "@/modules/social/notificationRouting";
 import { createSocialThreadEntry, getSocialCommentsPage } from "@/modules/social/ThreadService";
 import { getSocialPostPermalink, type SocialPermalinkPayloadContract } from "@/modules/social/PermalinkService";
 import { followSocialAuthor } from "@/modules/social/FollowService";
@@ -100,6 +104,7 @@ export default function SocialPostPermalinkClient() {
   const [topReplyTargetId, setTopReplyTargetId] = useState<string | null>(null);
   const [topReplyThreadRootId, setTopReplyThreadRootId] = useState<string | null>(null);
   const [localReplies, setLocalReplies] = useState<PermalinkThreadReply[]>([]);
+  const [highlightedReplyId, setHighlightedReplyId] = useState<string | null>(null);
   const [followRefreshNonce, setFollowRefreshNonce] = useState(0);
   const [pendingFollowAuthors, setPendingFollowAuthors] = useState<Record<string, boolean>>({});
   const [followStateOverrides, setFollowStateOverrides] = useState<Record<string, SocialAuthorFollowStateContract>>({});
@@ -135,6 +140,14 @@ export default function SocialPostPermalinkClient() {
   };
 
   const accessOverride = useMemo(() => resolveAccessOverride(searchParams.get("access")), [searchParams]);
+  const notificationThreadSelection = useMemo(
+    () => readSocialNotificationThreadSelection(searchParams),
+    [searchParams]
+  );
+  const targetedReplyId = useMemo(
+    () => getSocialNotificationTargetEntryId(notificationThreadSelection),
+    [notificationThreadSelection]
+  );
 
   useEffect(() => {
     if (typeof window === "undefined" || process.env.NODE_ENV === "test" || isTauri()) {
@@ -366,7 +379,7 @@ export default function SocialPostPermalinkClient() {
         permalink.postId,
         requesterAddress,
         !!requesterAddress,
-        10
+        targetedReplyId ? 50 : 10
       );
 
       if (cancelled || !response.success) {
@@ -428,7 +441,34 @@ export default function SocialPostPermalinkClient() {
     return () => {
       cancelled = true;
     };
-  }, [permalink?.accessState, permalink?.postId, followRefreshNonce]);
+  }, [permalink?.accessState, permalink?.postId, followRefreshNonce, targetedReplyId]);
+
+  useEffect(() => {
+    if (!targetedReplyId || localReplies.length === 0) {
+      setHighlightedReplyId(null);
+      return;
+    }
+
+    if (!localReplies.some((reply) => reply.id === targetedReplyId)) {
+      setHighlightedReplyId(null);
+      return;
+    }
+
+    setHighlightedReplyId(targetedReplyId);
+
+    if (typeof document !== "undefined") {
+      const targetElement = document.getElementById(`social-permalink-reply-anchor-${targetedReplyId}`);
+      targetElement?.scrollIntoView({ block: "center", behavior: "auto" });
+    }
+
+    const timer = window.setTimeout(() => {
+      setHighlightedReplyId((current) => (current === targetedReplyId ? null : current));
+    }, 2500);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [localReplies, targetedReplyId]);
 
   const savePermalinkDraft = () => {
     if (!permalink?.postId) {
@@ -866,8 +906,10 @@ export default function SocialPostPermalinkClient() {
                 {localReplies.map((reply) => (
                   <div
                     key={reply.id}
+                    id={`social-permalink-reply-anchor-${reply.id}`}
                     className="rounded-lg border border-hush-bg-hover p-3"
                     data-testid={`social-permalink-reply-${reply.id}`}
+                    data-highlighted={highlightedReplyId === reply.id ? "true" : "false"}
                   >
                     <div className="mb-1 flex items-center justify-between gap-2">
                       <p className="min-w-0 text-xs font-semibold text-hush-text-primary">{reply.author}</p>
