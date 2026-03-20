@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type WheelEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type WheelEvent } from "react";
 import { useRouter } from "next/navigation";
 import { AlertCircle, ArrowLeft, Check, Link2, Loader2, MessageCircle, Sparkles, Users, X } from "lucide-react";
 import { buildApiUrl } from "@/lib/api-config";
@@ -1789,18 +1789,18 @@ export default function SocialPage() {
     };
   }, [credentials?.signingPublicKey, ownAuthorLabel, renderFollowingItems, currentBlockHeight, followRefreshNonce]);
 
-  const getDisplayNameForAddress = (address: string) => {
+  const getDisplayNameForAddress = useCallback((address: string) => {
     const normalizedAddress = normalizePublicAddress(address);
     return (
       renderFollowingItems.find((item) => normalizePublicAddress(item.publicAddress) === normalizedAddress)?.displayName ??
       authorNamesByAddressRef.current[normalizedAddress] ??
       `${normalizedAddress.slice(0, 8)}...${normalizedAddress.slice(-6)}`
     );
-  };
+  }, [renderFollowingItems]);
 
   const selectedMemberDisplayName = useMemo(
     () => (selectedMemberAddress ? getDisplayNameForAddress(selectedMemberAddress) : null),
-    [selectedMemberAddress, renderFollowingItems]
+    [getDisplayNameForAddress, selectedMemberAddress]
   );
 
   const openChatForFollowingUser = async (publicAddress: string) => {
