@@ -882,6 +882,7 @@ export function useSocialNotifications(
   const [isSavingPreferences, setIsSavingPreferences] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const refreshPromiseRef = useRef<Promise<void> | null>(null);
+  const pendingPreferenceUpdateRef = useRef<UpdateSocialNotificationPreferencesRequest | null>(null);
 
   const refresh = useCallback(async () => {
     if (refreshPromiseRef.current) {
@@ -909,7 +910,11 @@ export function useSocialNotifications(
 
         setItems((current) => mergeSocialNotificationItems(current, inbox.items));
         setHasMore(inbox.hasMore);
-        setPreferences(nextPreferences);
+        setPreferences(
+          pendingPreferenceUpdateRef.current
+            ? applySocialNotificationPreferencesUpdate(nextPreferences, pendingPreferenceUpdateRef.current)
+            : nextPreferences
+        );
       } catch (refreshError) {
         debugError('[useSocialNotifications] Failed to refresh social notifications:', refreshError);
         setError(refreshError instanceof Error ? refreshError.message : 'Failed to load social notifications');
@@ -978,6 +983,7 @@ export function useSocialNotifications(
     setError(null);
     setIsSavingPreferences(true);
     const previousPreferences = preferences;
+    pendingPreferenceUpdateRef.current = update;
     setPreferences((current) => applySocialNotificationPreferencesUpdate(current, update));
 
     try {
@@ -986,10 +992,12 @@ export function useSocialNotifications(
         throw new Error(result.message || 'Failed to update social notification preferences');
       }
 
+      pendingPreferenceUpdateRef.current = null;
       setPreferences(result.preferences);
       return true;
     } catch (updateError) {
       debugError('[useSocialNotifications] Failed to update preferences:', updateError);
+      pendingPreferenceUpdateRef.current = null;
       setPreferences(previousPreferences);
       setError(updateError instanceof Error ? updateError.message : 'Failed to update social notification preferences');
       return false;
