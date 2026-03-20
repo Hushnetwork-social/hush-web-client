@@ -1,14 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import { AlertCircle, ArrowLeft, Check, Link2, Loader2, MessageCircle, Sparkles, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type WheelEvent } from "react";
+import { useRouter } from "next/navigation";
+import { AlertCircle, ArrowLeft, Check, Link2, Loader2, MessageCircle, Sparkles, Users, X } from "lucide-react";
 import { buildApiUrl } from "@/lib/api-config";
 import { useAppStore } from "@/stores";
 import { useFeedsStore } from "@/modules/feeds/useFeedsStore";
 import { useBlockchainStore } from "@/modules/blockchain";
 import { useSyncContext } from "@/lib/sync";
 import { SystemToastContainer } from "@/components/notifications/SystemToast";
-import { addMembersToCustomCircle, createCustomCircle } from "@/modules/feeds/FeedsService";
+import { addMembersToCustomCircle, createCustomCircle, findExistingChatFeed } from "@/modules/feeds/FeedsService";
 import { checkIdentityExists } from "@/modules/identity/IdentityService";
 import type { CustomCircleMemberPayload } from "@/lib/crypto";
 import { createSocialPost } from "@/modules/social/SocialService";
@@ -44,7 +45,7 @@ import {
   getSocialThreadRepliesPage,
   type SocialThreadEntryContract,
 } from "@/modules/social/ThreadService";
-import { getSocialPostRoute } from "@/lib/navigation/appRoutes";
+import { getAppHomeRoute, getSocialPostRoute } from "@/lib/navigation/appRoutes";
 import { SocialPostComposerCard } from "./components/SocialPostComposerCard";
 import { usePostPermalink } from "./hooks/usePostPermalink";
 
@@ -386,6 +387,7 @@ function logSocialDrag(event: string, payload: Record<string, unknown>): void {
 }
 
 export default function SocialPage() {
+  const router = useRouter();
   const [queryViewState, setQueryViewState] = useState<string | null>(() => {
     if (typeof window === "undefined") {
       return null;
@@ -396,6 +398,10 @@ export default function SocialPage() {
   const appContexts = useAppStore((state) => state.appContexts);
   const selectedNav = useAppStore((state) => state.selectedNav);
   const setSelectedNav = useAppStore((state) => state.setSelectedNav);
+  const setActiveApp = useAppStore((state) => state.setActiveApp);
+  const selectFeed = useAppStore((state) => state.selectFeed);
+  const setAppContextNav = useAppStore((state) => state.setAppContextNav);
+  const setAppContextFeed = useAppStore((state) => state.setAppContextFeed);
   const setAppContextScroll = useAppStore((state) => state.setAppContextScroll);
   const innerCircleSync = useAppStore((state) => state.innerCircleSync);
   const requestInnerCircleRetry = useAppStore((state) => state.requestInnerCircleRetry);
@@ -426,6 +432,8 @@ export default function SocialPage() {
   const [threadBeforeEntryIds, setThreadBeforeEntryIds] = useState<Record<string, string | null>>({});
   const [pointerDragMemberAddress, setPointerDragMemberAddress] = useState<string | null>(null);
   const [selectedMemberAddress, setSelectedMemberAddress] = useState<string | null>(null);
+  const [isMobileCirclesOpen, setIsMobileCirclesOpen] = useState(false);
+  const [openingMessageForAddress, setOpeningMessageForAddress] = useState<string | null>(null);
   const [creatingCircle, setCreatingCircle] = useState(false);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [createCircleNameDraft, setCreateCircleNameDraft] = useState("");
@@ -477,6 +485,7 @@ export default function SocialPage() {
     }
     return lookup;
   }, [renderCircleItems, feeds]);
+
 
   useEffect(() => {
     const previewUrls = mediaPreviewUrlsRef.current;
@@ -571,7 +580,6 @@ export default function SocialPage() {
   }, []);
 
   const viewState = useMemo(() => resolveViewState(queryViewState), [queryViewState]);
-  const canReturnToFeedWall = selectedNav !== "feed-wall";
   const activePost = useMemo(() => feedWallPosts.find((post) => post.id === activePostId) ?? null, [activePostId, feedWallPosts]);
   const resolvedAuthOverlayReturnTo = useMemo(() => {
     if (authOverlayReturnTo) {
@@ -1790,6 +1798,101 @@ export default function SocialPage() {
     );
   };
 
+  const selectedMemberDisplayName = useMemo(
+    () => (selectedMemberAddress ? getDisplayNameForAddress(selectedMemberAddress) : null),
+    [selectedMemberAddress, renderFollowingItems]
+  );
+
+  const openChatForFollowingUser = async (publicAddress: string) => {
+    const normalizedAddress = normalizePublicAddress(publicAddress);
+    const existingFeed = findExistingChatFeed(normalizedAddress);
+
+    if (!existingFeed) {
+      addUiToast("No chat feed found for this person yet");
+      return;
+    }
+
+    setOpeningMessageForAddress(normalizedAddress);
+    try {
+      setAppContextNav("feeds", "feeds");
+      setAppContextFeed("feeds", existingFeed.id);
+      selectFeed(existingFeed.id);
+      setActiveApp("feeds");
+      router.push(getAppHomeRoute("feeds"));
+    } finally {
+      setOpeningMessageForAddress((current) => (current === normalizedAddress ? null : current));
+    }
+  };
+
+  const openCirclesForMember = (memberAddress: string) => {
+    setSelectedMemberAddress(memberAddress);
+    setIsMobileCirclesOpen(true);
+  };
+
+  const closeMobileCirclesOverlay = () => {
+    setIsMobileCirclesOpen(false);
+    setSelectedMemberAddress(null);
+  };
+
+  const handleFollowingCirclesWheel = (event: WheelEvent<HTMLDivElement>) => {
+    const container = event.currentTarget;
+    if (Math.abs(container.scrollWidth - container.clientWidth) <= 2) {
+      return;
+    }
+
+    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX) && event.deltaX === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    container.scrollLeft += event.deltaX !== 0 ? event.deltaX : event.deltaY;
+  };
+
+  const handleFollowingCirclesPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    const container = event.currentTarget;
+    if (container.scrollWidth <= container.clientWidth || !event.isPrimary) {
+      return;
+    }
+
+    container.setPointerCapture(event.pointerId);
+    container.dataset.dragPointerId = String(event.pointerId);
+    container.dataset.dragStartX = String(event.clientX);
+    container.dataset.dragStartScrollLeft = String(container.scrollLeft);
+    container.dataset.dragMoved = "false";
+  };
+
+  const handleFollowingCirclesPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    const container = event.currentTarget;
+    if (container.dataset.dragPointerId !== String(event.pointerId)) {
+      return;
+    }
+
+    const startX = Number(container.dataset.dragStartX ?? "0");
+    const startScrollLeft = Number(container.dataset.dragStartScrollLeft ?? "0");
+    const deltaX = event.clientX - startX;
+
+    if (Math.abs(deltaX) > 3) {
+      container.dataset.dragMoved = "true";
+    }
+
+    container.scrollLeft = startScrollLeft - deltaX;
+  };
+
+  const handleFollowingCirclesPointerEnd = (event: PointerEvent<HTMLDivElement>) => {
+    const container = event.currentTarget;
+    if (container.dataset.dragPointerId !== String(event.pointerId)) {
+      return;
+    }
+
+    try {
+      container.releasePointerCapture(event.pointerId);
+    } catch {}
+
+    delete container.dataset.dragPointerId;
+    delete container.dataset.dragStartX;
+    delete container.dataset.dragStartScrollLeft;
+  };
+
   const isCircleAssignmentBlocked = (circle: CircleItem, memberAddress: string) => {
     const normalizedMemberAddress = normalizePublicAddress(memberAddress);
     const normalizedCircleMembers = circle.members.map((address) => normalizePublicAddress(address));
@@ -1902,7 +2005,6 @@ export default function SocialPage() {
         ),
       }));
     } finally {
-      setSelectedMemberAddress(null);
       setPointerDragMemberAddress(null);
     }
   };
@@ -2486,7 +2588,7 @@ export default function SocialPage() {
             You are not following anyone yet.
           </div>
           <div className="mt-6 rounded-xl border border-hush-bg-hover bg-hush-bg-dark p-4">
-            <div className="mb-2 flex items-center justify-between">
+            <div className="mb-2 flex items-center justify-between gap-2">
               <h3 className="text-sm font-semibold text-hush-text-primary">Circles</h3>
               <button
                 type="button"
@@ -2505,9 +2607,12 @@ export default function SocialPage() {
 
     return (
       <div className="flex min-h-0 flex-1 flex-col gap-6">
-        <div data-testid="social-following-list" className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+        <section data-testid="social-following-list-shell" className="min-h-0 flex-1">
+          <div data-testid="social-following-list" className="min-h-0 flex-1 space-y-1.5 overflow-y-auto">
           {renderFollowingItems.map((item) => {
-            const isSelectedOnMobile = selectedMemberAddress === item.publicAddress;
+            const isSelectedOnMobile = selectedMemberAddress === item.publicAddress && isMobileCirclesOpen;
+            const normalizedItemAddress = normalizePublicAddress(item.publicAddress);
+            const isOpeningMessage = openingMessageForAddress === normalizedItemAddress;
             return (
               <article
                 key={item.publicAddress}
@@ -2517,20 +2622,71 @@ export default function SocialPage() {
                   setPointerDragMemberAddress(item.publicAddress);
                   logSocialDrag("pointerdrag.start", { memberAddress: item.publicAddress });
                 }}
-                onClick={() => setSelectedMemberAddress(item.publicAddress)}
-                className={`select-none cursor-grab rounded-xl border bg-hush-bg-dark p-4 transition active:cursor-grabbing ${
+                className={`w-full select-none cursor-grab rounded-lg border bg-hush-bg-dark px-4 py-2 transition active:cursor-grabbing ${
                   isSelectedOnMobile
                     ? "border-hush-purple shadow-[0_0_0_1px_rgba(149,98,255,0.3)]"
                     : "border-hush-bg-hover"
                 }`}
               >
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-sm font-semibold text-hush-text-primary">{item.displayName}</p>
-                  <p className="text-[11px] text-hush-text-accent">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-hush-text-primary">{item.displayName}</p>
+                  </div>
+                  <p className="shrink-0 text-[11px] text-hush-text-accent">
                     {item.publicAddress.slice(0, 8)}...{item.publicAddress.slice(-6)}
                   </p>
                 </div>
-                <div className="mt-2 flex flex-wrap items-center gap-2">
+                <div className="mt-1.5 flex items-center justify-between gap-3 md:hidden">
+                  <div
+                    className="min-w-0 flex-1 overflow-x-auto pb-1 [touch-action:pan-x]"
+                    onClick={(event) => event.stopPropagation()}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onTouchStart={(event) => event.stopPropagation()}
+                    onWheel={handleFollowingCirclesWheel}
+                    onPointerDown={handleFollowingCirclesPointerDown}
+                    onPointerMove={handleFollowingCirclesPointerMove}
+                    onPointerUp={handleFollowingCirclesPointerEnd}
+                    onPointerCancel={handleFollowingCirclesPointerEnd}
+                  >
+                    <div className="flex min-w-max items-center gap-1 pr-2">
+                    {item.circles.map((circle) => (
+                      <span
+                        key={`${item.publicAddress}-${circle}-mobile`}
+                        className="rounded-full border border-hush-purple/30 px-1.5 py-0.5 text-[10px] leading-none text-hush-purple"
+                      >
+                        {circle}
+                      </span>
+                    ))}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      type="button"
+                      data-testid={`social-following-message-${item.publicAddress}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void openChatForFollowingUser(item.publicAddress);
+                      }}
+                      className="inline-flex items-center gap-1 rounded-full border border-hush-bg-hover px-2 py-1 text-[11px] text-hush-text-accent hover:border-hush-purple/40 hover:text-hush-purple"
+                    >
+                      {isOpeningMessage ? <Loader2 className="h-3 w-3 animate-spin" /> : <MessageCircle className="h-3 w-3" />}
+                      <span>Message</span>
+                    </button>
+                    <button
+                      type="button"
+                      data-testid={`social-following-circles-${item.publicAddress}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openCirclesForMember(item.publicAddress);
+                      }}
+                      className="inline-flex items-center gap-1 rounded-full border border-hush-bg-hover px-2 py-1 text-[11px] text-hush-text-accent hover:border-hush-purple/40 hover:text-hush-purple"
+                    >
+                      <Users className="h-3 w-3" />
+                      <span>Circles</span>
+                    </button>
+                  </div>
+                </div>
+                <div className="mt-2 hidden flex-wrap items-center gap-2 md:flex">
                   {item.circles.map((circle) => (
                     <span
                       key={`${item.publicAddress}-${circle}`}
@@ -2544,90 +2700,94 @@ export default function SocialPage() {
               </article>
             );
           })}
-        </div>
+          </div>
+        </section>
 
-        <section className="rounded-xl border border-hush-bg-hover bg-hush-bg-dark p-4" data-testid="social-circles-panel">
+        <section className="hidden rounded-xl border border-hush-bg-hover bg-hush-bg-dark p-4 md:block" data-testid="social-circles-panel">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold text-hush-text-primary">Circles</h3>
-            <button
-              type="button"
-              onClick={() => setIsCreateDialogOpen(true)}
-              className="rounded-md border border-hush-purple/40 px-2 py-1 text-xs text-hush-purple hover:bg-hush-purple/10"
-              data-testid="social-create-circle-button"
-            >
-              Create Circle
-            </button>
+            <div>
+              <h3 className="text-sm font-semibold text-hush-text-primary">Circles</h3>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsCreateDialogOpen(true)}
+                className="rounded-md border border-hush-purple/40 px-2 py-1 text-xs text-hush-purple hover:bg-hush-purple/10"
+                data-testid="social-create-circle-button"
+              >
+                Create Circle
+              </button>
+            </div>
           </div>
 
-          <p className="mb-3 text-xs text-hush-text-accent">
-            {selectedMemberAddress
-              ? `Selected member: ${getDisplayNameForAddress(selectedMemberAddress)}. Tap a circle to add.`
-              : "Drag a member into a circle on desktop or tap a member first on mobile."}
-          </p>
+          <div>
+            <p className="mb-3 text-xs text-hush-text-accent">
+              Drag a member into a circle on desktop or use the mobile row actions in Tauri Android.
+            </p>
 
-          <div className="flex snap-x gap-3 overflow-x-auto pb-2" data-testid="social-circles-strip">
-            {renderCircleItems.map((circle) => {
-              const pendingMembers = pendingCircleMembers[circle.feedId] ?? [];
-              const draggedAddressForStyle = resolveAnyDraggedMemberAddress();
-              const canDrop =
-                !!draggedAddressForStyle &&
-                !isCircleAssignmentBlocked(circle, draggedAddressForStyle) &&
-                circle.feedId !== "inner-circle-pending";
+            <div className="flex snap-x gap-3 overflow-x-auto pb-2" data-testid="social-circles-strip">
+              {renderCircleItems.map((circle) => {
+                const pendingMembers = pendingCircleMembers[circle.feedId] ?? [];
+                const draggedAddressForStyle = resolveAnyDraggedMemberAddress();
+                const canDrop =
+                  !!draggedAddressForStyle &&
+                  !isCircleAssignmentBlocked(circle, draggedAddressForStyle) &&
+                  circle.feedId !== "inner-circle-pending";
 
-              return (
-                <button
-                  key={circle.feedId}
-                  type="button"
-                  data-testid={`social-circle-card-${circle.feedId}`}
-                  style={{ userSelect: "none", WebkitUserSelect: "none" }}
-                  onMouseUp={() => {
-                    const draggedAddress = resolveAnyDraggedMemberAddress();
-                    if (!draggedAddress) {
-                      return;
-                    }
-                    const normalizedDraggedAddress = normalizePublicAddress(draggedAddress);
-
-                    const blockedByMembership = isCircleAssignmentBlocked(circle, normalizedDraggedAddress);
-                    const blockedByPendingInnerCircle = circle.feedId === "inner-circle-pending";
-                    const eligible = !blockedByMembership && !blockedByPendingInnerCircle;
-                    logSocialDrag("pointerdrag.drop", {
-                      circleFeedId: circle.feedId,
-                      circleName: circle.name,
-                      draggedAddress: normalizedDraggedAddress,
-                      eligible,
-                      blockedByMembership,
-                      blockedByPendingInnerCircle,
-                      existingMembers: circle.members.map((address) => normalizePublicAddress(address)),
-                      pendingMembers: (pendingCircleMembers[circle.feedId] ?? []).map((address) =>
-                        normalizePublicAddress(address)
-                      ),
-                    });
-                    if (!eligible) {
-                      if (blockedByPendingInnerCircle) {
-                        addUiToast("Transaction failed: Inner Circle is not available yet");
-                      } else if (blockedByMembership) {
-                        addUiToast(
-                          `Transaction failed: ${getDisplayNameForAddress(normalizedDraggedAddress)} is already in ${circle.name}`
-                        );
+                return (
+                  <button
+                    key={circle.feedId}
+                    type="button"
+                    data-testid={`social-circle-card-${circle.feedId}`}
+                    style={{ userSelect: "none", WebkitUserSelect: "none" }}
+                    onMouseUp={() => {
+                      const draggedAddress = resolveAnyDraggedMemberAddress();
+                      if (!draggedAddress) {
+                        return;
                       }
-                      return;
-                    }
-                    void assignMemberToCircle(normalizedDraggedAddress, circle);
-                  }}
-                  onClick={() => {
-                    if (!selectedMemberAddress) {
-                      return;
-                    }
-                    void assignMemberToCircle(selectedMemberAddress, circle);
-                  }}
-                  className={`min-w-[190px] snap-start rounded-xl border p-3 text-left transition select-none ${
-                    canDrop
-                      ? "cursor-pointer border-hush-purple bg-hush-purple/10"
-                      : draggedAddressForStyle
-                        ? "cursor-not-allowed border-hush-bg-hover bg-hush-bg-dark/70"
-                        : "cursor-pointer border-hush-bg-hover bg-hush-bg-dark/70 hover:border-hush-purple/40"
-                  }`}
-                >
+                      const normalizedDraggedAddress = normalizePublicAddress(draggedAddress);
+
+                      const blockedByMembership = isCircleAssignmentBlocked(circle, normalizedDraggedAddress);
+                      const blockedByPendingInnerCircle = circle.feedId === "inner-circle-pending";
+                      const eligible = !blockedByMembership && !blockedByPendingInnerCircle;
+                      logSocialDrag("pointerdrag.drop", {
+                        circleFeedId: circle.feedId,
+                        circleName: circle.name,
+                        draggedAddress: normalizedDraggedAddress,
+                        eligible,
+                        blockedByMembership,
+                        blockedByPendingInnerCircle,
+                        existingMembers: circle.members.map((address) => normalizePublicAddress(address)),
+                        pendingMembers: (pendingCircleMembers[circle.feedId] ?? []).map((address) =>
+                          normalizePublicAddress(address)
+                        ),
+                      });
+                      if (!eligible) {
+                        if (blockedByPendingInnerCircle) {
+                          addUiToast("Transaction failed: Inner Circle is not available yet");
+                        } else if (blockedByMembership) {
+                          addUiToast(
+                            `Transaction failed: ${getDisplayNameForAddress(normalizedDraggedAddress)} is already in ${circle.name}`
+                          );
+                        }
+                        return;
+                      }
+                      void assignMemberToCircle(normalizedDraggedAddress, circle);
+                    }}
+                    onClick={() => {
+                      if (!selectedMemberAddress) {
+                        return;
+                      }
+                      void assignMemberToCircle(selectedMemberAddress, circle);
+                    }}
+                    className={`min-w-[190px] snap-start rounded-xl border p-3 text-left transition select-none ${
+                      canDrop
+                        ? "cursor-pointer border-hush-purple bg-hush-purple/10"
+                        : draggedAddressForStyle
+                          ? "cursor-not-allowed border-hush-bg-hover bg-hush-bg-dark/70"
+                          : "cursor-pointer border-hush-bg-hover bg-hush-bg-dark/70 hover:border-hush-purple/40"
+                    }`}
+                  >
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <p className="text-sm font-semibold text-hush-text-primary">{circle.name}</p>
                     <span className="text-[11px] text-hush-text-accent">{circle.memberCount}</span>
@@ -2658,9 +2818,10 @@ export default function SocialPage() {
                   <div className="mt-2 text-[11px] text-hush-text-accent">
                     {circle.isInnerCircle ? "Default private circle" : "Custom circle"}
                   </div>
-                </button>
-              );
-            })}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </section>
       </div>
@@ -2756,6 +2917,98 @@ export default function SocialPage() {
     );
   };
 
+  const renderMobileCircleSheet = () => {
+    if (!isMobileCirclesOpen || !selectedMemberAddress) {
+      return null;
+    }
+
+    const mobileCircleListClassName =
+      renderCircleItems.length > 3 ? "max-h-[15.5rem] overflow-y-auto pr-1" : "";
+
+    return (
+      <div className="fixed inset-0 z-40 flex items-end bg-black/55 md:hidden" data-testid="social-mobile-circles-overlay">
+        <div className="max-h-[80vh] w-full overflow-y-auto rounded-t-2xl border border-hush-bg-hover bg-hush-bg-dark p-4 shadow-2xl">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-hush-text-primary">Assign Circles</p>
+              <p className="mt-1 text-xs text-hush-text-accent" data-testid="social-mobile-circles-selected-member">
+                {selectedMemberDisplayName ?? getDisplayNameForAddress(selectedMemberAddress)}
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsCreateDialogOpen(true)}
+                className="rounded-md border border-hush-purple/40 px-2.5 py-1.5 text-xs text-hush-purple hover:bg-hush-purple/10"
+                data-testid="social-mobile-create-circle-button"
+              >
+                Create Circle
+              </button>
+              <button
+                type="button"
+                onClick={closeMobileCirclesOverlay}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-hush-bg-hover text-hush-text-accent hover:border-hush-purple/40 hover:text-hush-purple"
+                data-testid="social-mobile-circles-close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          <div className={mobileCircleListClassName} data-testid="social-mobile-circles-list">
+            <div className="space-y-2">
+              {renderCircleItems.map((circle) => {
+                const pendingMembers = pendingCircleMembers[circle.feedId] ?? [];
+                const normalizedSelectedMemberAddress = normalizePublicAddress(selectedMemberAddress);
+                const blockedByMembership = isCircleAssignmentBlocked(circle, normalizedSelectedMemberAddress);
+                const blockedByPendingInnerCircle = circle.feedId === "inner-circle-pending";
+                const isDisabled = blockedByMembership || blockedByPendingInnerCircle;
+
+                return (
+                  <button
+                    key={`mobile-circle-${circle.feedId}`}
+                    type="button"
+                    data-testid={`social-mobile-circle-card-${circle.feedId}`}
+                    onClick={() => {
+                      if (isDisabled) {
+                        if (blockedByPendingInnerCircle) {
+                          addUiToast("Transaction failed: Inner Circle is not available yet");
+                        } else {
+                          addUiToast(
+                            `Transaction failed: ${getDisplayNameForAddress(normalizedSelectedMemberAddress)} is already in ${circle.name}`
+                          );
+                        }
+                        return;
+                      }
+                      void assignMemberToCircle(normalizedSelectedMemberAddress, circle);
+                    }}
+                    className={`w-full rounded-xl border p-3 text-left transition ${
+                      isDisabled
+                        ? "cursor-not-allowed border-hush-bg-hover bg-hush-bg-dark/70 opacity-80"
+                        : "border-hush-bg-hover bg-hush-bg-dark/70 hover:border-hush-purple/40"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-hush-text-primary">{circle.name}</p>
+                        <p className="mt-1 text-[11px] text-hush-text-accent">
+                          {circle.isInnerCircle ? "Default private circle" : "Custom circle"}
+                        </p>
+                      </div>
+                      <span className="rounded-full border border-hush-purple/30 bg-hush-purple/10 px-2 py-1 text-[11px] text-hush-purple">
+                        {circle.memberCount + pendingMembers.length}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="flex-1 min-h-0 flex flex-col overflow-hidden" data-testid="social-shell">
       <section
@@ -2770,35 +3023,46 @@ export default function SocialPage() {
       >
         <div className={`w-full ${selectedNav === "following" ? "min-h-0 flex flex-1 flex-col" : ""}`}>
           <div className="mb-3">
-            {canReturnToFeedWall ? (
-              <button
-                type="button"
-                className="mb-2 inline-flex items-center gap-1 rounded-md border border-hush-bg-hover px-2 py-1 text-xs text-hush-text-accent hover:bg-hush-bg-hover"
-                data-testid="social-back-to-feedwall"
-                onClick={() => setSelectedNav("feed-wall")}
-              >
-                <ArrowLeft className="h-3.5 w-3.5" />
-                Back to Feed Wall
-              </button>
-            ) : null}
-            <h2 className="text-xl font-semibold text-hush-text-primary">
-              {selectedNav === "following"
-                ? "Following"
-                : selectedNav === "new-post"
+            {selectedNav === "following" ? (
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-start gap-3">
+                  <button
+                    type="button"
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-hush-purple/30 bg-hush-purple/10 text-hush-purple hover:bg-hush-purple/20"
+                    data-testid="social-back-to-feedwall"
+                    onClick={() => setSelectedNav("feed-wall")}
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                  </button>
+                  <div className="min-w-0">
+                    <h2 className="text-xl font-semibold text-hush-text-primary">Following</h2>
+                    <p className="text-xs text-hush-text-accent">
+                      People you follow and their current circle memberships.
+                    </p>
+                  </div>
+                </div>
+                <span className="inline-flex h-10 min-w-10 shrink-0 items-center justify-center rounded-full border border-hush-purple/30 bg-hush-purple/10 px-3 text-sm text-hush-purple">
+                  {renderFollowingItems.length}
+                </span>
+              </div>
+            ) : (
+              <h2 className="text-xl font-semibold text-hush-text-primary">
+                {selectedNav === "new-post"
                   ? "New Post"
                   : selectedNav === "search"
                     ? "Search"
                     : "Feed Wall"}
-            </h2>
-            <p className="text-xs text-hush-text-accent">
-              {selectedNav === "following"
-                ? "People you follow and their current circle memberships."
-                : selectedNav === "new-post"
+              </h2>
+            )}
+            {selectedNav !== "following" ? (
+              <p className="text-xs text-hush-text-accent">
+                {selectedNav === "new-post"
                   ? "Compose a post with explicit audience targeting rules."
                   : selectedNav === "search"
                     ? "Profile discovery is being prepared."
-                : "Public posts from people you follow and nearby circles."}
-            </p>
+                    : "Public posts from people you follow and nearby circles."}
+              </p>
+            ) : null}
             {innerCircleSync.status !== "idle" && (
               <div
                 data-testid="inner-circle-sync-status"
@@ -2836,6 +3100,7 @@ export default function SocialPage() {
         </div>
       </section>
 
+      {renderMobileCircleSheet()}
       <SystemToastContainer toasts={uiToasts} onDismiss={removeUiToast} />
       {showAuthOverlay ? (
         <SocialAuthPromptOverlay
