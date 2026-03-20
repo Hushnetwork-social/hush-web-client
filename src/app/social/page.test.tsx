@@ -23,6 +23,10 @@ const createSocialThreadEntryMock = vi.fn();
 const followSocialAuthorMock = vi.fn();
 const computeSha256Mock = vi.fn();
 const socialPostReactionsPropsMock = vi.fn();
+const refreshSocialNotificationsMock = vi.fn();
+const markNotificationReadMock = vi.fn();
+const markAllNotificationsReadMock = vi.fn();
+const updateSocialNotificationPreferencesMock = vi.fn();
 let mockCredentials: {
   signingPublicKey?: string;
   signingPrivateKey?: string;
@@ -72,6 +76,38 @@ let mockGroupMembers: Record<string, { publicAddress: string }[]> = {
 let mockMemberRoles: Record<string, string> = {
   'inner-circle': 'Admin',
   'support-group': 'Member',
+};
+let mockSocialNotificationsState = {
+  items: [] as Array<{
+    notificationId: string;
+    kind: number;
+    visibilityClass: number;
+    targetType: number;
+    targetId: string;
+    postId: string;
+    parentCommentId: string;
+    actorUserId: string;
+    actorDisplayName: string;
+    title: string;
+    body: string;
+    isRead: boolean;
+    isPrivatePreviewSuppressed: boolean;
+    createdAtUnixMs: number;
+    deepLinkPath: string;
+    matchedCircleIds: string[];
+  }>,
+  preferences: {
+    openActivityEnabled: true,
+    closeActivityEnabled: true,
+    circleMutes: [] as Array<{ circleId: string; isMuted: boolean }>,
+    updatedAtUnixMs: 0,
+  },
+  unreadCount: 0,
+  hasMore: false,
+  isLoading: false,
+  isRefreshing: false,
+  isSavingPreferences: false,
+  error: null as string | null,
 };
 
 vi.mock('next/navigation', () => ({
@@ -149,6 +185,16 @@ vi.mock('@/modules/identity/IdentityService', () => ({
 vi.mock('@/lib/sync', () => ({
   useSyncContext: () => ({
     triggerSyncNow: triggerSyncNowMock,
+  }),
+}));
+
+vi.mock('@/hooks', () => ({
+  useSocialNotifications: () => ({
+    ...mockSocialNotificationsState,
+    refresh: refreshSocialNotificationsMock,
+    markNotificationRead: markNotificationReadMock,
+    markAllNotificationsRead: markAllNotificationsReadMock,
+    updatePreferences: updateSocialNotificationPreferencesMock,
   }),
 }));
 
@@ -288,6 +334,29 @@ describe('SocialPage', () => {
     });
     computeSha256Mock.mockResolvedValue('a'.repeat(64));
     clipboardWriteTextMock.mockResolvedValue(undefined);
+    refreshSocialNotificationsMock.mockReset();
+    refreshSocialNotificationsMock.mockResolvedValue(undefined);
+    markNotificationReadMock.mockReset();
+    markNotificationReadMock.mockResolvedValue(true);
+    markAllNotificationsReadMock.mockReset();
+    markAllNotificationsReadMock.mockResolvedValue(true);
+    updateSocialNotificationPreferencesMock.mockReset();
+    updateSocialNotificationPreferencesMock.mockResolvedValue(true);
+    mockSocialNotificationsState = {
+      items: [],
+      preferences: {
+        openActivityEnabled: true,
+        closeActivityEnabled: true,
+        circleMutes: [],
+        updatedAtUnixMs: 0,
+      },
+      unreadCount: 0,
+      hasMore: false,
+      isLoading: false,
+      isRefreshing: false,
+      isSavingPreferences: false,
+      error: null,
+    };
     Object.assign(navigator, {
       clipboard: {
         writeText: clipboardWriteTextMock,
@@ -529,6 +598,79 @@ describe('SocialPage', () => {
     expect(screen.getByTestId('social-circles-panel')).toBeInTheDocument();
     expect(screen.getByTestId('social-circles-strip')).toBeInTheDocument();
     expect(screen.getByTestId('social-circle-card-inner-circle')).toBeInTheDocument();
+  });
+
+  it('renders FEAT-091 notifications state and submits preference/read actions', async () => {
+    selectedNav = 'notifications';
+    mockSocialNotificationsState = {
+      items: [
+        {
+          notificationId: 'notif-1',
+          kind: 2,
+          visibilityClass: 2,
+          targetType: 2,
+          targetId: 'comment-1',
+          postId: 'post-1',
+          parentCommentId: '',
+          actorUserId: 'alice-address',
+          actorDisplayName: 'Alice',
+          title: 'New reaction',
+          body: 'Alice reacted to your comment',
+          isRead: false,
+          isPrivatePreviewSuppressed: true,
+          createdAtUnixMs: Date.now() - 1000,
+          deepLinkPath: '/social/post/post-1',
+          matchedCircleIds: ['inner-circle'],
+        },
+      ],
+      preferences: {
+        openActivityEnabled: true,
+        closeActivityEnabled: false,
+        circleMutes: [{ circleId: 'inner-circle', isMuted: true }],
+        updatedAtUnixMs: Date.now(),
+      },
+      unreadCount: 1,
+      hasMore: false,
+      isLoading: false,
+      isRefreshing: false,
+      isSavingPreferences: false,
+      error: null,
+    };
+
+    render(<SocialPage />);
+
+    expect(screen.getByTestId('social-notifications-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('social-notifications-unread-count')).toHaveTextContent('1 unread');
+    expect(screen.getByTestId('social-notification-item-notif-1')).toHaveTextContent('Alice reacted to your comment');
+    expect(screen.getByTestId('social-notifications-circle-inner-circle')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('social-notification-mark-read-notif-1'));
+    expect(markNotificationReadMock).toHaveBeenCalledWith('notif-1');
+
+    fireEvent.click(screen.getByTestId('social-notifications-mark-all-read'));
+    expect(markAllNotificationsReadMock).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId('social-notifications-refresh'));
+    expect(refreshSocialNotificationsMock).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId('social-notification-open-notif-1'));
+
+    const openToggle = screen.getByTestId('social-notifications-open-toggle').querySelector('input');
+    const closeToggle = screen.getByTestId('social-notifications-close-toggle').querySelector('input');
+    const circleToggle = screen.getByTestId('social-notifications-circle-inner-circle').querySelector('input');
+
+    fireEvent.click(openToggle as HTMLInputElement);
+    fireEvent.click(closeToggle as HTMLInputElement);
+    fireEvent.click(circleToggle as HTMLInputElement);
+
+    await waitFor(() => {
+      expect(routerPushMock).toHaveBeenCalledWith('/social/post/post-1');
+    });
+    expect(updateSocialNotificationPreferencesMock).toHaveBeenCalledWith({ openActivityEnabled: false });
+    expect(updateSocialNotificationPreferencesMock).toHaveBeenCalledWith({ closeActivityEnabled: true });
+    expect(updateSocialNotificationPreferencesMock).toHaveBeenCalledWith({
+      circleMutes: [{ circleId: 'inner-circle', isMuted: false }],
+    });
   });
 
   it('opens create-circle modal and submits transaction', async () => {

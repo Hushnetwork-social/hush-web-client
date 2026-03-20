@@ -17,7 +17,12 @@ import { detectPlatform } from '@/lib/platform';
 import { showNotification as showPlatformNotification } from '@/lib/notifications';
 import { onMemberJoin, onVisibilityChange } from '@/lib/events';
 import { onSyncRecoveredMessage } from '@/lib/events/syncRecoveredMessageEvents';
-import type { FeedEventResponse } from '@/lib/grpc/grpc-web-helper';
+import {
+  type FeedEventResponse,
+  type SocialNotificationItemResponse,
+  type SocialNotificationPreferencesResponse,
+  type UpdateSocialNotificationPreferencesRequest,
+} from '@/lib/grpc/grpc-web-helper';
 import { debugLog, debugError } from '@/lib/debug-logger';
 import { parseMentions, trackMention, getMentionDisplayText } from '@/lib/mentions';
 import { getNextDelay, STREAM_RECONNECT_CONFIG } from '@/lib/backoff';
@@ -47,6 +52,87 @@ export interface UseNotificationsOptions {
   onNewMessage?: (event: FeedEventResponse) => void;
   /** Whether to auto-reconnect on disconnect (default: true) */
   autoReconnect?: boolean;
+}
+
+export interface UseSocialNotificationsOptions {
+  enabled?: boolean;
+  limit?: number;
+  includeRead?: boolean;
+}
+
+export interface UseSocialNotificationsResult {
+  items: SocialNotificationItemResponse[];
+  preferences: SocialNotificationPreferencesResponse;
+  unreadCount: number;
+  hasMore: boolean;
+  isLoading: boolean;
+  isRefreshing: boolean;
+  isSavingPreferences: boolean;
+  error: string | null;
+  refresh: () => Promise<void>;
+  markNotificationRead: (notificationId: string) => Promise<boolean>;
+  markAllNotificationsRead: () => Promise<boolean>;
+  updatePreferences: (update: UpdateSocialNotificationPreferencesRequest) => Promise<boolean>;
+}
+
+const DEFAULT_SOCIAL_NOTIFICATION_PREFERENCES: SocialNotificationPreferencesResponse = {
+  openActivityEnabled: true,
+  closeActivityEnabled: true,
+  circleMutes: [],
+  updatedAtUnixMs: 0,
+};
+
+function compareSocialNotificationItems(
+  left: SocialNotificationItemResponse,
+  right: SocialNotificationItemResponse
+): number {
+  if (left.createdAtUnixMs !== right.createdAtUnixMs) {
+    return right.createdAtUnixMs - left.createdAtUnixMs;
+  }
+
+  return left.notificationId.localeCompare(right.notificationId);
+}
+
+export function mergeSocialNotificationItems(
+  previousItems: SocialNotificationItemResponse[],
+  nextItems: SocialNotificationItemResponse[]
+): SocialNotificationItemResponse[] {
+  const merged = new Map<string, SocialNotificationItemResponse>();
+
+  for (const item of previousItems) {
+    merged.set(item.notificationId, item);
+  }
+
+  for (const item of nextItems) {
+    const existing = merged.get(item.notificationId);
+    merged.set(item.notificationId, existing ? { ...existing, ...item } : item);
+  }
+
+  return Array.from(merged.values()).sort(compareSocialNotificationItems);
+}
+
+export function applySocialNotificationReadState(
+  items: SocialNotificationItemResponse[],
+  notificationId?: string,
+  markAll: boolean = false
+): SocialNotificationItemResponse[] {
+  if (markAll) {
+    return items.map((item) => ({ ...item, isRead: true }));
+  }
+
+  if (!notificationId) {
+    return items;
+  }
+
+  return items.map((item) =>
+    item.notificationId === notificationId
+      ? { ...item, isRead: true }
+      : item
+  );
+}
+
+function countUnreadSocialNotifications(items: SocialNotificationItemResponse[]): number {
+  return items.reduce((count, item) => count + (item.isRead ? 0 : 1), 0);
 }
 
 export function useNotifications(options: UseNotificationsOptions = {}) {
@@ -760,5 +846,163 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
     fetchUnreadCounts,
     connect,
     disconnect,
+  };
+}
+
+export function useSocialNotifications(
+  options: UseSocialNotificationsOptions = {}
+): UseSocialNotificationsResult {
+  const {
+    enabled = true,
+    limit = 50,
+    includeRead = true,
+  } = options;
+  const { isAuthenticated, credentials } = useAppStore();
+  const userId = credentials?.signingPublicKey;
+
+  const [items, setItems] = useState<SocialNotificationItemResponse[]>([]);
+  const [preferences, setPreferences] = useState<SocialNotificationPreferencesResponse>(
+    DEFAULT_SOCIAL_NOTIFICATION_PREFERENCES
+  );
+  const [hasMore, setHasMore] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isSavingPreferences, setIsSavingPreferences] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    if (!enabled || !isAuthenticated || !userId) {
+      setItems([]);
+      setPreferences(DEFAULT_SOCIAL_NOTIFICATION_PREFERENCES);
+      setHasMore(false);
+      setError(null);
+      return;
+    }
+
+    setError(null);
+    setIsRefreshing(true);
+    setIsLoading((current) => current || items.length === 0);
+
+    try {
+      const [inbox, nextPreferences] = await Promise.all([
+        notificationService.getSocialNotificationInbox(userId, { limit, includeRead }),
+        notificationService.getSocialNotificationPreferences(userId),
+      ]);
+
+      setItems((current) => mergeSocialNotificationItems(current, inbox.items));
+      setHasMore(inbox.hasMore);
+      setPreferences(nextPreferences);
+    } catch (refreshError) {
+      debugError('[useSocialNotifications] Failed to refresh social notifications:', refreshError);
+      setError(refreshError instanceof Error ? refreshError.message : 'Failed to load social notifications');
+    } finally {
+      setIsRefreshing(false);
+      setIsLoading(false);
+    }
+  }, [enabled, includeRead, isAuthenticated, items.length, limit, userId]);
+
+  const markNotificationRead = useCallback(async (notificationId: string) => {
+    if (!userId) {
+      return false;
+    }
+
+    const previousItems = items;
+    setItems((current) => applySocialNotificationReadState(current, notificationId, false));
+
+    try {
+      const result = await notificationService.markSocialNotificationRead(userId, notificationId, false);
+      if (!result.success) {
+        throw new Error(result.message || 'Failed to mark social notification as read');
+      }
+
+      return true;
+    } catch (markError) {
+      debugError('[useSocialNotifications] Failed to mark notification as read:', markError);
+      setItems(previousItems);
+      setError(markError instanceof Error ? markError.message : 'Failed to mark social notification as read');
+      return false;
+    }
+  }, [items, userId]);
+
+  const markAllNotificationsRead = useCallback(async () => {
+    if (!userId) {
+      return false;
+    }
+
+    const previousItems = items;
+    setItems((current) => applySocialNotificationReadState(current, undefined, true));
+
+    try {
+      const result = await notificationService.markSocialNotificationRead(userId, undefined, true);
+      if (!result.success) {
+        throw new Error(result.message || 'Failed to mark all social notifications as read');
+      }
+
+      return true;
+    } catch (markError) {
+      debugError('[useSocialNotifications] Failed to mark all notifications as read:', markError);
+      setItems(previousItems);
+      setError(markError instanceof Error ? markError.message : 'Failed to mark all social notifications as read');
+      return false;
+    }
+  }, [items, userId]);
+
+  const updatePreferences = useCallback(async (update: UpdateSocialNotificationPreferencesRequest) => {
+    if (!userId) {
+      return false;
+    }
+
+    setError(null);
+    setIsSavingPreferences(true);
+
+    try {
+      const result = await notificationService.updateSocialNotificationPreferences(userId, update);
+      if (!result.success) {
+        throw new Error(result.message || 'Failed to update social notification preferences');
+      }
+
+      setPreferences(result.preferences);
+      return true;
+    } catch (updateError) {
+      debugError('[useSocialNotifications] Failed to update preferences:', updateError);
+      setError(updateError instanceof Error ? updateError.message : 'Failed to update social notification preferences');
+      return false;
+    } finally {
+      setIsSavingPreferences(false);
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    if (!enabled || !isAuthenticated) {
+      return;
+    }
+
+    const handleOnline = () => {
+      void refresh();
+    };
+
+    window.addEventListener('online', handleOnline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+    };
+  }, [enabled, isAuthenticated, refresh]);
+
+  return {
+    items,
+    preferences,
+    unreadCount: countUnreadSocialNotifications(items),
+    hasMore,
+    isLoading,
+    isRefreshing,
+    isSavingPreferences,
+    error,
+    refresh,
+    markNotificationRead,
+    markAllNotificationsRead,
+    updatePreferences,
   };
 }

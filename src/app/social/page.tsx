@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, typ
 import { useRouter } from "next/navigation";
 import { AlertCircle, ArrowLeft, Check, Link2, Loader2, MessageCircle, Sparkles, Users, X } from "lucide-react";
 import { buildApiUrl } from "@/lib/api-config";
+import { useSocialNotifications } from "@/hooks";
 import { useAppStore } from "@/stores";
 import { useFeedsStore } from "@/modules/feeds/useFeedsStore";
 import { useBlockchainStore } from "@/modules/blockchain";
@@ -342,6 +343,32 @@ function normalizeFeedId(feedId?: string | null): string {
   return (feedId ?? "").trim().toLowerCase();
 }
 
+function formatSocialNotificationKind(kind: number): string {
+  switch (kind) {
+    case 1:
+      return "Post";
+    case 2:
+      return "Reaction";
+    case 3:
+      return "Comment";
+    case 4:
+      return "Reply";
+    default:
+      return "Notification";
+  }
+}
+
+function formatSocialNotificationVisibility(visibilityClass: number): string {
+  switch (visibilityClass) {
+    case 1:
+      return "Open";
+    case 2:
+      return "Close";
+    default:
+      return "Unknown";
+  }
+}
+
 function detectMediaKindFromMime(mimeType: string): "image" | "video" | null {
   const normalizedMime = mimeType.trim().toLowerCase();
   if (normalizedMime.startsWith("image/")) {
@@ -485,6 +512,24 @@ export default function SocialPage() {
     }
     return lookup;
   }, [renderCircleItems, feeds]);
+  const {
+    items: socialNotificationItems,
+    preferences: socialNotificationPreferences,
+    unreadCount: socialNotificationUnreadCount,
+    hasMore: socialNotificationHasMore,
+    isLoading: isSocialNotificationsLoading,
+    isRefreshing: isSocialNotificationsRefreshing,
+    isSavingPreferences: isSavingSocialNotificationPreferences,
+    error: socialNotificationError,
+    refresh: refreshSocialNotifications,
+    markNotificationRead,
+    markAllNotificationsRead,
+    updatePreferences: updateSocialNotificationPreferences,
+  } = useSocialNotifications({
+    enabled: selectedNav === "notifications",
+    limit: 50,
+    includeRead: true,
+  });
 
 
   useEffect(() => {
@@ -2828,6 +2873,268 @@ export default function SocialPage() {
     );
   };
 
+  const renderNotificationsContent = () => {
+    if (!credentials?.signingPublicKey) {
+      return (
+        <div
+          data-testid="social-notifications-auth-required"
+          className="rounded-xl border border-hush-bg-hover bg-hush-bg-dark p-4 text-sm text-hush-text-accent"
+        >
+          Create or load your identity to access the FEAT-091 notifications inbox.
+        </div>
+      );
+    }
+
+    const handlePreferenceToggle = async (
+      key: "openActivityEnabled" | "closeActivityEnabled",
+      value: boolean
+    ) => {
+      await updateSocialNotificationPreferences({ [key]: value });
+    };
+
+    const handleCircleMuteToggle = async (circleFeedId: string, isMuted: boolean) => {
+      const nextCircleMutes = Array.from(
+        new Map(
+          socialNotificationPreferences.circleMutes
+            .filter((entry) => entry.circleId !== circleFeedId)
+            .concat({ circleId: circleFeedId, isMuted })
+            .map((entry) => [entry.circleId, entry])
+        ).values()
+      );
+
+      await updateSocialNotificationPreferences({ circleMutes: nextCircleMutes });
+    };
+
+    const handleOpenNotification = async (notificationId: string, deepLinkPath: string) => {
+      await markNotificationRead(notificationId);
+
+      if (!deepLinkPath) {
+        return;
+      }
+
+      router.push(deepLinkPath);
+    };
+
+    return (
+      <div className="space-y-6" data-testid="social-notifications-panel">
+        <section className="rounded-xl border border-hush-bg-hover bg-hush-bg-dark p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-hush-text-primary">Delivery preferences</h3>
+              <p className="mt-1 text-xs text-hush-text-accent">
+                Toggle Open and Close social activity, then mute specific circles without weakening access control.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span
+                className="inline-flex rounded-full border border-hush-purple/40 bg-hush-purple/10 px-2 py-1 text-xs text-hush-purple"
+                data-testid="social-notifications-unread-count"
+              >
+                {socialNotificationUnreadCount} unread
+              </span>
+              <button
+                type="button"
+                className="rounded-md border border-hush-bg-hover px-3 py-1.5 text-xs text-hush-text-accent hover:bg-hush-bg-hover disabled:opacity-50"
+                data-testid="social-notifications-refresh"
+                disabled={isSocialNotificationsRefreshing}
+                onClick={() => void refreshSocialNotifications()}
+              >
+                {isSocialNotificationsRefreshing ? "Refreshing..." : "Refresh"}
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-hush-purple/40 px-3 py-1.5 text-xs text-hush-purple hover:bg-hush-purple/10 disabled:opacity-50"
+                data-testid="social-notifications-mark-all-read"
+                disabled={socialNotificationUnreadCount === 0}
+                onClick={() => void markAllNotificationsRead()}
+              >
+                Mark all read
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <label
+              className="flex items-center justify-between rounded-lg border border-hush-bg-hover px-3 py-2 text-sm text-hush-text-primary"
+              data-testid="social-notifications-open-toggle"
+            >
+              <span>Open activity</span>
+              <input
+                type="checkbox"
+                checked={socialNotificationPreferences.openActivityEnabled}
+                disabled={isSavingSocialNotificationPreferences}
+                onChange={(event) => {
+                  void handlePreferenceToggle("openActivityEnabled", event.currentTarget.checked);
+                }}
+              />
+            </label>
+            <label
+              className="flex items-center justify-between rounded-lg border border-hush-bg-hover px-3 py-2 text-sm text-hush-text-primary"
+              data-testid="social-notifications-close-toggle"
+            >
+              <span>Close activity</span>
+              <input
+                type="checkbox"
+                checked={socialNotificationPreferences.closeActivityEnabled}
+                disabled={isSavingSocialNotificationPreferences}
+                onChange={(event) => {
+                  void handlePreferenceToggle("closeActivityEnabled", event.currentTarget.checked);
+                }}
+              />
+            </label>
+          </div>
+
+          <div className="mt-4">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-hush-text-accent">
+              Circle mutes
+            </p>
+            <div className="grid gap-2 md:grid-cols-2">
+              {renderCircleItems.map((circle) => {
+                const currentMuteState = socialNotificationPreferences.circleMutes.find(
+                  (entry) => entry.circleId === circle.feedId
+                );
+                const isMuted = currentMuteState?.isMuted ?? false;
+
+                return (
+                  <label
+                    key={`social-notification-circle-${circle.feedId}`}
+                    className="flex items-center justify-between rounded-lg border border-hush-bg-hover px-3 py-2 text-sm text-hush-text-primary"
+                    data-testid={`social-notifications-circle-${circle.feedId}`}
+                  >
+                    <span>{circle.name}</span>
+                    <input
+                      type="checkbox"
+                      checked={isMuted}
+                      disabled={isSavingSocialNotificationPreferences}
+                      onChange={(event) => {
+                        void handleCircleMuteToggle(circle.feedId, event.currentTarget.checked);
+                      }}
+                    />
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+
+        {socialNotificationError ? (
+          <div
+            className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200"
+            data-testid="social-notifications-error"
+          >
+            {socialNotificationError}
+          </div>
+        ) : null}
+
+        <section className="rounded-xl border border-hush-bg-hover bg-hush-bg-dark p-4">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-semibold text-hush-text-primary">Inbox</h3>
+              <p className="text-xs text-hush-text-accent">
+                Durable FEAT-091 delivery items with privacy-safe previews and stable read state.
+              </p>
+            </div>
+            {socialNotificationHasMore ? (
+              <span className="text-xs text-hush-text-accent">Showing latest 50 items</span>
+            ) : null}
+          </div>
+
+          {isSocialNotificationsLoading ? (
+            <div
+              className="rounded-lg border border-hush-bg-hover bg-hush-bg-dark/60 px-4 py-5 text-sm text-hush-text-accent"
+              data-testid="social-notifications-loading"
+            >
+              Loading notifications...
+            </div>
+          ) : null}
+
+          {!isSocialNotificationsLoading && socialNotificationItems.length === 0 ? (
+            <div
+              className="rounded-lg border border-dashed border-hush-bg-hover bg-hush-bg-dark/40 px-4 py-5 text-sm text-hush-text-accent"
+              data-testid="social-notifications-empty"
+            >
+              No FEAT-091 notifications yet. New posts, reactions, comments, and replies will appear here.
+            </div>
+          ) : null}
+
+          {!isSocialNotificationsLoading && socialNotificationItems.length > 0 ? (
+            <div className="space-y-3" data-testid="social-notifications-list">
+              {socialNotificationItems.map((item) => (
+                <article
+                  key={item.notificationId}
+                  className={`rounded-xl border p-4 ${
+                    item.isRead
+                      ? "border-hush-bg-hover bg-hush-bg-dark/50"
+                      : "border-hush-purple/40 bg-hush-purple/5"
+                  }`}
+                  data-testid={`social-notification-item-${item.notificationId}`}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-hush-text-accent">
+                        <span className="rounded-full border border-hush-purple/30 px-2 py-0.5 text-hush-purple">
+                          {formatSocialNotificationKind(item.kind)}
+                        </span>
+                        <span className="rounded-full border border-hush-bg-hover px-2 py-0.5">
+                          {formatSocialNotificationVisibility(item.visibilityClass)}
+                        </span>
+                        {item.matchedCircleIds.map((circleId) => (
+                          <span
+                            key={`${item.notificationId}-${circleId}`}
+                            className="rounded-full border border-hush-bg-hover px-2 py-0.5"
+                          >
+                            {circleNameByFeedId.get(normalizeFeedId(circleId)) ?? circleId}
+                          </span>
+                        ))}
+                      </div>
+                      <h4 className="text-sm font-semibold text-hush-text-primary">{item.title}</h4>
+                      <p className="mt-1 text-xs text-hush-text-accent">{item.body}</p>
+                      <p className="mt-2 text-[11px] text-hush-text-accent">
+                        {item.actorDisplayName || "Unknown"} · {formatRelativeTime(item.createdAtUnixMs)}
+                        {item.isPrivatePreviewSuppressed ? " · Private preview suppressed" : ""}
+                      </p>
+                    </div>
+                    {!item.isRead ? (
+                      <span
+                        className="inline-flex h-2.5 w-2.5 rounded-full bg-hush-purple"
+                        aria-hidden="true"
+                      />
+                    ) : null}
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {!item.isRead ? (
+                      <button
+                        type="button"
+                        className="rounded-md border border-hush-purple/40 px-3 py-1.5 text-xs text-hush-purple hover:bg-hush-purple/10"
+                        data-testid={`social-notification-mark-read-${item.notificationId}`}
+                        onClick={() => void markNotificationRead(item.notificationId)}
+                      >
+                        Mark read
+                      </button>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-xs text-hush-text-accent">
+                        <Check className="h-3.5 w-3.5" />
+                        Read
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      className="rounded-md border border-hush-bg-hover px-3 py-1.5 text-xs text-hush-text-accent hover:bg-hush-bg-hover"
+                      data-testid={`social-notification-open-${item.notificationId}`}
+                      onClick={() => void handleOpenNotification(item.notificationId, item.deepLinkPath)}
+                    >
+                      Open
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : null}
+        </section>
+      </div>
+    );
+  };
+
   const renderCreateCircleDialog = () => {
     if (!isCreateDialogOpen) {
       return null;
@@ -3051,6 +3358,8 @@ export default function SocialPage() {
                   ? "New Post"
                   : selectedNav === "search"
                     ? "Search"
+                    : selectedNav === "notifications"
+                      ? "Notifications"
                     : "Feed Wall"}
               </h2>
             )}
@@ -3060,6 +3369,8 @@ export default function SocialPage() {
                   ? "Compose a post with explicit audience targeting rules."
                   : selectedNav === "search"
                     ? "Profile discovery is being prepared."
+                    : selectedNav === "notifications"
+                      ? "Durable social notifications, read-state, and delivery preferences."
                     : "Public posts from people you follow and nearby circles."}
               </p>
             ) : null}
@@ -3090,8 +3401,12 @@ export default function SocialPage() {
 
           {selectedNav === "feed-wall" ? renderFeedWallContent() : null}
           {selectedNav === "following" ? renderFollowingContent() : null}
+          {selectedNav === "notifications" ? renderNotificationsContent() : null}
           {selectedNav === "new-post" ? renderPostComposerCard("full") : null}
-          {selectedNav !== "feed-wall" && selectedNav !== "following" && selectedNav !== "new-post" ? (
+          {selectedNav !== "feed-wall" &&
+          selectedNav !== "following" &&
+          selectedNav !== "notifications" &&
+          selectedNav !== "new-post" ? (
             <div data-testid="social-subview-placeholder" className="py-16 text-center">
               <p className="text-hush-text-primary font-semibold mb-1">{selectedNav.replace(/-/g, " ")}</p>
               <p className="text-hush-text-accent text-sm">This section will be expanded in the next phases.</p>

@@ -56,7 +56,8 @@ if (typeof window !== 'undefined') {
 async function browserGrpcCall(
   service: string,
   method: string,
-  requestBytes: Uint8Array
+  requestBytes: Uint8Array,
+  additionalHeaders: Record<string, string> = {}
 ): Promise<Uint8Array> {
   const url = `${GRPC_WEB_URL}/${service}/${method}`;
 
@@ -77,6 +78,7 @@ async function browserGrpcCall(
       'Content-Type': 'application/grpc-web+proto',
       'Accept': 'application/grpc-web+proto',
       'X-Grpc-Web': '1',
+      ...additionalHeaders,
     },
     body: frame, // Use Uint8Array directly (browser compatible)
   });
@@ -299,7 +301,12 @@ export async function getSocialNotificationInbox(
       options.limit,
       options.includeRead
     );
-    const responseBytes = await browserGrpcCall(SERVICE_NAME, 'GetSocialNotificationInbox', requestBytes);
+    const responseBytes = await browserGrpcCall(
+      SERVICE_NAME,
+      'GetSocialNotificationInbox',
+      requestBytes,
+      { 'X-Hush-UserId': userId }
+    );
     const messageBytes = parseGrpcResponse(responseBytes);
 
     if (!messageBytes) {
@@ -322,7 +329,12 @@ export async function markSocialNotificationRead(
 ): Promise<MarkSocialNotificationReadResult> {
   try {
     const requestBytes = buildMarkSocialNotificationReadRequest(userId, notificationId, markAll);
-    const responseBytes = await browserGrpcCall(SERVICE_NAME, 'MarkSocialNotificationRead', requestBytes);
+    const responseBytes = await browserGrpcCall(
+      SERVICE_NAME,
+      'MarkSocialNotificationRead',
+      requestBytes,
+      { 'X-Hush-UserId': userId }
+    );
     const messageBytes = parseGrpcResponse(responseBytes);
 
     if (!messageBytes) {
@@ -343,7 +355,12 @@ export async function getSocialNotificationPreferences(
 ): Promise<SocialNotificationPreferencesResponse> {
   try {
     const requestBytes = buildGetSocialNotificationPreferencesRequest(userId);
-    const responseBytes = await browserGrpcCall(SERVICE_NAME, 'GetSocialNotificationPreferences', requestBytes);
+    const responseBytes = await browserGrpcCall(
+      SERVICE_NAME,
+      'GetSocialNotificationPreferences',
+      requestBytes,
+      { 'X-Hush-UserId': userId }
+    );
     const messageBytes = parseGrpcResponse(responseBytes);
 
     if (!messageBytes) {
@@ -375,7 +392,12 @@ export async function updateSocialNotificationPreferences(
 ): Promise<UpdateSocialNotificationPreferencesResult> {
   try {
     const requestBytes = buildUpdateSocialNotificationPreferencesRequest(userId, update);
-    const responseBytes = await browserGrpcCall(SERVICE_NAME, 'UpdateSocialNotificationPreferences', requestBytes);
+    const responseBytes = await browserGrpcCall(
+      SERVICE_NAME,
+      'UpdateSocialNotificationPreferences',
+      requestBytes,
+      { 'X-Hush-UserId': userId }
+    );
     const messageBytes = parseGrpcResponse(responseBytes);
 
     if (!messageBytes) {
