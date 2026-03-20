@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type WheelEvent } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { AlertCircle, ArrowLeft, Check, Link2, Loader2, MessageCircle, Sparkles, Users, X } from "lucide-react";
 import { buildApiUrl } from "@/lib/api-config";
 import { useSocialNotifications } from "@/hooks";
@@ -125,6 +125,11 @@ type UiToast = {
   message: string;
 };
 
+type NotificationOpenState = {
+  notificationId: string;
+  message: string;
+};
+
 type PendingCircleAssignment = {
   circleFeedId: string;
   circleName: string;
@@ -220,6 +225,88 @@ function formatRelativeTimeFromBlockAge(createdAtBlock: number, currentBlockHeig
   // HushServerNode block production interval defaults to 3 seconds.
   const elapsedMs = (currentBlockHeight - createdAtBlock) * 3000;
   return formatRelativeDuration(elapsedMs);
+}
+
+function normalizeRoutePath(route: string | null | undefined): string {
+  if (!route) {
+    return "";
+  }
+
+  try {
+    const url = new URL(route, "https://hush.local");
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return route.trim();
+  }
+}
+
+function resolveSocialNotificationDestination(item: {
+  deepLinkPath?: string;
+  postId?: string;
+  targetId?: string;
+  parentCommentId?: string;
+  targetType?: number;
+}): string {
+  const deepLinkPath = normalizeRoutePath(item.deepLinkPath);
+  if (deepLinkPath) {
+    return deepLinkPath;
+  }
+
+  if (!item.postId) {
+    return "";
+  }
+
+  const postRoute = getSocialPostRoute(item.postId);
+  if (item.targetType === 2 && item.targetId) {
+    return `${postRoute}?commentId=${encodeURIComponent(item.targetId)}`;
+  }
+
+  if (item.targetType === 3 && item.targetId) {
+    const params = new URLSearchParams();
+    if (item.parentCommentId) {
+      params.set("threadRootId", item.parentCommentId);
+    }
+    params.set("replyId", item.targetId);
+    return `${postRoute}?${params.toString()}`;
+  }
+
+  return postRoute;
+}
+
+function isViewingSocialNotificationTarget(
+  pathname: string,
+  item: {
+    deepLinkPath?: string;
+    postId?: string;
+    targetId?: string;
+    parentCommentId?: string;
+    targetType?: number;
+  }
+): boolean {
+  const destination = resolveSocialNotificationDestination(item);
+  return destination.length > 0 && normalizeRoutePath(pathname) === destination;
+}
+
+function buildSocialNotificationToastMessage(item: {
+  actorDisplayName?: string;
+  title?: string;
+  body?: string;
+  visibilityClass?: number;
+  isPrivatePreviewSuppressed?: boolean;
+}): string {
+  const actorName = item.actorDisplayName?.trim() || "Someone";
+  const isPrivate = item.visibilityClass === 2 || item.isPrivatePreviewSuppressed;
+
+  if (isPrivate) {
+    return `${actorName} triggered a private social update. Open Notifications to review it.`;
+  }
+
+  const preview = item.body?.trim() || item.title?.trim();
+  if (preview) {
+    return `${actorName}: ${preview}`;
+  }
+
+  return `${actorName} sent a social notification.`;
 }
 
 function readFeedWallTimestampCache(): Record<string, number> {
@@ -415,6 +502,7 @@ function logSocialDrag(event: string, payload: Record<string, unknown>): void {
 
 export default function SocialPage() {
   const router = useRouter();
+  const pathname = usePathname();
   const [queryViewState, setQueryViewState] = useState<string | null>(() => {
     if (typeof window === "undefined") {
       return null;
@@ -468,6 +556,7 @@ export default function SocialPage() {
   const [pendingCircleMembers, setPendingCircleMembers] = useState<Record<string, string[]>>({});
   const [pendingAssignments, setPendingAssignments] = useState<Record<string, PendingCircleAssignment>>({});
   const [uiToasts, setUiToasts] = useState<UiToast[]>([]);
+  const [notificationOpenState, setNotificationOpenState] = useState<NotificationOpenState | null>(null);
   const [renderFollowingItems, setRenderFollowingItems] = useState<FollowingItem[]>([]);
   const [renderCircleItems, setRenderCircleItems] = useState<CircleItem[]>([]);
   const [newPostDraft, setNewPostDraft] = useState("");
@@ -486,6 +575,7 @@ export default function SocialPage() {
   const [authOverlayReturnTo, setAuthOverlayReturnTo] = useState<string | null>(null);
   const authorNamesByAddressRef = useRef<Record<string, string>>({});
   const mediaPreviewUrlsRef = useRef<Set<string>>(new Set());
+  const shownSocialNotificationToastIdsRef = useRef<Set<string>>(new Set());
   const topComposerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const inlineComposerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const [isFeedWallLoading, setIsFeedWallLoading] = useState(true);
@@ -526,7 +616,7 @@ export default function SocialPage() {
     markAllNotificationsRead,
     updatePreferences: updateSocialNotificationPreferences,
   } = useSocialNotifications({
-    enabled: selectedNav === "notifications",
+    enabled: Boolean(credentials?.signingPublicKey),
     limit: 50,
     includeRead: true,
   });
@@ -778,6 +868,11 @@ export default function SocialPage() {
     });
   }, [circleItems, circlesSignature]);
 
+  const addUiToast = useCallback((message: string) => {
+    const toastId = `toast-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+    setUiToasts((current) => [...current, { id: toastId, message }]);
+  }, []);
+
   useEffect(() => {
     setPendingAssignments((current) => {
       const entries = Object.entries(current);
@@ -817,7 +912,7 @@ export default function SocialPage() {
 
       return changed ? nextAssignments : current;
     });
-  }, [renderCircleItems]);
+  }, [addUiToast, renderCircleItems]);
 
   useEffect(() => {
     if (Object.keys(pendingAssignments).length === 0) {
@@ -867,7 +962,7 @@ export default function SocialPage() {
     }, 1000);
 
     return () => window.clearInterval(intervalId);
-  }, [pendingAssignments]);
+  }, [addUiToast, pendingAssignments]);
 
   useEffect(() => {
     if (!activePostId) {
@@ -1003,7 +1098,7 @@ export default function SocialPage() {
     return () => {
       cancelled = true;
     };
-  }, [activePostId, credentials?.signingPublicKey, ownAddressNormalized, ownAuthorLabel, followRefreshNonce]);
+  }, [activePostId, addUiToast, credentials?.signingPublicKey, followRefreshNonce, ownAddressNormalized, ownAuthorLabel]);
 
   useEffect(() => {
     if (!credentials?.signingPublicKey || !feedWallPosts.length) {
@@ -1343,15 +1438,32 @@ export default function SocialPage() {
     })();
   };
 
-  const addUiToast = (message: string) => {
-    const toastId = `toast-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-    setUiToasts((current) => [...current, { id: toastId, message }]);
-  };
   const { copyPostPermalink } = usePostPermalink({ onToast: addUiToast });
 
   const removeUiToast = (toastId: string) => {
     setUiToasts((current) => current.filter((toast) => toast.id !== toastId));
   };
+
+  useEffect(() => {
+    if (!credentials?.signingPublicKey) {
+      shownSocialNotificationToastIdsRef.current.clear();
+      return;
+    }
+
+    for (const item of socialNotificationItems) {
+      if (item.isRead || shownSocialNotificationToastIdsRef.current.has(item.notificationId)) {
+        continue;
+      }
+
+      shownSocialNotificationToastIdsRef.current.add(item.notificationId);
+
+      if (selectedNav === "notifications" || isViewingSocialNotificationTarget(pathname ?? "", item)) {
+        continue;
+      }
+
+      addUiToast(buildSocialNotificationToastMessage(item));
+    }
+  }, [addUiToast, credentials?.signingPublicKey, pathname, selectedNav, socialNotificationItems]);
 
   const getEffectiveFollowState = (
     authorPublicAddress: string | undefined,
@@ -2905,14 +3017,22 @@ export default function SocialPage() {
       await updateSocialNotificationPreferences({ circleMutes: nextCircleMutes });
     };
 
-    const handleOpenNotification = async (notificationId: string, deepLinkPath: string) => {
-      await markNotificationRead(notificationId);
+    const handleOpenNotification = async (item: (typeof socialNotificationItems)[number]) => {
+      setNotificationOpenState(null);
+      await markNotificationRead(item.notificationId);
 
-      if (!deepLinkPath) {
+      const destination = resolveSocialNotificationDestination(item);
+      if (!destination) {
+        const message = "This notification target is no longer available. Privacy-safe details remain in your inbox only.";
+        setNotificationOpenState({
+          notificationId: item.notificationId,
+          message,
+        });
+        addUiToast("Notification target is no longer available.");
         return;
       }
 
-      router.push(deepLinkPath);
+      router.push(destination);
     };
 
     return (
@@ -2988,6 +3108,9 @@ export default function SocialPage() {
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-hush-text-accent">
               Circle mutes
             </p>
+            <p className="mb-2 text-xs text-hush-text-accent">
+              Mutes affect notification delivery only. They do not change circle membership or post access.
+            </p>
             <div className="grid gap-2 md:grid-cols-2">
               {renderCircleItems.map((circle) => {
                 const currentMuteState = socialNotificationPreferences.circleMutes.find(
@@ -3026,6 +3149,15 @@ export default function SocialPage() {
           </div>
         ) : null}
 
+        {notificationOpenState ? (
+          <div
+            className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-100"
+            data-testid="social-notifications-open-state"
+          >
+            {notificationOpenState.message}
+          </div>
+        ) : null}
+
         <section className="rounded-xl border border-hush-bg-hover bg-hush-bg-dark p-4">
           <div className="mb-3 flex items-center justify-between gap-2">
             <div>
@@ -3053,7 +3185,10 @@ export default function SocialPage() {
               className="rounded-lg border border-dashed border-hush-bg-hover bg-hush-bg-dark/40 px-4 py-5 text-sm text-hush-text-accent"
               data-testid="social-notifications-empty"
             >
-              No FEAT-091 notifications yet. New posts, reactions, comments, and replies will appear here.
+              <p className="font-semibold text-hush-text-primary">No notifications yet</p>
+              <p className="mt-1">
+                New posts, reactions, comments, and replies will appear here with privacy-safe previews.
+              </p>
             </div>
           ) : null}
 
@@ -3072,6 +3207,16 @@ export default function SocialPage() {
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-hush-text-accent">
+                        <span
+                          className={`rounded-full px-2 py-0.5 ${
+                            item.isRead
+                              ? "border border-hush-bg-hover text-hush-text-accent"
+                              : "border border-hush-purple/40 bg-hush-purple/10 text-hush-purple"
+                          }`}
+                          data-testid={`social-notification-status-${item.notificationId}`}
+                        >
+                          {item.isRead ? "Read" : "Unread"}
+                        </span>
                         <span className="rounded-full border border-hush-purple/30 px-2 py-0.5 text-hush-purple">
                           {formatSocialNotificationKind(item.kind)}
                         </span>
@@ -3121,7 +3266,7 @@ export default function SocialPage() {
                       type="button"
                       className="rounded-md border border-hush-bg-hover px-3 py-1.5 text-xs text-hush-text-accent hover:bg-hush-bg-hover"
                       data-testid={`social-notification-open-${item.notificationId}`}
-                      onClick={() => void handleOpenNotification(item.notificationId, item.deepLinkPath)}
+                      onClick={() => void handleOpenNotification(item)}
                     >
                       Open
                     </button>

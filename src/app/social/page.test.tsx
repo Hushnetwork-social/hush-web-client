@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import SocialPage from './page';
 
 const routerPushMock = vi.fn();
+let mockPathname = '/social';
 const setSelectedNavMock = vi.fn();
 const setActiveAppMock = vi.fn();
 const selectFeedMock = vi.fn();
@@ -114,6 +115,7 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({
     push: routerPushMock,
   }),
+  usePathname: () => mockPathname,
 }));
 
 vi.mock('@/stores', () => ({
@@ -246,6 +248,7 @@ describe('SocialPage', () => {
   };
 
   beforeEach(() => {
+    mockPathname = '/social';
     selectedNav = 'feed-wall';
     mockCredentials = {
       signingPublicKey: 'me-address',
@@ -642,6 +645,7 @@ describe('SocialPage', () => {
     expect(screen.getByTestId('social-notifications-panel')).toBeInTheDocument();
     expect(screen.getByTestId('social-notifications-unread-count')).toHaveTextContent('1 unread');
     expect(screen.getByTestId('social-notification-item-notif-1')).toHaveTextContent('Alice reacted to your comment');
+    expect(screen.getByTestId('social-notification-status-notif-1')).toHaveTextContent('Unread');
     expect(screen.getByTestId('social-notifications-circle-inner-circle')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('social-notification-mark-read-notif-1'));
@@ -671,6 +675,154 @@ describe('SocialPage', () => {
     expect(updateSocialNotificationPreferencesMock).toHaveBeenCalledWith({
       circleMutes: [{ circleId: 'inner-circle', isMuted: false }],
     });
+  });
+
+  it('shows deterministic empty and unavailable notification states', async () => {
+    selectedNav = 'notifications';
+    mockSocialNotificationsState = {
+      items: [],
+      preferences: {
+        openActivityEnabled: true,
+        closeActivityEnabled: true,
+        circleMutes: [],
+        updatedAtUnixMs: Date.now(),
+      },
+      unreadCount: 0,
+      hasMore: false,
+      isLoading: false,
+      isRefreshing: false,
+      isSavingPreferences: false,
+      error: null,
+    };
+
+    const { rerender } = render(<SocialPage />);
+
+    expect(screen.getByTestId('social-notifications-empty')).toHaveTextContent('No notifications yet');
+
+    mockSocialNotificationsState = {
+      ...mockSocialNotificationsState,
+      items: [
+        {
+          notificationId: 'notif-stale',
+          kind: 1,
+          visibilityClass: 2,
+          targetType: 0,
+          targetId: '',
+          postId: '',
+          parentCommentId: '',
+          actorUserId: 'alice-address',
+          actorDisplayName: 'Alice',
+          title: 'Private update',
+          body: 'Private preview hidden',
+          isRead: false,
+          isPrivatePreviewSuppressed: true,
+          createdAtUnixMs: Date.now() - 1000,
+          deepLinkPath: '',
+          matchedCircleIds: [],
+        },
+      ],
+      unreadCount: 1,
+    };
+
+    rerender(<SocialPage />);
+    fireEvent.click(screen.getByTestId('social-notification-open-notif-stale'));
+
+    await waitFor(() => {
+      expect(markNotificationReadMock).toHaveBeenCalledWith('notif-stale');
+    });
+    expect(routerPushMock).not.toHaveBeenCalled();
+    expect(screen.getByTestId('social-notifications-open-state')).toHaveTextContent(
+      'This notification target is no longer available'
+    );
+    expect(screen.getByText('Notification target is no longer available.')).toBeInTheDocument();
+  });
+
+  it('routes thread notifications with a deterministic fallback path', async () => {
+    selectedNav = 'notifications';
+    mockSocialNotificationsState = {
+      ...mockSocialNotificationsState,
+      items: [
+        {
+          notificationId: 'notif-thread',
+          kind: 4,
+          visibilityClass: 1,
+          targetType: 3,
+          targetId: 'reply-9',
+          postId: 'post-9',
+          parentCommentId: 'comment-3',
+          actorUserId: 'alice-address',
+          actorDisplayName: 'Alice',
+          title: 'New reply',
+          body: 'Alice replied in your thread',
+          isRead: false,
+          isPrivatePreviewSuppressed: false,
+          createdAtUnixMs: Date.now() - 1000,
+          deepLinkPath: '',
+          matchedCircleIds: [],
+        },
+      ],
+      unreadCount: 1,
+      hasMore: false,
+      isLoading: false,
+      isRefreshing: false,
+      isSavingPreferences: false,
+      error: null,
+    };
+
+    render(<SocialPage />);
+    fireEvent.click(screen.getByTestId('social-notification-open-notif-thread'));
+
+    await waitFor(() => {
+      expect(routerPushMock).toHaveBeenCalledWith('/social/post/post-9?threadRootId=comment-3&replyId=reply-9');
+    });
+  });
+
+  it('shows privacy-safe foreground toasts away from the target and suppresses them on the exact route', async () => {
+    selectedNav = 'feed-wall';
+    mockPathname = '/social';
+    mockSocialNotificationsState = {
+      ...mockSocialNotificationsState,
+      items: [
+        {
+          notificationId: 'notif-toast',
+          kind: 1,
+          visibilityClass: 2,
+          targetType: 1,
+          targetId: 'post-1',
+          postId: 'post-1',
+          parentCommentId: '',
+          actorUserId: 'alice-address',
+          actorDisplayName: 'Alice',
+          title: 'Private post',
+          body: 'Private update available',
+          isRead: false,
+          isPrivatePreviewSuppressed: true,
+          createdAtUnixMs: Date.now() - 1000,
+          deepLinkPath: '/social/post/post-1',
+          matchedCircleIds: [],
+        },
+      ],
+      unreadCount: 1,
+      hasMore: false,
+      isLoading: false,
+      isRefreshing: false,
+      isSavingPreferences: false,
+      error: null,
+    };
+
+    const { unmount } = render(<SocialPage />);
+
+    expect(
+      await screen.findByText('Alice triggered a private social update. Open Notifications to review it.')
+    ).toBeInTheDocument();
+
+    unmount();
+    mockPathname = '/social/post/post-1';
+    render(<SocialPage />);
+
+    expect(
+      screen.queryByText('Alice triggered a private social update. Open Notifications to review it.')
+    ).not.toBeInTheDocument();
   });
 
   it('opens create-circle modal and submits transaction', async () => {
