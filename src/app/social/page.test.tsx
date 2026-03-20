@@ -2,7 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import SocialPage from './page';
 
+const routerPushMock = vi.fn();
 const setSelectedNavMock = vi.fn();
+const setActiveAppMock = vi.fn();
+const selectFeedMock = vi.fn();
+const setAppContextNavMock = vi.fn();
+const setAppContextFeedMock = vi.fn();
 const setAppContextScrollMock = vi.fn();
 const requestInnerCircleRetryMock = vi.fn();
 const createCustomCircleMock = vi.fn();
@@ -69,10 +74,20 @@ let mockMemberRoles: Record<string, string> = {
   'support-group': 'Member',
 };
 
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({
+    push: routerPushMock,
+  }),
+}));
+
 vi.mock('@/stores', () => ({
   useAppStore: (
     selector: (state: {
       selectedNav: string;
+      setActiveApp: (app: 'feeds' | 'social') => void;
+      selectFeed: (feedId: string | null) => void;
+      setAppContextNav: (app: 'feeds' | 'social', nav: string) => void;
+      setAppContextFeed: (app: 'feeds' | 'social', feedId: string | null) => void;
       credentials: {
         signingPublicKey: string;
         signingPrivateKey: string;
@@ -102,6 +117,10 @@ vi.mock('@/stores', () => ({
       },
       requestInnerCircleRetry: requestInnerCircleRetryMock,
       setSelectedNav: setSelectedNavMock,
+      setActiveApp: setActiveAppMock,
+      selectFeed: selectFeedMock,
+      setAppContextNav: setAppContextNavMock,
+      setAppContextFeed: setAppContextFeedMock,
       appContexts: { social: { scrollOffset: 0 } },
       setAppContextScroll: setAppContextScrollMock,
     }),
@@ -188,7 +207,12 @@ describe('SocialPage', () => {
       encryptionPublicKey: 'enc-public',
       encryptionPrivateKey: 'enc-private',
     };
+    routerPushMock.mockReset();
     setSelectedNavMock.mockReset();
+    setActiveAppMock.mockReset();
+    selectFeedMock.mockReset();
+    setAppContextNavMock.mockReset();
+    setAppContextFeedMock.mockReset();
     setAppContextScrollMock.mockReset();
     requestInnerCircleRetryMock.mockReset();
     createCustomCircleMock.mockReset();
@@ -526,8 +550,9 @@ describe('SocialPage', () => {
     selectedNav = 'following';
     const { rerender } = render(<SocialPage />);
 
-    fireEvent.click(screen.getByTestId('social-following-item-bob-address'));
-    fireEvent.click(screen.getByTestId('social-circle-card-inner-circle'));
+    fireEvent.click(screen.getByTestId('social-following-circles-bob-address'));
+    expect(screen.getByTestId('social-mobile-circles-overlay')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('social-mobile-circle-card-inner-circle'));
 
     await waitFor(() => {
       expect(checkIdentityExistsMock).toHaveBeenCalledWith('bob-address');
@@ -556,8 +581,8 @@ describe('SocialPage', () => {
     selectedNav = 'following';
     render(<SocialPage />);
 
-    fireEvent.click(screen.getByTestId('social-following-item-alice-address'));
-    fireEvent.click(screen.getByTestId('social-circle-card-inner-circle'));
+    fireEvent.click(screen.getByTestId('social-following-circles-alice-address'));
+    fireEvent.click(screen.getByTestId('social-mobile-circle-card-inner-circle'));
 
     await waitFor(() => {
       expect(addMembersToCustomCircleMock).not.toHaveBeenCalled();
@@ -570,8 +595,8 @@ describe('SocialPage', () => {
     addMembersToCustomCircleMock.mockResolvedValueOnce({ success: false, message: 'backend rejected assignment' });
     render(<SocialPage />);
 
-    fireEvent.click(screen.getByTestId('social-following-item-bob-address'));
-    fireEvent.click(screen.getByTestId('social-circle-card-inner-circle'));
+    fireEvent.click(screen.getByTestId('social-following-circles-bob-address'));
+    fireEvent.click(screen.getByTestId('social-mobile-circle-card-inner-circle'));
 
     await waitFor(() => {
       expect(addMembersToCustomCircleMock).toHaveBeenCalled();
