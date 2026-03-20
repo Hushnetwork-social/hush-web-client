@@ -146,6 +146,7 @@ export async function fetchFeeds(
       encryptedFeedKey: userParticipant?.encryptedFeedKey || undefined,
       // Store other participant's address for detecting existing feeds
       otherParticipantPublicSigningAddress: otherParticipant?.participantPublicAddress,
+      feedOwnerPublicSigningAddress: feed.feedOwner || undefined,
       // FEAT-051: Last read block index from server (default to 0 if not present for backward compatibility)
       lastReadBlockIndex: feed.lastReadBlockIndex || 0,
     };

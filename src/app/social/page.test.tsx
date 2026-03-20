@@ -623,6 +623,35 @@ describe('SocialPage', () => {
 
   it('renders FEAT-091 notifications state and submits preference/read actions', async () => {
     selectedNav = 'notifications';
+    mockFeeds = [
+      {
+        id: 'chat-alice',
+        type: 'chat',
+        name: 'Alice',
+        participants: ['me-address', 'alice-address'],
+        otherParticipantPublicSigningAddress: 'alice-address',
+      },
+      {
+        id: 'inner-circle',
+        type: 'group',
+        name: 'Inner Circle',
+        description: 'Auto-managed inner circle',
+        participants: ['me-address', 'alice-address'],
+      },
+    ];
+    mockGroupMembers = {
+      'inner-circle': [{ publicAddress: 'me-address' }, { publicAddress: 'alice-address' }],
+    };
+    getInnerCircleMock.mockResolvedValueOnce({
+      success: true,
+      message: 'ok',
+      exists: true,
+      feedId: 'alice-inner-circle',
+    });
+    getGroupMembersMock.mockResolvedValueOnce([
+      { publicAddress: 'me-address' },
+      { publicAddress: 'alice-address' },
+    ]);
     mockSocialNotificationsState = {
       items: [
         {
@@ -641,13 +670,13 @@ describe('SocialPage', () => {
           isPrivatePreviewSuppressed: true,
           createdAtUnixMs: Date.now() - 1000,
           deepLinkPath: '/social/post/post-1',
-          matchedCircleIds: ['inner-circle'],
+          matchedCircleIds: ['alice-inner-circle'],
         },
       ],
       preferences: {
         openActivityEnabled: true,
         closeActivityEnabled: false,
-        circleMutes: [{ circleId: 'inner-circle', isMuted: true }],
+        circleMutes: [{ circleId: 'alice-inner-circle', isMuted: true }],
         updatedAtUnixMs: Date.now(),
       },
       unreadCount: 1,
@@ -664,7 +693,9 @@ describe('SocialPage', () => {
     expect(screen.getByTestId('social-notifications-unread-count')).toHaveTextContent('1 unread');
     expect(screen.getByTestId('social-notification-item-notif-1')).toHaveTextContent('Alice reacted to your comment');
     expect(screen.getByTestId('social-notification-status-notif-1')).toHaveTextContent('Unread');
-    expect(screen.getByTestId('social-notifications-circle-inner-circle')).toBeInTheDocument();
+    expect(await screen.findByTestId('social-notifications-circle-alice-inner-circle')).toBeInTheDocument();
+    expect(screen.getByTestId('social-notifications-circle-alice-inner-circle')).toHaveTextContent('Private posts from Alice');
+    expect(screen.queryByText('Inner Circle')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('social-notification-mark-read-notif-1'));
     expect(markNotificationReadMock).toHaveBeenCalledWith('notif-1');
@@ -679,7 +710,7 @@ describe('SocialPage', () => {
 
     const openToggle = screen.getByTestId('social-notifications-open-toggle').querySelector('input');
     const closeToggle = screen.getByTestId('social-notifications-close-toggle').querySelector('input');
-    const circleToggle = screen.getByTestId('social-notifications-circle-inner-circle').querySelector('input');
+    const circleToggle = screen.getByTestId('social-notifications-circle-alice-inner-circle').querySelector('input');
 
     fireEvent.click(openToggle as HTMLInputElement);
     fireEvent.click(closeToggle as HTMLInputElement);
@@ -691,7 +722,9 @@ describe('SocialPage', () => {
     expect(updateSocialNotificationPreferencesMock).toHaveBeenCalledWith({ openActivityEnabled: false });
     expect(updateSocialNotificationPreferencesMock).toHaveBeenCalledWith({ closeActivityEnabled: true });
     expect(updateSocialNotificationPreferencesMock).toHaveBeenCalledWith({
-      circleMutes: [{ circleId: 'inner-circle', isMuted: false }],
+      circleMutes: [
+        { circleId: 'alice-inner-circle', isMuted: false },
+      ],
     });
   });
 
@@ -723,7 +756,111 @@ describe('SocialPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('social-notifications-circle-alice-inner-circle')).toBeInTheDocument();
     });
+    expect(screen.getByTestId('social-notifications-circle-alice-inner-circle')).toHaveTextContent('Private posts from Alice');
+    expect(screen.queryByTestId('social-notifications-circle-inner-circle')).not.toBeInTheDocument();
     expect(screen.queryByTestId('social-notifications-circle-inner-circle-pending')).not.toBeInTheDocument();
+  });
+
+  it('discovers private mute targets from local Inner Circle membership even without a chat feed', async () => {
+    selectedNav = 'notifications';
+    mockFeeds = [
+      {
+        id: 'my-inner-circle',
+        type: 'group',
+        name: 'Inner Circle',
+        description: 'Auto-managed inner circle',
+        participants: ['me-address', 'owner-address'],
+      },
+    ];
+    mockGroupMembers = {
+      'my-inner-circle': [{ publicAddress: 'me-address' }, { publicAddress: 'owner-address' }],
+    };
+    getInnerCircleMock.mockResolvedValueOnce({
+      success: true,
+      message: 'ok',
+      exists: true,
+      feedId: 'owner-inner-circle',
+    });
+    getGroupMembersMock.mockResolvedValueOnce([
+      { publicAddress: 'me-address' },
+      { publicAddress: 'owner-address' },
+    ]);
+
+    render(<SocialPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('social-notifications-circle-owner-inner-circle')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('social-notifications-circle-owner-inner-circle')).toHaveTextContent('Private posts');
+    expect(screen.queryByTestId('social-notifications-circle-my-inner-circle')).not.toBeInTheDocument();
+  });
+
+  it('does not render the local Inner Circle row as a notification mute target when an authoritative remote source exists', async () => {
+    selectedNav = 'notifications';
+    mockFeeds = [
+      {
+        id: 'my-inner-circle',
+        type: 'group',
+        name: 'Inner Circle',
+        description: 'Auto-managed inner circle',
+        participants: ['me-address'],
+        feedOwnerPublicSigningAddress: 'owner-address',
+      },
+    ];
+    mockGroupMembers = {
+      'my-inner-circle': [{ publicAddress: 'me-address' }],
+    };
+    getInnerCircleMock.mockResolvedValue({
+      success: true,
+      message: 'ok',
+      exists: true,
+      feedId: 'owner-inner-circle',
+    });
+    getGroupMembersMock.mockResolvedValue([{ publicAddress: 'me-address' }]);
+
+    render(<SocialPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('social-notifications-circle-owner-inner-circle')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('social-notifications-circle-my-inner-circle')).not.toBeInTheDocument();
+  });
+
+  it('falls back to the single known private-source author when local Inner Circle rows have no owner metadata', async () => {
+    selectedNav = 'notifications';
+    mockFeeds = [
+      {
+        id: 'chat-owner',
+        type: 'chat',
+        name: 'Owner',
+        participants: ['me-address', 'owner-address'],
+        otherParticipantPublicSigningAddress: 'owner-address',
+      },
+      {
+        id: 'my-inner-circle',
+        type: 'group',
+        name: 'Inner Circle',
+        description: 'Auto-managed inner circle',
+        participants: ['me-address'],
+      },
+    ];
+    mockGroupMembers = {
+      'my-inner-circle': [{ publicAddress: 'me-address' }],
+    };
+    getInnerCircleMock.mockResolvedValue({
+      success: true,
+      message: 'ok',
+      exists: true,
+      feedId: 'owner-inner-circle',
+    });
+    getGroupMembersMock.mockResolvedValue([{ publicAddress: 'me-address' }]);
+
+    render(<SocialPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('social-notifications-circle-owner-inner-circle')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('social-notifications-circle-my-inner-circle')).not.toBeInTheDocument();
   });
 
   it('shows deterministic empty and unavailable notification states', async () => {
@@ -784,6 +921,41 @@ describe('SocialPage', () => {
       'This notification target is no longer available'
     );
     expect(screen.getByText('Notification target is no longer available.')).toBeInTheDocument();
+  });
+
+  it('keeps private inbox items privacy-safe and does not render circle identity', () => {
+    selectedNav = 'notifications';
+    mockSocialNotificationsState = {
+      ...mockSocialNotificationsState,
+      items: [
+        {
+          notificationId: 'notif-private',
+          kind: 1,
+          visibilityClass: 2,
+          targetType: 1,
+          targetId: 'post-private',
+          postId: 'post-private',
+          parentCommentId: '',
+          actorUserId: 'alice-address',
+          actorDisplayName: 'Alice',
+          title: 'Private update',
+          body: 'Private preview hidden',
+          isRead: false,
+          isPrivatePreviewSuppressed: true,
+          createdAtUnixMs: Date.now() - 1000,
+          deepLinkPath: '/social/post/post-private',
+          matchedCircleIds: ['shitty-people-circle'],
+        },
+      ],
+      unreadCount: 1,
+    };
+
+    render(<SocialPage />);
+
+    const notificationItem = screen.getByTestId('social-notification-item-notif-private');
+    expect(notificationItem).toHaveTextContent('Private');
+    expect(notificationItem).not.toHaveTextContent('shitty-people-circle');
+    expect(notificationItem).not.toHaveTextContent('Inner Circle');
   });
 
   it('routes thread notifications with a deterministic fallback path', async () => {

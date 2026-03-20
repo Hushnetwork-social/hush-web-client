@@ -123,6 +123,8 @@ type CircleItem = {
   isInnerCircle: boolean;
   members: string[];
   memberCount: number;
+  ownerDisplayName?: string;
+  ownerPublicAddress?: string;
 };
 
 type UiToast = {
@@ -395,10 +397,22 @@ function formatSocialNotificationVisibility(visibilityClass: number): string {
     case 1:
       return "Open";
     case 2:
-      return "Close";
+      return "Private";
     default:
       return "Unknown";
   }
+}
+
+function getNotificationMuteLabel(circle: CircleItem): string {
+  if (circle.isInnerCircle) {
+    if (circle.ownerDisplayName?.trim()) {
+      return `Private posts from ${circle.ownerDisplayName.trim()}`;
+    }
+
+    return "Private posts";
+  }
+
+  return circle.name;
 }
 
 function detectMediaKindFromMime(mimeType: string): "image" | "video" | null {
@@ -737,7 +751,7 @@ export default function SocialPage() {
       return false;
     });
 
-    const allCircles = groupFeeds.map((feed) => {
+    const allCircles: CircleItem[] = groupFeeds.map((feed): CircleItem => {
       const members =
         groupMembers[feed.id]?.map((member) => normalizePublicAddress(member.publicAddress)) ??
         feed.participants.map((participant) => normalizePublicAddress(participant));
@@ -750,6 +764,10 @@ export default function SocialPage() {
         isInnerCircle,
         members: uniqueMembers,
         memberCount: uniqueMembers.length,
+        ownerDisplayName: undefined,
+        ownerPublicAddress: isInnerCircle
+          ? normalizePublicAddress(feed.feedOwnerPublicSigningAddress) || undefined
+          : undefined,
       };
     });
 
@@ -799,18 +817,87 @@ export default function SocialPage() {
     [followingItems]
   );
 
-  useEffect(() => {
-    let cancelled = false;
+  const followingDisplayNameByAddress = useMemo(() => {
+    const lookup = new Map<string, string>();
+    for (const item of followingItems) {
+      const normalizedAddress = normalizePublicAddress(item.publicAddress);
+      if (normalizedAddress.length === 0) {
+        continue;
+      }
 
-    const followedAddresses = Array.from(
+      lookup.set(normalizedAddress, item.displayName);
+    }
+    return lookup;
+  }, [followingItems]);
+
+  const socialNotificationDisplayNameByAddress = useMemo(() => {
+    const lookup = new Map<string, string>();
+    for (const item of socialNotificationItems) {
+      const normalizedAddress = normalizePublicAddress(item.actorUserId);
+      const displayName = item.actorDisplayName?.trim();
+      if (normalizedAddress.length === 0 || !displayName) {
+        continue;
+      }
+
+      lookup.set(normalizedAddress, displayName);
+    }
+    return lookup;
+  }, [socialNotificationItems]);
+
+  const notificationMuteDisplayNameByAddress = useMemo(() => {
+    const lookup = new Map<string, string>();
+    for (const [address, displayName] of followingDisplayNameByAddress.entries()) {
+      lookup.set(address, displayName);
+    }
+    for (const [address, displayName] of socialNotificationDisplayNameByAddress.entries()) {
+      if (!lookup.has(address)) {
+        lookup.set(address, displayName);
+      }
+    }
+    return lookup;
+  }, [followingDisplayNameByAddress, socialNotificationDisplayNameByAddress]);
+
+  const notificationMuteAuthorAddresses = useMemo(() => {
+    const localInnerCircleMemberAddresses = feeds
+      .filter((feed) => feed.type === "group" && isInnerCircleName(feed.name))
+      .flatMap((feed) => {
+        const ownerAddress = normalizePublicAddress(feed.feedOwnerPublicSigningAddress);
+        const knownMembers = groupMembers[feed.id]?.map((member) => normalizePublicAddress(member.publicAddress)) ?? [];
+
+        return Array.from(
+          new Set(
+            knownMembers
+              .concat(feed.participants.map((participant) => normalizePublicAddress(participant)))
+              .concat(ownerAddress.length > 0 ? [ownerAddress] : [])
+          )
+        );
+      })
+      .filter((address) => address.length > 0 && address !== ownAddressNormalized);
+
+    return Array.from(
       new Set(
         followingItems
           .map((item) => normalizePublicAddress(item.publicAddress))
+          .concat(
+            socialNotificationItems
+              .map((item) => normalizePublicAddress(item.actorUserId))
+              .filter((address) => address.length > 0)
+          )
+          .concat(localInnerCircleMemberAddresses)
           .filter((address) => address.length > 0)
       )
-    );
+    ).sort((left, right) => left.localeCompare(right));
+  }, [feeds, followingItems, groupMembers, ownAddressNormalized, socialNotificationItems]);
 
-    if (followedAddresses.length === 0) {
+  const notificationMuteAuthorSignature = useMemo(
+    () => notificationMuteAuthorAddresses.join("|"),
+    [notificationMuteAuthorAddresses]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (notificationMuteAuthorAddresses.length === 0) {
       setRemoteCircleItems([]);
       return () => {
         cancelled = true;
@@ -819,7 +906,7 @@ export default function SocialPage() {
 
     void (async () => {
       const nextRemoteCircles = await Promise.all(
-        followedAddresses.map(async (authorAddress) => {
+        notificationMuteAuthorAddresses.map(async (authorAddress) => {
           try {
             const innerCircle = await getInnerCircle(authorAddress);
             if (!innerCircle.exists || !innerCircle.feedId) {
@@ -840,6 +927,8 @@ export default function SocialPage() {
               isInnerCircle: true,
               members,
               memberCount: members.length,
+              ownerDisplayName: notificationMuteDisplayNameByAddress.get(authorAddress),
+              ownerPublicAddress: normalizePublicAddress(authorAddress) || undefined,
             } satisfies CircleItem;
           } catch {
             return null;
@@ -860,15 +949,81 @@ export default function SocialPage() {
     return () => {
       cancelled = true;
     };
-  }, [followingItems]);
+  }, [notificationMuteAuthorAddresses, notificationMuteAuthorSignature, notificationMuteDisplayNameByAddress]);
 
   const circlesSignature = useMemo(
     () =>
       circleItems
-        .map((circle) => `${circle.feedId}:${circle.name}:${circle.memberCount}:${circle.members.join(",")}`)
+        .map(
+          (circle) =>
+            `${circle.feedId}:${circle.name}:${circle.ownerDisplayName ?? ""}:${circle.memberCount}:${circle.members.join(",")}`
+            + `:${circle.ownerPublicAddress ?? ""}`
+        )
         .join("|"),
     [circleItems]
   );
+
+  const notificationMuteCircleItems = useMemo<CircleItem[]>(() => {
+    const notificationCircles: CircleItem[] = [];
+
+    for (const circle of renderCircleItems) {
+      if (circle.feedId === "inner-circle-pending" || circle.isInnerCircle) {
+        continue;
+      }
+
+      notificationCircles.push(circle);
+    }
+
+    for (const remoteCircle of remoteCircleItems) {
+      if (notificationCircles.some((circle) => circle.feedId === remoteCircle.feedId)) {
+        continue;
+      }
+
+      notificationCircles.push(remoteCircle);
+    }
+
+    return notificationCircles.sort((left, right) => {
+      if (left.memberCount !== right.memberCount) {
+        return right.memberCount - left.memberCount;
+      }
+
+      return getNotificationMuteLabel(left).localeCompare(getNotificationMuteLabel(right));
+    });
+  }, [remoteCircleItems, renderCircleItems]);
+
+  useEffect(() => {
+    const innerCircleItems = notificationMuteCircleItems.filter((circle) => circle.isInnerCircle);
+    const ownerNamedInnerCircleItems = innerCircleItems.filter((circle) => circle.ownerDisplayName?.trim());
+    const ownerlessInnerCircleItems = innerCircleItems.filter((circle) => !circle.ownerDisplayName?.trim());
+
+    if (ownerNamedInnerCircleItems.length !== 1 || ownerlessInnerCircleItems.length !== 1 || isSavingSocialNotificationPreferences) {
+      return;
+    }
+
+    const ownerNamedCircleId = ownerNamedInnerCircleItems[0].feedId;
+    const ownerlessCircleId = ownerlessInnerCircleItems[0].feedId;
+    const ownerNamedMute = socialNotificationPreferences.circleMutes.find((entry) => entry.circleId === ownerNamedCircleId)?.isMuted ?? false;
+    const ownerlessMute = socialNotificationPreferences.circleMutes.find((entry) => entry.circleId === ownerlessCircleId)?.isMuted ?? false;
+
+    if (ownerNamedMute === ownerlessMute) {
+      return;
+    }
+
+    const nextSharedMuteState = ownerNamedMute || ownerlessMute;
+    const nextCircleMutes = Array.from(
+      new Map(
+        socialNotificationPreferences.circleMutes
+          .filter((entry) => entry.circleId !== ownerNamedCircleId && entry.circleId !== ownerlessCircleId)
+          .concat([
+            { circleId: ownerNamedCircleId, isMuted: nextSharedMuteState },
+            { circleId: ownerlessCircleId, isMuted: nextSharedMuteState },
+          ])
+          .map((entry) => [entry.circleId, entry])
+      ).values()
+    );
+
+    void updateSocialNotificationPreferences({ circleMutes: nextCircleMutes });
+  }, [isSavingSocialNotificationPreferences, notificationMuteCircleItems, socialNotificationPreferences.circleMutes, updateSocialNotificationPreferences]);
 
   const availableCustomCirclesForPost = useMemo(
     () => renderCircleItems.filter((circle) => !circle.isInnerCircle && circle.feedId !== "inner-circle-pending"),
@@ -887,7 +1042,10 @@ export default function SocialPage() {
   useEffect(() => {
     setRenderCircleItems((current) => {
       const currentSignature = current
-        .map((circle) => `${circle.feedId}:${circle.name}:${circle.memberCount}:${circle.members.join(",")}`)
+        .map(
+          (circle) =>
+            `${circle.feedId}:${circle.name}:${circle.memberCount}:${circle.members.join(",")}:${circle.ownerPublicAddress ?? ""}`
+        )
         .join("|");
       return currentSignature === circlesSignature ? current : circleItems;
     });
@@ -3029,12 +3187,47 @@ export default function SocialPage() {
       await updateSocialNotificationPreferences({ [key]: value });
     };
 
-    const handleCircleMuteToggle = async (circleFeedId: string, isMuted: boolean) => {
+    const resolveNotificationMuteTargetIds = (circle: CircleItem): string[] => {
+      const targetIds = new Set<string>([circle.feedId]);
+      if (!circle.isInnerCircle) {
+        return Array.from(targetIds);
+      }
+
+      const innerCircleItems = notificationMuteCircleItems.filter((item) => item.isInnerCircle);
+      const ownerNamedInnerCircleItems = innerCircleItems.filter((item) => item.ownerDisplayName?.trim());
+      const ownerlessInnerCircleItems = innerCircleItems.filter((item) => !item.ownerDisplayName?.trim());
+
+      if (ownerNamedInnerCircleItems.length === 1 && ownerlessInnerCircleItems.length === 1) {
+        targetIds.add(ownerNamedInnerCircleItems[0].feedId);
+        targetIds.add(ownerlessInnerCircleItems[0].feedId);
+      }
+
+      return Array.from(targetIds);
+    };
+
+    const handleCircleMuteToggle = async (circle: CircleItem, isMuted: boolean) => {
+      const targetCircleIds = new Set(resolveNotificationMuteTargetIds(circle));
+
+      const authoritativeOwnerAddress = circle.isInnerCircle
+        ? circle.ownerPublicAddress ?? (notificationMuteAuthorAddresses.length === 1 ? notificationMuteAuthorAddresses[0] : undefined)
+        : undefined;
+
+      if (circle.isInnerCircle && authoritativeOwnerAddress) {
+        try {
+          const authoritativeInnerCircle = await getInnerCircle(authoritativeOwnerAddress);
+          if (authoritativeInnerCircle.exists && authoritativeInnerCircle.feedId) {
+            targetCircleIds.add(authoritativeInnerCircle.feedId);
+          }
+        } catch {
+          // Keep the local mute target if the authoritative lookup is temporarily unavailable.
+        }
+      }
+
       const nextCircleMutes = Array.from(
         new Map(
           socialNotificationPreferences.circleMutes
-            .filter((entry) => entry.circleId !== circleFeedId)
-            .concat({ circleId: circleFeedId, isMuted })
+            .filter((entry) => !targetCircleIds.has(entry.circleId))
+            .concat(Array.from(targetCircleIds, (circleId) => ({ circleId, isMuted })))
             .map((entry) => [entry.circleId, entry])
         ).values()
       );
@@ -3137,11 +3330,11 @@ export default function SocialPage() {
               Mutes affect notification delivery only. They do not change circle membership or post access.
             </p>
             <div className="grid gap-2 md:grid-cols-2">
-              {renderCircleItems.map((circle) => {
-                const currentMuteState = socialNotificationPreferences.circleMutes.find(
-                  (entry) => entry.circleId === circle.feedId
+              {notificationMuteCircleItems.map((circle) => {
+                const targetCircleIds = resolveNotificationMuteTargetIds(circle);
+                const isMuted = targetCircleIds.some((circleId) =>
+                  socialNotificationPreferences.circleMutes.some((entry) => entry.circleId === circleId && entry.isMuted)
                 );
-                const isMuted = currentMuteState?.isMuted ?? false;
 
                 return (
                   <label
@@ -3149,13 +3342,13 @@ export default function SocialPage() {
                     className="flex items-center justify-between rounded-lg border border-hush-bg-hover px-3 py-2 text-sm text-hush-text-primary"
                     data-testid={`social-notifications-circle-${circle.feedId}`}
                   >
-                    <span>{circle.name}</span>
+                    <span>{getNotificationMuteLabel(circle)}</span>
                     <input
                       type="checkbox"
                       checked={isMuted}
                       disabled={isSavingSocialNotificationPreferences}
                       onChange={(event) => {
-                        void handleCircleMuteToggle(circle.feedId, event.currentTarget.checked);
+                        void handleCircleMuteToggle(circle, event.currentTarget.checked);
                       }}
                     />
                   </label>
@@ -3248,14 +3441,6 @@ export default function SocialPage() {
                         <span className="rounded-full border border-hush-bg-hover px-2 py-0.5">
                           {formatSocialNotificationVisibility(item.visibilityClass)}
                         </span>
-                        {item.matchedCircleIds.map((circleId) => (
-                          <span
-                            key={`${item.notificationId}-${circleId}`}
-                            className="rounded-full border border-hush-bg-hover px-2 py-0.5"
-                          >
-                            {circleNameByFeedId.get(normalizeFeedId(circleId)) ?? circleId}
-                          </span>
-                        ))}
                       </div>
                       <h4 className="text-sm font-semibold text-hush-text-primary">{item.title}</h4>
                       <p className="mt-1 text-xs text-hush-text-accent">{item.body}</p>
