@@ -82,6 +82,18 @@ const DEFAULT_SOCIAL_NOTIFICATION_PREFERENCES: SocialNotificationPreferencesResp
   updatedAtUnixMs: 0,
 };
 
+function applySocialNotificationPreferencesUpdate(
+  current: SocialNotificationPreferencesResponse,
+  update: UpdateSocialNotificationPreferencesRequest
+): SocialNotificationPreferencesResponse {
+  return {
+    openActivityEnabled: update.openActivityEnabled ?? current.openActivityEnabled,
+    closeActivityEnabled: update.closeActivityEnabled ?? current.closeActivityEnabled,
+    circleMutes: update.circleMutes ?? current.circleMutes,
+    updatedAtUnixMs: current.updatedAtUnixMs,
+  };
+}
+
 function compareSocialNotificationItems(
   left: SocialNotificationItemResponse,
   right: SocialNotificationItemResponse
@@ -965,6 +977,8 @@ export function useSocialNotifications(
 
     setError(null);
     setIsSavingPreferences(true);
+    const previousPreferences = preferences;
+    setPreferences((current) => applySocialNotificationPreferencesUpdate(current, update));
 
     try {
       const result = await notificationService.updateSocialNotificationPreferences(userId, update);
@@ -976,12 +990,13 @@ export function useSocialNotifications(
       return true;
     } catch (updateError) {
       debugError('[useSocialNotifications] Failed to update preferences:', updateError);
+      setPreferences(previousPreferences);
       setError(updateError instanceof Error ? updateError.message : 'Failed to update social notification preferences');
       return false;
     } finally {
       setIsSavingPreferences(false);
     }
-  }, [userId]);
+  }, [preferences, userId]);
 
   useEffect(() => {
     void refresh();

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const getSocialNotificationInboxMock = vi.fn();
 const getSocialNotificationPreferencesMock = vi.fn();
+const updateSocialNotificationPreferencesMock = vi.fn();
 
 let mockAppState = {
   isAuthenticated: true,
@@ -31,7 +32,7 @@ vi.mock("@/lib/grpc/services", () => ({
     getSocialNotificationInbox: (...args: unknown[]) => getSocialNotificationInboxMock(...args),
     getSocialNotificationPreferences: (...args: unknown[]) => getSocialNotificationPreferencesMock(...args),
     markSocialNotificationRead: vi.fn(),
-    updateSocialNotificationPreferences: vi.fn(),
+    updateSocialNotificationPreferences: (...args: unknown[]) => updateSocialNotificationPreferencesMock(...args),
     subscribeToEvents: vi.fn(),
     markFeedAsRead: vi.fn(),
     getUnreadCounts: vi.fn(),
@@ -87,6 +88,7 @@ describe("useSocialNotifications FEAT-091 integration", () => {
 
     getSocialNotificationInboxMock.mockReset();
     getSocialNotificationPreferencesMock.mockReset();
+    updateSocialNotificationPreferencesMock.mockReset();
 
     getSocialNotificationInboxMock.mockResolvedValue({
       items: [
@@ -117,6 +119,16 @@ describe("useSocialNotifications FEAT-091 integration", () => {
       circleMutes: [],
       updatedAtUnixMs: 200,
     });
+    updateSocialNotificationPreferencesMock.mockResolvedValue({
+      success: true,
+      message: "",
+      preferences: {
+        openActivityEnabled: true,
+        closeActivityEnabled: true,
+        circleMutes: [],
+        updatedAtUnixMs: 300,
+      },
+    });
   });
 
   it("refreshes the durable inbox once when focus and visibility recovery happen together", async () => {
@@ -143,5 +155,60 @@ describe("useSocialNotifications FEAT-091 integration", () => {
       expect(getSocialNotificationInboxMock).toHaveBeenCalledTimes(1);
     });
     expect(result.current.unreadCount).toBe(1);
+  });
+
+  it("applies FEAT-091 preference updates optimistically and keeps server response", async () => {
+    let resolveUpdate: ((value: {
+      success: boolean;
+      message: string;
+      preferences: {
+        openActivityEnabled: boolean;
+        closeActivityEnabled: boolean;
+        circleMutes: Array<{ circleId: string; isMuted: boolean }>;
+        updatedAtUnixMs: number;
+      };
+    }) => void) | null = null;
+
+    updateSocialNotificationPreferencesMock.mockReturnValue(
+      new Promise((resolve) => {
+        resolveUpdate = resolve;
+      })
+    );
+
+    const { result } = renderHook(() => useSocialNotifications({ enabled: true, includeRead: true, limit: 20 }));
+
+    await waitFor(() => {
+      expect(result.current.preferences.closeActivityEnabled).toBe(true);
+    });
+
+    let pendingUpdate: Promise<boolean>;
+    await act(async () => {
+      pendingUpdate = result.current.updatePreferences({
+        closeActivityEnabled: false,
+        circleMutes: [{ circleId: "inner-circle", isMuted: true }],
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.preferences.closeActivityEnabled).toBe(false);
+      expect(result.current.preferences.circleMutes).toEqual([{ circleId: "inner-circle", isMuted: true }]);
+    });
+
+    await act(async () => {
+      resolveUpdate?.({
+        success: true,
+        message: "",
+        preferences: {
+          openActivityEnabled: true,
+          closeActivityEnabled: false,
+          circleMutes: [{ circleId: "inner-circle", isMuted: true }],
+          updatedAtUnixMs: 400,
+        },
+      });
+
+      await pendingUpdate!;
+    });
+
+    expect(result.current.preferences.updatedAtUnixMs).toBe(400);
   });
 });

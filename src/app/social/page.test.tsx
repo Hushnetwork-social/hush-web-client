@@ -23,6 +23,8 @@ const getSocialThreadRepliesPageMock = vi.fn();
 const createSocialThreadEntryMock = vi.fn();
 const followSocialAuthorMock = vi.fn();
 const computeSha256Mock = vi.fn();
+const getInnerCircleMock = vi.fn();
+const getGroupMembersMock = vi.fn();
 const socialPostReactionsPropsMock = vi.fn();
 const refreshSocialNotificationsMock = vi.fn();
 const markNotificationReadMock = vi.fn();
@@ -178,6 +180,13 @@ vi.mock('@/modules/feeds/useFeedsStore', () => ({
 vi.mock('@/modules/feeds/FeedsService', () => ({
   createCustomCircle: (...args: unknown[]) => createCustomCircleMock(...args),
   addMembersToCustomCircle: (...args: unknown[]) => addMembersToCustomCircleMock(...args),
+  getInnerCircle: (...args: unknown[]) => getInnerCircleMock(...args),
+}));
+
+vi.mock('@/lib/grpc/services/group', () => ({
+  groupService: {
+    getGroupMembers: (...args: unknown[]) => getGroupMembersMock(...args),
+  },
 }));
 
 vi.mock('@/modules/identity/IdentityService', () => ({
@@ -273,6 +282,8 @@ describe('SocialPage', () => {
     getSocialThreadRepliesPageMock.mockReset();
     createSocialThreadEntryMock.mockReset();
     followSocialAuthorMock.mockReset();
+    getInnerCircleMock.mockReset();
+    getGroupMembersMock.mockReset();
     socialPostReactionsPropsMock.mockReset();
     createCustomCircleMock.mockResolvedValue({ success: true, message: 'ok' });
     addMembersToCustomCircleMock.mockResolvedValue({ success: true, message: 'ok' });
@@ -311,6 +322,13 @@ describe('SocialPage', () => {
       alreadyFollowing: false,
       requiresSyncRefresh: true,
     });
+    getInnerCircleMock.mockResolvedValue({
+      success: false,
+      message: 'not found',
+      exists: false,
+      feedId: undefined,
+    });
+    getGroupMembersMock.mockResolvedValue([]);
     getSocialFeedWallMock.mockResolvedValue({
       success: true,
       message: 'ok',
@@ -675,6 +693,37 @@ describe('SocialPage', () => {
     expect(updateSocialNotificationPreferencesMock).toHaveBeenCalledWith({
       circleMutes: [{ circleId: 'inner-circle', isMuted: false }],
     });
+  });
+
+  it('renders followed-author inner circle mute controls using remote FEAT-091 circle ids', async () => {
+    selectedNav = 'notifications';
+    mockFeeds = [
+      {
+        id: 'chat-alice',
+        type: 'chat',
+        name: 'Alice',
+        participants: ['me-address', 'alice-address'],
+        otherParticipantPublicSigningAddress: 'alice-address',
+      },
+    ];
+    mockGroupMembers = {};
+    getInnerCircleMock.mockResolvedValueOnce({
+      success: true,
+      message: 'ok',
+      exists: true,
+      feedId: 'alice-inner-circle',
+    });
+    getGroupMembersMock.mockResolvedValueOnce([
+      { publicAddress: 'me-address' },
+      { publicAddress: 'alice-address' },
+    ]);
+
+    render(<SocialPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('social-notifications-circle-alice-inner-circle')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('social-notifications-circle-inner-circle-pending')).not.toBeInTheDocument();
   });
 
   it('shows deterministic empty and unavailable notification states', async () => {

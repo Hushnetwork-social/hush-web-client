@@ -9,8 +9,9 @@ import { useAppStore } from "@/stores";
 import { useFeedsStore } from "@/modules/feeds/useFeedsStore";
 import { useBlockchainStore } from "@/modules/blockchain";
 import { useSyncContext } from "@/lib/sync";
+import { groupService } from "@/lib/grpc/services/group";
 import { SystemToastContainer } from "@/components/notifications/SystemToast";
-import { addMembersToCustomCircle, createCustomCircle, findExistingChatFeed } from "@/modules/feeds/FeedsService";
+import { addMembersToCustomCircle, createCustomCircle, findExistingChatFeed, getInnerCircle } from "@/modules/feeds/FeedsService";
 import { checkIdentityExists } from "@/modules/identity/IdentityService";
 import type { CustomCircleMemberPayload } from "@/lib/crypto";
 import { createSocialPost } from "@/modules/social/SocialService";
@@ -503,6 +504,7 @@ export default function SocialPage() {
   const [notificationOpenState, setNotificationOpenState] = useState<NotificationOpenState | null>(null);
   const [renderFollowingItems, setRenderFollowingItems] = useState<FollowingItem[]>([]);
   const [renderCircleItems, setRenderCircleItems] = useState<CircleItem[]>([]);
+  const [remoteCircleItems, setRemoteCircleItems] = useState<CircleItem[]>([]);
   const [newPostDraft, setNewPostDraft] = useState("");
   const [postAudience, setPostAudience] = useState<"public" | "close">("close");
   const [includeInnerCircleForPost, setIncludeInnerCircleForPost] = useState(true);
@@ -751,6 +753,22 @@ export default function SocialPage() {
       };
     });
 
+    for (const remoteCircle of remoteCircleItems) {
+      if (allCircles.some((circle) => circle.feedId === remoteCircle.feedId)) {
+        continue;
+      }
+
+      const uniqueMembers = Array.from(
+        new Set(remoteCircle.members.filter((member) => member !== normalizedOwnAddress))
+      );
+
+      allCircles.push({
+        ...remoteCircle,
+        members: uniqueMembers,
+        memberCount: uniqueMembers.length,
+      });
+    }
+
     const hasInnerCircle = allCircles.some((circle) => circle.isInnerCircle);
     if (!hasInnerCircle) {
       allCircles.push({
@@ -771,7 +789,7 @@ export default function SocialPage() {
       }
       return left.name.localeCompare(right.name);
     });
-  }, [credentials?.signingPublicKey, feeds, groupMembers]);
+  }, [credentials?.signingPublicKey, feeds, groupMembers, remoteCircleItems]);
 
   const followingSignature = useMemo(
     () =>
@@ -780,6 +798,69 @@ export default function SocialPage() {
         .join("|"),
     [followingItems]
   );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const followedAddresses = Array.from(
+      new Set(
+        followingItems
+          .map((item) => normalizePublicAddress(item.publicAddress))
+          .filter((address) => address.length > 0)
+      )
+    );
+
+    if (followedAddresses.length === 0) {
+      setRemoteCircleItems([]);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void (async () => {
+      const nextRemoteCircles = await Promise.all(
+        followedAddresses.map(async (authorAddress) => {
+          try {
+            const innerCircle = await getInnerCircle(authorAddress);
+            if (!innerCircle.exists || !innerCircle.feedId) {
+              return null;
+            }
+
+            const members = Array.from(
+              new Set(
+                (await groupService.getGroupMembers(innerCircle.feedId))
+                  .map((member) => normalizePublicAddress(member.publicAddress))
+                  .filter((member) => member.length > 0)
+              )
+            );
+
+            return {
+              feedId: innerCircle.feedId,
+              name: "Inner Circle",
+              isInnerCircle: true,
+              members,
+              memberCount: members.length,
+            } satisfies CircleItem;
+          } catch {
+            return null;
+          }
+        })
+      );
+
+      if (cancelled) {
+        return;
+      }
+
+      const resolvedCircleItems = nextRemoteCircles.filter(
+        (circle): circle is NonNullable<(typeof nextRemoteCircles)[number]> => circle !== null
+      );
+      setRemoteCircleItems(resolvedCircleItems);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [followingItems]);
 
   const circlesSignature = useMemo(
     () =>
