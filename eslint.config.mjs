@@ -24,6 +24,7 @@ const eslintConfig = [
       "tmp/**",
       ".tmp/**",
       ".generated/**",
+      "src/lib/crypto/vendor/**",
     ],
   },
   ...compat.extends("next/core-web-vitals", "next/typescript"),

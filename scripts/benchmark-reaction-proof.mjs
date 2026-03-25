@@ -3,7 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import * as snarkjs from 'snarkjs';
-import { buildPoseidon } from 'circomlibjs';
+import { buildPoseidon } from '../src/lib/crypto/vendor/circomlibjs-poseidon/buildPoseidon.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

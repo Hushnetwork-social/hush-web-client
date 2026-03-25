@@ -1,17 +1,28 @@
 /**
  * Poseidon Hash Function
  *
- * Uses circomlibjs for the actual Poseidon hash implementation.
+ * Uses a vendored Poseidon-only implementation derived from circomlibjs.
  * This MUST match the server-side Poseidon and ZK circuit exactly.
  */
 
-import { buildPoseidon, type Poseidon } from 'circomlibjs';
+import { buildPoseidon } from '@/lib/crypto/vendor/circomlibjs-poseidon/buildPoseidon.js';
 import { BABYJUBJUB, DOMAIN_SEPARATORS, FEED_KEY_DOMAIN } from './constants';
 import { bytesToBigint } from './babyjubjub';
 import { uuidToBytes } from '@/lib/grpc/grpc-web-helper';
 
 // Field modulus (same as Baby JubJub prime)
 const F = BABYJUBJUB.p;
+
+interface PoseidonField {
+  toObject(element: unknown): bigint;
+  e(n: bigint | number | string): unknown;
+  zero: unknown;
+}
+
+interface Poseidon {
+  (inputs: (bigint | number | string)[]): unknown;
+  F: PoseidonField;
+}
 
 /**
  * Modular arithmetic helper
@@ -36,7 +47,7 @@ async function getPoseidon(): Promise<Poseidon> {
   if (!poseidonPromise) {
     poseidonPromise = buildPoseidon().then((poseidon) => {
       poseidonInstance = poseidon;
-      console.log('[Poseidon] Initialized circomlibjs Poseidon');
+      console.log('[Poseidon] Initialized vendored Poseidon');
       return poseidon;
     });
   }
@@ -61,12 +72,12 @@ export async function initializePoseidon(): Promise<void> {
 /**
  * Poseidon hash function
  *
- * Uses circomlibjs Poseidon which is compatible with circom ZK circuits.
+ * Uses the vendored Poseidon implementation which is compatible with circom ZK circuits.
  */
 export async function poseidonHash(inputs: bigint[]): Promise<bigint> {
   const poseidon = await getPoseidon();
 
-  // circomlibjs poseidon expects inputs as bigints or numbers
+  // The vendored Poseidon implementation expects inputs as bigints or numbers.
   const result = poseidon(inputs);
 
   // poseidon.F.toObject converts the result to a bigint

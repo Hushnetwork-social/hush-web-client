@@ -75,7 +75,7 @@ export async function initializeReactionsSystem(mnemonic: string[]): Promise<boo
     debugLog('[initializeReactions] Starting initialization...');
 
     // 1. Initialize Poseidon hash
-    console.log('[initializeReactions] Loading Poseidon (circomlibjs)...');
+    console.log('[initializeReactions] Loading Poseidon...');
     debugLog('[initializeReactions] Loading Poseidon...');
     await initializePoseidon();
     console.log('[initializeReactions] Poseidon loaded successfully');
