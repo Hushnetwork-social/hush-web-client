@@ -42,6 +42,18 @@ describe('FEAT-107 election fixture helpers', () => {
     ]);
   });
 
+  it('does not recover the original meaning with the wrong private key', () => {
+    const correctKeyPair = createControlledElectionKeyPair(111n);
+    const wrongKeyPair = createControlledElectionKeyPair(222n);
+    const encryptedBallot = encryptOneHotElectionBallot(2, correctKeyPair.publicKey, {
+      nonces: [17n, 18n, 19n, 20n, 21n, 22n],
+    });
+
+    expect(() =>
+      decryptControlledElectionBallot(encryptedBallot.ciphertext, wrongKeyPair.privateKey)
+    ).toThrow(/unsupported point outside the 0\/1 test harness/);
+  });
+
   it('rerandomizes a ballot while preserving one-hot semantics', () => {
     const keyPair = createControlledElectionKeyPair(202n);
     const encryptedBallot = encryptOneHotElectionBallot(4, keyPair.publicKey, {
