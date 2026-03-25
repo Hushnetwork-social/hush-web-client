@@ -710,7 +710,10 @@ describe("SocialPostPermalinkPage", () => {
 
     render(<SocialPostPermalinkPage />);
 
-    expect(await screen.findByTestId("social-permalink-reply-reply-9")).toHaveAttribute("data-highlighted", "true");
+    const targetedReply = await screen.findByTestId("social-permalink-reply-reply-9");
+    await waitFor(() => {
+      expect(targetedReply).toHaveAttribute("data-highlighted", "true");
+    });
     expect(getSocialCommentsPageMock).toHaveBeenCalledWith(
       "post-123",
       "02viewer1234567890fedcba1234567890abcdef1234567890fedcba1234567890",
