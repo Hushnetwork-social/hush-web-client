@@ -7,7 +7,7 @@
  * This implementation matches the circom/snarkjs BabyJubJub parameters.
  */
 
-import { BABYJUBJUB, IDENTITY } from './constants';
+import { BABYJUBJUB, IDENTITY } from './constants.ts';
 
 /**
  * Point on the Baby JubJub curve

@@ -1,0 +1,23 @@
+import { BABYJUBJUB, CIRCUIT, EMOJI_COUNT } from '../reactions/constants.ts';
+
+export const FEAT107_FIXTURE_VERSION = 'feat-107.v1';
+
+export const FEAT107_PROOF_PROFILES = {
+  DEV_SMOKE_PROFILE: 'DEV_SMOKE_PROFILE',
+  PRODUCTION_LIKE_PROFILE: 'PRODUCTION_LIKE_PROFILE',
+} as const;
+
+export const FEAT107_DECODE_TIERS = {
+  DEV_SMOKE_TIER: 64n,
+  CLUB_ROLLOUT_TIER: 5000n,
+  UPPER_SUPPORTED_TIER: 20000n,
+} as const;
+
+export const FEAT107_CIRCUIT_VERSION_BY_PROFILE = {
+  DEV_SMOKE_PROFILE: 'dev-smoke-fixture',
+  PRODUCTION_LIKE_PROFILE: CIRCUIT.version,
+} as const;
+
+export const FEAT107_SELECTION_COUNT = EMOJI_COUNT;
+export const FEAT107_CURVE_ORDER = BABYJUBJUB.order;
+export const FEAT107_DETERMINISTIC_GENERATED_AT = 'deterministic-fixture';

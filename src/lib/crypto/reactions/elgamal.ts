@@ -9,7 +9,6 @@
  */
 
 import {
-  Point,
   addPoints,
   subPoints,
   scalarMul,
@@ -19,8 +18,9 @@ import {
   randomScalar,
   pointToBase64,
   base64ToPoint,
-} from './babyjubjub';
-import { EMOJI_COUNT } from './constants';
+} from './babyjubjub.ts';
+import type { Point } from './babyjubjub.ts';
+import { EMOJI_COUNT } from './constants.ts';
 import type { ECPoint } from '@/lib/grpc/types';
 
 /**

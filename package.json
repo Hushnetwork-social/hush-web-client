@@ -23,6 +23,7 @@
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
     "proof:benchmark": "node scripts/benchmark-reaction-proof.mjs",
+    "fixture:election": "node scripts/generate-election-crypto-fixture.mts",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:prod": "tauri dev --config src-tauri/tauri.prod.conf.json",
