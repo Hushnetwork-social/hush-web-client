@@ -63,6 +63,8 @@ export {
   addCiphertexts,
   subCiphertexts,
   encryptZero,
+  rerandomizeCiphertext,
+  rerandomizeVectorCiphertext,
   isZeroCiphertext,
   vectorCiphertextToGrpc,
   grpcToVectorCiphertext,

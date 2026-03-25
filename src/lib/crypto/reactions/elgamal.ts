@@ -161,6 +161,73 @@ export function encryptZero(publicKey: Point, nonce?: bigint): Ciphertext {
 }
 
 /**
+ * Rerandomize an existing ciphertext without decrypting it.
+ *
+ * This adds an encryption of zero under the same public key:
+ *   Enc(m; r) + Enc(0; s) = Enc(m; r + s)
+ *
+ * The message semantics stay the same while the ciphertext bytes change.
+ */
+export function rerandomizeCiphertext(
+  ciphertext: Ciphertext,
+  publicKey: Point,
+  nonce?: bigint
+): { ciphertext: Ciphertext; nonce: bigint } {
+  const rerandomizationNonce = nonce ?? randomScalar();
+  const zeroCiphertext = encryptZero(publicKey, rerandomizationNonce);
+
+  return {
+    ciphertext: addCiphertexts(ciphertext, zeroCiphertext),
+    nonce: rerandomizationNonce,
+  };
+}
+
+/**
+ * Rerandomize each element of a vector ciphertext.
+ */
+export function rerandomizeVectorCiphertext(
+  ciphertext: VectorCiphertext,
+  publicKey: Point,
+  nonces?: bigint[]
+): { ciphertext: VectorCiphertext; nonces: bigint[] } {
+  if (ciphertext.c1.length !== ciphertext.c2.length) {
+    throw new Error(
+      `Vector ciphertext has mismatched coordinate lengths (${ciphertext.c1.length} vs ${ciphertext.c2.length})`
+    );
+  }
+
+  if (nonces && nonces.length !== ciphertext.c1.length) {
+    throw new Error(
+      `Expected ${ciphertext.c1.length} rerandomization nonces, received ${nonces.length}`
+    );
+  }
+
+  const rerandomizedC1: Point[] = [];
+  const rerandomizedC2: Point[] = [];
+  const appliedNonces: bigint[] = [];
+
+  for (let i = 0; i < ciphertext.c1.length; i++) {
+    const rerandomized = rerandomizeCiphertext(
+      { c1: ciphertext.c1[i], c2: ciphertext.c2[i] },
+      publicKey,
+      nonces?.[i]
+    );
+
+    rerandomizedC1.push(rerandomized.ciphertext.c1);
+    rerandomizedC2.push(rerandomized.ciphertext.c2);
+    appliedNonces.push(rerandomized.nonce);
+  }
+
+  return {
+    ciphertext: {
+      c1: rerandomizedC1,
+      c2: rerandomizedC2,
+    },
+    nonces: appliedNonces,
+  };
+}
+
+/**
  * Check if a ciphertext encrypts zero (after decryption)
  */
 export function isZeroCiphertext(decrypted: Point): boolean {
