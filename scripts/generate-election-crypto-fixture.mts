@@ -136,7 +136,7 @@ function parseOptionalNumber(value: string | boolean | undefined): number | unde
 function printHelp(): void {
   process.stdout.write(
     [
-      'Usage: node scripts/generate-election-crypto-fixture.mts [options]',
+      'Usage: npm run fixture:election -- [options]',
       '',
       'Required:',
       '  --seed <bigint>               Deterministic election key seed',
@@ -152,7 +152,7 @@ function printHelp(): void {
       '  --help                        Show this message',
       '',
       'Example:',
-      '  node scripts/generate-election-crypto-fixture.mts --seed 17 --choice 2 --profile PRODUCTION_LIKE_PROFILE --tier CLUB_ROLLOUT_TIER --output .tmp/feat107-fixture.json',
+      '  npm run fixture:election -- --seed 17 --choice 2 --profile PRODUCTION_LIKE_PROFILE --tier CLUB_ROLLOUT_TIER --output .tmp/feat107-fixture.json',
       '',
     ].join('\n')
   );
