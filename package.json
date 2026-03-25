@@ -18,7 +18,7 @@
     "build:static": "cross-env STATIC_EXPORT=true next build",
     "start": "next start",
     "prod": "next build && next start",
-    "lint": "next lint",
+    "lint": "eslint .",
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",

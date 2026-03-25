@@ -10,6 +10,22 @@ const compat = new FlatCompat({
 });
 
 const eslintConfig = [
+  {
+    ignores: [
+      "node_modules/**",
+      ".next/**",
+      ".next-tauri/**",
+      "next-env.d.ts",
+      "out/**",
+      "build/**",
+      "coverage/**",
+      "scripts/**",
+      "src-tauri/target/**",
+      "tmp/**",
+      ".tmp/**",
+      ".generated/**",
+    ],
+  },
   ...compat.extends("next/core-web-vitals", "next/typescript"),
 ];
 
