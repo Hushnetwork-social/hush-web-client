@@ -1,6 +1,8 @@
 import { BABYJUBJUB, CIRCUIT, EMOJI_COUNT } from '../reactions/constants.ts';
 
 export const FEAT107_FIXTURE_VERSION = 'feat-107.v1';
+export const FEAT107_DEPRECATED_FIXTURE_VERSION = 'feat-107.v0';
+export const FEAT107_VULNERABLE_FIXTURE_VERSION = 'feat-107.v0-broken';
 
 export const FEAT107_PROOF_PROFILES = {
   DEV_SMOKE_PROFILE: 'DEV_SMOKE_PROFILE',

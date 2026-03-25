@@ -29,6 +29,7 @@ async function main() {
     encryptionNonceSeed: parseOptionalBigInt(args.encryptionNonceSeed),
     rerandomizationNonceSeed: parseOptionalBigInt(args.rerandomizationNonceSeed),
     selectionCount: parseOptionalNumber(args.selectionCount),
+    fixtureVersion: parseOptionalString(args.fixtureVersion),
   };
 
   const fixtureJson = JSON.stringify(buildControlledElectionFixturePack(options), null, 2);
@@ -133,6 +134,14 @@ function parseOptionalNumber(value: string | boolean | undefined): number | unde
   return Number.parseInt(value, 10);
 }
 
+function parseOptionalString(value: string | boolean | undefined): string | undefined {
+  if (!value || typeof value !== 'string') {
+    return undefined;
+  }
+
+  return value;
+}
+
 function printHelp(): void {
   process.stdout.write(
     [
@@ -148,6 +157,7 @@ function printHelp(): void {
       '  --selectionCount <number>     Override slot count (default: 6)',
       '  --encryptionNonceSeed <bigint>',
       '  --rerandomizationNonceSeed <bigint>',
+      '  --fixtureVersion <version>    Override fixture version policy tag',
       '  --output <path>               Write JSON to a file instead of stdout',
       '  --help                        Show this message',
       '',

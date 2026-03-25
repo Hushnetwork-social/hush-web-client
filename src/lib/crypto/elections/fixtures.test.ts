@@ -4,8 +4,10 @@ import { CIRCUIT } from '../reactions/constants';
 import { getGenerator, getIdentity, pointToKey, type Point } from '../reactions';
 import {
   FEAT107_CIRCUIT_VERSION_BY_PROFILE,
+  FEAT107_DEPRECATED_FIXTURE_VERSION,
   FEAT107_DETERMINISTIC_GENERATED_AT,
   FEAT107_FIXTURE_VERSION,
+  FEAT107_VULNERABLE_FIXTURE_VERSION,
   buildControlledElectionFixturePack,
   createControlledElectionKeyPair,
   createDeterministicNonceSequence,
@@ -110,6 +112,34 @@ describe('FEAT-107 election fixture helpers', () => {
     expect(fixturePack.generatedAt).toBe(FEAT107_DETERMINISTIC_GENERATED_AT);
     expect(fixturePack.expectedAggregateTally).toEqual(['0', '1', '0', '0', '0', '0']);
     expect(fixturePack.testOnly.privateKey).not.toBe('0');
+  });
+
+  it('allows explicit supported, deprecated, and vulnerable fixture policy tags', () => {
+    expect(
+      buildControlledElectionFixturePack({
+        seed: 307n,
+        choiceIndex: 0,
+        fixtureVersion: FEAT107_DEPRECATED_FIXTURE_VERSION,
+      }).fixtureVersion
+    ).toBe(FEAT107_DEPRECATED_FIXTURE_VERSION);
+
+    expect(
+      buildControlledElectionFixturePack({
+        seed: 308n,
+        choiceIndex: 0,
+        fixtureVersion: FEAT107_VULNERABLE_FIXTURE_VERSION,
+      }).fixtureVersion
+    ).toBe(FEAT107_VULNERABLE_FIXTURE_VERSION);
+
+    expect(() =>
+      buildControlledElectionFixturePack({
+        seed: 309n,
+        choiceIndex: 0,
+        fixtureVersion: 'feat-107.experimental',
+      })
+    ).toThrow(
+      "Controlled fixture version 'feat-107.experimental' is not part of the FEAT-107 interoperability policy"
+    );
   });
 
   it.each([

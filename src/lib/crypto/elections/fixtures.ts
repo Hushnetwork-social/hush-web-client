@@ -17,10 +17,12 @@ import {
 import {
   FEAT107_CIRCUIT_VERSION_BY_PROFILE,
   FEAT107_CURVE_ORDER,
+  FEAT107_DEPRECATED_FIXTURE_VERSION,
   FEAT107_DECODE_TIERS,
   FEAT107_DETERMINISTIC_GENERATED_AT,
   FEAT107_FIXTURE_VERSION,
   FEAT107_SELECTION_COUNT,
+  FEAT107_VULNERABLE_FIXTURE_VERSION,
 } from './constants.ts';
 
 export type ElectionProofProfile = 'DEV_SMOKE_PROFILE' | 'PRODUCTION_LIKE_PROFILE';
@@ -77,6 +79,7 @@ export interface ControlledElectionFixtureOptions {
   selectionCount?: number;
   encryptionNonceSeed?: bigint;
   rerandomizationNonceSeed?: bigint;
+  fixtureVersion?: string;
 }
 
 export interface ControlledBallotEncryptionOptions {
@@ -231,6 +234,7 @@ export function buildControlledElectionFixturePack(
   const selectionCount = options.selectionCount ?? FEAT107_SELECTION_COUNT;
   const encryptionNonceSeed = options.encryptionNonceSeed ?? 101n;
   const rerandomizationNonceSeed = options.rerandomizationNonceSeed ?? 1001n;
+  const fixtureVersion = normalizeFixtureVersion(options.fixtureVersion);
   const keyPair = createControlledElectionKeyPair(options.seed);
   const encryptedBallot = encryptOneHotElectionBallot(options.choiceIndex, keyPair.publicKey, {
     nonceSeed: encryptionNonceSeed,
@@ -249,7 +253,7 @@ export function buildControlledElectionFixturePack(
   );
 
   return {
-    fixtureVersion: FEAT107_FIXTURE_VERSION,
+    fixtureVersion,
     profile,
     decodeTier,
     decodeBound: FEAT107_DECODE_TIERS[decodeTier].toString(),
@@ -279,6 +283,31 @@ export function buildControlledElectionFixturePack(
       rerandomizationNonceSeed: normalizeControlledScalar(rerandomizationNonceSeed).toString(),
     },
   };
+}
+
+function normalizeFixtureVersion(version: string | undefined): string {
+  if (version === undefined) {
+    return FEAT107_FIXTURE_VERSION;
+  }
+
+  const normalized = version.trim();
+  if (normalized.length === 0) {
+    throw new Error('Controlled fixture version override cannot be empty');
+  }
+
+  const allowedVersions = new Set([
+    FEAT107_FIXTURE_VERSION,
+    FEAT107_DEPRECATED_FIXTURE_VERSION,
+    FEAT107_VULNERABLE_FIXTURE_VERSION,
+  ]);
+
+  if (!allowedVersions.has(normalized)) {
+    throw new Error(
+      `Controlled fixture version '${normalized}' is not part of the FEAT-107 interoperability policy`
+    );
+  }
+
+  return normalized;
 }
 
 export function generateControlledElectionFixtureJson(
