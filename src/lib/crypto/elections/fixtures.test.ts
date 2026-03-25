@@ -65,6 +65,35 @@ describe('FEAT-107 election fixture helpers', () => {
     ]);
   });
 
+  it('encrypts the same ballot meaning with different randomness into different ciphertexts', () => {
+    const keyPair = createControlledElectionKeyPair(211n);
+    const firstBallot = encryptOneHotElectionBallot(2, keyPair.publicKey, {
+      nonces: [31n, 32n, 33n, 34n, 35n, 36n],
+    });
+    const secondBallot = encryptOneHotElectionBallot(2, keyPair.publicKey, {
+      nonces: [41n, 42n, 43n, 44n, 45n, 46n],
+    });
+
+    expect(pointToKey(firstBallot.ciphertext.c1[2])).not.toBe(pointToKey(secondBallot.ciphertext.c1[2]));
+    expect(pointToKey(firstBallot.ciphertext.c2[2])).not.toBe(pointToKey(secondBallot.ciphertext.c2[2]));
+    expect(decryptControlledElectionBallot(firstBallot.ciphertext, keyPair.privateKey)).toEqual([
+      0n,
+      0n,
+      1n,
+      0n,
+      0n,
+      0n,
+    ]);
+    expect(decryptControlledElectionBallot(secondBallot.ciphertext, keyPair.privateKey)).toEqual([
+      0n,
+      0n,
+      1n,
+      0n,
+      0n,
+      0n,
+    ]);
+  });
+
   it('builds a deterministic fixture pack with version and profile metadata', () => {
     const fixturePack = buildControlledElectionFixturePack({
       seed: 303n,
@@ -81,6 +110,27 @@ describe('FEAT-107 election fixture helpers', () => {
     expect(fixturePack.generatedAt).toBe(FEAT107_DETERMINISTIC_GENERATED_AT);
     expect(fixturePack.expectedAggregateTally).toEqual(['0', '1', '0', '0', '0', '0']);
     expect(fixturePack.testOnly.privateKey).not.toBe('0');
+  });
+
+  it.each([
+    ['DEV_SMOKE_PROFILE', 'DEV_SMOKE_PROFILE'],
+    ['PRODUCTION_LIKE_PROFILE', 'PRODUCTION_LIKE_PROFILE'],
+  ] as const)('keeps rerandomized fixture semantics stable for %s', (_, profile) => {
+    const fixturePack = buildControlledElectionFixturePack({
+      seed: 333n,
+      choiceIndex: 5,
+      profile,
+    });
+    const originalCiphertext = fixturePack.ballot.ciphertext;
+    const rerandomizedCiphertext = fixturePack.rerandomizedBallot.ciphertext;
+
+    expect(FEAT107_CIRCUIT_VERSION_BY_PROFILE[profile]).toBe(fixturePack.circuitVersion);
+    expect(rerandomizedCiphertext.c1[5].x).not.toBe(originalCiphertext.c1[5].x);
+    expect(rerandomizedCiphertext.c2[5].y).not.toBe(originalCiphertext.c2[5].y);
+    expect(fixturePack.rerandomizedBallot.expectedPlaintextSlots).toEqual(
+      fixturePack.ballot.expectedPlaintextSlots
+    );
+    expect(fixturePack.expectedAggregateTally).toEqual(['0', '0', '0', '0', '0', '1']);
   });
 
   it('generates deterministic fixture JSON for the script-first path', () => {
