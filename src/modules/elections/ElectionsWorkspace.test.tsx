@@ -337,6 +337,49 @@ describe('ElectionsWorkspace', () => {
     expect(screen.queryByTestId('elections-open-button')).not.toBeInTheDocument();
   });
 
+  it('shows the non-binding advisory for advisory elections', async () => {
+    const advisoryElection = createElectionRecord(ElectionLifecycleStateProto.Draft, {
+      BindingStatus: ElectionBindingStatusProto.NonBinding,
+    });
+
+    electionsServiceMock.getElectionsByOwner.mockResolvedValueOnce({
+      Elections: [
+        createElectionSummary(ElectionLifecycleStateProto.Draft, {
+          BindingStatus: ElectionBindingStatusProto.NonBinding,
+        }),
+      ],
+    });
+    electionsServiceMock.getElection.mockResolvedValueOnce(
+      createElectionResponse({
+        Election: advisoryElection,
+        LatestDraftSnapshot: createDraftSnapshot({
+          Policy: {
+            ElectionClass: ElectionClassProto.OrganizationalRemoteVoting,
+            BindingStatus: ElectionBindingStatusProto.NonBinding,
+            GovernanceMode: ElectionGovernanceModeProto.AdminOnly,
+            DisclosureMode: ElectionDisclosureModeProto.FinalResultsOnly,
+            ParticipationPrivacyMode:
+              ParticipationPrivacyModeProto.PublicCheckoffAnonymousBallotPrivateChoice,
+            VoteUpdatePolicy: VoteUpdatePolicyProto.SingleSubmissionOnly,
+            EligibilitySourceType: EligibilitySourceTypeProto.OrganizationImportedRoster,
+            EligibilityMutationPolicy: EligibilityMutationPolicyProto.FrozenAtOpen,
+            OutcomeRule: advisoryElection.OutcomeRule,
+            ApprovedClientApplications: [{ ApplicationId: 'hushsocial', Version: '1.0.0' }],
+            ProtocolOmegaVersion: 'omega-v1.0.0',
+            ReportingPolicy: ReportingPolicyProto.DefaultPhaseOnePackage,
+            ReviewWindowPolicy: ReviewWindowPolicyProto.NoReviewWindow,
+          },
+        }),
+      })
+    );
+
+    render(<ElectionsWorkspace ownerPublicAddress="owner-public-key" />);
+
+    expect(await screen.findByTestId('elections-binding-advisory')).toHaveTextContent(
+      'result is advisory'
+    );
+  });
+
   it('shows lifecycle controls and frozen policy for an open election', async () => {
     const openElection = createElectionRecord(ElectionLifecycleStateProto.Open, {
       OpenedAt: timestamp,
@@ -349,6 +392,16 @@ describe('ElectionsWorkspace', () => {
     electionsServiceMock.getElection.mockResolvedValueOnce(
       createElectionResponse({
         Election: openElection,
+        WarningAcknowledgements: [
+          {
+            Id: 'warning-1',
+            ElectionId: 'election-1',
+            WarningCode: 0,
+            DraftRevision: 1,
+            AcknowledgedByPublicAddress: 'owner-public-key',
+            AcknowledgedAt: timestamp,
+          },
+        ],
         BoundaryArtifacts: [
           {
             Id: 'open-artifact',
@@ -396,7 +449,12 @@ describe('ElectionsWorkspace', () => {
     render(<ElectionsWorkspace ownerPublicAddress="owner-public-key" />);
 
     expect(await screen.findByTestId('elections-close-button')).toBeInTheDocument();
+    expect(screen.getByTestId('elections-read-only-banner')).toHaveTextContent(
+      'Draft editing is frozen after open'
+    );
+    expect(screen.getByTestId('elections-title-input')).toBeDisabled();
     expect(screen.getByTestId('elections-frozen-policy')).toHaveTextContent('Protocol Omega version');
+    expect(screen.getByTestId('elections-warning-evidence')).toHaveTextContent('Low anonymity set');
     expect(screen.getByText('Boundary artifacts')).toBeInTheDocument();
   });
 

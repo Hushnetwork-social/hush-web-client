@@ -535,7 +535,10 @@ export function ElectionsWorkspace({ ownerPublicAddress }: ElectionsWorkspacePro
                 </div>
                 <div className="flex flex-wrap gap-3">
                   {draft.BindingStatus === ElectionBindingStatusProto.NonBinding && (
-                    <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                    <div
+                      className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-100"
+                      data-testid="elections-binding-advisory"
+                    >
                       Non-binding elections still freeze the same policy and lifecycle data, but the
                       result is advisory.
                     </div>
@@ -543,6 +546,16 @@ export function ElectionsWorkspace({ ownerPublicAddress }: ElectionsWorkspacePro
                 </div>
               </div>
             </section>
+
+            {selectedElectionId && !canEditDraft && (
+              <section
+                className="rounded-2xl border border-sky-500/30 bg-sky-500/10 p-5 text-sky-100"
+                data-testid="elections-read-only-banner"
+              >
+                Draft editing is frozen after open. FEAT-094 keeps this surface read-only while
+                lifecycle state, warning evidence, and boundary artifacts remain visible.
+              </section>
+            )}
 
             {unsupportedMessages.length > 0 && (
               <section
@@ -1186,7 +1199,10 @@ export function ElectionsWorkspace({ ownerPublicAddress }: ElectionsWorkspacePro
                     </div>
                   )}
 
-                  <div className="mt-4 rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-3 text-xs text-hush-text-accent">
+                  <div
+                    className="mt-4 rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-3 text-xs text-hush-text-accent"
+                    data-testid="elections-warning-evidence"
+                  >
                     Persisted warning evidence on the selected election:{' '}
                     {warningAcknowledgements.length > 0
                       ? warningAcknowledgements
