@@ -17,7 +17,6 @@ import {
   initializeReactionsSystem,
 } from "@/modules/reactions/initializeReactions";
 import {
-  deriveFeedElGamalKey,
   deriveDeterministicReactionScopeKey,
   deriveAddressMembershipSecret,
   computeCommitment,
@@ -127,7 +126,6 @@ interface UseFeedReactionsResult {
  */
 export function useFeedReactions({
   feedId,
-  feedAesKey,
   publicReactionKeyScopeId,
   membershipFeedId,
   resolveAuthorCommitment,
@@ -152,8 +150,10 @@ export function useFeedReactions({
 
   // Track key derivation to prevent duplicate calls (React Strict Mode)
   const keyDerivationStartedRef = useRef<string | null>(null);
-  // Track the AES key we derived from, to detect when it changes (key rotation)
-  const derivedFromAesKeyRef = useRef<string | null>(null);
+  // Track the reaction scope we derived from so feed-backed and public reactions
+  // stay aligned with the server's deterministic scope-key derivation.
+  const derivedFromReactionScopeRef = useRef<string | null>(null);
+  const reactionKeyScopeId = publicReactionKeyScopeId ?? feedId;
 
   // Use refs to access fresh state in callbacks without re-creating them
   // This avoids stale closure issues where the callback captures old state
@@ -166,49 +166,41 @@ export function useFeedReactions({
     }
 
     try {
-      let privateKey: bigint;
-      if (feedAesKey) {
-        debugLog(
-          `[useFeedReactions] Deriving ElGamal key on demand for feed ${feedId.substring(0, 8)}...`
-        );
-        privateKey = await deriveFeedElGamalKey(feedAesKey);
-        derivedFromAesKeyRef.current = feedAesKey;
-      } else {
-        const deterministicScopeId = publicReactionKeyScopeId ?? feedId;
-        debugLog(
-          `[useFeedReactions] Deriving public reaction key on demand for scope ${deterministicScopeId.substring(0, 8)}...`
-        );
-        privateKey = await deriveDeterministicReactionScopeKey(deterministicScopeId);
-        derivedFromAesKeyRef.current = deterministicScopeId;
-      }
+      debugLog(
+        `[useFeedReactions] Deriving reaction scope key on demand for ${reactionKeyScopeId.substring(0, 8)}...`
+      );
+      const privateKey = await deriveDeterministicReactionScopeKey(reactionKeyScopeId);
 
       const publicKey = scalarMul(getGenerator(), privateKey);
       feedPublicKeyRef.current = publicKey;
       setFeedPublicKey(publicKey);
       setFeedPrivateKey(privateKey);
+      derivedFromReactionScopeRef.current = reactionKeyScopeId;
       return publicKey;
     } catch (err) {
       debugWarn("[useFeedReactions] Feed public key derivation failed", err);
       return null;
     }
-  }, [feedAesKey, feedId, publicReactionKeyScopeId]);
+  }, [reactionKeyScopeId]);
 
-  // Derive feed ElGamal keys from AES key
+  // Derive reaction scope keys for feed-backed and public reaction targets.
   useEffect(() => {
-    const derivationInput = feedAesKey ?? publicReactionKeyScopeId;
+    const derivationInput = reactionKeyScopeId;
 
     // Skip if no derivation input or currently deriving
     if (!derivationInput || isDerivingKey) {
       return;
     }
 
-    // If AES key changed (key rotation), clear the old derived keys and re-derive
-    if (derivedFromAesKeyRef.current !== null && derivedFromAesKeyRef.current !== derivationInput) {
-      const oldDerivationInput = derivedFromAesKeyRef.current;
-      debugLog(`[useFeedReactions] AES key changed for feed ${feedId.substring(0, 8)}... (key rotation detected)`);
+    if (
+      derivedFromReactionScopeRef.current !== null &&
+      derivedFromReactionScopeRef.current !== derivationInput
+    ) {
+      const oldDerivationInput = derivedFromReactionScopeRef.current;
+      debugLog(`[useFeedReactions] Reaction scope changed for feed ${feedId.substring(0, 8)}...`);
       debugLog(`[useFeedReactions]   Previous derivation input: ${oldDerivationInput.substring(0, 16)}...`);
       debugLog(`[useFeedReactions]   New derivation input: ${derivationInput.substring(0, 16)}...`);
-      debugLog(`[useFeedReactions]   Re-deriving ElGamal keys...`);
+      debugLog(`[useFeedReactions]   Re-deriving reaction scope keys...`);
       // Invalidate any cached derivation promises for this feed before clearing refs.
       for (const key of derivationPromises.keys()) {
         if (key.startsWith(`${feedId}:`)) {
@@ -219,20 +211,17 @@ export function useFeedReactions({
       setFeedPublicKey(null);
       setFeedPrivateKey(null);
       keyDerivationStartedRef.current = null;
-      derivedFromAesKeyRef.current = null;
+      derivedFromReactionScopeRef.current = null;
     }
 
-    // Skip if already have public key derived from current AES key
-    if (feedPublicKey && derivedFromAesKeyRef.current === derivationInput) {
+    if (feedPublicKey && derivedFromReactionScopeRef.current === derivationInput) {
       return;
     }
 
     // Key derivation with Promise-based deduplication for React Strict Mode
     // When a second instance mounts while derivation is in progress, it WAITS for
     // the existing Promise instead of skipping (which would leave it without keys)
-    const derivationKey = feedAesKey
-      ? `${feedId}:aes:${feedAesKey.substring(0, 16)}`
-      : `${feedId}:scope:${publicReactionKeyScopeId}`;
+    const derivationKey = `${feedId}:scope:${derivationInput}`;
 
     // Skip if this instance already started derivation for this key
     if (keyDerivationStartedRef.current === derivationKey) {
@@ -249,7 +238,7 @@ export function useFeedReactions({
         feedPublicKeyRef.current = result.publicKey;
         setFeedPublicKey(result.publicKey);
         setFeedPrivateKey(result.privateKey);
-        derivedFromAesKeyRef.current = derivationInput;
+        derivedFromReactionScopeRef.current = derivationInput;
       }).catch(() => {
         keyDerivationStartedRef.current = null; // Allow retry
       });
@@ -263,28 +252,24 @@ export function useFeedReactions({
     const derivationPromise = (async (): Promise<DerivedKeyResult> => {
       setIsDerivingKey(true);
       try {
-        let privateKey: bigint;
-        if (feedAesKey) {
-          debugLog(`[useFeedReactions] Deriving ElGamal key for feed ${feedId.substring(0, 8)}... from AES key ${feedAesKey.substring(0, 16)}...`);
-          privateKey = await deriveFeedElGamalKey(feedAesKey);
-        } else {
-          debugLog('[useFeedReactions] Deriving deterministic public reaction key');
-          privateKey = await deriveDeterministicReactionScopeKey(publicReactionKeyScopeId!);
-        }
+        debugLog(
+          `[useFeedReactions] Deriving deterministic reaction key for scope ${derivationInput.substring(0, 8)}...`
+        );
+        const privateKey = await deriveDeterministicReactionScopeKey(derivationInput);
         const publicKey = scalarMul(getGenerator(), privateKey);
 
         // Update ref IMMEDIATELY so callbacks can see it right away
         feedPublicKeyRef.current = publicKey;
         setFeedPublicKey(publicKey);
         setFeedPrivateKey(privateKey);
-        derivedFromAesKeyRef.current = derivationInput;
+        derivedFromReactionScopeRef.current = derivationInput;
 
         return { publicKey, privateKey };
       } catch (err) {
         debugError(`[useFeedReactions] Failed to derive feed key:`, err);
         setError("Failed to derive feed encryption key");
         keyDerivationStartedRef.current = null;
-        derivedFromAesKeyRef.current = null;
+        derivedFromReactionScopeRef.current = null;
         throw err;
       } finally {
         setIsDerivingKey(false);
@@ -295,7 +280,7 @@ export function useFeedReactions({
     })();
 
     derivationPromises.set(derivationKey, derivationPromise);
-  }, [feedAesKey, feedId, feedPublicKey, isDerivingKey, publicReactionKeyScopeId]);
+  }, [feedId, feedPublicKey, isDerivingKey, reactionKeyScopeId]);
 
   // Track which message IDs have already had tallies fetched (to avoid duplicate decryption)
   const fetchedTallyMessageIds = useRef<Set<string>>(new Set());
@@ -421,7 +406,7 @@ export function useFeedReactions({
       let currentFeedPublicKey = feedPublicKeyRef.current;
 
       debugLog(`[useFeedReactions] Reaction selected: messageId=${messageId.substring(0, 8)}..., emojiIndex=${emojiIndex}`);
-      debugLog(`[useFeedReactions]   Using AES key (derived from): ${derivedFromAesKeyRef.current?.substring(0, 16) ?? 'NOT SET'}...`);
+      debugLog(`[useFeedReactions]   Using reaction scope: ${derivedFromReactionScopeRef.current?.substring(0, 16) ?? 'NOT SET'}...`);
 
       // Get current reaction for this message
       const currentReaction = getMyReaction(messageId);

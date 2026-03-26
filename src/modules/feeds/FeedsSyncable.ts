@@ -976,24 +976,14 @@ export class FeedsSyncable implements ISyncable {
         continue;
       }
 
-      // Find the feed to get its AES key for decryption
       const feed = feeds.find(f => f.id === feedId);
+      const reactionScopeId = feedId;
 
-      // Get the effective AES key:
-      // - For group feeds: use the current KeyGeneration's AES key from groupKeyStates
-      // - For other feeds: use the feed's aesKey directly
-      let feedAesKey = feed?.aesKey;
-      if (feed?.type === 'group') {
-        const keyState = useFeedsStore.getState().getGroupKeyState(feedId);
-        if (keyState) {
-          const currentKey = keyState.keyGenerations.find(
-            (kg) => kg.keyGeneration === keyState.currentKeyGeneration
-          );
-          feedAesKey = currentKey?.aesKey;
-        }
-      }
-
-      debugLog(`[FeedsSyncable] Processing tally for message ${tally.messageId.substring(0, 8)}..., version=${tally.tallyVersion}, reactionCount=${tally.reactionCount}, feedId=${feedId.substring(0, 8)}..., hasKey=${!!feedAesKey}`);
+      debugLog(
+        `[FeedsSyncable] Processing tally for message ${tally.messageId.substring(0, 8)}..., ` +
+        `version=${tally.tallyVersion}, reactionCount=${tally.reactionCount}, ` +
+        `feedId=${feedId.substring(0, 8)}..., feedType=${feed?.type ?? 'unknown'}`
+      );
 
       // Check if this tally version is newer than what we have
       const existingReaction = reactionsStore.reactions[tally.messageId];
@@ -1004,13 +994,14 @@ export class FeedsSyncable implements ISyncable {
         continue;
       }
 
-      // Try to decrypt the tally if we have the feed's AES key
-      if (feedAesKey && tally.tallyC1.length > 0 && tally.tallyC2.length > 0) {
+      // Feed-backed reactions are encrypted with the deterministic reaction
+      // scope key derived from the public feed id, not the feed AES key.
+      if (reactionScopeId && tally.tallyC1.length > 0 && tally.tallyC2.length > 0) {
         try {
           const decryptedCounts = await decryptReactionTally(
             tally.tallyC1,
             tally.tallyC2,
-            feedAesKey
+            reactionScopeId
           );
 
           // Update the store with decrypted counts and server's tally version

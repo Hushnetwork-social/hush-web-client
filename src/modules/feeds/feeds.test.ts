@@ -14,6 +14,8 @@ import { FeedsSyncable } from './FeedsSyncable';
 import * as FeedsService from './FeedsService';
 import { useAppStore } from '@/stores';
 import type { Feed, FeedMessage } from '@/types';
+import { useReactionsStore } from '../reactions/useReactionsStore';
+import { decryptReactionTally } from '@/lib/crypto/reactions';
 
 // Mock fetch
 const mockFetch = vi.fn();
@@ -41,7 +43,14 @@ vi.mock('@/lib/crypto', () => ({
 
 // Mock crypto reactions module
 vi.mock('@/lib/crypto/reactions', () => ({
-  decryptReactionTally: vi.fn().mockReturnValue([0, 0, 0, 0, 0, 0]),
+  decryptReactionTally: vi.fn().mockResolvedValue({
+    '👍': 0,
+    '❤️': 0,
+    '😂': 0,
+    '😮': 0,
+    '😢': 0,
+    '😡': 0,
+  }),
   initializeBsgs: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -316,6 +325,7 @@ describe('FeedsSyncable', () => {
   beforeEach(() => {
     syncable = new FeedsSyncable();
     useFeedsStore.getState().reset();
+    useReactionsStore.getState().reset();
     useAppStore.getState().setCredentials(null);
     mockFetch.mockReset();
     // Simulate existing session to prevent full resync on every test
@@ -532,6 +542,88 @@ describe('FeedsSyncable', () => {
     // Check that feed-1's lastSyncedMessageBlockIndex was updated
     const feedMetadata = getFeedCacheMetadata('feed-1');
     expect(feedMetadata?.lastSyncedMessageBlockIndex).toBe(300);
+  });
+
+  it('should decrypt feed reaction tallies using the feed id reaction scope', async () => {
+    useAppStore.getState().setCredentials({
+      signingPublicKey: 'user-public-key',
+      signingPrivateKey: 'private',
+      encryptionPublicKey: 'enc-pub',
+      encryptionPrivateKey: 'enc-priv',
+      mnemonic: ['word1', 'word2'],
+    });
+
+    vi.mocked(decryptReactionTally).mockResolvedValueOnce({
+      '👍': 1,
+      '❤️': 0,
+      '😂': 0,
+      '😮': 0,
+      '😢': 0,
+      '😡': 0,
+    });
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          feeds: [
+            {
+              feedId: 'feed-personal',
+              feedTitle: 'My Personal Feed',
+              feedType: 0,
+              blockIndex: 100,
+              participants: [{ participantPublicAddress: 'user-public-key' }],
+            },
+            {
+              feedId: 'feed-chat',
+              feedTitle: 'Chat with Bob',
+              feedType: 1,
+              blockIndex: 150,
+              participants: [
+                { participantPublicAddress: 'user-public-key' },
+                { participantPublicAddress: 'user-2' },
+              ],
+            },
+          ],
+        }),
+    });
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          messages: [
+            {
+              feedId: 'feed-chat',
+              feedMessageId: 'msg-reaction',
+              messageContent: 'Encrypted hello',
+              issuerPublicAddress: 'user-2',
+              issuerName: 'Bob',
+              timestamp: '2024-01-01T00:00:00Z',
+              blockIndex: 150,
+            },
+          ],
+          reactionTallies: [
+            {
+              messageId: 'msg-reaction',
+              tallyC1: Array.from({ length: 6 }, () => ({ x: 'abc', y: 'def' })),
+              tallyC2: Array.from({ length: 6 }, () => ({ x: 'ghi', y: 'jkl' })),
+              tallyVersion: 1,
+              reactionCount: 1,
+            },
+          ],
+          maxReactionTallyVersion: 1,
+        }),
+    });
+
+    await syncable.syncTask();
+
+    expect(decryptReactionTally).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.any(Array),
+      'feed-chat'
+    );
+    expect(useReactionsStore.getState().getReaction('msg-reaction')?.counts['👍']).toBe(1);
   });
 });
 

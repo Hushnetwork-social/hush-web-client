@@ -73,6 +73,18 @@ describe('MessageBubble', () => {
       expect(screen.queryByTitle('Add reaction')).not.toBeInTheDocument();
     });
 
+    it('should not show reaction button on own messages', () => {
+      const onReactionSelect = vi.fn();
+      render(
+        <MessageBubble
+          {...defaultProps}
+          isOwn={true}
+          onReactionSelect={onReactionSelect}
+        />
+      );
+      expect(screen.queryByTitle('Add reaction')).not.toBeInTheDocument();
+    });
+
     it('should show reaction button when confirmed and onReactionSelect provided', () => {
       const onReactionSelect = vi.fn();
       render(
@@ -163,6 +175,23 @@ describe('MessageBubble', () => {
       // Third emoji should be marked as selected
       const emojiButtons = screen.getAllByRole('option');
       expect(emojiButtons[2]).toHaveAttribute('aria-selected', 'true');
+    });
+
+    it('should disable the reaction button and picker when reactions are not ready', () => {
+      const onReactionSelect = vi.fn();
+      render(
+        <MessageBubble
+          {...defaultProps}
+          onReactionSelect={onReactionSelect}
+          reactionsReady={false}
+        />
+      );
+
+      const button = screen.getByTitle('Add reaction');
+      expect(button).toBeDisabled();
+
+      fireEvent.click(button);
+      expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
     });
   });
 

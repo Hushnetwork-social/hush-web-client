@@ -5,7 +5,7 @@
  */
 
 import { decrypt, grpcToCiphertext, type Ciphertext } from './elgamal';
-import { deriveFeedElGamalKey } from './poseidon';
+import { deriveDeterministicReactionScopeKey } from './poseidon';
 import { bsgsManager } from './bsgs';
 import { EMOJI_COUNT } from './constants';
 import { debugLog, debugWarn, debugError } from '@/lib/debug-logger';
@@ -78,13 +78,13 @@ export function isBsgsReady(): boolean {
  *
  * @param tallyC1 - Array of 6 C1 points (base64 encoded, can be uppercase or lowercase x/y)
  * @param tallyC2 - Array of 6 C2 points (base64 encoded, can be uppercase or lowercase x/y)
- * @param feedAesKey - The feed's AES key (base64 encoded)
+ * @param reactionScopeId - Public reaction scope identifier used to derive the tally key
  * @returns Decrypted emoji counts
  */
 export async function decryptReactionTally(
   tallyC1: FlexibleECPoint[],
   tallyC2: FlexibleECPoint[],
-  feedAesKey: string
+  reactionScopeId: string
 ): Promise<DecryptedEmojiCounts> {
   // Validate input
   if (!tallyC1 || !tallyC2 || tallyC1.length !== EMOJI_COUNT || tallyC2.length !== EMOJI_COUNT) {
@@ -98,8 +98,9 @@ export async function decryptReactionTally(
     await bsgsManager.ensureLoaded();
   }
 
-  // Derive the feed's ElGamal private key
-  const privateKey = await deriveFeedElGamalKey(feedAesKey);
+  // Feed-backed/chat reactions use a deterministic reaction scope key derived
+  // from the public scope identifier (typically the feed id).
+  const privateKey = await deriveDeterministicReactionScopeKey(reactionScopeId);
 
   // Decrypt each emoji's count
   const counts: DecryptedEmojiCounts = { ...EMPTY_DECRYPTED_COUNTS };

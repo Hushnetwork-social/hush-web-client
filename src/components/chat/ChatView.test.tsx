@@ -9,8 +9,18 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { ChatView } from './ChatView';
 import { useAppStore } from '@/stores';
 import { useFeedsStore } from '@/modules/feeds/useFeedsStore';
-import { useReactionsStore } from '@/modules/reactions/useReactionsStore';
+import { EMPTY_EMOJI_COUNTS, useReactionsStore } from '@/modules/reactions/useReactionsStore';
 import type { Feed, GroupFeedMember } from '@/types';
+
+const {
+  mockUseFeedReactions,
+  mockHandleReactionSelect,
+  mockFetchTalliesForMessages,
+} = vi.hoisted(() => ({
+  mockUseFeedReactions: vi.fn(),
+  mockHandleReactionSelect: vi.fn(),
+  mockFetchTalliesForMessages: vi.fn(),
+}));
 
 // Mock scrollIntoView for jsdom
 Element.prototype.scrollIntoView = vi.fn();
@@ -57,6 +67,10 @@ vi.mock('@/lib/debug-logger', () => ({
   debugError: vi.fn(),
 }));
 
+vi.mock('@/hooks/useFeedReactions', () => ({
+  useFeedReactions: (options: unknown) => mockUseFeedReactions(options),
+}));
+
 // Mock sendMessage to avoid actual API calls
 vi.mock('@/modules/feeds', async () => {
   const actual = await vi.importActual('@/modules/feeds');
@@ -95,6 +109,27 @@ describe('ChatView', () => {
     useAppStore.setState({ credentials: mockCredentials });
     useFeedsStore.getState().reset();
     useReactionsStore.getState().reset();
+    useReactionsStore.setState({
+      isProverReady: true,
+      userSecret: 'test-secret',
+    });
+    mockHandleReactionSelect.mockReset();
+    mockFetchTalliesForMessages.mockReset();
+    mockUseFeedReactions.mockImplementation(() => ({
+      getReactionCounts: (messageId: string) =>
+        useReactionsStore.getState().getReaction(messageId)?.counts ?? EMPTY_EMOJI_COUNTS,
+      getMyReaction: (messageId: string) =>
+        useReactionsStore.getState().getReaction(messageId)?.myReaction ?? null,
+      isPending: (messageId: string) =>
+        useReactionsStore.getState().hasPendingReaction(messageId),
+      isReady:
+        useReactionsStore.getState().isProverReady &&
+        !!useReactionsStore.getState().userSecret,
+      handleReactionSelect: mockHandleReactionSelect,
+      fetchTalliesForMessages: mockFetchTalliesForMessages,
+      hydrateMyReactions: vi.fn(),
+      error: null,
+    }));
   });
 
   describe('Rendering', () => {
@@ -140,9 +175,11 @@ describe('ChatView', () => {
       ]);
     });
 
-    it('should show reaction button on confirmed messages', () => {
+    it('should show reaction button on confirmed messages', async () => {
       render(<ChatView feed={mockFeed} />);
-      expect(screen.getByTitle('Add reaction')).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByTitle('Add reaction')).toBeInTheDocument();
+      });
     });
 
     it('should not show reaction button on unconfirmed messages', () => {
@@ -155,6 +192,23 @@ describe('ChatView', () => {
           senderPublicKey: 'my-public-key',
           timestamp: Date.now(),
           isConfirmed: false,
+        },
+      ]);
+
+      render(<ChatView feed={mockFeed} />);
+      expect(screen.queryByTitle('Add reaction')).not.toBeInTheDocument();
+    });
+
+    it('should not show reaction button on own confirmed messages', () => {
+      useFeedsStore.getState().reset();
+      useFeedsStore.getState().addMessages('feed-123', [
+        {
+          id: 'msg-own-reaction',
+          feedId: 'feed-123',
+          content: 'My confirmed message',
+          senderPublicKey: 'my-public-key',
+          timestamp: Date.now(),
+          isConfirmed: true,
         },
       ]);
 
@@ -180,12 +234,15 @@ describe('ChatView', () => {
       expect(screen.getByText('2')).toBeInTheDocument();
     });
 
-    it('should show my reaction highlighted', () => {
+    it('should show my reaction highlighted', async () => {
       useReactionsStore.getState().setMyReaction('msg-1', 0); // 👍
 
       render(<ChatView feed={mockFeed} />);
 
-      // Open picker
+      await waitFor(() => {
+        expect(screen.getByTitle('Add reaction')).toBeInTheDocument();
+      });
+
       fireEvent.click(screen.getByTitle('Add reaction'));
 
       // First emoji should be selected
@@ -193,8 +250,12 @@ describe('ChatView', () => {
       expect(emojiButtons[0]).toHaveAttribute('aria-selected', 'true');
     });
 
-    it('should open reaction picker when clicking reaction button', () => {
+    it('should open reaction picker when clicking reaction button', async () => {
       render(<ChatView feed={mockFeed} />);
+
+      await waitFor(() => {
+        expect(screen.getByTitle('Add reaction')).toBeInTheDocument();
+      });
 
       fireEvent.click(screen.getByTitle('Add reaction'));
 
@@ -202,16 +263,33 @@ describe('ChatView', () => {
       expect(screen.getByRole('listbox')).toBeInTheDocument();
     });
 
-    it('should call onReactionSelect when emoji is selected', () => {
+    it('should call onReactionSelect when emoji is selected', async () => {
       render(<ChatView feed={mockFeed} />);
 
-      // Open picker and select emoji
+      await waitFor(() => {
+        expect(screen.getByTitle('Add reaction')).toBeInTheDocument();
+      });
+
       fireEvent.click(screen.getByTitle('Add reaction'));
       const emojiButtons = screen.getAllByRole('option');
       fireEvent.click(emojiButtons[0]);
 
       // Emoji selection should close the picker
       expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+      expect(mockHandleReactionSelect).toHaveBeenCalledWith('msg-1', 0);
+    });
+
+    it('should disable reactions when the prover is not ready', async () => {
+      useReactionsStore.setState({
+        isProverReady: false,
+        userSecret: 'test-secret',
+      });
+
+      render(<ChatView feed={mockFeed} />);
+
+      await waitFor(() => {
+        expect(screen.getByTitle('Add reaction')).toBeDisabled();
+      });
     });
   });
 

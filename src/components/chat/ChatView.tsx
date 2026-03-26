@@ -583,6 +583,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
     getReactionCounts,
     getMyReaction,
     isPending,
+    isReady,
     handleReactionSelect,
     fetchTalliesForMessages,
   } = useFeedReactions({
@@ -1703,6 +1704,7 @@ export function ChatView({ feed, onSendMessage, onBack, onCloseFeed, showBackBut
                     reactionCounts={getReactionCounts(item.id)}
                     myReaction={getMyReaction(item.id)}
                     isPendingReaction={isPending(item.id)}
+                    reactionsReady={isReady}
                     onReactionSelect={stableHandleReactionSelect}
                     replyToMessageId={item.replyToMessageId}
                     onReplyClick={handleReplyClick}

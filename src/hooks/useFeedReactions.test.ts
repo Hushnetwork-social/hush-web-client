@@ -2,8 +2,8 @@
  * useFeedReactions Hook Tests
  *
  * Tests for:
- * 1. Key derivation from AES key
- * 2. Key rotation detection and re-derivation
+ * 1. Deterministic reaction-scope key derivation
+ * 2. Scope change detection and re-derivation
  * 3. Reaction submission with correct key
  */
 
@@ -121,7 +121,6 @@ vi.mock('@/modules/feeds/useFeedsStore', () => ({
 }));
 
 import {
-  deriveFeedElGamalKey,
   deriveDeterministicReactionScopeKey,
   deriveAddressMembershipSecret,
   computeCommitment,
@@ -159,7 +158,7 @@ describe('useFeedReactions', () => {
   });
 
   describe('Key Derivation', () => {
-    it('should derive ElGamal key when feedAesKey is provided', async () => {
+    it('should derive the deterministic reaction scope key for feed-backed reactions', async () => {
       renderHook(() =>
         useFeedReactions({
           feedId: 'test-feed-id',
@@ -167,84 +166,71 @@ describe('useFeedReactions', () => {
         })
       );
 
-      // Wait for async key derivation
       await waitFor(() => {
-        expect(deriveFeedElGamalKey).toHaveBeenCalledWith('test-aes-key-base64==');
+        expect(deriveDeterministicReactionScopeKey).toHaveBeenCalledWith('test-feed-id');
       });
 
       expect(scalarMul).toHaveBeenCalled();
     });
 
-    it('should not derive key when feedAesKey is undefined', async () => {
+    it('should still derive the feed reaction scope key when feedAesKey is undefined', async () => {
       renderHook(() =>
         useFeedReactions({
-          feedId: 'test-feed-id',
+          feedId: 'test-feed-id-no-aes',
           feedAesKey: undefined,
         })
       );
 
-      // Wait a bit to ensure no derivation happens
-      await new Promise(resolve => setTimeout(resolve, 50));
-
-      expect(deriveFeedElGamalKey).not.toHaveBeenCalled();
+      await waitFor(() => {
+        expect(deriveDeterministicReactionScopeKey).toHaveBeenCalledWith('test-feed-id-no-aes');
+      });
     });
 
-    it('should re-derive key when feedAesKey changes (key rotation)', async () => {
+    it('should not re-derive when only feedAesKey changes and the scope stays the same', async () => {
       const { rerender } = renderHook(
         ({ feedAesKey }) =>
           useFeedReactions({
-            feedId: 'test-feed-id',
+            feedId: 'test-feed-id-static-scope',
             feedAesKey,
           }),
         { initialProps: { feedAesKey: 'old-key-base64==' } }
       );
 
-      // Wait for initial derivation
       await waitFor(() => {
-        expect(deriveFeedElGamalKey).toHaveBeenCalledWith('old-key-base64==');
+        expect(deriveDeterministicReactionScopeKey).toHaveBeenCalledWith('test-feed-id-static-scope');
       });
 
       vi.clearAllMocks();
-
-      // Simulate key rotation by changing the AES key
       rerender({ feedAesKey: 'new-key-base64==' });
-
-      // Wait for re-derivation with new key
-      await waitFor(() => {
-        expect(deriveFeedElGamalKey).toHaveBeenCalledWith('new-key-base64==');
-      });
-
-      // Should log the key rotation detection
-      expect(debugLog).toHaveBeenCalledWith(
-        expect.stringContaining('AES key changed')
-      );
-    });
-
-    it('should not re-derive key when feedAesKey stays the same', async () => {
-      const { rerender } = renderHook(
-        ({ feedAesKey }) =>
-          useFeedReactions({
-            feedId: 'test-feed-id',
-            feedAesKey,
-          }),
-        { initialProps: { feedAesKey: 'same-key-base64==' } }
-      );
-
-      // Wait for initial derivation
-      await waitFor(() => {
-        expect(deriveFeedElGamalKey).toHaveBeenCalledTimes(1);
-      });
-
-      vi.clearAllMocks();
-
-      // Rerender with same key
-      rerender({ feedAesKey: 'same-key-base64==' });
-
-      // Wait a bit to ensure no extra derivation
       await new Promise(resolve => setTimeout(resolve, 50));
 
-      // Should NOT re-derive
-      expect(deriveFeedElGamalKey).not.toHaveBeenCalled();
+      expect(deriveDeterministicReactionScopeKey).not.toHaveBeenCalled();
+    });
+
+    it('should re-derive when the reaction scope changes', async () => {
+      const { rerender } = renderHook(
+        ({ publicReactionKeyScopeId }) =>
+          useFeedReactions({
+            feedId: 'test-feed-id',
+            publicReactionKeyScopeId,
+          }),
+        { initialProps: { publicReactionKeyScopeId: 'old-scope-id' } }
+      );
+
+      await waitFor(() => {
+        expect(deriveDeterministicReactionScopeKey).toHaveBeenCalledWith('old-scope-id');
+      });
+
+      vi.clearAllMocks();
+      rerender({ publicReactionKeyScopeId: 'new-scope-id' });
+
+      await waitFor(() => {
+        expect(deriveDeterministicReactionScopeKey).toHaveBeenCalledWith('new-scope-id');
+      });
+
+      expect(debugLog).toHaveBeenCalledWith(
+        expect.stringContaining('Reaction scope changed')
+      );
     });
   });
 
@@ -283,7 +269,7 @@ describe('useFeedReactions', () => {
       expect(reactionsServiceInstance.getTallies).toHaveBeenCalledWith(
         'tally-feed-id-1',
         ['message-1'],
-        123456n
+        654321n
       );
     });
 
@@ -308,7 +294,7 @@ describe('useFeedReactions', () => {
         2,
         'tally-feed-id-2',
         ['message-1'],
-        123456n
+        654321n
       );
     });
 
@@ -361,13 +347,13 @@ describe('useFeedReactions', () => {
         1,
         'shared-scope-id',
         ['message-1'],
-        123456n
+        654321n
       );
       expect(reactionsServiceInstance.getTallies).toHaveBeenNthCalledWith(
         2,
         'shared-scope-id',
         ['message-2'],
-        123456n
+        654321n
       );
 
       resolveFirstFetch?.();
@@ -390,7 +376,7 @@ describe('useFeedReactions', () => {
   });
 
   describe('isReady', () => {
-    it('should be false when feedAesKey is not provided', () => {
+    it('should be false when the prover is not ready', () => {
       const { result } = renderHook(() =>
         useFeedReactions({
           feedId: 'test-feed-id',
@@ -412,7 +398,7 @@ describe('useFeedReactions', () => {
       );
 
       await waitFor(() => {
-        expect(deriveFeedElGamalKey).toHaveBeenCalled();
+        expect(deriveDeterministicReactionScopeKey).toHaveBeenCalledWith('proof-guard-feed-id-1');
       });
 
       await result.current.handleReactionSelect('message-1', 2);
@@ -437,7 +423,7 @@ describe('useFeedReactions', () => {
       );
 
       await waitFor(() => {
-        expect(deriveFeedElGamalKey).toHaveBeenCalled();
+        expect(deriveDeterministicReactionScopeKey).toHaveBeenCalledWith('proof-guard-feed-id-2');
       });
 
       await result.current.handleReactionSelect('message-1', 2);
@@ -462,7 +448,7 @@ describe('useFeedReactions', () => {
       );
 
       await waitFor(() => {
-        expect(deriveFeedElGamalKey).toHaveBeenCalled();
+        expect(deriveDeterministicReactionScopeKey).toHaveBeenCalledWith('proof-guard-feed-id-4');
       });
 
       await result.current.handleReactionSelect('message-1', 2);
@@ -546,7 +532,7 @@ describe('useFeedReactions', () => {
       );
 
       await waitFor(() => {
-        expect(deriveFeedElGamalKey).toHaveBeenCalled();
+        expect(deriveDeterministicReactionScopeKey).toHaveBeenCalledWith('proof-guard-feed-id-timeout');
       });
 
       await result.current.handleReactionSelect('message-1', 2);
@@ -576,7 +562,7 @@ describe('useFeedReactions', () => {
       );
 
       await waitFor(() => {
-        expect(deriveFeedElGamalKey).toHaveBeenCalled();
+        expect(deriveDeterministicReactionScopeKey).toHaveBeenCalledWith('proof-guard-feed-id-5');
       });
 
       await result.current.handleReactionSelect('message-1', 2);
@@ -602,7 +588,7 @@ describe('useFeedReactions', () => {
       );
 
       await waitFor(() => {
-        expect(deriveFeedElGamalKey).toHaveBeenCalled();
+        expect(deriveDeterministicReactionScopeKey).toHaveBeenCalledWith('proof-guard-feed-id-6');
       });
 
       await result.current.handleReactionSelect('message-1', 2);
@@ -624,7 +610,7 @@ describe('useFeedReactions', () => {
 
       await result.current.handleReactionSelect('message-1', 2);
 
-      expect(deriveFeedElGamalKey).toHaveBeenCalledWith('proof-guard-aes-key-7==');
+      expect(deriveDeterministicReactionScopeKey).toHaveBeenCalledWith('proof-guard-feed-id-7');
       expect(ensureCommitmentRegisteredMock).not.toHaveBeenCalled();
       expect(reactionsServiceInstance.submitReactionDevMode).toHaveBeenCalled();
     });
@@ -692,7 +678,7 @@ describe('useFeedReactions', () => {
       );
 
       await waitFor(() => {
-        expect(deriveFeedElGamalKey).toHaveBeenCalled();
+        expect(deriveDeterministicReactionScopeKey).toHaveBeenCalledWith('proof-guard-feed-id-3');
       });
 
       await result.current.handleReactionSelect('message-1', 2);
