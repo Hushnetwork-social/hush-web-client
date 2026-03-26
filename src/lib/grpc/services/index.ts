@@ -4,6 +4,7 @@ export { bankService } from './bank';
 export { feedService } from './feed';
 export { notificationService } from './notification';
 export { reactionsService } from './reactions';
+export { electionsService } from './elections';
 export { membershipService } from './membership';
 export { membershipServiceBinary } from './membership-binary';
 export { groupService } from './group';

@@ -694,3 +694,381 @@ export interface SearchPublicGroupsResponse {
   Message: string;
   Groups: PublicGroupInfoProto[];
 }
+
+// ============= Elections Service Types =============
+
+export interface GrpcTimestamp {
+  seconds: number;
+  nanos: number;
+}
+
+export enum ElectionLifecycleStateProto {
+  Draft = 0,
+  Open = 1,
+  Closed = 2,
+  Finalized = 3,
+}
+
+export enum ElectionClassProto {
+  OrganizationalRemoteVoting = 0,
+  PrivatePoll = 1,
+  SeriousSecretBallotVoting = 2,
+}
+
+export enum ElectionBindingStatusProto {
+  Binding = 0,
+  NonBinding = 1,
+}
+
+export enum ElectionGovernanceModeProto {
+  AdminOnly = 0,
+  TrusteeThreshold = 1,
+}
+
+export enum ElectionDisclosureModeProto {
+  FinalResultsOnly = 0,
+  SeparatedParticipationAndResultReports = 1,
+  SeparatedParticipationAndPlaintextBallotReports = 2,
+}
+
+export enum ParticipationPrivacyModeProto {
+  PublicCheckoffAnonymousBallotPrivateChoice = 0,
+}
+
+export enum VoteUpdatePolicyProto {
+  SingleSubmissionOnly = 0,
+  LatestValidVoteWins = 1,
+}
+
+export enum EligibilitySourceTypeProto {
+  OrganizationImportedRoster = 0,
+}
+
+export enum EligibilityMutationPolicyProto {
+  FrozenAtOpen = 0,
+  LateActivationForRosteredVotersOnly = 1,
+}
+
+export enum OutcomeRuleKindProto {
+  SingleWinner = 0,
+  PassFail = 1,
+  TopN = 2,
+}
+
+export enum ReportingPolicyProto {
+  DefaultPhaseOnePackage = 0,
+}
+
+export enum ReviewWindowPolicyProto {
+  NoReviewWindow = 0,
+  GovernedReviewWindowReserved = 1,
+}
+
+export enum ElectionBoundaryArtifactTypeProto {
+  OpenArtifact = 0,
+  CloseArtifact = 1,
+  FinalizeArtifact = 2,
+}
+
+export enum ElectionWarningCodeProto {
+  LowAnonymitySet = 0,
+  AllTrusteesRequiredFragility = 1,
+}
+
+export enum ElectionTrusteeInvitationStatusProto {
+  Pending = 0,
+  Accepted = 1,
+  Rejected = 2,
+  Revoked = 3,
+}
+
+export enum ElectionCommandErrorCodeProto {
+  None = 0,
+  NotFound = 1,
+  Forbidden = 2,
+  InvalidState = 3,
+  ValidationFailed = 4,
+  DependencyBlocked = 5,
+  Conflict = 6,
+  NotSupported = 7,
+}
+
+export interface ApprovedClientApplication {
+  ApplicationId: string;
+  Version: string;
+}
+
+export interface OutcomeRule {
+  Kind: OutcomeRuleKindProto;
+  TemplateKey: string;
+  SeatCount: number;
+  BlankVoteCountsForTurnout: boolean;
+  BlankVoteExcludedFromWinnerSelection: boolean;
+  BlankVoteExcludedFromThresholdDenominator: boolean;
+  TieResolutionRule: string;
+  CalculationBasis: string;
+}
+
+export interface ElectionOption {
+  OptionId: string;
+  DisplayLabel: string;
+  ShortDescription: string;
+  BallotOrder: number;
+  IsBlankOption: boolean;
+}
+
+export interface ElectionMetadata {
+  Title: string;
+  ShortDescription: string;
+  OwnerPublicAddress: string;
+  ExternalReferenceCode: string;
+}
+
+export interface ElectionFrozenPolicy {
+  ElectionClass: ElectionClassProto;
+  BindingStatus: ElectionBindingStatusProto;
+  GovernanceMode: ElectionGovernanceModeProto;
+  DisclosureMode: ElectionDisclosureModeProto;
+  ParticipationPrivacyMode: ParticipationPrivacyModeProto;
+  VoteUpdatePolicy: VoteUpdatePolicyProto;
+  EligibilitySourceType: EligibilitySourceTypeProto;
+  EligibilityMutationPolicy: EligibilityMutationPolicyProto;
+  OutcomeRule: OutcomeRule;
+  ApprovedClientApplications: ApprovedClientApplication[];
+  ProtocolOmegaVersion: string;
+  ReportingPolicy: ReportingPolicyProto;
+  ReviewWindowPolicy: ReviewWindowPolicyProto;
+  RequiredApprovalCount?: number;
+}
+
+export interface ElectionTrusteeReference {
+  TrusteeUserAddress: string;
+  TrusteeDisplayName: string;
+}
+
+export interface ElectionTrusteeBoundarySnapshot {
+  RequiredApprovalCount: number;
+  AcceptedTrustees: ElectionTrusteeReference[];
+  EveryAcceptedTrusteeMustApprove: boolean;
+}
+
+export interface ElectionRecordView {
+  ElectionId: string;
+  Title: string;
+  ShortDescription: string;
+  OwnerPublicAddress: string;
+  ExternalReferenceCode: string;
+  LifecycleState: ElectionLifecycleStateProto;
+  ElectionClass: ElectionClassProto;
+  BindingStatus: ElectionBindingStatusProto;
+  GovernanceMode: ElectionGovernanceModeProto;
+  DisclosureMode: ElectionDisclosureModeProto;
+  ParticipationPrivacyMode: ParticipationPrivacyModeProto;
+  VoteUpdatePolicy: VoteUpdatePolicyProto;
+  EligibilitySourceType: EligibilitySourceTypeProto;
+  EligibilityMutationPolicy: EligibilityMutationPolicyProto;
+  OutcomeRule: OutcomeRule;
+  ApprovedClientApplications: ApprovedClientApplication[];
+  ProtocolOmegaVersion: string;
+  ReportingPolicy: ReportingPolicyProto;
+  ReviewWindowPolicy: ReviewWindowPolicyProto;
+  CurrentDraftRevision: number;
+  Options: ElectionOption[];
+  AcknowledgedWarningCodes: ElectionWarningCodeProto[];
+  RequiredApprovalCount?: number;
+  CreatedAt: GrpcTimestamp;
+  LastUpdatedAt: GrpcTimestamp;
+  OpenedAt?: GrpcTimestamp;
+  ClosedAt?: GrpcTimestamp;
+  FinalizedAt?: GrpcTimestamp;
+  OpenArtifactId: string;
+  CloseArtifactId: string;
+  FinalizeArtifactId: string;
+}
+
+export interface ElectionSummary {
+  ElectionId: string;
+  Title: string;
+  OwnerPublicAddress: string;
+  LifecycleState: ElectionLifecycleStateProto;
+  BindingStatus: ElectionBindingStatusProto;
+  GovernanceMode: ElectionGovernanceModeProto;
+  CurrentDraftRevision: number;
+  LastUpdatedAt: GrpcTimestamp;
+}
+
+export interface ElectionDraftSnapshot {
+  Id: string;
+  ElectionId: string;
+  DraftRevision: number;
+  Metadata: ElectionMetadata;
+  Policy: ElectionFrozenPolicy;
+  Options: ElectionOption[];
+  AcknowledgedWarningCodes: ElectionWarningCodeProto[];
+  SnapshotReason: string;
+  RecordedAt: GrpcTimestamp;
+  RecordedByPublicAddress: string;
+}
+
+export interface ElectionBoundaryArtifact {
+  Id: string;
+  ElectionId: string;
+  ArtifactType: ElectionBoundaryArtifactTypeProto;
+  LifecycleState: ElectionLifecycleStateProto;
+  SourceDraftRevision: number;
+  Metadata: ElectionMetadata;
+  Policy: ElectionFrozenPolicy;
+  Options: ElectionOption[];
+  AcknowledgedWarningCodes: ElectionWarningCodeProto[];
+  TrusteeSnapshot?: ElectionTrusteeBoundarySnapshot;
+  FrozenEligibleVoterSetHash: string;
+  TrusteePolicyExecutionReference: string;
+  ReportingPolicyExecutionReference: string;
+  ReviewWindowExecutionReference: string;
+  AcceptedBallotSetHash: string;
+  FinalEncryptedTallyHash: string;
+  RecordedAt: GrpcTimestamp;
+  RecordedByPublicAddress: string;
+}
+
+export interface ElectionWarningAcknowledgement {
+  Id: string;
+  ElectionId: string;
+  WarningCode: ElectionWarningCodeProto;
+  DraftRevision: number;
+  AcknowledgedByPublicAddress: string;
+  AcknowledgedAt: GrpcTimestamp;
+}
+
+export interface ElectionTrusteeInvitation {
+  Id: string;
+  ElectionId: string;
+  TrusteeUserAddress: string;
+  TrusteeDisplayName: string;
+  InvitedByPublicAddress: string;
+  LinkedMessageId: string;
+  Status: ElectionTrusteeInvitationStatusProto;
+  SentAtDraftRevision: number;
+  SentAt: GrpcTimestamp;
+  ResolvedAtDraftRevision?: number;
+  RespondedAt?: GrpcTimestamp;
+  RevokedAt?: GrpcTimestamp;
+}
+
+export interface ElectionDraftInput {
+  Title: string;
+  ShortDescription: string;
+  ExternalReferenceCode: string;
+  ElectionClass: ElectionClassProto;
+  BindingStatus: ElectionBindingStatusProto;
+  GovernanceMode: ElectionGovernanceModeProto;
+  DisclosureMode: ElectionDisclosureModeProto;
+  ParticipationPrivacyMode: ParticipationPrivacyModeProto;
+  VoteUpdatePolicy: VoteUpdatePolicyProto;
+  EligibilitySourceType: EligibilitySourceTypeProto;
+  EligibilityMutationPolicy: EligibilityMutationPolicyProto;
+  OutcomeRule: OutcomeRule;
+  ApprovedClientApplications: ApprovedClientApplication[];
+  ProtocolOmegaVersion: string;
+  ReportingPolicy: ReportingPolicyProto;
+  ReviewWindowPolicy: ReviewWindowPolicyProto;
+  OwnerOptions: ElectionOption[];
+  AcknowledgedWarningCodes: ElectionWarningCodeProto[];
+  RequiredApprovalCount?: number;
+}
+
+export interface CreateElectionDraftRequest {
+  OwnerPublicAddress: string;
+  ActorPublicAddress: string;
+  SnapshotReason: string;
+  Draft: ElectionDraftInput;
+}
+
+export interface UpdateElectionDraftRequest {
+  ElectionId: string;
+  ActorPublicAddress: string;
+  SnapshotReason: string;
+  Draft: ElectionDraftInput;
+}
+
+export interface InviteElectionTrusteeRequest {
+  ElectionId: string;
+  ActorPublicAddress: string;
+  TrusteeUserAddress: string;
+  TrusteeDisplayName: string;
+}
+
+export interface ResolveElectionTrusteeInvitationRequest {
+  ElectionId: string;
+  InvitationId: string;
+  ActorPublicAddress: string;
+}
+
+export interface GetElectionOpenReadinessRequest {
+  ElectionId: string;
+  RequiredWarningCodes: ElectionWarningCodeProto[];
+}
+
+export interface OpenElectionRequest {
+  ElectionId: string;
+  ActorPublicAddress: string;
+  RequiredWarningCodes: ElectionWarningCodeProto[];
+  FrozenEligibleVoterSetHash: string;
+  TrusteePolicyExecutionReference: string;
+  ReportingPolicyExecutionReference: string;
+  ReviewWindowExecutionReference: string;
+}
+
+export interface CloseElectionRequest {
+  ElectionId: string;
+  ActorPublicAddress: string;
+  AcceptedBallotSetHash: string;
+  FinalEncryptedTallyHash: string;
+}
+
+export interface FinalizeElectionRequest {
+  ElectionId: string;
+  ActorPublicAddress: string;
+  AcceptedBallotSetHash: string;
+  FinalEncryptedTallyHash: string;
+}
+
+export interface GetElectionRequest {
+  ElectionId: string;
+}
+
+export interface GetElectionsByOwnerRequest {
+  OwnerPublicAddress: string;
+}
+
+export interface ElectionCommandResponse {
+  Success: boolean;
+  ErrorCode: ElectionCommandErrorCodeProto;
+  ErrorMessage: string;
+  ValidationErrors: string[];
+  Election?: ElectionRecordView;
+  DraftSnapshot?: ElectionDraftSnapshot;
+  BoundaryArtifact?: ElectionBoundaryArtifact;
+  TrusteeInvitation?: ElectionTrusteeInvitation;
+}
+
+export interface GetElectionOpenReadinessResponse {
+  IsReadyToOpen: boolean;
+  ValidationErrors: string[];
+  RequiredWarningCodes: ElectionWarningCodeProto[];
+  MissingWarningAcknowledgements: ElectionWarningCodeProto[];
+}
+
+export interface GetElectionResponse {
+  Success: boolean;
+  ErrorMessage: string;
+  Election?: ElectionRecordView;
+  LatestDraftSnapshot?: ElectionDraftSnapshot;
+  WarningAcknowledgements: ElectionWarningAcknowledgement[];
+  TrusteeInvitations: ElectionTrusteeInvitation[];
+  BoundaryArtifacts: ElectionBoundaryArtifact[];
+}
+
+export interface GetElectionsByOwnerResponse {
+  Elections: ElectionSummary[];
+}
