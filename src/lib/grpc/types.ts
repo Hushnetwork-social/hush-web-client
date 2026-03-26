@@ -782,6 +782,18 @@ export enum ElectionTrusteeInvitationStatusProto {
   Revoked = 3,
 }
 
+export enum ElectionGovernedActionTypeProto {
+  Open = 0,
+  Close = 1,
+  Finalize = 2,
+}
+
+export enum ElectionGovernedProposalExecutionStatusProto {
+  WaitingForApprovals = 0,
+  ExecutionSucceeded = 1,
+  ExecutionFailed = 2,
+}
+
 export enum ElectionCommandErrorCodeProto {
   None = 0,
   NotFound = 1,
@@ -884,6 +896,8 @@ export interface ElectionRecordView {
   OpenArtifactId: string;
   CloseArtifactId: string;
   FinalizeArtifactId: string;
+  TallyReadyAt?: GrpcTimestamp;
+  VoteAcceptanceLockedAt?: GrpcTimestamp;
 }
 
 export interface ElectionSummary {
@@ -955,6 +969,32 @@ export interface ElectionTrusteeInvitation {
   RevokedAt?: GrpcTimestamp;
 }
 
+export interface ElectionGovernedProposal {
+  Id: string;
+  ElectionId: string;
+  ActionType: ElectionGovernedActionTypeProto;
+  LifecycleStateAtCreation: ElectionLifecycleStateProto;
+  ProposedByPublicAddress: string;
+  CreatedAt: GrpcTimestamp;
+  ExecutionStatus: ElectionGovernedProposalExecutionStatusProto;
+  LastExecutionAttemptedAt?: GrpcTimestamp;
+  ExecutedAt?: GrpcTimestamp;
+  ExecutionFailureReason: string;
+  LastExecutionTriggeredByPublicAddress: string;
+}
+
+export interface ElectionGovernedProposalApproval {
+  Id: string;
+  ProposalId: string;
+  ElectionId: string;
+  ActionType: ElectionGovernedActionTypeProto;
+  LifecycleStateAtProposalCreation: ElectionLifecycleStateProto;
+  TrusteeUserAddress: string;
+  TrusteeDisplayName: string;
+  ApprovalNote: string;
+  ApprovedAt: GrpcTimestamp;
+}
+
 export interface ElectionDraftInput {
   Title: string;
   ShortDescription: string;
@@ -1004,6 +1044,25 @@ export interface ResolveElectionTrusteeInvitationRequest {
   ActorPublicAddress: string;
 }
 
+export interface StartElectionGovernedProposalRequest {
+  ElectionId: string;
+  ActionType: ElectionGovernedActionTypeProto;
+  ActorPublicAddress: string;
+}
+
+export interface ApproveElectionGovernedProposalRequest {
+  ElectionId: string;
+  ProposalId: string;
+  ActorPublicAddress: string;
+  ApprovalNote: string;
+}
+
+export interface RetryElectionGovernedProposalExecutionRequest {
+  ElectionId: string;
+  ProposalId: string;
+  ActorPublicAddress: string;
+}
+
 export interface GetElectionOpenReadinessRequest {
   ElectionId: string;
   RequiredWarningCodes: ElectionWarningCodeProto[];
@@ -1050,6 +1109,8 @@ export interface ElectionCommandResponse {
   DraftSnapshot?: ElectionDraftSnapshot;
   BoundaryArtifact?: ElectionBoundaryArtifact;
   TrusteeInvitation?: ElectionTrusteeInvitation;
+  GovernedProposal?: ElectionGovernedProposal;
+  GovernedProposalApproval?: ElectionGovernedProposalApproval;
 }
 
 export interface GetElectionOpenReadinessResponse {
@@ -1067,6 +1128,8 @@ export interface GetElectionResponse {
   WarningAcknowledgements: ElectionWarningAcknowledgement[];
   TrusteeInvitations: ElectionTrusteeInvitation[];
   BoundaryArtifacts: ElectionBoundaryArtifact[];
+  GovernedProposals: ElectionGovernedProposal[];
+  GovernedProposalApprovals: ElectionGovernedProposalApproval[];
 }
 
 export interface GetElectionsByOwnerResponse {

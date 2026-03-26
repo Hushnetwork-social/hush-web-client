@@ -1,4 +1,8 @@
 import { create } from 'zustand';
+import {
+  ElectionGovernedActionTypeProto,
+  ElectionGovernedProposalExecutionStatusProto,
+} from '@/lib/grpc';
 import type {
   ElectionCommandResponse,
   ElectionDraftInput,
@@ -10,6 +14,7 @@ import type {
   ResolveElectionTrusteeInvitationRequest,
 } from '@/lib/grpc';
 import { electionsService } from '@/lib/grpc/services/elections';
+import { getGovernedActionLabel } from './contracts';
 
 export type ElectionsFeedbackTone = 'success' | 'error';
 
@@ -42,6 +47,13 @@ interface ElectionsState {
   loadOpenReadiness: (
     requiredWarningCodes: ElectionWarningCodeProto[]
   ) => Promise<GetElectionOpenReadinessResponse | null>;
+  startGovernedProposal: (actionType: ElectionGovernedActionTypeProto) => Promise<boolean>;
+  approveGovernedProposal: (
+    proposalId: string,
+    actorPublicAddress: string,
+    approvalNote?: string
+  ) => Promise<boolean>;
+  retryGovernedProposalExecution: (proposalId: string) => Promise<boolean>;
   openElection: (requiredWarningCodes: ElectionWarningCodeProto[]) => Promise<boolean>;
   closeElection: () => Promise<boolean>;
   finalizeElection: () => Promise<boolean>;
@@ -377,6 +389,152 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
         feedback: buildThrownErrorFeedback(error, 'Failed to load election readiness.'),
       });
       return null;
+    }
+  },
+
+  startGovernedProposal: async (actionType) => {
+    const electionId = get().selectedElectionId;
+    const ownerPublicAddress = get().ownerPublicAddress;
+
+    if (!electionId || !ownerPublicAddress) {
+      return false;
+    }
+
+    set({
+      isSubmitting: true,
+      feedback: null,
+      error: null,
+    });
+
+    try {
+      const response = await electionsService.startElectionGovernedProposal({
+        ElectionId: electionId,
+        ActionType: actionType,
+        ActorPublicAddress: ownerPublicAddress,
+      });
+
+      if (!response.Success) {
+        set({ feedback: buildCommandFailureFeedback(response) });
+        return false;
+      }
+
+      await get().loadElection(electionId);
+      await get().loadOwnerDashboard(ownerPublicAddress);
+      set({
+        feedback: {
+          tone: 'success',
+          message: `${getGovernedActionLabel(actionType)} proposal started.`,
+          details: [],
+        },
+      });
+      return true;
+    } catch (error) {
+      set({
+        feedback: buildThrownErrorFeedback(error, 'Failed to start governed proposal.'),
+      });
+      return false;
+    } finally {
+      set({ isSubmitting: false });
+    }
+  },
+
+  approveGovernedProposal: async (proposalId, actorPublicAddress, approvalNote = '') => {
+    const electionId = get().selectedElectionId;
+    if (!electionId) {
+      return false;
+    }
+
+    set({
+      isSubmitting: true,
+      feedback: null,
+      error: null,
+    });
+
+    try {
+      const response = await electionsService.approveElectionGovernedProposal({
+        ElectionId: electionId,
+        ProposalId: proposalId,
+        ActorPublicAddress: actorPublicAddress,
+        ApprovalNote: approvalNote,
+      });
+
+      if (!response.Success) {
+        set({ feedback: buildCommandFailureFeedback(response) });
+        return false;
+      }
+
+      await get().loadElection(electionId);
+
+      const ownerPublicAddress = get().ownerPublicAddress;
+      if (ownerPublicAddress) {
+        await get().loadOwnerDashboard(ownerPublicAddress);
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message:
+            response.GovernedProposal?.ExecutionStatus ===
+            ElectionGovernedProposalExecutionStatusProto.ExecutionSucceeded
+              ? 'Approval recorded and proposal executed.'
+              : 'Approval recorded.',
+          details: [],
+        },
+      });
+      return true;
+    } catch (error) {
+      set({
+        feedback: buildThrownErrorFeedback(error, 'Failed to approve governed proposal.'),
+      });
+      return false;
+    } finally {
+      set({ isSubmitting: false });
+    }
+  },
+
+  retryGovernedProposalExecution: async (proposalId) => {
+    const electionId = get().selectedElectionId;
+    const ownerPublicAddress = get().ownerPublicAddress;
+
+    if (!electionId || !ownerPublicAddress) {
+      return false;
+    }
+
+    set({
+      isSubmitting: true,
+      feedback: null,
+      error: null,
+    });
+
+    try {
+      const response = await electionsService.retryElectionGovernedProposalExecution({
+        ElectionId: electionId,
+        ProposalId: proposalId,
+        ActorPublicAddress: ownerPublicAddress,
+      });
+
+      if (!response.Success) {
+        set({ feedback: buildCommandFailureFeedback(response) });
+        return false;
+      }
+
+      await get().loadElection(electionId);
+      await get().loadOwnerDashboard(ownerPublicAddress);
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Governed proposal execution retried.',
+          details: [],
+        },
+      });
+      return true;
+    } catch (error) {
+      set({
+        feedback: buildThrownErrorFeedback(error, 'Failed to retry governed proposal execution.'),
+      });
+      return false;
+    } finally {
+      set({ isSubmitting: false });
     }
   },
 

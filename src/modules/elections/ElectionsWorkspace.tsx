@@ -19,6 +19,7 @@ import {
 import {
   ElectionBindingStatusProto,
   type ElectionDraftInput,
+  ElectionGovernedActionTypeProto,
   ElectionGovernanceModeProto,
   type ResolveElectionTrusteeInvitationRequest,
   ElectionTrusteeInvitationStatusProto,
@@ -45,7 +46,11 @@ import {
   getDraftOpenValidationErrors,
   getDraftRevisionLabel,
   getDraftSaveValidationErrors,
+  type GovernedActionViewState,
   getElectionClassLabel,
+  getGovernedActionLabel,
+  getGovernedActionViewStates,
+  getGovernedProposalExecutionStatusLabel,
   getEligibilityMutationLabel,
   getEligibilitySourceLabel,
   getGovernanceLabel,
@@ -93,6 +98,42 @@ function getInvitationStatusLabel(status: ElectionTrusteeInvitationStatusProto):
   }
 }
 
+function getGovernedActionStatusLabel(status: GovernedActionViewState['status']): string {
+  switch (status) {
+    case 'available':
+      return 'Available';
+    case 'pending':
+      return 'Pending';
+    case 'execution_failed':
+      return 'Execution failed';
+    case 'completed':
+      return 'Completed';
+    case 'finalize_not_tally_ready':
+      return 'Awaiting tally readiness';
+    case 'unavailable':
+    default:
+      return 'Unavailable';
+  }
+}
+
+function getGovernedActionStatusClass(status: GovernedActionViewState['status']): string {
+  switch (status) {
+    case 'available':
+      return 'border-green-500/40 bg-green-500/10 text-green-100';
+    case 'pending':
+      return 'border-amber-500/40 bg-amber-500/10 text-amber-100';
+    case 'execution_failed':
+      return 'border-red-500/40 bg-red-500/10 text-red-100';
+    case 'completed':
+      return 'border-hush-purple/40 bg-hush-purple/10 text-hush-purple';
+    case 'finalize_not_tally_ready':
+      return 'border-blue-500/40 bg-blue-500/10 text-blue-100';
+    case 'unavailable':
+    default:
+      return 'border-hush-bg-light bg-hush-bg-dark text-hush-text-accent';
+  }
+}
+
 function toggleWarningCode(
   draft: ElectionDraftInput,
   warningCode: ElectionWarningCodeProto,
@@ -135,6 +176,8 @@ export function ElectionsWorkspace({ ownerPublicAddress }: ElectionsWorkspacePro
     selectedElection,
     selectedElectionId,
     setOwnerPublicAddress,
+    startGovernedProposal,
+    retryGovernedProposalExecution,
     updateDraft,
   } = useElectionsStore();
 
@@ -156,6 +199,10 @@ export function ElectionsWorkspace({ ownerPublicAddress }: ElectionsWorkspacePro
   const boundaryArtifacts = useMemo(
     () => selectedElection?.BoundaryArtifacts ?? [],
     [selectedElection?.BoundaryArtifacts]
+  );
+  const governedActionStates = useMemo(
+    () => getGovernedActionViewStates(selectedElection ?? null),
+    [selectedElection]
   );
 
   const acceptedTrusteeCount = useMemo(
@@ -388,6 +435,21 @@ export function ElectionsWorkspace({ ownerPublicAddress }: ElectionsWorkspacePro
     }
 
     await openElection(requiredWarningCodes);
+  };
+
+  const handleStartGovernedProposal = async (actionType: ElectionGovernedActionTypeProto) => {
+    if (
+      actionType === ElectionGovernedActionTypeProto.Open &&
+      (saveValidationErrors.length > 0 || openValidationErrors.length > 0)
+    ) {
+      return;
+    }
+
+    await startGovernedProposal(actionType);
+  };
+
+  const handleRetryGovernedProposal = async (proposalId: string) => {
+    await retryGovernedProposalExecution(proposalId);
   };
 
   return (
@@ -912,16 +974,17 @@ export function ElectionsWorkspace({ ownerPublicAddress }: ElectionsWorkspacePro
                   <div>
                     <h2 className="text-lg font-semibold">Trustee Draft Setup</h2>
                     <p className="mt-1 text-sm text-hush-text-accent">
-                      Trustee invitations and approval-count metadata are owned by FEAT-094, but
-                      governed open remains blocked until FEAT-096.
+                      Trustee invitations and approval-count metadata are configured here; the
+                      governed `open`, `close`, and `finalize` actions are handled below through the
+                      FEAT-096 proposal workflow.
                     </p>
                   </div>
                   <div
                     className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-100"
                     data-testid="elections-trustee-blocked-panel"
                   >
-                    Trustee-threshold elections cannot open in FEAT-094 until FEAT-096 provides the
-                    governed approval workflow.
+                    FEAT-096 is active for trustee-threshold elections. Critical lifecycle changes
+                    now move through proposal approval instead of direct buttons.
                   </div>
                 </div>
 
@@ -1213,6 +1276,159 @@ export function ElectionsWorkspace({ ownerPublicAddress }: ElectionsWorkspacePro
                 </div>
               </div>
             </section>
+
+            {election?.GovernanceMode === ElectionGovernanceModeProto.TrusteeThreshold && (
+              <section className={sectionClass} data-testid="elections-governed-actions">
+                <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <h2 className="text-lg font-semibold">Governed Actions</h2>
+                    <p className="mt-1 text-sm text-hush-text-accent">
+                      FEAT-096 keeps critical `open`, `close`, and `finalize` transitions inside
+                      the current workspace while making pending, failed, and unavailable states
+                      explicit.
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-hush-purple/30 bg-hush-purple/10 px-3 py-2 text-xs text-hush-text-primary">
+                    Trustee-threshold elections use proposal approval instead of direct lifecycle
+                    buttons.
+                  </div>
+                </div>
+
+                {!selectedElectionId ? (
+                  <div className="rounded-xl border border-dashed border-hush-bg-light bg-hush-bg-dark/60 px-4 py-5 text-sm text-hush-text-accent">
+                    Save the trustee-threshold draft first to start governed actions.
+                  </div>
+                ) : (
+                  <div className="grid gap-4 xl:grid-cols-3">
+                    {governedActionStates.map((state) => {
+                      const openWorkflowBlocked =
+                        state.actionType === ElectionGovernedActionTypeProto.Open &&
+                        (saveValidationErrors.length > 0 || openValidationErrors.length > 0);
+                      const resolvedReason = openWorkflowBlocked
+                        ? 'Resolve the draft-save and open-checklist issues below before starting the governed open request.'
+                        : state.reason;
+
+                      return (
+                        <article
+                          key={state.actionType}
+                          className="rounded-2xl border border-hush-bg-light bg-hush-bg-dark/80 p-4"
+                          data-testid={`elections-governed-card-${state.actionType}`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="text-sm font-semibold">
+                                {getGovernedActionLabel(state.actionType)} proposal
+                              </div>
+                              <div className="mt-1 text-xs text-hush-text-accent">
+                                {state.requiredApprovalCount !== null
+                                  ? `${state.approvalCount} of ${state.requiredApprovalCount} approvals recorded`
+                                  : 'Approval threshold not yet recorded'}
+                              </div>
+                            </div>
+                            <span
+                              className={`rounded-full border px-3 py-1 text-xs font-medium ${getGovernedActionStatusClass(state.status)}`}
+                            >
+                              {getGovernedActionStatusLabel(state.status)}
+                            </span>
+                          </div>
+
+                          <p className="mt-4 text-sm text-hush-text-accent">{resolvedReason}</p>
+
+                          {state.proposal && (
+                            <div className="mt-4 rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-3 text-xs text-hush-text-accent">
+                              <div>
+                                Proposal id:{' '}
+                                <span className="font-mono text-hush-text-primary">{state.proposal.Id}</span>
+                              </div>
+                              <div className="mt-1">
+                                Created: {formatTimestamp(state.proposal.CreatedAt)}
+                              </div>
+                              <div className="mt-1">
+                                Execution state:{' '}
+                                {getGovernedProposalExecutionStatusLabel(state.proposal.ExecutionStatus)}
+                              </div>
+                            </div>
+                          )}
+
+                          {state.approvals.length > 0 && (
+                            <div className="mt-4 rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-3">
+                              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                                Recorded approvals
+                              </div>
+                              <div className="mt-3 space-y-2">
+                                {state.approvals.map((approval) => (
+                                  <div
+                                    key={approval.Id}
+                                    className="rounded-xl border border-hush-bg-light/60 px-3 py-2 text-xs text-hush-text-accent"
+                                  >
+                                    <div className="font-medium text-hush-text-primary">
+                                      {approval.TrusteeDisplayName || approval.TrusteeUserAddress}
+                                    </div>
+                                    <div className="mt-1">
+                                      Approved at {formatTimestamp(approval.ApprovedAt)}
+                                    </div>
+                                    {approval.ApprovalNote ? (
+                                      <div className="mt-1 text-hush-text-primary">
+                                        Note: {approval.ApprovalNote}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            {state.status === 'available' && (
+                              <button
+                                type="button"
+                                onClick={() => void handleStartGovernedProposal(state.actionType)}
+                                disabled={isSubmitting || openWorkflowBlocked}
+                                className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 disabled:cursor-not-allowed disabled:bg-hush-bg-light disabled:text-hush-text-accent"
+                                data-testid={`elections-governed-start-${state.actionType}`}
+                              >
+                                {isSubmitting ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Lock className="h-4 w-4" />
+                                )}
+                                <span>Start {state.label}</span>
+                              </button>
+                            )}
+
+                            {state.status === 'execution_failed' && state.proposal && (
+                              <button
+                                type="button"
+                                onClick={() => void handleRetryGovernedProposal(state.proposal!.Id)}
+                                disabled={isSubmitting}
+                                className="inline-flex items-center gap-2 rounded-xl border border-red-500/40 px-4 py-2 text-sm text-red-100 transition-colors hover:border-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+                                data-testid={`elections-governed-retry-${state.actionType}`}
+                              >
+                                {isSubmitting ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <RefreshCcw className="h-4 w-4" />
+                                )}
+                                <span>Retry execution</span>
+                              </button>
+                            )}
+
+                            {state.proposal && (
+                              <Link
+                                href={`/account/elections/trustee/${state.proposal.ElectionId}/proposal/${state.proposal.Id}`}
+                                className="inline-flex items-center gap-2 rounded-xl border border-hush-bg-light px-4 py-2 text-sm transition-colors hover:border-hush-purple"
+                              >
+                                <span>Open trustee approval page</span>
+                              </Link>
+                            )}
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+            )}
 
             <section className={sectionClass}>
               <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">

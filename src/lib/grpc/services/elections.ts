@@ -1,5 +1,6 @@
 import { getGrpcClient } from '../client';
 import type {
+  ApproveElectionGovernedProposalRequest,
   CloseElectionRequest,
   CreateElectionDraftRequest,
   ElectionCommandResponse,
@@ -12,7 +13,9 @@ import type {
   GetElectionsByOwnerResponse,
   InviteElectionTrusteeRequest,
   OpenElectionRequest,
+  RetryElectionGovernedProposalExecutionRequest,
   ResolveElectionTrusteeInvitationRequest,
+  StartElectionGovernedProposalRequest,
   UpdateElectionDraftRequest,
 } from '../types';
 
@@ -88,6 +91,39 @@ export const electionsService = {
     return client.unaryCall<GetElectionOpenReadinessRequest, GetElectionOpenReadinessResponse>(
       SERVICE_NAME,
       'GetElectionOpenReadiness',
+      request
+    );
+  },
+
+  async startElectionGovernedProposal(
+    request: StartElectionGovernedProposalRequest
+  ): Promise<ElectionCommandResponse> {
+    const client = getGrpcClient();
+    return client.unaryCall<StartElectionGovernedProposalRequest, ElectionCommandResponse>(
+      SERVICE_NAME,
+      'StartElectionGovernedProposal',
+      request
+    );
+  },
+
+  async approveElectionGovernedProposal(
+    request: ApproveElectionGovernedProposalRequest
+  ): Promise<ElectionCommandResponse> {
+    const client = getGrpcClient();
+    return client.unaryCall<ApproveElectionGovernedProposalRequest, ElectionCommandResponse>(
+      SERVICE_NAME,
+      'ApproveElectionGovernedProposal',
+      request
+    );
+  },
+
+  async retryElectionGovernedProposalExecution(
+    request: RetryElectionGovernedProposalExecutionRequest
+  ): Promise<ElectionCommandResponse> {
+    const client = getGrpcClient();
+    return client.unaryCall<RetryElectionGovernedProposalExecutionRequest, ElectionCommandResponse>(
+      SERVICE_NAME,
+      'RetryElectionGovernedProposalExecution',
       request
     );
   },

@@ -4,6 +4,10 @@ import {
   ElectionDisclosureModeProto,
   type ElectionDraftInput,
   type ElectionDraftSnapshot,
+  ElectionGovernedActionTypeProto,
+  type ElectionGovernedProposal,
+  type ElectionGovernedProposalApproval,
+  ElectionGovernedProposalExecutionStatusProto,
   ElectionGovernanceModeProto,
   ElectionLifecycleStateProto,
   type ElectionOption,
@@ -151,6 +155,21 @@ const REPORTING_POLICY_LABELS: Record<ReportingPolicyProto, string> = {
 const REVIEW_WINDOW_LABELS: Record<ReviewWindowPolicyProto, string> = {
   [ReviewWindowPolicyProto.NoReviewWindow]: 'No review window',
   [ReviewWindowPolicyProto.GovernedReviewWindowReserved]: 'Governed review window reserved',
+};
+
+const GOVERNED_ACTION_LABELS: Record<ElectionGovernedActionTypeProto, string> = {
+  [ElectionGovernedActionTypeProto.Open]: 'Open',
+  [ElectionGovernedActionTypeProto.Close]: 'Close',
+  [ElectionGovernedActionTypeProto.Finalize]: 'Finalize',
+};
+
+const GOVERNED_PROPOSAL_STATUS_LABELS: Record<
+  ElectionGovernedProposalExecutionStatusProto,
+  string
+> = {
+  [ElectionGovernedProposalExecutionStatusProto.WaitingForApprovals]: 'Waiting for approvals',
+  [ElectionGovernedProposalExecutionStatusProto.ExecutionSucceeded]: 'Executed',
+  [ElectionGovernedProposalExecutionStatusProto.ExecutionFailed]: 'Execution failed',
 };
 
 let nextOptionSeed = 1;
@@ -420,6 +439,36 @@ export function getWarningTitle(code: ElectionWarningCodeProto): string {
   return WARNING_CHOICES.find((warning) => warning.code === code)?.title ?? 'Unspecified warning';
 }
 
+export type GovernedActionViewStatus =
+  | 'available'
+  | 'pending'
+  | 'execution_failed'
+  | 'completed'
+  | 'unavailable'
+  | 'finalize_not_tally_ready';
+
+export interface GovernedProposalProgress {
+  approvalCount: number;
+  requiredApprovalCount: number | null;
+  approvals: ElectionGovernedProposalApproval[];
+}
+
+export interface GovernedActionViewState extends GovernedProposalProgress {
+  actionType: ElectionGovernedActionTypeProto;
+  label: string;
+  status: GovernedActionViewStatus;
+  reason: string;
+  proposal: ElectionGovernedProposal | null;
+}
+
+function timestampToMilliseconds(timestamp?: GrpcTimestamp): number {
+  if (!timestamp) {
+    return 0;
+  }
+
+  return (timestamp.seconds * 1000) + Math.floor(timestamp.nanos / 1_000_000);
+}
+
 export function formatTimestamp(timestamp?: GrpcTimestamp): string {
   if (!timestamp) {
     return 'Not recorded';
@@ -441,6 +490,69 @@ export function formatArtifactValue(value?: string): string {
   return `${value.slice(0, 12)}...${value.slice(-8)}`;
 }
 
+export function getGovernedActionLabel(actionType: ElectionGovernedActionTypeProto): string {
+  return GOVERNED_ACTION_LABELS[actionType];
+}
+
+export function getGovernedProposalExecutionStatusLabel(
+  status: ElectionGovernedProposalExecutionStatusProto
+): string {
+  return GOVERNED_PROPOSAL_STATUS_LABELS[status];
+}
+
+export function getGovernedProposalApprovals(
+  detail: GetElectionResponse | null,
+  proposalId: string
+): ElectionGovernedProposalApproval[] {
+  return (detail?.GovernedProposalApprovals ?? [])
+    .filter((approval) => approval.ProposalId === proposalId)
+    .sort(
+      (left, right) => timestampToMilliseconds(left.ApprovedAt) - timestampToMilliseconds(right.ApprovedAt)
+    );
+}
+
+export function getLatestGovernedProposal(
+  detail: GetElectionResponse | null,
+  actionType?: ElectionGovernedActionTypeProto
+): ElectionGovernedProposal | null {
+  const proposals = (detail?.GovernedProposals ?? [])
+    .filter((proposal) => actionType === undefined || proposal.ActionType === actionType)
+    .sort(
+      (left, right) => timestampToMilliseconds(right.CreatedAt) - timestampToMilliseconds(left.CreatedAt)
+    );
+
+  return proposals[0] ?? null;
+}
+
+export function getPendingGovernedProposal(detail: GetElectionResponse | null): ElectionGovernedProposal | null {
+  const proposals = detail?.GovernedProposals ?? [];
+
+  return (
+    proposals
+      .filter(
+        (proposal) =>
+          proposal.ExecutionStatus !== ElectionGovernedProposalExecutionStatusProto.ExecutionSucceeded
+      )
+      .sort(
+        (left, right) => timestampToMilliseconds(right.CreatedAt) - timestampToMilliseconds(left.CreatedAt)
+      )[0] ?? null
+  );
+}
+
+export function getGovernedProposalProgress(
+  detail: GetElectionResponse | null,
+  proposalId: string
+): GovernedProposalProgress {
+  const approvals = getGovernedProposalApprovals(detail, proposalId);
+  const requiredApprovalCount = detail?.Election?.RequiredApprovalCount ?? null;
+
+  return {
+    approvalCount: approvals.length,
+    requiredApprovalCount,
+    approvals,
+  };
+}
+
 export function isDraftEditable(election?: ElectionRecordView): boolean {
   return !election || election.LifecycleState === ElectionLifecycleStateProto.Draft;
 }
@@ -452,11 +564,221 @@ export function canOpenElection(election?: ElectionRecordView): boolean {
 }
 
 export function canCloseElection(election?: ElectionRecordView): boolean {
-  return election?.LifecycleState === ElectionLifecycleStateProto.Open;
+  return election?.LifecycleState === ElectionLifecycleStateProto.Open &&
+    election.GovernanceMode === ElectionGovernanceModeProto.AdminOnly;
 }
 
 export function canFinalizeElection(election?: ElectionRecordView): boolean {
-  return election?.LifecycleState === ElectionLifecycleStateProto.Closed;
+  return election?.LifecycleState === ElectionLifecycleStateProto.Closed &&
+    election.GovernanceMode === ElectionGovernanceModeProto.AdminOnly;
+}
+
+function buildPendingGovernedReason(
+  actionType: ElectionGovernedActionTypeProto,
+  election: ElectionRecordView
+): string {
+  switch (actionType) {
+    case ElectionGovernedActionTypeProto.Open:
+      return 'Draft edits are locked while trustee approval is pending.';
+    case ElectionGovernedActionTypeProto.Close:
+      return election.VoteAcceptanceLockedAt
+        ? 'Vote acceptance is already locked while trustee approval is pending.'
+        : 'Trustee approval is pending before the election can close.';
+    case ElectionGovernedActionTypeProto.Finalize:
+      return 'Trustee approval is pending before finalization can execute.';
+    default:
+      return 'Trustee approval is pending.';
+  }
+}
+
+function buildGovernedAvailabilityState(
+  detail: GetElectionResponse | null,
+  actionType: ElectionGovernedActionTypeProto
+): GovernedActionViewState {
+  const election = detail?.Election;
+  const label = getGovernedActionLabel(actionType);
+  const proposal = getLatestGovernedProposal(detail, actionType);
+  const progress = proposal
+    ? getGovernedProposalProgress(detail, proposal.Id)
+    : {
+        approvalCount: 0,
+        requiredApprovalCount: election?.RequiredApprovalCount ?? null,
+        approvals: [],
+      };
+
+  if (!election) {
+    return {
+      actionType,
+      label,
+      status: 'unavailable',
+      reason: `${label} is unavailable until election details load.`,
+      proposal: null,
+      ...progress,
+    };
+  }
+
+  const pendingProposal = getPendingGovernedProposal(detail);
+  if (
+    pendingProposal &&
+    pendingProposal.ActionType === actionType &&
+    pendingProposal.ExecutionStatus === ElectionGovernedProposalExecutionStatusProto.WaitingForApprovals
+  ) {
+    return {
+      actionType,
+      label,
+      status: 'pending',
+      reason: buildPendingGovernedReason(actionType, election),
+      proposal: pendingProposal,
+      ...getGovernedProposalProgress(detail, pendingProposal.Id),
+    };
+  }
+
+  if (
+    proposal &&
+    proposal.ExecutionStatus === ElectionGovernedProposalExecutionStatusProto.ExecutionFailed
+  ) {
+    return {
+      actionType,
+      label,
+      status: 'execution_failed',
+      reason:
+        proposal.ExecutionFailureReason || `${label} execution failed. The owner can retry the proposal.`,
+      proposal,
+      ...progress,
+    };
+  }
+
+  if (pendingProposal && pendingProposal.ActionType !== actionType) {
+    return {
+      actionType,
+      label,
+      status: 'unavailable',
+      reason: `${getGovernedActionLabel(pendingProposal.ActionType)} is already pending for this election.`,
+      proposal,
+      ...progress,
+    };
+  }
+
+  switch (actionType) {
+    case ElectionGovernedActionTypeProto.Open:
+      if (election.LifecycleState === ElectionLifecycleStateProto.Draft) {
+        return {
+          actionType,
+          label,
+          status: 'available',
+          reason: 'Start trustee approval to open the election.',
+          proposal,
+          ...progress,
+        };
+      }
+
+      return {
+        actionType,
+        label,
+        status: 'completed',
+        reason: 'The election is already open or beyond.',
+        proposal,
+        ...progress,
+      };
+
+    case ElectionGovernedActionTypeProto.Close:
+      if (election.LifecycleState === ElectionLifecycleStateProto.Open) {
+        return {
+          actionType,
+          label,
+          status: 'available',
+          reason: 'Starting close locks vote acceptance immediately while trustee approval is pending.',
+          proposal,
+          ...progress,
+        };
+      }
+
+      if (election.LifecycleState === ElectionLifecycleStateProto.Closed ||
+          election.LifecycleState === ElectionLifecycleStateProto.Finalized) {
+        return {
+          actionType,
+          label,
+          status: 'completed',
+          reason: 'The election is already closed.',
+          proposal,
+          ...progress,
+        };
+      }
+
+      return {
+        actionType,
+        label,
+        status: 'unavailable',
+        reason: 'Close proposals are only available while the election is open.',
+        proposal,
+        ...progress,
+      };
+
+    case ElectionGovernedActionTypeProto.Finalize:
+      if (election.LifecycleState === ElectionLifecycleStateProto.Finalized) {
+        return {
+          actionType,
+          label,
+          status: 'completed',
+          reason: 'The election is already finalized.',
+          proposal,
+          ...progress,
+        };
+      }
+
+      if (election.LifecycleState !== ElectionLifecycleStateProto.Closed) {
+        return {
+          actionType,
+          label,
+          status: 'unavailable',
+          reason: 'Finalize proposals are only available while the election is closed.',
+          proposal,
+          ...progress,
+        };
+      }
+
+      if (!election.TallyReadyAt) {
+        return {
+          actionType,
+          label,
+          status: 'finalize_not_tally_ready',
+          reason: 'Finalize remains unavailable until tally readiness is recorded.',
+          proposal,
+          ...progress,
+        };
+      }
+
+      return {
+        actionType,
+        label,
+        status: 'available',
+        reason: 'Tally readiness is recorded and trustees can approve finalization.',
+        proposal,
+        ...progress,
+      };
+
+    default:
+      return {
+        actionType,
+        label,
+        status: 'unavailable',
+        reason: `${label} is unavailable.`,
+        proposal,
+        ...progress,
+      };
+  }
+}
+
+export function getGovernedActionViewStates(detail: GetElectionResponse | null): GovernedActionViewState[] {
+  if (detail?.Election?.GovernanceMode !== ElectionGovernanceModeProto.TrusteeThreshold) {
+    return [];
+  }
+
+  return [
+    buildGovernedAvailabilityState(detail, ElectionGovernedActionTypeProto.Open),
+    buildGovernedAvailabilityState(detail, ElectionGovernedActionTypeProto.Close),
+    buildGovernedAvailabilityState(detail, ElectionGovernedActionTypeProto.Finalize),
+  ];
 }
 
 export function getUnsupportedDraftValueMessages(draft: ElectionDraftInput): string[] {

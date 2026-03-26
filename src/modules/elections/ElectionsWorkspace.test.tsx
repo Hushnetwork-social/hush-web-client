@@ -30,6 +30,7 @@ import { useElectionsStore } from './useElectionsStore';
 
 const { electionsServiceMock } = vi.hoisted(() => ({
   electionsServiceMock: {
+    approveElectionGovernedProposal: vi.fn(),
     closeElection: vi.fn(),
     createElectionDraft: vi.fn(),
     finalizeElection: vi.fn(),
@@ -39,6 +40,8 @@ const { electionsServiceMock } = vi.hoisted(() => ({
     inviteElectionTrustee: vi.fn(),
     openElection: vi.fn(),
     revokeElectionTrusteeInvitation: vi.fn(),
+    retryElectionGovernedProposalExecution: vi.fn(),
+    startElectionGovernedProposal: vi.fn(),
     updateElectionDraft: vi.fn(),
   },
 }));
@@ -181,6 +184,8 @@ function createElectionResponse(overrides?: Partial<GetElectionResponse>): GetEl
     WarningAcknowledgements: [],
     TrusteeInvitations: [],
     BoundaryArtifacts: [],
+    GovernedProposals: [],
+    GovernedProposalApprovals: [],
     ...overrides,
   };
 }
@@ -219,6 +224,9 @@ describe('ElectionsWorkspace', () => {
     electionsServiceMock.updateElectionDraft.mockResolvedValue(createCommandResponse());
     electionsServiceMock.inviteElectionTrustee.mockResolvedValue(createCommandResponse());
     electionsServiceMock.revokeElectionTrusteeInvitation.mockResolvedValue(createCommandResponse());
+    electionsServiceMock.startElectionGovernedProposal.mockResolvedValue(createCommandResponse());
+    electionsServiceMock.approveElectionGovernedProposal.mockResolvedValue(createCommandResponse());
+    electionsServiceMock.retryElectionGovernedProposalExecution.mockResolvedValue(createCommandResponse());
     electionsServiceMock.openElection.mockResolvedValue(createCommandResponse());
     electionsServiceMock.closeElection.mockResolvedValue(createCommandResponse());
     electionsServiceMock.finalizeElection.mockResolvedValue(createCommandResponse());
