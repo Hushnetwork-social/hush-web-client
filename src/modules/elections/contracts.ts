@@ -1,0 +1,680 @@
+import {
+  ElectionBindingStatusProto,
+  ElectionClassProto,
+  ElectionDisclosureModeProto,
+  type ElectionDraftInput,
+  type ElectionDraftSnapshot,
+  ElectionGovernanceModeProto,
+  ElectionLifecycleStateProto,
+  type ElectionOption,
+  type ElectionRecordView,
+  type ElectionSummary,
+  ElectionWarningCodeProto,
+  EligibilityMutationPolicyProto,
+  EligibilitySourceTypeProto,
+  type GetElectionResponse,
+  type GrpcTimestamp,
+  OutcomeRuleKindProto,
+  ParticipationPrivacyModeProto,
+  ReportingPolicyProto,
+  ReviewWindowPolicyProto,
+  VoteUpdatePolicyProto,
+} from '@/lib/grpc';
+
+export type ElectionSelectOption<TValue extends number> = {
+  label: string;
+  value: TValue;
+  description: string;
+};
+
+export type ElectionWarningChoice = {
+  code: ElectionWarningCodeProto;
+  title: string;
+  description: string;
+};
+
+export const DEFAULT_APPROVED_CLIENT_APPLICATIONS = [
+  { ApplicationId: 'hushsocial', Version: '1.0.0' },
+];
+
+export const DEFAULT_PROTOCOL_OMEGA_VERSION = 'omega-v1.0.0';
+
+export const BINDING_OPTIONS: ElectionSelectOption<ElectionBindingStatusProto>[] = [
+  {
+    value: ElectionBindingStatusProto.Binding,
+    label: 'Binding',
+    description: 'Results are intended to be the official organizational decision.',
+  },
+  {
+    value: ElectionBindingStatusProto.NonBinding,
+    label: 'Non-binding',
+    description: 'Results are advisory but still follow the same lifecycle and frozen-policy rules.',
+  },
+];
+
+export const GOVERNANCE_OPTIONS: ElectionSelectOption<ElectionGovernanceModeProto>[] = [
+  {
+    value: ElectionGovernanceModeProto.AdminOnly,
+    label: 'Admin only',
+    description: 'The owner can open, close, and finalize directly in FEAT-094.',
+  },
+  {
+    value: ElectionGovernanceModeProto.TrusteeThreshold,
+    label: 'Trustee threshold',
+    description: 'Draft setup is supported now, but open remains blocked until FEAT-096.',
+  },
+];
+
+export const OUTCOME_RULE_OPTIONS: ElectionSelectOption<OutcomeRuleKindProto>[] = [
+  {
+    value: OutcomeRuleKindProto.SingleWinner,
+    label: 'Single winner',
+    description: 'One winner is selected from the non-blank options.',
+  },
+  {
+    value: OutcomeRuleKindProto.PassFail,
+    label: 'Pass / fail',
+    description: 'Two-option majority decision with blank votes reported separately.',
+  },
+];
+
+export const WARNING_CHOICES: ElectionWarningChoice[] = [
+  {
+    code: ElectionWarningCodeProto.LowAnonymitySet,
+    title: 'Low anonymity set',
+    description:
+      'Acknowledge that a small election reduces practical anonymity even with private ballots.',
+  },
+  {
+    code: ElectionWarningCodeProto.AllTrusteesRequiredFragility,
+    title: 'All trustees required fragility',
+    description:
+      'Acknowledge that requiring every accepted trustee can block lifecycle progress if one becomes unavailable.',
+  },
+];
+
+const LIFECYCLE_LABELS: Record<ElectionLifecycleStateProto, string> = {
+  [ElectionLifecycleStateProto.Draft]: 'Draft',
+  [ElectionLifecycleStateProto.Open]: 'Open',
+  [ElectionLifecycleStateProto.Closed]: 'Closed',
+  [ElectionLifecycleStateProto.Finalized]: 'Finalized',
+};
+
+const BINDING_LABELS: Record<ElectionBindingStatusProto, string> = {
+  [ElectionBindingStatusProto.Binding]: 'Binding',
+  [ElectionBindingStatusProto.NonBinding]: 'Non-binding',
+};
+
+const GOVERNANCE_LABELS: Record<ElectionGovernanceModeProto, string> = {
+  [ElectionGovernanceModeProto.AdminOnly]: 'Admin only',
+  [ElectionGovernanceModeProto.TrusteeThreshold]: 'Trustee threshold',
+};
+
+const OUTCOME_LABELS: Record<OutcomeRuleKindProto, string> = {
+  [OutcomeRuleKindProto.SingleWinner]: 'Single winner',
+  [OutcomeRuleKindProto.PassFail]: 'Pass / fail',
+  [OutcomeRuleKindProto.TopN]: 'Top N',
+};
+
+const DISCLOSURE_LABELS: Record<ElectionDisclosureModeProto, string> = {
+  [ElectionDisclosureModeProto.FinalResultsOnly]: 'Final results only',
+  [ElectionDisclosureModeProto.SeparatedParticipationAndResultReports]:
+    'Separated participation and result reports',
+  [ElectionDisclosureModeProto.SeparatedParticipationAndPlaintextBallotReports]:
+    'Separated participation and plaintext ballot reports',
+};
+
+const PARTICIPATION_PRIVACY_LABELS: Record<ParticipationPrivacyModeProto, string> = {
+  [ParticipationPrivacyModeProto.PublicCheckoffAnonymousBallotPrivateChoice]:
+    'Public checkoff, anonymous ballot, private choice',
+};
+
+const VOTE_UPDATE_LABELS: Record<VoteUpdatePolicyProto, string> = {
+  [VoteUpdatePolicyProto.SingleSubmissionOnly]: 'Single submission only',
+  [VoteUpdatePolicyProto.LatestValidVoteWins]: 'Latest valid vote wins',
+};
+
+const ELIGIBILITY_SOURCE_LABELS: Record<EligibilitySourceTypeProto, string> = {
+  [EligibilitySourceTypeProto.OrganizationImportedRoster]: 'Organization imported roster',
+};
+
+const ELIGIBILITY_MUTATION_LABELS: Record<EligibilityMutationPolicyProto, string> = {
+  [EligibilityMutationPolicyProto.FrozenAtOpen]: 'Frozen at open',
+  [EligibilityMutationPolicyProto.LateActivationForRosteredVotersOnly]:
+    'Late activation for rostered voters only',
+};
+
+const REPORTING_POLICY_LABELS: Record<ReportingPolicyProto, string> = {
+  [ReportingPolicyProto.DefaultPhaseOnePackage]: 'Default phase one package',
+};
+
+const REVIEW_WINDOW_LABELS: Record<ReviewWindowPolicyProto, string> = {
+  [ReviewWindowPolicyProto.NoReviewWindow]: 'No review window',
+  [ReviewWindowPolicyProto.GovernedReviewWindowReserved]: 'Governed review window reserved',
+};
+
+let nextOptionSeed = 1;
+
+export function createElectionOption(ballotOrder: number, displayLabel = ''): ElectionOption {
+  const optionId = `option-${nextOptionSeed}`;
+  nextOptionSeed += 1;
+
+  return {
+    OptionId: optionId,
+    DisplayLabel: displayLabel,
+    ShortDescription: '',
+    BallotOrder: ballotOrder,
+    IsBlankOption: false,
+  };
+}
+
+export function renumberElectionOptions(options: ElectionOption[]): ElectionOption[] {
+  return options.map((option, index) => ({
+    ...option,
+    OptionId: option.OptionId || `option-${index + 1}`,
+    BallotOrder: index + 1,
+  }));
+}
+
+export function createSingleWinnerOutcomeRule(): ElectionDraftInput['OutcomeRule'] {
+  return {
+    Kind: OutcomeRuleKindProto.SingleWinner,
+    TemplateKey: 'single_winner',
+    SeatCount: 1,
+    BlankVoteCountsForTurnout: true,
+    BlankVoteExcludedFromWinnerSelection: true,
+    BlankVoteExcludedFromThresholdDenominator: false,
+    TieResolutionRule: 'tie_unresolved',
+    CalculationBasis: 'highest_non_blank_votes',
+  };
+}
+
+export function createPassFailOutcomeRule(): ElectionDraftInput['OutcomeRule'] {
+  return {
+    Kind: OutcomeRuleKindProto.PassFail,
+    TemplateKey: 'pass_fail_yes_no',
+    SeatCount: 1,
+    BlankVoteCountsForTurnout: true,
+    BlankVoteExcludedFromWinnerSelection: true,
+    BlankVoteExcludedFromThresholdDenominator: true,
+    TieResolutionRule: 'tie_unresolved',
+    CalculationBasis: 'simple_majority_of_non_blank_votes',
+  };
+}
+
+export function createOutcomeRuleForKind(kind: OutcomeRuleKindProto): ElectionDraftInput['OutcomeRule'] {
+  return kind === OutcomeRuleKindProto.PassFail
+    ? createPassFailOutcomeRule()
+    : createSingleWinnerOutcomeRule();
+}
+
+export function getReviewWindowPolicyForGovernance(
+  governanceMode: ElectionGovernanceModeProto
+): ReviewWindowPolicyProto {
+  return governanceMode === ElectionGovernanceModeProto.TrusteeThreshold
+    ? ReviewWindowPolicyProto.GovernedReviewWindowReserved
+    : ReviewWindowPolicyProto.NoReviewWindow;
+}
+
+export function applyGovernanceModeDefaults(
+  draft: ElectionDraftInput,
+  governanceMode: ElectionGovernanceModeProto
+): ElectionDraftInput {
+  return {
+    ...draft,
+    GovernanceMode: governanceMode,
+    ReviewWindowPolicy: getReviewWindowPolicyForGovernance(governanceMode),
+    RequiredApprovalCount:
+      governanceMode === ElectionGovernanceModeProto.TrusteeThreshold
+        ? Math.max(1, draft.RequiredApprovalCount ?? 1)
+        : undefined,
+  };
+}
+
+export function createDefaultElectionDraft(): ElectionDraftInput {
+  return {
+    Title: '',
+    ShortDescription: '',
+    ExternalReferenceCode: '',
+    ElectionClass: ElectionClassProto.OrganizationalRemoteVoting,
+    BindingStatus: ElectionBindingStatusProto.Binding,
+    GovernanceMode: ElectionGovernanceModeProto.AdminOnly,
+    DisclosureMode: ElectionDisclosureModeProto.FinalResultsOnly,
+    ParticipationPrivacyMode:
+      ParticipationPrivacyModeProto.PublicCheckoffAnonymousBallotPrivateChoice,
+    VoteUpdatePolicy: VoteUpdatePolicyProto.SingleSubmissionOnly,
+    EligibilitySourceType: EligibilitySourceTypeProto.OrganizationImportedRoster,
+    EligibilityMutationPolicy: EligibilityMutationPolicyProto.FrozenAtOpen,
+    OutcomeRule: createSingleWinnerOutcomeRule(),
+    ApprovedClientApplications: [...DEFAULT_APPROVED_CLIENT_APPLICATIONS],
+    ProtocolOmegaVersion: DEFAULT_PROTOCOL_OMEGA_VERSION,
+    ReportingPolicy: ReportingPolicyProto.DefaultPhaseOnePackage,
+    ReviewWindowPolicy: ReviewWindowPolicyProto.NoReviewWindow,
+    OwnerOptions: [createElectionOption(1), createElectionOption(2)],
+    AcknowledgedWarningCodes: [],
+    RequiredApprovalCount: undefined,
+  };
+}
+
+export function createDraftFromElectionDetail(detail: GetElectionResponse | null): ElectionDraftInput {
+  const draftSnapshot = detail?.LatestDraftSnapshot;
+  if (draftSnapshot) {
+    return {
+      Title: draftSnapshot.Metadata.Title,
+      ShortDescription: draftSnapshot.Metadata.ShortDescription,
+      ExternalReferenceCode: draftSnapshot.Metadata.ExternalReferenceCode,
+      ElectionClass: draftSnapshot.Policy.ElectionClass,
+      BindingStatus: draftSnapshot.Policy.BindingStatus,
+      GovernanceMode: draftSnapshot.Policy.GovernanceMode,
+      DisclosureMode: draftSnapshot.Policy.DisclosureMode,
+      ParticipationPrivacyMode: draftSnapshot.Policy.ParticipationPrivacyMode,
+      VoteUpdatePolicy: draftSnapshot.Policy.VoteUpdatePolicy,
+      EligibilitySourceType: draftSnapshot.Policy.EligibilitySourceType,
+      EligibilityMutationPolicy: draftSnapshot.Policy.EligibilityMutationPolicy,
+      OutcomeRule: { ...draftSnapshot.Policy.OutcomeRule },
+      ApprovedClientApplications: draftSnapshot.Policy.ApprovedClientApplications.map((application) => ({
+        ...application,
+      })),
+      ProtocolOmegaVersion: draftSnapshot.Policy.ProtocolOmegaVersion,
+      ReportingPolicy: draftSnapshot.Policy.ReportingPolicy,
+      ReviewWindowPolicy: draftSnapshot.Policy.ReviewWindowPolicy,
+      OwnerOptions: renumberElectionOptions(
+        draftSnapshot.Options.map((option) => ({
+          ...option,
+        }))
+      ),
+      AcknowledgedWarningCodes: [...draftSnapshot.AcknowledgedWarningCodes],
+      RequiredApprovalCount: draftSnapshot.Policy.RequiredApprovalCount,
+    };
+  }
+
+  const election = detail?.Election;
+  if (election) {
+    return {
+      Title: election.Title,
+      ShortDescription: election.ShortDescription,
+      ExternalReferenceCode: election.ExternalReferenceCode,
+      ElectionClass: election.ElectionClass,
+      BindingStatus: election.BindingStatus,
+      GovernanceMode: election.GovernanceMode,
+      DisclosureMode: election.DisclosureMode,
+      ParticipationPrivacyMode: election.ParticipationPrivacyMode,
+      VoteUpdatePolicy: election.VoteUpdatePolicy,
+      EligibilitySourceType: election.EligibilitySourceType,
+      EligibilityMutationPolicy: election.EligibilityMutationPolicy,
+      OutcomeRule: { ...election.OutcomeRule },
+      ApprovedClientApplications: election.ApprovedClientApplications.map((application) => ({
+        ...application,
+      })),
+      ProtocolOmegaVersion: election.ProtocolOmegaVersion,
+      ReportingPolicy: election.ReportingPolicy,
+      ReviewWindowPolicy: election.ReviewWindowPolicy,
+      OwnerOptions: renumberElectionOptions(
+        election.Options.map((option) => ({
+          ...option,
+        }))
+      ),
+      AcknowledgedWarningCodes: [...election.AcknowledgedWarningCodes],
+      RequiredApprovalCount: election.RequiredApprovalCount,
+    };
+  }
+
+  return createDefaultElectionDraft();
+}
+
+export function normalizeElectionDraft(draft: ElectionDraftInput): ElectionDraftInput {
+  return {
+    ...draft,
+    Title: draft.Title.trim(),
+    ShortDescription: draft.ShortDescription.trim(),
+    ExternalReferenceCode: draft.ExternalReferenceCode.trim(),
+    OutcomeRule: {
+      ...draft.OutcomeRule,
+      TemplateKey: draft.OutcomeRule.TemplateKey.trim(),
+      TieResolutionRule: draft.OutcomeRule.TieResolutionRule.trim(),
+      CalculationBasis: draft.OutcomeRule.CalculationBasis.trim(),
+    },
+    ApprovedClientApplications: draft.ApprovedClientApplications
+      .map((application) => ({
+        ApplicationId: application.ApplicationId.trim(),
+        Version: application.Version.trim(),
+      }))
+      .filter((application) => application.ApplicationId.length > 0 && application.Version.length > 0),
+    OwnerOptions: renumberElectionOptions(
+      draft.OwnerOptions.map((option) => ({
+        ...option,
+        DisplayLabel: option.DisplayLabel.trim(),
+        ShortDescription: option.ShortDescription.trim(),
+      }))
+    ),
+    AcknowledgedWarningCodes: [...draft.AcknowledgedWarningCodes].sort((left, right) => left - right),
+    RequiredApprovalCount:
+      draft.GovernanceMode === ElectionGovernanceModeProto.TrusteeThreshold
+        ? draft.RequiredApprovalCount ?? 1
+        : undefined,
+  };
+}
+
+export function getLifecycleLabel(lifecycleState?: ElectionLifecycleStateProto): string {
+  if (lifecycleState === undefined) {
+    return 'Unsaved draft';
+  }
+
+  return LIFECYCLE_LABELS[lifecycleState];
+}
+
+export function getBindingLabel(bindingStatus: ElectionBindingStatusProto): string {
+  return BINDING_LABELS[bindingStatus];
+}
+
+export function getElectionClassLabel(electionClass: ElectionClassProto): string {
+  switch (electionClass) {
+    case ElectionClassProto.OrganizationalRemoteVoting:
+      return 'Organizational remote voting';
+    case ElectionClassProto.PrivatePoll:
+      return 'Private poll';
+    case ElectionClassProto.SeriousSecretBallotVoting:
+      return 'Serious secret ballot voting';
+    default:
+      return 'Unknown election class';
+  }
+}
+
+export function getGovernanceLabel(governanceMode: ElectionGovernanceModeProto): string {
+  return GOVERNANCE_LABELS[governanceMode];
+}
+
+export function getOutcomeRuleLabel(kind: OutcomeRuleKindProto): string {
+  return OUTCOME_LABELS[kind];
+}
+
+export function getDisclosureModeLabel(mode: ElectionDisclosureModeProto): string {
+  return DISCLOSURE_LABELS[mode];
+}
+
+export function getParticipationPrivacyLabel(mode: ParticipationPrivacyModeProto): string {
+  return PARTICIPATION_PRIVACY_LABELS[mode];
+}
+
+export function getVoteUpdatePolicyLabel(policy: VoteUpdatePolicyProto): string {
+  return VOTE_UPDATE_LABELS[policy];
+}
+
+export function getEligibilitySourceLabel(source: EligibilitySourceTypeProto): string {
+  return ELIGIBILITY_SOURCE_LABELS[source];
+}
+
+export function getEligibilityMutationLabel(policy: EligibilityMutationPolicyProto): string {
+  return ELIGIBILITY_MUTATION_LABELS[policy];
+}
+
+export function getReportingPolicyLabel(policy: ReportingPolicyProto): string {
+  return REPORTING_POLICY_LABELS[policy];
+}
+
+export function getReviewWindowPolicyLabel(policy: ReviewWindowPolicyProto): string {
+  return REVIEW_WINDOW_LABELS[policy];
+}
+
+export function getWarningTitle(code: ElectionWarningCodeProto): string {
+  return WARNING_CHOICES.find((warning) => warning.code === code)?.title ?? 'Unspecified warning';
+}
+
+export function formatTimestamp(timestamp?: GrpcTimestamp): string {
+  if (!timestamp) {
+    return 'Not recorded';
+  }
+
+  const milliseconds = (timestamp.seconds * 1000) + Math.floor(timestamp.nanos / 1_000_000);
+  return new Date(milliseconds).toLocaleString();
+}
+
+export function formatArtifactValue(value?: string): string {
+  if (!value) {
+    return 'Not recorded';
+  }
+
+  if (value.length <= 24) {
+    return value;
+  }
+
+  return `${value.slice(0, 12)}...${value.slice(-8)}`;
+}
+
+export function isDraftEditable(election?: ElectionRecordView): boolean {
+  return !election || election.LifecycleState === ElectionLifecycleStateProto.Draft;
+}
+
+export function canOpenElection(election?: ElectionRecordView): boolean {
+  return !!election &&
+    election.LifecycleState === ElectionLifecycleStateProto.Draft &&
+    election.GovernanceMode === ElectionGovernanceModeProto.AdminOnly;
+}
+
+export function canCloseElection(election?: ElectionRecordView): boolean {
+  return election?.LifecycleState === ElectionLifecycleStateProto.Open;
+}
+
+export function canFinalizeElection(election?: ElectionRecordView): boolean {
+  return election?.LifecycleState === ElectionLifecycleStateProto.Closed;
+}
+
+export function getUnsupportedDraftValueMessages(draft: ElectionDraftInput): string[] {
+  const messages: string[] = [];
+
+  if (draft.ElectionClass !== ElectionClassProto.OrganizationalRemoteVoting) {
+    messages.push('FEAT-094 only supports organizational remote voting elections.');
+  }
+
+  if (draft.DisclosureMode !== ElectionDisclosureModeProto.FinalResultsOnly) {
+    messages.push('FEAT-094 only supports the final-results-only disclosure mode.');
+  }
+
+  if (
+    draft.ParticipationPrivacyMode !==
+    ParticipationPrivacyModeProto.PublicCheckoffAnonymousBallotPrivateChoice
+  ) {
+    messages.push('FEAT-094 only supports the phase-one participation privacy mode.');
+  }
+
+  if (draft.VoteUpdatePolicy !== VoteUpdatePolicyProto.SingleSubmissionOnly) {
+    messages.push('FEAT-094 only supports the single-submission-only vote update policy.');
+  }
+
+  if (draft.EligibilitySourceType !== EligibilitySourceTypeProto.OrganizationImportedRoster) {
+    messages.push('FEAT-094 only supports the organization-imported-roster eligibility source.');
+  }
+
+  if (draft.EligibilityMutationPolicy !== EligibilityMutationPolicyProto.FrozenAtOpen) {
+    messages.push('FEAT-094 only supports the frozen-at-open eligibility mutation policy.');
+  }
+
+  if (draft.ReportingPolicy !== ReportingPolicyProto.DefaultPhaseOnePackage) {
+    messages.push('FEAT-094 only supports the default phase-one reporting policy.');
+  }
+
+  if (
+    draft.GovernanceMode === ElectionGovernanceModeProto.AdminOnly &&
+    draft.ReviewWindowPolicy !== ReviewWindowPolicyProto.NoReviewWindow
+  ) {
+    messages.push('Admin-only elections must use the no-review-window policy in FEAT-094.');
+  }
+
+  if (
+    draft.GovernanceMode === ElectionGovernanceModeProto.TrusteeThreshold &&
+    draft.ReviewWindowPolicy !== ReviewWindowPolicyProto.GovernedReviewWindowReserved
+  ) {
+    messages.push(
+      'Trustee-threshold drafts should reserve the governed review-window policy for FEAT-096.'
+    );
+  }
+
+  return messages;
+}
+
+export function getDraftSaveValidationErrors(draft: ElectionDraftInput): string[] {
+  const errors = [...getUnsupportedDraftValueMessages(draft)];
+
+  if (!draft.Title.trim()) {
+    errors.push('Election title is required.');
+  }
+
+  if (!draft.ProtocolOmegaVersion.trim()) {
+    errors.push('Protocol Omega version is required.');
+  }
+
+  if (!draft.OutcomeRule.TemplateKey.trim()) {
+    errors.push('Outcome rule template key is required.');
+  }
+
+  if (!draft.OutcomeRule.TieResolutionRule.trim()) {
+    errors.push('Outcome rule tie-resolution policy is required.');
+  }
+
+  if (!draft.OutcomeRule.CalculationBasis.trim()) {
+    errors.push('Outcome rule calculation basis is required.');
+  }
+
+  if (!draft.OutcomeRule.BlankVoteCountsForTurnout) {
+    errors.push('Blank vote turnout accounting must remain enabled in FEAT-094.');
+  }
+
+  if (!draft.OutcomeRule.BlankVoteExcludedFromWinnerSelection) {
+    errors.push('Blank vote must remain excluded from winner selection in FEAT-094.');
+  }
+
+  switch (draft.OutcomeRule.Kind) {
+    case OutcomeRuleKindProto.SingleWinner:
+      if (draft.OutcomeRule.SeatCount !== 1) {
+        errors.push('Single-winner elections must use seat count 1.');
+      }
+      break;
+    case OutcomeRuleKindProto.PassFail:
+      if (draft.OutcomeRule.SeatCount !== 1) {
+        errors.push('Pass / fail elections must use seat count 1.');
+      }
+      if (!draft.OutcomeRule.BlankVoteExcludedFromThresholdDenominator) {
+        errors.push('Pass / fail elections must exclude blank votes from the threshold denominator.');
+      }
+      break;
+    default:
+      errors.push('FEAT-094 does not support this outcome rule kind.');
+      break;
+  }
+
+  if (draft.GovernanceMode === ElectionGovernanceModeProto.AdminOnly && draft.RequiredApprovalCount) {
+    errors.push('Admin-only elections must not set a required approval count.');
+  }
+
+  if (
+    draft.GovernanceMode === ElectionGovernanceModeProto.TrusteeThreshold &&
+    (!draft.RequiredApprovalCount || draft.RequiredApprovalCount < 1)
+  ) {
+    errors.push('Trustee-threshold elections require a required approval count of at least 1.');
+  }
+
+  if (draft.OwnerOptions.length === 0) {
+    errors.push('At least one owner-managed option is required.');
+  }
+
+  const optionIds = new Set<string>();
+  const ballotOrders = new Set<number>();
+
+  draft.OwnerOptions.forEach((option, index) => {
+    const trimmedId = option.OptionId.trim();
+    const trimmedLabel = option.DisplayLabel.trim();
+
+    if (!trimmedId) {
+      errors.push(`Option ${index + 1} must have a stable option id.`);
+    } else {
+      const normalizedId = trimmedId.toLowerCase();
+      if (optionIds.has(normalizedId)) {
+        errors.push('Election option ids must be unique.');
+      }
+      optionIds.add(normalizedId);
+    }
+
+    if (!trimmedLabel) {
+      errors.push(`Option ${index + 1} must have a display label.`);
+    }
+
+    if (option.BallotOrder < 1) {
+      errors.push('Election option ballot order must be 1 or greater.');
+    } else if (ballotOrders.has(option.BallotOrder)) {
+      errors.push('Election option ballot order must be unique.');
+    } else {
+      ballotOrders.add(option.BallotOrder);
+    }
+
+    if (option.IsBlankOption) {
+      errors.push('Owner options must not mark themselves as the reserved blank vote option.');
+    }
+  });
+
+  return Array.from(new Set(errors));
+}
+
+export function getDraftOpenValidationErrors(draft: ElectionDraftInput): string[] {
+  const errors: string[] = [];
+  const nonBlankOptions = draft.OwnerOptions.filter((option) => option.DisplayLabel.trim().length > 0);
+
+  if (nonBlankOptions.length < 2) {
+    errors.push('At least two non-blank options are required before opening the election.');
+  }
+
+  if (draft.OutcomeRule.Kind === OutcomeRuleKindProto.PassFail && nonBlankOptions.length !== 2) {
+    errors.push('Pass / fail elections require exactly two non-blank options before open.');
+  }
+
+  if (
+    draft.GovernanceMode === ElectionGovernanceModeProto.TrusteeThreshold &&
+    (!draft.RequiredApprovalCount || draft.RequiredApprovalCount < 1)
+  ) {
+    errors.push('Trustee-threshold elections require a required approval count before open.');
+  }
+
+  if (
+    draft.GovernanceMode === ElectionGovernanceModeProto.AdminOnly &&
+    draft.ReviewWindowPolicy !== ReviewWindowPolicyProto.NoReviewWindow
+  ) {
+    errors.push('Admin-only elections must use the no-review-window policy in FEAT-094.');
+  }
+
+  return errors;
+}
+
+export function getRequiredOpenWarningCodes(
+  draft: ElectionDraftInput,
+  acceptedTrusteeCount = 0
+): ElectionWarningCodeProto[] {
+  const warningCodes = new Set<ElectionWarningCodeProto>(draft.AcknowledgedWarningCodes);
+
+  if (
+    draft.GovernanceMode === ElectionGovernanceModeProto.TrusteeThreshold &&
+    draft.RequiredApprovalCount &&
+    acceptedTrusteeCount === draft.RequiredApprovalCount
+  ) {
+    warningCodes.add(ElectionWarningCodeProto.AllTrusteesRequiredFragility);
+  }
+
+  return Array.from(warningCodes).sort((left, right) => left - right);
+}
+
+export function getDraftRevisionLabel(
+  draftSnapshot?: ElectionDraftSnapshot,
+  election?: ElectionRecordView
+): string {
+  if (draftSnapshot) {
+    return `Draft revision ${draftSnapshot.DraftRevision}`;
+  }
+
+  if (election) {
+    return `Draft revision ${election.CurrentDraftRevision}`;
+  }
+
+  return 'Unsaved draft';
+}
+
+export function getSummaryBadge(summary: ElectionSummary): string {
+  return `${getLifecycleLabel(summary.LifecycleState)} | ${getGovernanceLabel(summary.GovernanceMode)}`;
+}

@@ -219,6 +219,19 @@ describe('AccountPage', () => {
 
       expect(mockBack).toHaveBeenCalled();
     });
+
+    it('should navigate to the elections workspace when Manage Elections is clicked', async () => {
+      render(<AccountPage />);
+
+      await act(async () => {
+        vi.advanceTimersByTime(200);
+      });
+
+      const electionsButton = screen.getByTestId('account-manage-elections-button');
+      fireEvent.click(electionsButton);
+
+      expect(mockPush).toHaveBeenCalledWith('/account/elections');
+    });
   });
 
   describe('Save Button State', () => {

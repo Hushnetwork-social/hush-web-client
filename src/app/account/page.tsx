@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
-import { ArrowLeft, Save, Download, Loader2, Check, AlertCircle } from "lucide-react";
+import { ArrowLeft, Save, Download, Loader2, Check, AlertCircle, Vote } from "lucide-react";
 import { KeyDisplayField } from "@/components/account";
 import { useAppStore } from "@/stores";
 import {
@@ -122,6 +122,10 @@ export default function AccountPage() {
   const handleDownloadKeys = () => {
     if (!credentials) return;
     setShowPasswordDialog(true);
+  };
+
+  const handleOpenElections = () => {
+    router.push("/account/elections");
   };
 
   const handlePasswordConfirm = async (password: string) => {
@@ -272,6 +276,23 @@ export default function AccountPage() {
           </button>
           <p className="mt-2 text-xs text-hush-text-accent">
             Keep your keys safe! You&apos;ll need them to recover your account.
+          </p>
+        </section>
+
+        <section className="bg-hush-bg-element rounded-xl p-4 mb-4">
+          <label className="text-xs font-semibold text-hush-text-accent uppercase tracking-wider">
+            Elections
+          </label>
+          <button
+            onClick={handleOpenElections}
+            data-testid="account-manage-elections-button"
+            className="mt-2 flex items-center gap-2 px-4 py-2 bg-hush-bg-dark border border-hush-bg-light rounded-lg text-sm text-hush-text-primary hover:border-hush-purple hover:text-hush-purple transition-colors"
+          >
+            <Vote className="w-4 h-4" />
+            <span>Manage Elections</span>
+          </button>
+          <p className="mt-2 text-xs text-hush-text-accent">
+            Create drafts, review frozen policy, and progress FEAT-094 election lifecycles.
           </p>
         </section>
 
