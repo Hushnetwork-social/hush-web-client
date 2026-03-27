@@ -3,6 +3,8 @@ import {
   type CompleteElectionCeremonyTrusteeRequest,
   ElectionGovernedActionTypeProto,
   ElectionGovernedProposalExecutionStatusProto,
+  ElectionLifecycleStateProto,
+  ElectionTrusteeInvitationStatusProto,
   type GetElectionCeremonyActionViewResponse,
   type JoinElectionCeremonyRequest,
   type PublishElectionCeremonyTransportKeyRequest,
@@ -23,7 +25,20 @@ import type {
   ResolveElectionTrusteeInvitationRequest,
 } from '@/lib/grpc';
 import { electionsService } from '@/lib/grpc/services/elections';
+import { submitTransaction } from '@/modules/blockchain/BlockchainService';
 import { getGovernedActionLabel } from './contracts';
+import {
+  createApproveElectionGovernedProposalTransaction,
+  createCloseElectionTransaction,
+  createElectionDraftTransaction,
+  createElectionTrusteeInvitationTransaction,
+  createFinalizeElectionTransaction,
+  createOpenElectionTransaction,
+  createRevokeElectionTrusteeInvitationTransaction,
+  createRetryElectionGovernedProposalExecutionTransaction,
+  createStartElectionGovernedProposalTransaction,
+  createUpdateElectionDraftTransaction,
+} from './transactionService';
 
 export type ElectionsFeedbackTone = 'success' | 'error';
 
@@ -55,20 +70,46 @@ interface ElectionsState {
     actorPublicAddress: string,
     electionId?: string
   ) => Promise<GetElectionCeremonyActionViewResponse | null>;
-  createDraft: (draft: ElectionDraftInput, snapshotReason: string) => Promise<boolean>;
-  updateDraft: (draft: ElectionDraftInput, snapshotReason: string) => Promise<boolean>;
-  inviteTrustee: (request: InviteElectionTrusteeRequest) => Promise<boolean>;
-  revokeInvitation: (request: ResolveElectionTrusteeInvitationRequest) => Promise<boolean>;
+  createDraft: (
+    draft: ElectionDraftInput,
+    snapshotReason: string,
+    ownerPublicEncryptAddress: string,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
+  updateDraft: (
+    draft: ElectionDraftInput,
+    snapshotReason: string,
+    ownerPublicEncryptAddress: string,
+    ownerPrivateEncryptKeyHex: string,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
+  inviteTrustee: (
+    request: InviteElectionTrusteeRequest,
+    ownerPublicEncryptAddress: string,
+    ownerPrivateEncryptKeyHex: string,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
+  revokeInvitation: (
+    request: ResolveElectionTrusteeInvitationRequest,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
   loadOpenReadiness: (
     requiredWarningCodes: ElectionWarningCodeProto[]
   ) => Promise<GetElectionOpenReadinessResponse | null>;
-  startGovernedProposal: (actionType: ElectionGovernedActionTypeProto) => Promise<boolean>;
+  startGovernedProposal: (
+    actionType: ElectionGovernedActionTypeProto,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
   approveGovernedProposal: (
     proposalId: string,
     actorPublicAddress: string,
+    signingPrivateKeyHex: string,
     approvalNote?: string
   ) => Promise<boolean>;
-  retryGovernedProposalExecution: (proposalId: string) => Promise<boolean>;
+  retryGovernedProposalExecution: (
+    proposalId: string,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
   startElectionCeremony: (request: StartElectionCeremonyRequest) => Promise<boolean>;
   restartElectionCeremony: (request: RestartElectionCeremonyRequest) => Promise<boolean>;
   publishElectionCeremonyTransportKey: (
@@ -87,9 +128,12 @@ interface ElectionsState {
   recordElectionCeremonyShareExport: (
     request: RecordElectionCeremonyShareExportRequest
   ) => Promise<boolean>;
-  openElection: (requiredWarningCodes: ElectionWarningCodeProto[]) => Promise<boolean>;
-  closeElection: () => Promise<boolean>;
-  finalizeElection: () => Promise<boolean>;
+  openElection: (
+    requiredWarningCodes: ElectionWarningCodeProto[],
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
+  closeElection: (signingPrivateKeyHex: string) => Promise<boolean>;
+  finalizeElection: (signingPrivateKeyHex: string) => Promise<boolean>;
   reset: () => void;
 }
 
@@ -153,6 +197,42 @@ async function refreshElectionContext(
   if (resolvedActorPublicAddress) {
     await get().loadCeremonyActionView(resolvedActorPublicAddress, electionId);
   }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForIndexedElection(
+  electionId: string,
+  maxAttempts: number = 12,
+  delayMs: number = 500
+): Promise<GetElectionResponse | null> {
+  return waitForIndexedElectionMatch(electionId, () => true, maxAttempts, delayMs);
+}
+
+async function waitForIndexedElectionMatch(
+  electionId: string,
+  isMatch: (response: GetElectionResponse) => boolean,
+  maxAttempts: number = 12,
+  delayMs: number = 500
+): Promise<GetElectionResponse | null> {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      const response = await electionsService.getElection({ ElectionId: electionId });
+      if (response.Success && response.Election && isMatch(response)) {
+        return response;
+      }
+    } catch {
+      // Query surface is eventually consistent after block indexing. Retry below.
+    }
+
+    if (attempt < maxAttempts - 1) {
+      await delay(delayMs);
+    }
+  }
+
+  return null;
 }
 
 export const useElectionsStore = create<ElectionsState>((set, get) => ({
@@ -293,13 +373,13 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     }
   },
 
-  createDraft: async (draft, snapshotReason) => {
+  createDraft: async (draft, snapshotReason, ownerPublicEncryptAddress, signingPrivateKeyHex) => {
     const ownerPublicAddress = get().ownerPublicAddress;
-    if (!ownerPublicAddress) {
+    if (!ownerPublicAddress || !ownerPublicEncryptAddress || !signingPrivateKeyHex) {
       set({
         feedback: {
           tone: 'error',
-          message: 'Owner public address is missing.',
+          message: 'Owner signing or encryption credentials are missing.',
           details: [],
         },
       });
@@ -313,34 +393,54 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     });
 
     try {
-      const response = await electionsService.createElectionDraft({
-        OwnerPublicAddress: ownerPublicAddress,
-        ActorPublicAddress: ownerPublicAddress,
-        SnapshotReason: snapshotReason,
-        Draft: draft,
-      });
+      const { signedTransaction, electionId } = await createElectionDraftTransaction(
+        ownerPublicAddress,
+        ownerPublicEncryptAddress,
+        snapshotReason,
+        draft,
+        signingPrivateKeyHex
+      );
+      const submitResult = await submitTransaction(signedTransaction);
 
-      if (!response.Success) {
-        set({ feedback: buildCommandFailureFeedback(response) });
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit election draft transaction.',
+            details: [],
+          },
+        });
         return false;
       }
 
-      const electionId = response.Election?.ElectionId ?? null;
+      const indexedElection = await waitForIndexedElection(electionId);
+
+      set({ selectedElectionId: electionId });
       await get().loadOwnerDashboard(ownerPublicAddress);
 
-      if (electionId) {
+      if (indexedElection?.Success && indexedElection.Election) {
         await get().loadElection(electionId);
+        set({
+          feedback: {
+            tone: 'success',
+            message: 'Election draft created.',
+            details: [],
+          },
+        });
+        return true;
       }
 
       set({
         feedback: {
           tone: 'success',
-          message: 'Election draft created.',
-          details: [],
+          message: 'Election draft submitted.',
+          details: [
+            'The transaction was accepted and is waiting for block confirmation before the draft appears in the query view.',
+          ],
         },
       });
 
-      return true;
+      return false;
     } catch (error) {
       set({
         feedback: buildThrownErrorFeedback(error, 'Failed to create election draft.'),
@@ -351,15 +451,29 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     }
   },
 
-  updateDraft: async (draft, snapshotReason) => {
+  updateDraft: async (
+    draft,
+    snapshotReason,
+    ownerPublicEncryptAddress,
+    ownerPrivateEncryptKeyHex,
+    signingPrivateKeyHex
+  ) => {
     const electionId = get().selectedElectionId;
     const ownerPublicAddress = get().ownerPublicAddress;
 
-    if (!electionId || !ownerPublicAddress) {
+    if (
+      !electionId ||
+      !ownerPublicAddress ||
+      !ownerPublicEncryptAddress ||
+      !ownerPrivateEncryptKeyHex ||
+      !signingPrivateKeyHex
+    ) {
       set({
         feedback: {
           tone: 'error',
-          message: 'No draft election is selected.',
+          message: !electionId || !ownerPublicAddress
+            ? 'No draft election is selected.'
+            : 'Owner signing or encryption credentials are missing.',
           details: [],
         },
       });
@@ -373,15 +487,47 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     });
 
     try {
-      const response = await electionsService.updateElectionDraft({
-        ElectionId: electionId,
-        ActorPublicAddress: ownerPublicAddress,
-        SnapshotReason: snapshotReason,
-        Draft: draft,
+      const currentRevision = get().selectedElection?.Election?.CurrentDraftRevision ?? 0;
+      const { signedTransaction } = await createUpdateElectionDraftTransaction(
+        electionId,
+        ownerPublicAddress,
+        ownerPublicEncryptAddress,
+        ownerPrivateEncryptKeyHex,
+        snapshotReason,
+        draft,
+        signingPrivateKeyHex
+      );
+      const submitResult = await submitTransaction(signedTransaction);
+
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit election draft update transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Election draft update submitted.',
+          details: [
+            'Waiting for block confirmation before the updated draft revision appears in the query view.',
+          ],
+        },
       });
 
-      if (!response.Success) {
-        set({ feedback: buildCommandFailureFeedback(response) });
+      const indexedElection = await waitForIndexedElectionMatch(
+        electionId,
+        (response) =>
+          (response.Election?.CurrentDraftRevision ?? 0) > currentRevision
+          && (response.LatestDraftSnapshot?.DraftRevision ?? 0) > currentRevision
+      );
+
+      if (!indexedElection?.Success || !indexedElection.Election) {
         return false;
       }
 
@@ -407,7 +553,23 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     }
   },
 
-  inviteTrustee: async (request) => {
+  inviteTrustee: async (
+    request,
+    ownerPublicEncryptAddress,
+    ownerPrivateEncryptKeyHex,
+    signingPrivateKeyHex
+  ) => {
+    if (!ownerPublicEncryptAddress || !ownerPrivateEncryptKeyHex || !signingPrivateKeyHex) {
+      set({
+        feedback: {
+          tone: 'error',
+          message: 'Owner signing or encryption credentials are missing.',
+          details: [],
+        },
+      });
+      return false;
+    }
+
     set({
       isSubmitting: true,
       feedback: null,
@@ -415,9 +577,45 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     });
 
     try {
-      const response = await electionsService.inviteElectionTrustee(request);
-      if (!response.Success) {
-        set({ feedback: buildCommandFailureFeedback(response) });
+      const { signedTransaction, invitationId } = await createElectionTrusteeInvitationTransaction(
+        request.ElectionId,
+        request.ActorPublicAddress,
+        ownerPublicEncryptAddress,
+        ownerPrivateEncryptKeyHex,
+        request.TrusteeUserAddress,
+        request.TrusteeDisplayName,
+        signingPrivateKeyHex
+      );
+      const submitResult = await submitTransaction(signedTransaction);
+
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit trustee invitation transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Trustee invitation submitted.',
+          details: [
+            'Waiting for block confirmation before the invitation appears in the trustee roster.',
+          ],
+        },
+      });
+
+      const indexedElection = await waitForIndexedElectionMatch(
+        request.ElectionId,
+        (response) =>
+          response.TrusteeInvitations.some((invitation) => invitation.Id === invitationId)
+      );
+
+      if (!indexedElection?.Success || !indexedElection.Election) {
         return false;
       }
 
@@ -440,7 +638,18 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     }
   },
 
-  revokeInvitation: async (request) => {
+  revokeInvitation: async (request, signingPrivateKeyHex) => {
+    if (!signingPrivateKeyHex) {
+      set({
+        feedback: {
+          tone: 'error',
+          message: 'Owner signing credentials are missing.',
+          details: [],
+        },
+      });
+      return false;
+    }
+
     set({
       isSubmitting: true,
       feedback: null,
@@ -448,9 +657,44 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     });
 
     try {
-      const response = await electionsService.revokeElectionTrusteeInvitation(request);
-      if (!response.Success) {
-        set({ feedback: buildCommandFailureFeedback(response) });
+      const { signedTransaction } = await createRevokeElectionTrusteeInvitationTransaction(
+        request.ElectionId,
+        request.InvitationId,
+        request.ActorPublicAddress,
+        signingPrivateKeyHex
+      );
+      const submitResult = await submitTransaction(signedTransaction);
+
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit trustee revocation transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Trustee revocation submitted.',
+          details: [
+            'Waiting for block confirmation before the trustee roster shows the revoked invitation.',
+          ],
+        },
+      });
+
+      const indexedElection = await waitForIndexedElectionMatch(
+        request.ElectionId,
+        (response) =>
+          response.TrusteeInvitations.some((invitation) =>
+            invitation.Id === request.InvitationId
+            && invitation.Status === ElectionTrusteeInvitationStatusProto.Revoked)
+      );
+
+      if (!indexedElection?.Success || !indexedElection.Election) {
         return false;
       }
 
@@ -496,11 +740,11 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     }
   },
 
-  startGovernedProposal: async (actionType) => {
+  startGovernedProposal: async (actionType, signingPrivateKeyHex) => {
     const electionId = get().selectedElectionId;
     const ownerPublicAddress = get().ownerPublicAddress;
 
-    if (!electionId || !ownerPublicAddress) {
+    if (!electionId || !ownerPublicAddress || !signingPrivateKeyHex) {
       return false;
     }
 
@@ -511,14 +755,49 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     });
 
     try {
-      const response = await electionsService.startElectionGovernedProposal({
-        ElectionId: electionId,
-        ActionType: actionType,
-        ActorPublicAddress: ownerPublicAddress,
+      const { signedTransaction, proposalId } = await createStartElectionGovernedProposalTransaction(
+        electionId,
+        actionType,
+        ownerPublicAddress,
+        signingPrivateKeyHex,
+      );
+
+      const submitResult = await submitTransaction(signedTransaction);
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit governed proposal transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: `${getGovernedActionLabel(actionType)} proposal submitted.`,
+          details: ['Waiting for block confirmation before the governed proposal appears in the query view.'],
+        },
       });
 
-      if (!response.Success) {
-        set({ feedback: buildCommandFailureFeedback(response) });
+      const indexedElection = await waitForIndexedElectionMatch(
+        electionId,
+        (response) => {
+          const proposal = response.GovernedProposals.find((candidate) => candidate.Id === proposalId);
+          if (!proposal) {
+            return false;
+          }
+
+          if (actionType === ElectionGovernedActionTypeProto.Close) {
+            return Boolean(response.Election?.VoteAcceptanceLockedAt);
+          }
+
+          return true;
+        },
+      );
+      if (!indexedElection) {
         return false;
       }
 
@@ -542,9 +821,14 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     }
   },
 
-  approveGovernedProposal: async (proposalId, actorPublicAddress, approvalNote = '') => {
+  approveGovernedProposal: async (
+    proposalId,
+    actorPublicAddress,
+    signingPrivateKeyHex,
+    approvalNote = ''
+  ) => {
     const electionId = get().selectedElectionId;
-    if (!electionId) {
+    if (!electionId || !signingPrivateKeyHex) {
       return false;
     }
 
@@ -555,15 +839,41 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     });
 
     try {
-      const response = await electionsService.approveElectionGovernedProposal({
-        ElectionId: electionId,
-        ProposalId: proposalId,
-        ActorPublicAddress: actorPublicAddress,
-        ApprovalNote: approvalNote,
+      const { signedTransaction } = await createApproveElectionGovernedProposalTransaction(
+        electionId,
+        proposalId,
+        actorPublicAddress,
+        approvalNote,
+        signingPrivateKeyHex,
+      );
+
+      const submitResult = await submitTransaction(signedTransaction);
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit governed approval transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Governed approval submitted.',
+          details: ['Waiting for block confirmation before the approval appears in the query view.'],
+        },
       });
 
-      if (!response.Success) {
-        set({ feedback: buildCommandFailureFeedback(response) });
+      const indexedElection = await waitForIndexedElectionMatch(
+        electionId,
+        (response) =>
+          response.GovernedProposalApprovals.some((approval) =>
+            approval.ProposalId === proposalId && approval.TrusteeUserAddress === actorPublicAddress),
+      );
+      if (!indexedElection) {
         return false;
       }
 
@@ -574,11 +884,15 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
         await get().loadOwnerDashboard(ownerPublicAddress);
       }
 
+      const indexedProposal = indexedElection.GovernedProposals.find(
+        (candidate) => candidate.Id === proposalId
+      );
+
       set({
         feedback: {
           tone: 'success',
           message:
-            response.GovernedProposal?.ExecutionStatus ===
+            indexedProposal?.ExecutionStatus ===
             ElectionGovernedProposalExecutionStatusProto.ExecutionSucceeded
               ? 'Approval recorded and proposal executed.'
               : 'Approval recorded.',
@@ -596,13 +910,20 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     }
   },
 
-  retryGovernedProposalExecution: async (proposalId) => {
+  retryGovernedProposalExecution: async (proposalId, signingPrivateKeyHex) => {
     const electionId = get().selectedElectionId;
     const ownerPublicAddress = get().ownerPublicAddress;
 
-    if (!electionId || !ownerPublicAddress) {
+    if (!electionId || !ownerPublicAddress || !signingPrivateKeyHex) {
       return false;
     }
+
+    const baselineProposal = get().selectedElection?.GovernedProposals.find(
+      (candidate) => candidate.Id === proposalId
+    );
+    const baselineAttemptKey = baselineProposal?.LastExecutionAttemptedAt
+      ? `${baselineProposal.LastExecutionAttemptedAt.seconds}:${baselineProposal.LastExecutionAttemptedAt.nanos}`
+      : '';
 
     set({
       isSubmitting: true,
@@ -611,23 +932,68 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     });
 
     try {
-      const response = await electionsService.retryElectionGovernedProposalExecution({
-        ElectionId: electionId,
-        ProposalId: proposalId,
-        ActorPublicAddress: ownerPublicAddress,
+      const { signedTransaction } = await createRetryElectionGovernedProposalExecutionTransaction(
+        electionId,
+        proposalId,
+        ownerPublicAddress,
+        signingPrivateKeyHex,
+      );
+
+      const submitResult = await submitTransaction(signedTransaction);
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit governed retry transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Governed proposal retry submitted.',
+          details: ['Waiting for block confirmation before the proposal execution state updates.'],
+        },
       });
 
-      if (!response.Success) {
-        set({ feedback: buildCommandFailureFeedback(response) });
+      const indexedElection = await waitForIndexedElectionMatch(
+        electionId,
+        (response) => {
+          const proposal = response.GovernedProposals.find((candidate) => candidate.Id === proposalId);
+          if (!proposal) {
+            return false;
+          }
+
+          if (proposal.ExecutionStatus === ElectionGovernedProposalExecutionStatusProto.ExecutionSucceeded) {
+            return true;
+          }
+
+          const nextAttemptKey = proposal.LastExecutionAttemptedAt
+            ? `${proposal.LastExecutionAttemptedAt.seconds}:${proposal.LastExecutionAttemptedAt.nanos}`
+            : '';
+          return nextAttemptKey !== baselineAttemptKey;
+        },
+      );
+      if (!indexedElection) {
         return false;
       }
 
       await get().loadElection(electionId);
       await get().loadOwnerDashboard(ownerPublicAddress);
+      const indexedProposal = indexedElection.GovernedProposals.find(
+        (candidate) => candidate.Id === proposalId
+      );
       set({
         feedback: {
           tone: 'success',
-          message: 'Governed proposal execution retried.',
+          message:
+            indexedProposal?.ExecutionStatus ===
+            ElectionGovernedProposalExecutionStatusProto.ExecutionSucceeded
+              ? 'Governed proposal execution retried.'
+              : 'Governed proposal retry indexed, but execution is still failing.',
           details: [],
         },
       });
@@ -924,11 +1290,11 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     }
   },
 
-  openElection: async (requiredWarningCodes) => {
+  openElection: async (requiredWarningCodes, signingPrivateKeyHex) => {
     const electionId = get().selectedElectionId;
     const ownerPublicAddress = get().ownerPublicAddress;
 
-    if (!electionId || !ownerPublicAddress) {
+    if (!electionId || !ownerPublicAddress || !signingPrivateKeyHex) {
       return false;
     }
 
@@ -939,18 +1305,44 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     });
 
     try {
-      const response = await electionsService.openElection({
-        ElectionId: electionId,
-        ActorPublicAddress: ownerPublicAddress,
-        RequiredWarningCodes: requiredWarningCodes,
-        FrozenEligibleVoterSetHash: '',
-        TrusteePolicyExecutionReference: '',
-        ReportingPolicyExecutionReference: '',
-        ReviewWindowExecutionReference: '',
+      const { signedTransaction } = await createOpenElectionTransaction(
+        electionId,
+        ownerPublicAddress,
+        requiredWarningCodes,
+        null,
+        '',
+        '',
+        '',
+        signingPrivateKeyHex,
+      );
+
+      const submitResult = await submitTransaction(signedTransaction);
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit open election transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Election open submitted.',
+          details: ['Waiting for block confirmation before the open boundary appears in the query view.'],
+        },
       });
 
-      if (!response.Success) {
-        set({ feedback: buildCommandFailureFeedback(response) });
+      const indexedElection = await waitForIndexedElectionMatch(
+        electionId,
+        (response) =>
+          response.Election?.LifecycleState === ElectionLifecycleStateProto.Open
+          && Boolean(response.Election?.OpenArtifactId),
+      );
+      if (!indexedElection) {
         return false;
       }
 
@@ -974,11 +1366,11 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     }
   },
 
-  closeElection: async () => {
+  closeElection: async (signingPrivateKeyHex) => {
     const electionId = get().selectedElectionId;
     const ownerPublicAddress = get().ownerPublicAddress;
 
-    if (!electionId || !ownerPublicAddress) {
+    if (!electionId || !ownerPublicAddress || !signingPrivateKeyHex) {
       return false;
     }
 
@@ -989,15 +1381,41 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     });
 
     try {
-      const response = await electionsService.closeElection({
-        ElectionId: electionId,
-        ActorPublicAddress: ownerPublicAddress,
-        AcceptedBallotSetHash: '',
-        FinalEncryptedTallyHash: '',
+      const { signedTransaction } = await createCloseElectionTransaction(
+        electionId,
+        ownerPublicAddress,
+        null,
+        null,
+        signingPrivateKeyHex,
+      );
+
+      const submitResult = await submitTransaction(signedTransaction);
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit close election transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Election close submitted.',
+          details: ['Waiting for block confirmation before the close boundary appears in the query view.'],
+        },
       });
 
-      if (!response.Success) {
-        set({ feedback: buildCommandFailureFeedback(response) });
+      const indexedElection = await waitForIndexedElectionMatch(
+        electionId,
+        (response) =>
+          response.Election?.LifecycleState === ElectionLifecycleStateProto.Closed
+          && Boolean(response.Election?.CloseArtifactId),
+      );
+      if (!indexedElection) {
         return false;
       }
 
@@ -1021,11 +1439,11 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     }
   },
 
-  finalizeElection: async () => {
+  finalizeElection: async (signingPrivateKeyHex) => {
     const electionId = get().selectedElectionId;
     const ownerPublicAddress = get().ownerPublicAddress;
 
-    if (!electionId || !ownerPublicAddress) {
+    if (!electionId || !ownerPublicAddress || !signingPrivateKeyHex) {
       return false;
     }
 
@@ -1036,15 +1454,41 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     });
 
     try {
-      const response = await electionsService.finalizeElection({
-        ElectionId: electionId,
-        ActorPublicAddress: ownerPublicAddress,
-        AcceptedBallotSetHash: '',
-        FinalEncryptedTallyHash: '',
+      const { signedTransaction } = await createFinalizeElectionTransaction(
+        electionId,
+        ownerPublicAddress,
+        null,
+        null,
+        signingPrivateKeyHex,
+      );
+
+      const submitResult = await submitTransaction(signedTransaction);
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit finalize election transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Election finalize submitted.',
+          details: ['Waiting for block confirmation before the finalize boundary appears in the query view.'],
+        },
       });
 
-      if (!response.Success) {
-        set({ feedback: buildCommandFailureFeedback(response) });
+      const indexedElection = await waitForIndexedElectionMatch(
+        electionId,
+        (response) =>
+          response.Election?.LifecycleState === ElectionLifecycleStateProto.Finalized
+          && Boolean(response.Election?.FinalizeArtifactId),
+      );
+      if (!indexedElection) {
         return false;
       }
 

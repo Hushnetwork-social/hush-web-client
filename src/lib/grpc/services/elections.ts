@@ -10,6 +10,8 @@ import type {
   GetElectionOpenReadinessRequest,
   GetElectionOpenReadinessResponse,
   GetElectionRequest,
+  GetElectionEnvelopeAccessRequest,
+  GetElectionEnvelopeAccessResponse,
   GetElectionResponse,
   GetElectionsByOwnerRequest,
   GetElectionsByOwnerResponse,
@@ -281,6 +283,17 @@ export const electionsService = {
     return client.unaryCall<GetElectionRequest, GetElectionResponse>(
       SERVICE_NAME,
       'GetElection',
+      request
+    );
+  },
+
+  async getElectionEnvelopeAccess(
+    request: GetElectionEnvelopeAccessRequest
+  ): Promise<GetElectionEnvelopeAccessResponse> {
+    const client = getGrpcClient();
+    return client.unaryCall<GetElectionEnvelopeAccessRequest, GetElectionEnvelopeAccessResponse>(
+      SERVICE_NAME,
+      'GetElectionEnvelopeAccess',
       request
     );
   },

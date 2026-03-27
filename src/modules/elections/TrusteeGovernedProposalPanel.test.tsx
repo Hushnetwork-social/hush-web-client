@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ElectionCommandResponse, ElectionRecordView, GetElectionResponse } from '@/lib/grpc';
+import type { ElectionRecordView, GetElectionResponse } from '@/lib/grpc';
 import {
   ElectionBindingStatusProto,
   ElectionClassProto,
@@ -20,15 +20,29 @@ import {
 import { TrusteeGovernedProposalPanel } from './TrusteeGovernedProposalPanel';
 import { useElectionsStore } from './useElectionsStore';
 
-const { electionsServiceMock } = vi.hoisted(() => ({
+const { electionsServiceMock, blockchainServiceMock, transactionServiceMock } = vi.hoisted(() => ({
   electionsServiceMock: {
-    approveElectionGovernedProposal: vi.fn(),
     getElection: vi.fn(),
+  },
+  blockchainServiceMock: {
+    submitTransaction: vi.fn(),
+  },
+  transactionServiceMock: {
+    createApproveElectionGovernedProposalTransaction: vi.fn(),
   },
 }));
 
 vi.mock('@/lib/grpc/services/elections', () => ({
   electionsService: electionsServiceMock,
+}));
+
+vi.mock('@/modules/blockchain/BlockchainService', () => ({
+  submitTransaction: (...args: unknown[]) => blockchainServiceMock.submitTransaction(...args),
+}));
+
+vi.mock('./transactionService', () => ({
+  createApproveElectionGovernedProposalTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createApproveElectionGovernedProposalTransaction(...args),
 }));
 
 const timestamp = { seconds: 1_711_410_000, nanos: 0 };
@@ -123,43 +137,44 @@ function createElectionResponse(overrides?: Partial<GetElectionResponse>): GetEl
   };
 }
 
-function createCommandResponse(overrides?: Partial<ElectionCommandResponse>): ElectionCommandResponse {
-  return {
-    Success: true,
-    ErrorCode: 0,
-    ErrorMessage: '',
-    ValidationErrors: [],
-    Election: createElectionRecord(),
-    CeremonyTranscriptEvents: [],
-    GovernedProposal: {
-      Id: 'proposal-1',
-      ElectionId: 'election-1',
-      ActionType: ElectionGovernedActionTypeProto.Close,
-      LifecycleStateAtCreation: ElectionLifecycleStateProto.Open,
-      ProposedByPublicAddress: 'owner-public-key',
-      CreatedAt: timestamp,
-      ExecutionStatus: ElectionGovernedProposalExecutionStatusProto.WaitingForApprovals,
-      ExecutionFailureReason: '',
-      LastExecutionTriggeredByPublicAddress: '',
-    },
-    ...overrides,
-  };
-}
-
 describe('TrusteeGovernedProposalPanel', () => {
   beforeEach(() => {
     useElectionsStore.getState().reset();
     vi.clearAllMocks();
     electionsServiceMock.getElection.mockResolvedValue(createElectionResponse());
-    electionsServiceMock.approveElectionGovernedProposal.mockResolvedValue(createCommandResponse());
+    blockchainServiceMock.submitTransaction.mockResolvedValue({ successful: true, message: 'Accepted' });
+    transactionServiceMock.createApproveElectionGovernedProposalTransaction.mockResolvedValue({
+      signedTransaction: 'signed-approve-governed-proposal-transaction',
+    });
   });
 
   it('loads the proposal detail and submits a trustee approval with the note', async () => {
+    electionsServiceMock.getElection
+      .mockResolvedValueOnce(createElectionResponse())
+      .mockResolvedValue(
+        createElectionResponse({
+          GovernedProposalApprovals: [
+            {
+              Id: 'approval-1',
+              ProposalId: 'proposal-1',
+              ElectionId: 'election-1',
+              ActionType: ElectionGovernedActionTypeProto.Close,
+              LifecycleStateAtProposalCreation: ElectionLifecycleStateProto.Open,
+              TrusteeUserAddress: 'trustee-a',
+              TrusteeDisplayName: 'Alice Trustee',
+              ApprovalNote: 'Ready to approve.',
+              ApprovedAt: timestamp,
+            },
+          ],
+        })
+      );
+
     render(
       <TrusteeGovernedProposalPanel
         electionId="election-1"
         proposalId="proposal-1"
         actorPublicAddress="trustee-a"
+        actorSigningPrivateKey="trustee-a-private-key"
       />
     );
 
@@ -173,12 +188,16 @@ describe('TrusteeGovernedProposalPanel', () => {
     fireEvent.click(screen.getByTestId('trustee-approve-button'));
 
     await waitFor(() => {
-      expect(electionsServiceMock.approveElectionGovernedProposal).toHaveBeenCalledWith({
-        ElectionId: 'election-1',
-        ProposalId: 'proposal-1',
-        ActorPublicAddress: 'trustee-a',
-        ApprovalNote: 'Ready to approve.',
-      });
+      expect(transactionServiceMock.createApproveElectionGovernedProposalTransaction).toHaveBeenCalledWith(
+        'election-1',
+        'proposal-1',
+        'trustee-a',
+        'Ready to approve.',
+        'trustee-a-private-key'
+      );
     });
+    expect(blockchainServiceMock.submitTransaction).toHaveBeenCalledWith(
+      'signed-approve-governed-proposal-transaction'
+    );
   });
 });

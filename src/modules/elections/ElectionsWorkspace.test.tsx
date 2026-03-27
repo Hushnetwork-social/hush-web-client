@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   ElectionCeremonyTrusteeState,
   ElectionCommandResponse,
@@ -19,6 +19,8 @@ import {
   ElectionClassProto,
   ElectionDisclosureModeProto,
   ElectionGovernanceModeProto,
+  ElectionGovernedActionTypeProto,
+  ElectionGovernedProposalExecutionStatusProto,
   ElectionLifecycleStateProto,
   ElectionTrusteeCeremonyStateProto,
   ElectionTrusteeInvitationStatusProto,
@@ -34,7 +36,7 @@ import { ElectionsWorkspace } from './ElectionsWorkspace';
 import { createDefaultElectionDraft } from './contracts';
 import { useElectionsStore } from './useElectionsStore';
 
-const { electionsServiceMock } = vi.hoisted(() => ({
+const { electionsServiceMock, blockchainServiceMock, transactionServiceMock } = vi.hoisted(() => ({
   electionsServiceMock: {
     approveElectionGovernedProposal: vi.fn(),
     closeElection: vi.fn(),
@@ -53,10 +55,52 @@ const { electionsServiceMock } = vi.hoisted(() => ({
     startElectionGovernedProposal: vi.fn(),
     updateElectionDraft: vi.fn(),
   },
+  blockchainServiceMock: {
+    submitTransaction: vi.fn(),
+  },
+  transactionServiceMock: {
+    createApproveElectionGovernedProposalTransaction: vi.fn(),
+    createCloseElectionTransaction: vi.fn(),
+    createElectionDraftTransaction: vi.fn(),
+    createElectionTrusteeInvitationTransaction: vi.fn(),
+    createFinalizeElectionTransaction: vi.fn(),
+    createOpenElectionTransaction: vi.fn(),
+    createRevokeElectionTrusteeInvitationTransaction: vi.fn(),
+    createRetryElectionGovernedProposalExecutionTransaction: vi.fn(),
+    createStartElectionGovernedProposalTransaction: vi.fn(),
+    createUpdateElectionDraftTransaction: vi.fn(),
+  },
 }));
 
 vi.mock('@/lib/grpc/services/elections', () => ({
   electionsService: electionsServiceMock,
+}));
+
+vi.mock('@/modules/blockchain/BlockchainService', () => ({
+  submitTransaction: (...args: unknown[]) => blockchainServiceMock.submitTransaction(...args),
+}));
+
+vi.mock('./transactionService', () => ({
+  createApproveElectionGovernedProposalTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createApproveElectionGovernedProposalTransaction(...args),
+  createCloseElectionTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createCloseElectionTransaction(...args),
+  createElectionDraftTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createElectionDraftTransaction(...args),
+  createElectionTrusteeInvitationTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createElectionTrusteeInvitationTransaction(...args),
+  createFinalizeElectionTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createFinalizeElectionTransaction(...args),
+  createOpenElectionTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createOpenElectionTransaction(...args),
+  createRevokeElectionTrusteeInvitationTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createRevokeElectionTrusteeInvitationTransaction(...args),
+  createRetryElectionGovernedProposalExecutionTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createRetryElectionGovernedProposalExecutionTransaction(...args),
+  createStartElectionGovernedProposalTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createStartElectionGovernedProposalTransaction(...args),
+  createUpdateElectionDraftTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createUpdateElectionDraftTransaction(...args),
 }));
 
 const timestamp = { seconds: 1_711_410_000, nanos: 0 };
@@ -275,16 +319,19 @@ function createReadinessResponse(
 }
 
 describe('ElectionsWorkspace', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   beforeEach(() => {
     useElectionsStore.getState().reset();
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     electionsServiceMock.getElectionsByOwner.mockResolvedValue({ Elections: [] });
     electionsServiceMock.getElection.mockResolvedValue(createElectionResponse());
     electionsServiceMock.getElectionCeremonyActionView.mockResolvedValue(createCeremonyActionViewResponse());
     electionsServiceMock.getElectionOpenReadiness.mockResolvedValue(createReadinessResponse());
     electionsServiceMock.createElectionDraft.mockResolvedValue(createCommandResponse());
     electionsServiceMock.updateElectionDraft.mockResolvedValue(createCommandResponse());
-    electionsServiceMock.inviteElectionTrustee.mockResolvedValue(createCommandResponse());
     electionsServiceMock.revokeElectionTrusteeInvitation.mockResolvedValue(createCommandResponse());
     electionsServiceMock.startElectionGovernedProposal.mockResolvedValue(createCommandResponse());
     electionsServiceMock.approveElectionGovernedProposal.mockResolvedValue(createCommandResponse());
@@ -294,6 +341,40 @@ describe('ElectionsWorkspace', () => {
     electionsServiceMock.finalizeElection.mockResolvedValue(createCommandResponse());
     electionsServiceMock.startElectionCeremony.mockResolvedValue(createCommandResponse());
     electionsServiceMock.restartElectionCeremony.mockResolvedValue(createCommandResponse());
+    blockchainServiceMock.submitTransaction.mockResolvedValue({ successful: true, message: 'Accepted' });
+    transactionServiceMock.createElectionDraftTransaction.mockResolvedValue({
+      signedTransaction: 'signed-election-transaction',
+      electionId: 'election-1',
+    });
+    transactionServiceMock.createStartElectionGovernedProposalTransaction.mockResolvedValue({
+      signedTransaction: 'signed-start-governed-proposal-transaction',
+      proposalId: 'proposal-1',
+    });
+    transactionServiceMock.createApproveElectionGovernedProposalTransaction.mockResolvedValue({
+      signedTransaction: 'signed-approve-governed-proposal-transaction',
+    });
+    transactionServiceMock.createRetryElectionGovernedProposalExecutionTransaction.mockResolvedValue({
+      signedTransaction: 'signed-retry-governed-proposal-transaction',
+    });
+    transactionServiceMock.createOpenElectionTransaction.mockResolvedValue({
+      signedTransaction: 'signed-open-election-transaction',
+    });
+    transactionServiceMock.createCloseElectionTransaction.mockResolvedValue({
+      signedTransaction: 'signed-close-election-transaction',
+    });
+    transactionServiceMock.createFinalizeElectionTransaction.mockResolvedValue({
+      signedTransaction: 'signed-finalize-election-transaction',
+    });
+    transactionServiceMock.createElectionTrusteeInvitationTransaction.mockResolvedValue({
+      signedTransaction: 'signed-trustee-invite-transaction',
+      invitationId: 'invite-1',
+    });
+    transactionServiceMock.createUpdateElectionDraftTransaction.mockResolvedValue({
+      signedTransaction: 'signed-draft-update-transaction',
+    });
+    transactionServiceMock.createRevokeElectionTrusteeInvitationTransaction.mockResolvedValue({
+      signedTransaction: 'signed-trustee-revoke-transaction',
+    });
   });
 
   it('creates a valid draft and shows save feedback', async () => {
@@ -303,17 +384,21 @@ describe('ElectionsWorkspace', () => {
       .mockResolvedValueOnce({
         Elections: [createElectionSummary(ElectionLifecycleStateProto.Draft)],
       });
-    electionsServiceMock.createElectionDraft.mockResolvedValueOnce(
-      createCommandResponse({ Election: createdRecord })
-    );
-    electionsServiceMock.getElection.mockResolvedValueOnce(
+    electionsServiceMock.getElection.mockResolvedValue(
       createElectionResponse({
         Election: createdRecord,
         LatestDraftSnapshot: createDraftSnapshot(),
       })
     );
 
-    render(<ElectionsWorkspace ownerPublicAddress="owner-public-key" />);
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />
+    );
 
     fireEvent.change(screen.getByTestId('elections-title-input'), {
       target: { value: 'Board Election' },
@@ -328,15 +413,465 @@ describe('ElectionsWorkspace', () => {
     fireEvent.click(screen.getByTestId('elections-save-button'));
 
     expect(await screen.findByText('Election draft created.')).toBeInTheDocument();
-    expect(electionsServiceMock.createElectionDraft).toHaveBeenCalledWith(
+    expect(transactionServiceMock.createElectionDraftTransaction).toHaveBeenCalledWith(
+      'owner-public-key',
+      'owner-encryption-key',
+      'Initial draft',
       expect.objectContaining({
-        OwnerPublicAddress: 'owner-public-key',
-        SnapshotReason: 'Initial draft',
-        Draft: expect.objectContaining({
-          Title: 'Board Election',
-        }),
-      })
+        Title: 'Board Election',
+      }),
+      'owner-private-key'
     );
+    expect(blockchainServiceMock.submitTransaction).toHaveBeenCalledWith('signed-election-transaction');
+    expect(electionsServiceMock.createElectionDraft).not.toHaveBeenCalled();
+  });
+
+  it('shows pending feedback when the draft transaction is accepted before indexing finishes', async () => {
+    vi.useFakeTimers();
+    electionsServiceMock.getElectionsByOwner
+      .mockResolvedValueOnce({ Elections: [] })
+      .mockResolvedValueOnce({ Elections: [] });
+    electionsServiceMock.getElection.mockResolvedValue({
+      Success: false,
+      ErrorMessage: 'not indexed yet',
+      Election: undefined,
+      LatestDraftSnapshot: undefined,
+      WarningAcknowledgements: [],
+      TrusteeInvitations: [],
+      BoundaryArtifacts: [],
+      GovernedProposals: [],
+      GovernedProposalApprovals: [],
+      CeremonyProfiles: [],
+      CeremonyVersions: [],
+      CeremonyTranscriptEvents: [],
+      ActiveCeremonyTrusteeStates: [],
+    });
+
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />
+    );
+
+    fireEvent.change(screen.getByTestId('elections-title-input'), {
+      target: { value: 'Board Election' },
+    });
+    fireEvent.change(screen.getByTestId('elections-option-label-0'), {
+      target: { value: 'Alice' },
+    });
+    fireEvent.change(screen.getByTestId('elections-option-label-1'), {
+      target: { value: 'Bob' },
+    });
+
+    fireEvent.click(screen.getByTestId('elections-save-button'));
+    await vi.runAllTimersAsync();
+
+    expect(screen.getByText('Election draft submitted.')).toBeInTheDocument();
+    expect(screen.getByText(/waiting for block confirmation/i)).toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it('updates an existing draft through blockchain submission and waits for the next revision', async () => {
+    const baselineElection = createElectionRecord(ElectionLifecycleStateProto.Draft, {
+      Title: 'Board Election',
+      CurrentDraftRevision: 1,
+    });
+    const updatedElection = {
+      ...baselineElection,
+      Title: 'Board Election Final',
+      CurrentDraftRevision: 2,
+    };
+
+    electionsServiceMock.getElectionsByOwner
+      .mockResolvedValueOnce({
+        Elections: [createElectionSummary(ElectionLifecycleStateProto.Draft)],
+      })
+      .mockResolvedValue({
+        Elections: [
+          createElectionSummary(ElectionLifecycleStateProto.Draft, {
+            CurrentDraftRevision: 2,
+          }),
+        ],
+      });
+    electionsServiceMock.getElection
+      .mockResolvedValueOnce(
+        createElectionResponse({
+          Election: baselineElection,
+          LatestDraftSnapshot: createDraftSnapshot({
+            DraftRevision: 1,
+            SnapshotReason: 'Initial draft',
+            Metadata: {
+              Title: 'Board Election',
+              ShortDescription: baselineElection.ShortDescription,
+              OwnerPublicAddress: 'owner-public-key',
+              ExternalReferenceCode: baselineElection.ExternalReferenceCode,
+            },
+          }),
+        })
+      )
+      .mockResolvedValueOnce(
+        createElectionResponse({
+          Election: updatedElection,
+          LatestDraftSnapshot: createDraftSnapshot({
+            DraftRevision: 2,
+            SnapshotReason: 'Owner draft update',
+            Metadata: {
+              Title: 'Board Election Final',
+              ShortDescription: updatedElection.ShortDescription,
+              OwnerPublicAddress: 'owner-public-key',
+              ExternalReferenceCode: updatedElection.ExternalReferenceCode,
+            },
+          }),
+        })
+      )
+      .mockResolvedValue(
+        createElectionResponse({
+          Election: updatedElection,
+          LatestDraftSnapshot: createDraftSnapshot({
+            DraftRevision: 2,
+            SnapshotReason: 'Owner draft update',
+            Metadata: {
+              Title: 'Board Election Final',
+              ShortDescription: updatedElection.ShortDescription,
+              OwnerPublicAddress: 'owner-public-key',
+              ExternalReferenceCode: updatedElection.ExternalReferenceCode,
+            },
+          }),
+        })
+      );
+
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />
+    );
+
+    expect(await screen.findByTestId('elections-title-input')).toHaveValue('Board Election');
+
+    fireEvent.change(screen.getByTestId('elections-title-input'), {
+      target: { value: 'Board Election Final' },
+    });
+    fireEvent.click(screen.getByTestId('elections-save-button'));
+
+    await waitFor(() => {
+      expect(transactionServiceMock.createUpdateElectionDraftTransaction).toHaveBeenCalledWith(
+        'election-1',
+        'owner-public-key',
+        'owner-encryption-key',
+        'owner-encryption-private-key',
+        'Owner draft update',
+        expect.objectContaining({
+          Title: 'Board Election Final',
+        }),
+        'owner-private-key'
+      );
+    });
+    expect(blockchainServiceMock.submitTransaction).toHaveBeenCalledWith(
+      'signed-draft-update-transaction'
+    );
+    expect(electionsServiceMock.updateElectionDraft).not.toHaveBeenCalled();
+    expect(await screen.findByText('Election draft updated.')).toBeInTheDocument();
+  });
+
+  it('invites a trustee through blockchain submission and waits for indexed readback', async () => {
+    const thresholdElection = createElectionRecord(ElectionLifecycleStateProto.Draft, {
+      GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+      ReviewWindowPolicy: ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+      RequiredApprovalCount: 3,
+    });
+    const thresholdPolicy = {
+      ElectionClass: ElectionClassProto.OrganizationalRemoteVoting,
+      BindingStatus: ElectionBindingStatusProto.Binding,
+      GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+      DisclosureMode: ElectionDisclosureModeProto.FinalResultsOnly,
+      ParticipationPrivacyMode:
+        ParticipationPrivacyModeProto.PublicCheckoffAnonymousBallotPrivateChoice,
+      VoteUpdatePolicy: VoteUpdatePolicyProto.SingleSubmissionOnly,
+      EligibilitySourceType: EligibilitySourceTypeProto.OrganizationImportedRoster,
+      EligibilityMutationPolicy: EligibilityMutationPolicyProto.FrozenAtOpen,
+      OutcomeRule: thresholdElection.OutcomeRule,
+      ApprovedClientApplications: [{ ApplicationId: 'hushsocial', Version: '1.0.0' }],
+      ProtocolOmegaVersion: 'omega-v1.0.0',
+      ReportingPolicy: ReportingPolicyProto.DefaultPhaseOnePackage,
+      ReviewWindowPolicy: ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+      RequiredApprovalCount: 3,
+    };
+    const indexedInvitations = [
+      {
+        Id: 'invite-1',
+        ElectionId: 'election-1',
+        TrusteeUserAddress: 'trustee-z',
+        TrusteeDisplayName: 'Zoe Trustee',
+        InvitedByPublicAddress: 'owner-public-key',
+        LinkedMessageId: 'message-1',
+        Status: ElectionTrusteeInvitationStatusProto.Pending,
+        SentAtDraftRevision: 1,
+        SentAt: timestamp,
+      },
+    ];
+
+    electionsServiceMock.getElectionsByOwner.mockResolvedValueOnce({
+      Elections: [
+        createElectionSummary(ElectionLifecycleStateProto.Draft, {
+          GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+        }),
+      ],
+    });
+    electionsServiceMock.getElection
+      .mockResolvedValueOnce(
+        createElectionResponse({
+          Election: thresholdElection,
+          LatestDraftSnapshot: createDraftSnapshot({ Policy: thresholdPolicy }),
+          TrusteeInvitations: [],
+          CeremonyProfiles: [],
+        })
+      )
+      .mockResolvedValueOnce(
+        createElectionResponse({
+          Election: thresholdElection,
+          LatestDraftSnapshot: createDraftSnapshot({ Policy: thresholdPolicy }),
+          TrusteeInvitations: indexedInvitations,
+          CeremonyProfiles: [],
+        })
+      )
+      .mockResolvedValue(
+        createElectionResponse({
+          Election: thresholdElection,
+          LatestDraftSnapshot: createDraftSnapshot({ Policy: thresholdPolicy }),
+          TrusteeInvitations: indexedInvitations,
+          CeremonyProfiles: [],
+        })
+      );
+
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />
+    );
+
+    expect(await screen.findByTestId('elections-trustee-user-address-input')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId('elections-trustee-user-address-input'), {
+      target: { value: 'trustee-z' },
+    });
+    fireEvent.change(screen.getByTestId('elections-trustee-display-name-input'), {
+      target: { value: 'Zoe Trustee' },
+    });
+
+    fireEvent.click(screen.getByTestId('elections-invite-trustee-button'));
+
+    await waitFor(() => {
+      expect(transactionServiceMock.createElectionTrusteeInvitationTransaction).toHaveBeenCalledWith(
+        'election-1',
+        'owner-public-key',
+        'owner-encryption-key',
+        'owner-encryption-private-key',
+        'trustee-z',
+        'Zoe Trustee',
+        'owner-private-key'
+      );
+    });
+    expect(blockchainServiceMock.submitTransaction).toHaveBeenCalledWith(
+      'signed-trustee-invite-transaction'
+    );
+    expect(await screen.findByText('Trustee invitation created.')).toBeInTheDocument();
+    expect(screen.getByText('Zoe Trustee (trustee-z)')).toBeInTheDocument();
+  });
+
+  it('revokes a trustee invitation through blockchain submission and waits for the revoked status', async () => {
+    const thresholdElection = createElectionRecord(ElectionLifecycleStateProto.Draft, {
+      GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+      ReviewWindowPolicy: ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+      RequiredApprovalCount: 3,
+    });
+    const thresholdPolicy = {
+      ElectionClass: ElectionClassProto.OrganizationalRemoteVoting,
+      BindingStatus: ElectionBindingStatusProto.Binding,
+      GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+      DisclosureMode: ElectionDisclosureModeProto.FinalResultsOnly,
+      ParticipationPrivacyMode:
+        ParticipationPrivacyModeProto.PublicCheckoffAnonymousBallotPrivateChoice,
+      VoteUpdatePolicy: VoteUpdatePolicyProto.SingleSubmissionOnly,
+      EligibilitySourceType: EligibilitySourceTypeProto.OrganizationImportedRoster,
+      EligibilityMutationPolicy: EligibilityMutationPolicyProto.FrozenAtOpen,
+      OutcomeRule: thresholdElection.OutcomeRule,
+      ApprovedClientApplications: [{ ApplicationId: 'hushsocial', Version: '1.0.0' }],
+      ProtocolOmegaVersion: 'omega-v1.0.0',
+      ReportingPolicy: ReportingPolicyProto.DefaultPhaseOnePackage,
+      ReviewWindowPolicy: ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+      RequiredApprovalCount: 3,
+    };
+    const pendingInvitation = {
+      Id: 'invite-1',
+      ElectionId: 'election-1',
+      TrusteeUserAddress: 'trustee-z',
+      TrusteeDisplayName: 'Zoe Trustee',
+      InvitedByPublicAddress: 'owner-public-key',
+      LinkedMessageId: 'message-1',
+      Status: ElectionTrusteeInvitationStatusProto.Pending,
+      SentAtDraftRevision: 1,
+      SentAt: timestamp,
+    };
+    const revokedInvitation = {
+      ...pendingInvitation,
+      Status: ElectionTrusteeInvitationStatusProto.Revoked,
+      ResolvedAtDraftRevision: 1,
+      RevokedAt: timestamp,
+    };
+
+    electionsServiceMock.getElectionsByOwner.mockResolvedValueOnce({
+      Elections: [
+        createElectionSummary(ElectionLifecycleStateProto.Draft, {
+          GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+        }),
+      ],
+    });
+    electionsServiceMock.getElection
+      .mockResolvedValueOnce(
+        createElectionResponse({
+          Election: thresholdElection,
+          LatestDraftSnapshot: createDraftSnapshot({ Policy: thresholdPolicy }),
+          TrusteeInvitations: [pendingInvitation],
+          CeremonyProfiles: [],
+        })
+      )
+      .mockResolvedValueOnce(
+        createElectionResponse({
+          Election: thresholdElection,
+          LatestDraftSnapshot: createDraftSnapshot({ Policy: thresholdPolicy }),
+          TrusteeInvitations: [revokedInvitation],
+          CeremonyProfiles: [],
+        })
+      )
+      .mockResolvedValue(
+        createElectionResponse({
+          Election: thresholdElection,
+          LatestDraftSnapshot: createDraftSnapshot({ Policy: thresholdPolicy }),
+          TrusteeInvitations: [revokedInvitation],
+          CeremonyProfiles: [],
+        })
+      );
+
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />
+    );
+
+    expect(await screen.findByText('Zoe Trustee (trustee-z)')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Revoke'));
+
+    await waitFor(() => {
+      expect(
+        transactionServiceMock.createRevokeElectionTrusteeInvitationTransaction
+      ).toHaveBeenCalledWith('election-1', 'invite-1', 'owner-public-key', 'owner-private-key');
+    });
+    expect(blockchainServiceMock.submitTransaction).toHaveBeenCalledWith(
+      'signed-trustee-revoke-transaction'
+    );
+    expect(electionsServiceMock.revokeElectionTrusteeInvitation).not.toHaveBeenCalled();
+    expect(await screen.findByText('Trustee invitation revoked.')).toBeInTheDocument();
+    expect(screen.getByText(/Revoked • Sent at draft revision/i)).toBeInTheDocument();
+  });
+
+  it('keeps the busy state while the trustee invitation waits for indexing', async () => {
+    const thresholdElection = createElectionRecord(ElectionLifecycleStateProto.Draft, {
+      GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+      ReviewWindowPolicy: ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+      RequiredApprovalCount: 3,
+    });
+    const thresholdPolicy = {
+      ElectionClass: ElectionClassProto.OrganizationalRemoteVoting,
+      BindingStatus: ElectionBindingStatusProto.Binding,
+      GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+      DisclosureMode: ElectionDisclosureModeProto.FinalResultsOnly,
+      ParticipationPrivacyMode:
+        ParticipationPrivacyModeProto.PublicCheckoffAnonymousBallotPrivateChoice,
+      VoteUpdatePolicy: VoteUpdatePolicyProto.SingleSubmissionOnly,
+      EligibilitySourceType: EligibilitySourceTypeProto.OrganizationImportedRoster,
+      EligibilityMutationPolicy: EligibilityMutationPolicyProto.FrozenAtOpen,
+      OutcomeRule: thresholdElection.OutcomeRule,
+      ApprovedClientApplications: [{ ApplicationId: 'hushsocial', Version: '1.0.0' }],
+      ProtocolOmegaVersion: 'omega-v1.0.0',
+      ReportingPolicy: ReportingPolicyProto.DefaultPhaseOnePackage,
+      ReviewWindowPolicy: ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+      RequiredApprovalCount: 3,
+    };
+
+    electionsServiceMock.getElectionsByOwner.mockResolvedValueOnce({
+      Elections: [
+        createElectionSummary(ElectionLifecycleStateProto.Draft, {
+          GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+        }),
+      ],
+    });
+    electionsServiceMock.getElection
+      .mockResolvedValueOnce(
+        createElectionResponse({
+          Election: thresholdElection,
+          LatestDraftSnapshot: createDraftSnapshot({ Policy: thresholdPolicy }),
+          TrusteeInvitations: [],
+          CeremonyProfiles: [],
+        })
+      )
+      .mockResolvedValue(
+        createElectionResponse({
+          Election: thresholdElection,
+          LatestDraftSnapshot: createDraftSnapshot({ Policy: thresholdPolicy }),
+          TrusteeInvitations: [],
+          CeremonyProfiles: [],
+        })
+      );
+
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />
+    );
+
+    expect(await screen.findByTestId('elections-trustee-user-address-input')).toBeInTheDocument();
+
+    vi.useFakeTimers();
+
+    fireEvent.change(screen.getByTestId('elections-trustee-user-address-input'), {
+      target: { value: 'trustee-z' },
+    });
+    fireEvent.change(screen.getByTestId('elections-trustee-display-name-input'), {
+      target: { value: 'Zoe Trustee' },
+    });
+
+    fireEvent.click(screen.getByTestId('elections-invite-trustee-button'));
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('Trustee invitation submitted.')).toBeInTheDocument();
+    expect(screen.getByText(/waiting for block confirmation/i)).toBeInTheDocument();
+    expect(screen.getByTestId('elections-invite-trustee-button')).toBeDisabled();
+
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    expect(screen.getByText('Trustee invitation submitted.')).toBeInTheDocument();
   });
 
   it('shows the trustee-threshold block and hides the open action', async () => {
@@ -401,7 +936,12 @@ describe('ElectionsWorkspace', () => {
       })
     );
 
-    render(<ElectionsWorkspace ownerPublicAddress="owner-public-key" />);
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />
+    );
 
     expect(await screen.findByTestId('elections-trustee-blocked-panel')).toHaveTextContent(
       'FEAT-096'
@@ -445,7 +985,12 @@ describe('ElectionsWorkspace', () => {
       })
     );
 
-    render(<ElectionsWorkspace ownerPublicAddress="owner-public-key" />);
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />
+    );
 
     expect(await screen.findByTestId('elections-binding-advisory')).toHaveTextContent(
       'result is advisory'
@@ -518,7 +1063,12 @@ describe('ElectionsWorkspace', () => {
       })
     );
 
-    render(<ElectionsWorkspace ownerPublicAddress="owner-public-key" />);
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />
+    );
 
     expect(await screen.findByTestId('elections-close-button')).toBeInTheDocument();
     expect(screen.getByTestId('elections-read-only-banner')).toHaveTextContent(
@@ -528,6 +1078,358 @@ describe('ElectionsWorkspace', () => {
     expect(screen.getByTestId('elections-frozen-policy')).toHaveTextContent('Protocol Omega version');
     expect(screen.getByTestId('elections-warning-evidence')).toHaveTextContent('Low anonymity set');
     expect(screen.getByText('Boundary artifacts')).toBeInTheDocument();
+  });
+
+  it('opens an election through blockchain submission and waits for the open boundary readback', async () => {
+    const draftElection = createElectionRecord(ElectionLifecycleStateProto.Draft, {
+      AcknowledgedWarningCodes: [0],
+    });
+    const openElection = createElectionRecord(ElectionLifecycleStateProto.Open, {
+      AcknowledgedWarningCodes: [0],
+      OpenedAt: timestamp,
+      OpenArtifactId: 'open-artifact',
+    });
+
+    electionsServiceMock.getElectionsByOwner
+      .mockResolvedValueOnce({
+        Elections: [createElectionSummary(ElectionLifecycleStateProto.Draft)],
+      })
+      .mockResolvedValueOnce({
+        Elections: [createElectionSummary(ElectionLifecycleStateProto.Open)],
+      });
+    electionsServiceMock.getElection
+      .mockResolvedValueOnce(
+        createElectionResponse({
+          Election: draftElection,
+          LatestDraftSnapshot: createDraftSnapshot(),
+          WarningAcknowledgements: [
+            {
+              Id: 'warning-1',
+              ElectionId: 'election-1',
+              WarningCode: 0,
+              DraftRevision: 1,
+              AcknowledgedByPublicAddress: 'owner-public-key',
+              AcknowledgedAt: timestamp,
+            },
+          ],
+        })
+      )
+      .mockResolvedValueOnce(
+        createElectionResponse({
+          Election: openElection,
+          LatestDraftSnapshot: createDraftSnapshot(),
+        })
+      )
+      .mockResolvedValue(
+        createElectionResponse({
+          Election: openElection,
+          LatestDraftSnapshot: createDraftSnapshot(),
+        })
+      );
+
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />
+    );
+
+    fireEvent.click(await screen.findByTestId('elections-open-button'));
+
+    expect(await screen.findByText('Election opened.')).toBeInTheDocument();
+    expect(transactionServiceMock.createOpenElectionTransaction).toHaveBeenCalledWith(
+      'election-1',
+      'owner-public-key',
+      expect.any(Array),
+      null,
+      '',
+      '',
+      '',
+      'owner-private-key'
+    );
+    expect(blockchainServiceMock.submitTransaction).toHaveBeenCalledWith(
+      'signed-open-election-transaction'
+    );
+    expect(electionsServiceMock.openElection).not.toHaveBeenCalled();
+  });
+
+  it('closes an election through blockchain submission and waits for the close boundary readback', async () => {
+    const openElection = createElectionRecord(ElectionLifecycleStateProto.Open, {
+      OpenedAt: timestamp,
+      OpenArtifactId: 'open-artifact',
+    });
+    const closedElection = createElectionRecord(ElectionLifecycleStateProto.Closed, {
+      OpenedAt: timestamp,
+      ClosedAt: timestamp,
+      OpenArtifactId: 'open-artifact',
+      CloseArtifactId: 'close-artifact',
+    });
+
+    electionsServiceMock.getElectionsByOwner
+      .mockResolvedValueOnce({
+        Elections: [createElectionSummary(ElectionLifecycleStateProto.Open)],
+      })
+      .mockResolvedValueOnce({
+        Elections: [createElectionSummary(ElectionLifecycleStateProto.Closed)],
+      });
+    electionsServiceMock.getElection
+      .mockResolvedValueOnce(
+        createElectionResponse({
+          Election: openElection,
+          BoundaryArtifacts: [],
+        })
+      )
+      .mockResolvedValueOnce(
+        createElectionResponse({
+          Election: closedElection,
+          BoundaryArtifacts: [],
+        })
+      )
+      .mockResolvedValue(
+        createElectionResponse({
+          Election: closedElection,
+          BoundaryArtifacts: [],
+        })
+      );
+
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />
+    );
+
+    fireEvent.click(await screen.findByTestId('elections-close-button'));
+
+    expect(await screen.findByText('Election closed.')).toBeInTheDocument();
+    expect(transactionServiceMock.createCloseElectionTransaction).toHaveBeenCalledWith(
+      'election-1',
+      'owner-public-key',
+      null,
+      null,
+      'owner-private-key'
+    );
+    expect(blockchainServiceMock.submitTransaction).toHaveBeenCalledWith(
+      'signed-close-election-transaction'
+    );
+    expect(electionsServiceMock.closeElection).not.toHaveBeenCalled();
+  });
+
+  it('finalizes an election through blockchain submission and waits for the finalize boundary readback', async () => {
+    const closedElection = createElectionRecord(ElectionLifecycleStateProto.Closed, {
+      OpenedAt: timestamp,
+      ClosedAt: timestamp,
+      OpenArtifactId: 'open-artifact',
+      CloseArtifactId: 'close-artifact',
+      TallyReadyAt: timestamp,
+    });
+    const finalizedElection = createElectionRecord(ElectionLifecycleStateProto.Finalized, {
+      OpenedAt: timestamp,
+      ClosedAt: timestamp,
+      FinalizedAt: timestamp,
+      OpenArtifactId: 'open-artifact',
+      CloseArtifactId: 'close-artifact',
+      FinalizeArtifactId: 'finalize-artifact',
+      TallyReadyAt: timestamp,
+    });
+
+    electionsServiceMock.getElectionsByOwner
+      .mockResolvedValueOnce({
+        Elections: [createElectionSummary(ElectionLifecycleStateProto.Closed)],
+      })
+      .mockResolvedValueOnce({
+        Elections: [createElectionSummary(ElectionLifecycleStateProto.Finalized)],
+      });
+    electionsServiceMock.getElection
+      .mockResolvedValueOnce(
+        createElectionResponse({
+          Election: closedElection,
+          BoundaryArtifacts: [],
+        })
+      )
+      .mockResolvedValueOnce(
+        createElectionResponse({
+          Election: finalizedElection,
+          BoundaryArtifacts: [],
+        })
+      )
+      .mockResolvedValue(
+        createElectionResponse({
+          Election: finalizedElection,
+          BoundaryArtifacts: [],
+        })
+      );
+
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />
+    );
+
+    fireEvent.click(await screen.findByTestId('elections-finalize-button'));
+
+    expect(await screen.findByText('Election finalized.')).toBeInTheDocument();
+    expect(transactionServiceMock.createFinalizeElectionTransaction).toHaveBeenCalledWith(
+      'election-1',
+      'owner-public-key',
+      null,
+      null,
+      'owner-private-key'
+    );
+    expect(blockchainServiceMock.submitTransaction).toHaveBeenCalledWith(
+      'signed-finalize-election-transaction'
+    );
+    expect(electionsServiceMock.finalizeElection).not.toHaveBeenCalled();
+  });
+
+  it('starts a governed close proposal through blockchain submission and waits for the indexed proposal', async () => {
+    const openThresholdElection = createElectionRecord(ElectionLifecycleStateProto.Open, {
+      GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+      ReviewWindowPolicy: ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+      RequiredApprovalCount: 3,
+      OpenArtifactId: 'open-artifact',
+    });
+    const indexedProposal = {
+      Id: 'proposal-1',
+      ElectionId: 'election-1',
+      ActionType: ElectionGovernedActionTypeProto.Close,
+      LifecycleStateAtCreation: ElectionLifecycleStateProto.Open,
+      ProposedByPublicAddress: 'owner-public-key',
+      CreatedAt: timestamp,
+      ExecutionStatus: ElectionGovernedProposalExecutionStatusProto.WaitingForApprovals,
+      ExecutionFailureReason: '',
+      LastExecutionTriggeredByPublicAddress: '',
+    };
+
+    electionsServiceMock.getElectionsByOwner.mockResolvedValueOnce({
+      Elections: [
+        createElectionSummary(ElectionLifecycleStateProto.Open, {
+          GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+        }),
+      ],
+    });
+    electionsServiceMock.getElection
+      .mockResolvedValueOnce(
+        createElectionResponse({
+          Election: openThresholdElection,
+          GovernedProposals: [],
+        })
+      )
+      .mockResolvedValue(
+        createElectionResponse({
+          Election: {
+            ...openThresholdElection,
+            VoteAcceptanceLockedAt: timestamp,
+          },
+          GovernedProposals: [indexedProposal],
+        })
+      );
+
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />
+    );
+
+    expect(await screen.findByTestId('elections-governed-actions')).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByTestId(`elections-governed-start-${ElectionGovernedActionTypeProto.Close}`)
+    );
+
+    await waitFor(() => {
+      expect(transactionServiceMock.createStartElectionGovernedProposalTransaction).toHaveBeenCalledWith(
+        'election-1',
+        ElectionGovernedActionTypeProto.Close,
+        'owner-public-key',
+        'owner-private-key'
+      );
+    });
+    expect(blockchainServiceMock.submitTransaction).toHaveBeenCalledWith(
+      'signed-start-governed-proposal-transaction'
+    );
+    expect(electionsServiceMock.startElectionGovernedProposal).not.toHaveBeenCalled();
+  });
+
+  it('retries a failed governed proposal through blockchain submission and waits for the execution update', async () => {
+    const openThresholdElection = createElectionRecord(ElectionLifecycleStateProto.Open, {
+      GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+      ReviewWindowPolicy: ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+      RequiredApprovalCount: 3,
+      OpenArtifactId: 'open-artifact',
+    });
+    const failedProposal = {
+      Id: 'proposal-1',
+      ElectionId: 'election-1',
+      ActionType: ElectionGovernedActionTypeProto.Close,
+      LifecycleStateAtCreation: ElectionLifecycleStateProto.Open,
+      ProposedByPublicAddress: 'owner-public-key',
+      CreatedAt: timestamp,
+      ExecutionStatus: ElectionGovernedProposalExecutionStatusProto.ExecutionFailed,
+      ExecutionFailureReason: 'The election was not open during the first attempt.',
+      LastExecutionTriggeredByPublicAddress: 'trustee-a',
+      LastExecutionAttemptedAt: timestamp,
+    };
+    const succeededProposal = {
+      ...failedProposal,
+      ExecutionStatus: ElectionGovernedProposalExecutionStatusProto.ExecutionSucceeded,
+      ExecutionFailureReason: '',
+      ExecutedAt: { seconds: timestamp.seconds + 60, nanos: 0 },
+      LastExecutionAttemptedAt: { seconds: timestamp.seconds + 60, nanos: 0 },
+      LastExecutionTriggeredByPublicAddress: 'owner-public-key',
+    };
+
+    electionsServiceMock.getElectionsByOwner.mockResolvedValueOnce({
+      Elections: [
+        createElectionSummary(ElectionLifecycleStateProto.Open, {
+          GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+        }),
+      ],
+    });
+    electionsServiceMock.getElection
+      .mockResolvedValueOnce(
+        createElectionResponse({
+          Election: openThresholdElection,
+          GovernedProposals: [failedProposal],
+        })
+      )
+      .mockResolvedValue(
+        createElectionResponse({
+          Election: {
+            ...openThresholdElection,
+            LifecycleState: ElectionLifecycleStateProto.Closed,
+            ClosedAt: timestamp,
+            CloseArtifactId: 'close-artifact',
+          },
+          GovernedProposals: [succeededProposal],
+        })
+      );
+
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />
+    );
+
+    expect(await screen.findByTestId('elections-governed-actions')).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByTestId(`elections-governed-retry-${ElectionGovernedActionTypeProto.Close}`)
+    );
+
+    await waitFor(() => {
+      expect(transactionServiceMock.createRetryElectionGovernedProposalExecutionTransaction).toHaveBeenCalledWith(
+        'election-1',
+        'proposal-1',
+        'owner-public-key',
+        'owner-private-key'
+      );
+    });
+    expect(blockchainServiceMock.submitTransaction).toHaveBeenCalledWith(
+      'signed-retry-governed-proposal-transaction'
+    );
+    expect(electionsServiceMock.retryElectionGovernedProposalExecution).not.toHaveBeenCalled();
   });
 
   it('surfaces unsupported FEAT-094 values from an existing draft', async () => {
@@ -563,7 +1465,12 @@ describe('ElectionsWorkspace', () => {
       })
     );
 
-    render(<ElectionsWorkspace ownerPublicAddress="owner-public-key" />);
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />
+    );
 
     const unsupportedPanel = await screen.findByTestId('elections-unsupported-panel');
     expect(unsupportedPanel).toHaveTextContent('final-results-only disclosure mode');
@@ -653,7 +1560,12 @@ describe('ElectionsWorkspace', () => {
       createCeremonyActionViewResponse()
     );
 
-    render(<ElectionsWorkspace ownerPublicAddress="owner-public-key" />);
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />
+    );
 
     expect(await screen.findByTestId('elections-ceremony-section')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('elections-ceremony-start-button'));
@@ -761,7 +1673,12 @@ describe('ElectionsWorkspace', () => {
       createCeremonyActionViewResponse()
     );
 
-    render(<ElectionsWorkspace ownerPublicAddress="owner-public-key" />);
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />
+    );
 
     expect(await screen.findByTestId('elections-ceremony-warning-card')).toHaveTextContent(
       'Opening can still proceed when the ceremony is ready'
@@ -860,7 +1777,12 @@ describe('ElectionsWorkspace', () => {
       })
     );
 
-    render(<ElectionsWorkspace ownerPublicAddress="owner-public-key" />);
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />
+    );
 
     expect(await screen.findByTestId('elections-ceremony-section')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('elections-ceremony-restart-button'));

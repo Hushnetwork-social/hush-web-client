@@ -73,6 +73,9 @@ import { useElectionsStore } from './useElectionsStore';
 
 type ElectionsWorkspaceProps = {
   ownerPublicAddress: string;
+  ownerEncryptionPublicKey?: string;
+  ownerEncryptionPrivateKey?: string;
+  ownerSigningPrivateKey: string;
 };
 
 type FixedPolicyItem = {
@@ -153,7 +156,12 @@ function toggleWarningCode(
   };
 }
 
-export function ElectionsWorkspace({ ownerPublicAddress }: ElectionsWorkspaceProps) {
+export function ElectionsWorkspace({
+  ownerPublicAddress,
+  ownerEncryptionPublicKey,
+  ownerEncryptionPrivateKey,
+  ownerSigningPrivateKey,
+}: ElectionsWorkspaceProps) {
   const {
     beginNewElection,
     ceremonyActionView,
@@ -288,7 +296,10 @@ export function ElectionsWorkspace({ ownerPublicAddress }: ElectionsWorkspacePro
   const saveButtonLabel = selectedElectionId ? 'Update Draft' : 'Create Draft';
 
   const canEditDraft = isDraftEditable(election);
+  const supportsDirectOpen =
+    election?.GovernanceMode !== ElectionGovernanceModeProto.TrusteeThreshold;
   const canOpenSelectedElection =
+    supportsDirectOpen &&
     canOpenElection(election) &&
     unsupportedMessages.length === 0 &&
     saveValidationErrors.length === 0 &&
@@ -365,11 +376,22 @@ export function ElectionsWorkspace({ ownerPublicAddress }: ElectionsWorkspacePro
     }
 
     if (selectedElectionId) {
-      await updateDraft(normalizedDraft, reason);
+      await updateDraft(
+        normalizedDraft,
+        reason,
+        ownerEncryptionPublicKey ?? '',
+        ownerEncryptionPrivateKey ?? '',
+        ownerSigningPrivateKey
+      );
       return;
     }
 
-    await createDraft(normalizedDraft, reason);
+    await createDraft(
+      normalizedDraft,
+      reason,
+      ownerEncryptionPublicKey ?? '',
+      ownerSigningPrivateKey,
+    );
   };
 
   const handleGovernanceChange = (governanceMode: ElectionGovernanceModeProto) => {
@@ -425,7 +447,7 @@ export function ElectionsWorkspace({ ownerPublicAddress }: ElectionsWorkspacePro
       ActorPublicAddress: ownerPublicAddress,
       TrusteeUserAddress: trusteeUserAddress.trim(),
       TrusteeDisplayName: trusteeDisplayName.trim(),
-    });
+    }, ownerEncryptionPublicKey ?? '', ownerEncryptionPrivateKey ?? '', ownerSigningPrivateKey);
 
     if (didInvite) {
       setTrusteeUserAddress('');
@@ -444,7 +466,7 @@ export function ElectionsWorkspace({ ownerPublicAddress }: ElectionsWorkspacePro
       ActorPublicAddress: ownerPublicAddress,
     };
 
-    await revokeInvitation(request);
+    await revokeInvitation(request, ownerSigningPrivateKey);
   };
 
   const handleOpenElection = async () => {
@@ -457,7 +479,15 @@ export function ElectionsWorkspace({ ownerPublicAddress }: ElectionsWorkspacePro
       return;
     }
 
-    await openElection(requiredWarningCodes);
+    await openElection(requiredWarningCodes, ownerSigningPrivateKey);
+  };
+
+  const handleCloseElection = async () => {
+    await closeElection(ownerSigningPrivateKey);
+  };
+
+  const handleFinalizeElection = async () => {
+    await finalizeElection(ownerSigningPrivateKey);
   };
 
   const handleStartGovernedProposal = async (actionType: ElectionGovernedActionTypeProto) => {
@@ -468,11 +498,11 @@ export function ElectionsWorkspace({ ownerPublicAddress }: ElectionsWorkspacePro
       return;
     }
 
-    await startGovernedProposal(actionType);
+    await startGovernedProposal(actionType, ownerSigningPrivateKey);
   };
 
   const handleRetryGovernedProposal = async (proposalId: string) => {
-    await retryGovernedProposalExecution(proposalId);
+    await retryGovernedProposalExecution(proposalId, ownerSigningPrivateKey);
   };
 
   const handleStartCeremony = async (profileId: string) => {
@@ -1091,6 +1121,7 @@ export function ElectionsWorkspace({ ownerPublicAddress }: ElectionsWorkspacePro
                           value={trusteeUserAddress}
                           onChange={(event) => setTrusteeUserAddress(event.target.value)}
                           disabled={!canEditDraft || isSubmitting}
+                          data-testid="elections-trustee-user-address-input"
                           className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-2 text-sm outline-none transition-colors focus:border-hush-purple disabled:cursor-not-allowed disabled:opacity-70"
                         />
                       </label>
@@ -1103,6 +1134,7 @@ export function ElectionsWorkspace({ ownerPublicAddress }: ElectionsWorkspacePro
                           value={trusteeDisplayName}
                           onChange={(event) => setTrusteeDisplayName(event.target.value)}
                           disabled={!canEditDraft || isSubmitting}
+                          data-testid="elections-trustee-display-name-input"
                           className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-2 text-sm outline-none transition-colors focus:border-hush-purple disabled:cursor-not-allowed disabled:opacity-70"
                         />
                       </label>
@@ -1116,9 +1148,14 @@ export function ElectionsWorkspace({ ownerPublicAddress }: ElectionsWorkspacePro
                             !trusteeUserAddress.trim() ||
                             !trusteeDisplayName.trim()
                           }
+                          data-testid="elections-invite-trustee-button"
                           className="inline-flex h-11 items-center gap-2 rounded-xl border border-hush-bg-light px-4 text-sm transition-colors hover:border-hush-purple disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                          <Plus className="h-4 w-4" />
+                          {isSubmitting ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Plus className="h-4 w-4" />
+                          )}
                           <span>Invite trustee</span>
                         </button>
                       </div>
@@ -1152,7 +1189,11 @@ export function ElectionsWorkspace({ ownerPublicAddress }: ElectionsWorkspacePro
                                   disabled={isSubmitting}
                                   className="inline-flex items-center gap-2 rounded-xl border border-hush-bg-light px-3 py-2 text-sm transition-colors hover:border-red-400 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-50"
                                 >
-                                  <Square className="h-4 w-4" />
+                                  {isSubmitting ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Square className="h-4 w-4" />
+                                  )}
                                   <span>Revoke</span>
                                 </button>
                               )}
@@ -1520,7 +1561,7 @@ export function ElectionsWorkspace({ ownerPublicAddress }: ElectionsWorkspacePro
                   {canCloseSelectedElection && (
                     <button
                       type="button"
-                      onClick={() => void closeElection()}
+                      onClick={() => void handleCloseElection()}
                       disabled={isSubmitting}
                       className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90"
                       data-testid="elections-close-button"
@@ -1537,7 +1578,7 @@ export function ElectionsWorkspace({ ownerPublicAddress }: ElectionsWorkspacePro
                   {canFinalizeSelectedElection && (
                     <button
                       type="button"
-                      onClick={() => void finalizeElection()}
+                      onClick={() => void handleFinalizeElection()}
                       disabled={isSubmitting}
                       className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90"
                       data-testid="elections-finalize-button"

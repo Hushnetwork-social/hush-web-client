@@ -22,15 +22,15 @@ export default function TrusteeProposalPage({ params }: TrusteeProposalPageProps
   useEffect(() => {
     const timer = setTimeout(() => {
       setIsCheckingAuth(false);
-      if (!isAuthenticated || !credentials?.signingPublicKey) {
+      if (!isAuthenticated || !credentials?.signingPublicKey || !credentials?.signingPrivateKey) {
         router.replace('/auth');
       }
     }, 100);
 
     return () => clearTimeout(timer);
-  }, [credentials?.signingPublicKey, isAuthenticated, router]);
+  }, [credentials?.signingPrivateKey, credentials?.signingPublicKey, isAuthenticated, router]);
 
-  if (isCheckingAuth || !isAuthenticated || !credentials?.signingPublicKey) {
+  if (isCheckingAuth || !isAuthenticated || !credentials?.signingPublicKey || !credentials?.signingPrivateKey) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-hush-bg-dark">
         <Loader2 className="h-8 w-8 animate-spin text-hush-purple" />
@@ -43,6 +43,7 @@ export default function TrusteeProposalPage({ params }: TrusteeProposalPageProps
       electionId={resolvedParams.electionId}
       proposalId={resolvedParams.proposalId}
       actorPublicAddress={credentials.signingPublicKey}
+      actorSigningPrivateKey={credentials.signingPrivateKey}
     />
   );
 }

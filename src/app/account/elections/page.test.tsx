@@ -12,8 +12,20 @@ vi.mock('next/navigation', () => ({
 }));
 
 vi.mock('@/modules/elections', () => ({
-  ElectionsWorkspace: ({ ownerPublicAddress }: { ownerPublicAddress: string }) => (
-    <div data-testid="elections-workspace-stub">{ownerPublicAddress}</div>
+  ElectionsWorkspace: ({
+    ownerPublicAddress,
+    ownerEncryptionPublicKey,
+    ownerEncryptionPrivateKey,
+    ownerSigningPrivateKey,
+  }: {
+    ownerPublicAddress: string;
+    ownerEncryptionPublicKey: string;
+    ownerEncryptionPrivateKey: string;
+    ownerSigningPrivateKey: string;
+  }) => (
+    <div data-testid="elections-workspace-stub">
+      {ownerPublicAddress}:{ownerEncryptionPublicKey}:{ownerEncryptionPrivateKey}:{ownerSigningPrivateKey}
+    </div>
   ),
 }));
 
@@ -65,7 +77,9 @@ describe('AccountElectionsPage', () => {
       vi.advanceTimersByTime(200);
     });
 
-    expect(screen.getByTestId('elections-workspace-stub')).toHaveTextContent('owner-public-key');
+    expect(screen.getByTestId('elections-workspace-stub')).toHaveTextContent(
+      'owner-public-key:owner-encryption-key:private-encryption-key:private-signing-key'
+    );
     expect(mockReplace).not.toHaveBeenCalled();
   });
 });

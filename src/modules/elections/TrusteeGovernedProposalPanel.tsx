@@ -16,6 +16,7 @@ type TrusteeGovernedProposalPanelProps = {
   electionId: string;
   proposalId: string;
   actorPublicAddress: string;
+  actorSigningPrivateKey: string;
 };
 
 const sectionClass =
@@ -25,6 +26,7 @@ export function TrusteeGovernedProposalPanel({
   electionId,
   proposalId,
   actorPublicAddress,
+  actorSigningPrivateKey,
 }: TrusteeGovernedProposalPanelProps) {
   const {
     approveGovernedProposal,
@@ -68,7 +70,12 @@ export function TrusteeGovernedProposalPanel({
     !hasCurrentActorApproved;
 
   const handleApprove = async () => {
-    const didApprove = await approveGovernedProposal(proposalId, actorPublicAddress, approvalNote);
+    const didApprove = await approveGovernedProposal(
+      proposalId,
+      actorPublicAddress,
+      actorSigningPrivateKey,
+      approvalNote
+    );
     if (didApprove) {
       setApprovalNote('');
     }

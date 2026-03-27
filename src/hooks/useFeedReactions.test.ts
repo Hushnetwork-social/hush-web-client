@@ -155,6 +155,7 @@ describe('useFeedReactions', () => {
   afterEach(() => {
     vi.clearAllMocks();
     process.env.NEXT_PUBLIC_REACTIONS_ALLOW_DEV_MODE = 'false';
+    delete (window as Window & { __e2e_forceReactionMode?: unknown }).__e2e_forceReactionMode;
   });
 
   describe('Key Derivation', () => {
@@ -385,6 +386,22 @@ describe('useFeedReactions', () => {
       );
 
       expect(result.current.isReady).toBe(false);
+    });
+
+    it('should become ready when dev mode is forced for E2E', async () => {
+      mockReactionsState.userSecret = null;
+      Object.assign(window, { __e2e_forceReactionMode: 'dev' });
+
+      const { result } = renderHook(() =>
+        useFeedReactions({
+          feedId: 'forced-dev-ready-feed',
+          feedAesKey: undefined,
+        })
+      );
+
+      await waitFor(() => {
+        expect(result.current.isReady).toBe(true);
+      });
     });
   });
 

@@ -16,6 +16,14 @@ export interface GetBlockchainHeightReply {
   Index: number;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface GetElectionEnvelopeContextRequest {}
+
+export interface GetElectionEnvelopeContextReply {
+  NodePublicEncryptAddress: string;
+  ElectionEnvelopeVersion: string;
+}
+
 export interface SubmitSignedTransactionRequest {
   SignedTransaction: string;
 }
@@ -1344,6 +1352,17 @@ export interface FinalizeElectionRequest {
 
 export interface GetElectionRequest {
   ElectionId: string;
+}
+
+export interface GetElectionEnvelopeAccessRequest {
+  ElectionId: string;
+  ActorPublicAddress: string;
+}
+
+export interface GetElectionEnvelopeAccessResponse {
+  Success: boolean;
+  ErrorMessage: string;
+  ActorEncryptedElectionPrivateKey: string;
 }
 
 export interface GetElectionCeremonyActionViewRequest {
