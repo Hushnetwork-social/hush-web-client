@@ -1092,6 +1092,20 @@ describe('SocialPage', () => {
     });
   });
 
+  it('assigns selected member to circle through desktop click flow', async () => {
+    selectedNav = 'following';
+    render(<SocialPage />);
+
+    fireEvent.click(screen.getByTestId('social-following-item-bob-address'));
+    fireEvent.click(screen.getByTestId('social-circle-card-inner-circle'));
+
+    await waitFor(() => {
+      expect(checkIdentityExistsMock).toHaveBeenCalledWith('bob-address');
+      expect(addMembersToCustomCircleMock).toHaveBeenCalled();
+      expect(triggerSyncNowMock).toHaveBeenCalled();
+    });
+  });
+
   it('blocks duplicate assignment before submission', async () => {
     selectedNav = 'following';
     render(<SocialPage />);
@@ -1330,6 +1344,70 @@ describe('SocialPage', () => {
 
     expect(screen.getByTestId('social-following-circle-alice-address-Inner Circle')).toBeInTheDocument();
     expect(screen.getByTestId('social-following-circle-alice-address-Friends')).toBeInTheDocument();
+  });
+
+  it('augments following badges from the authoritative owner inner circle when local membership is stale', async () => {
+    selectedNav = 'following';
+    mockFeeds = [
+      {
+        id: 'chat-alice',
+        type: 'chat',
+        name: 'Alice',
+        participants: ['me-address', 'alice-address'],
+        otherParticipantPublicSigningAddress: 'alice-address',
+      },
+      {
+        id: 'chat-bob',
+        type: 'chat',
+        name: 'Bob',
+        participants: ['me-address', 'bob-address'],
+        otherParticipantPublicSigningAddress: 'bob-address',
+      },
+      {
+        id: 'inner-circle',
+        type: 'group',
+        name: 'Inner Circle',
+        description: 'Auto-managed inner circle',
+        participants: ['me-address', 'alice-address'],
+      },
+    ];
+    mockGroupMembers = {
+      'inner-circle': [{ publicAddress: 'me-address' }, { publicAddress: 'alice-address' }],
+    };
+    getInnerCircleMock.mockImplementation(async (ownerAddress: string) => {
+      if (ownerAddress === 'me-address') {
+        return {
+          success: true,
+          message: 'ok',
+          exists: true,
+          feedId: 'inner-circle',
+        };
+      }
+
+      return {
+        success: false,
+        message: 'not found',
+        exists: false,
+        feedId: undefined,
+      };
+    });
+    getGroupMembersMock.mockImplementation(async (feedId: string) => {
+      if (feedId === 'inner-circle') {
+        return [
+          { publicAddress: 'me-address' },
+          { publicAddress: 'alice-address' },
+          { publicAddress: 'bob-address' },
+        ];
+      }
+
+      return [];
+    });
+
+    render(<SocialPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('social-following-circle-bob-address-Inner Circle')).toBeInTheDocument();
+    });
   });
 
   it('shows generic Private badge for private post received from another user', async () => {
