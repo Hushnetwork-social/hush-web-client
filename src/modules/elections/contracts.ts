@@ -2,6 +2,7 @@ import {
   type ElectionCeremonyProfile,
   ElectionCeremonyActionTypeProto,
   ElectionCeremonyActorRoleProto,
+  ElectionCeremonyShareCustodyStatusProto,
   ElectionCeremonyVersionStatusProto,
   ElectionBindingStatusProto,
   ElectionClassProto,
@@ -219,6 +220,13 @@ const CEREMONY_ACTOR_ROLE_LABELS: Record<ElectionCeremonyActorRoleProto, string>
   [ElectionCeremonyActorRoleProto.CeremonyActorOwner]: 'Owner',
   [ElectionCeremonyActorRoleProto.CeremonyActorTrustee]: 'Trustee',
   [ElectionCeremonyActorRoleProto.CeremonyActorReadOnly]: 'Read-only',
+};
+
+const CEREMONY_SHARE_CUSTODY_STATUS_LABELS: Record<ElectionCeremonyShareCustodyStatusProto, string> = {
+  [ElectionCeremonyShareCustodyStatusProto.ShareCustodyNotExported]: 'Not exported',
+  [ElectionCeremonyShareCustodyStatusProto.ShareCustodyExported]: 'Exported',
+  [ElectionCeremonyShareCustodyStatusProto.ShareCustodyImported]: 'Imported',
+  [ElectionCeremonyShareCustodyStatusProto.ShareCustodyImportFailed]: 'Import failed',
 };
 
 let nextOptionSeed = 1;
@@ -834,6 +842,43 @@ export function getAllowedCeremonyProfiles(detail: GetElectionResponse | null): 
   return detail?.CeremonyProfiles ?? [];
 }
 
+export function getActiveCeremonyVersion(detail: GetElectionResponse | null) {
+  const versions = (detail?.CeremonyVersions ?? [])
+    .filter((version) => version.Status !== ElectionCeremonyVersionStatusProto.CeremonyVersionSuperseded)
+    .sort(
+      (left, right) => timestampToMilliseconds(right.StartedAt) - timestampToMilliseconds(left.StartedAt)
+    );
+
+  return versions[0] ?? null;
+}
+
+export function getSupersededCeremonyVersions(detail: GetElectionResponse | null) {
+  return (detail?.CeremonyVersions ?? [])
+    .filter((version) => version.Status === ElectionCeremonyVersionStatusProto.CeremonyVersionSuperseded)
+    .sort(
+      (left, right) =>
+        timestampToMilliseconds(right.SupersededAt ?? right.StartedAt) -
+        timestampToMilliseconds(left.SupersededAt ?? left.StartedAt)
+    );
+}
+
+export function getCeremonyTranscriptEvents(
+  detail: GetElectionResponse | null,
+  ceremonyVersionId?: string
+) {
+  return (detail?.CeremonyTranscriptEvents ?? [])
+    .filter((event) => !ceremonyVersionId || event.CeremonyVersionId === ceremonyVersionId)
+    .sort(
+      (left, right) => timestampToMilliseconds(left.OccurredAt) - timestampToMilliseconds(right.OccurredAt)
+    );
+}
+
+export function getActiveCeremonyTrusteeStates(detail: GetElectionResponse | null) {
+  return (detail?.ActiveCeremonyTrusteeStates ?? [])
+    .slice()
+    .sort((left, right) => left.TrusteeDisplayName.localeCompare(right.TrusteeDisplayName));
+}
+
 export function getCeremonyVersionStatusLabel(status: ElectionCeremonyVersionStatusProto): string {
   return CEREMONY_VERSION_STATUS_LABELS[status] ?? 'Unknown';
 }
@@ -848,6 +893,12 @@ export function getCeremonyActionLabel(actionType: ElectionCeremonyActionTypePro
 
 export function getCeremonyActorRoleLabel(actorRole: ElectionCeremonyActorRoleProto): string {
   return CEREMONY_ACTOR_ROLE_LABELS[actorRole] ?? 'Unknown';
+}
+
+export function getCeremonyShareCustodyStatusLabel(
+  status: ElectionCeremonyShareCustodyStatusProto
+): string {
+  return CEREMONY_SHARE_CUSTODY_STATUS_LABELS[status] ?? 'Unknown';
 }
 
 export function getCeremonyActionViewStates(

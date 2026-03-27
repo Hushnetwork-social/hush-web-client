@@ -1,7 +1,16 @@
 import { create } from 'zustand';
 import {
+  type CompleteElectionCeremonyTrusteeRequest,
   ElectionGovernedActionTypeProto,
   ElectionGovernedProposalExecutionStatusProto,
+  type GetElectionCeremonyActionViewResponse,
+  type JoinElectionCeremonyRequest,
+  type PublishElectionCeremonyTransportKeyRequest,
+  type RecordElectionCeremonySelfTestRequest,
+  type RecordElectionCeremonyShareExportRequest,
+  type RestartElectionCeremonyRequest,
+  type StartElectionCeremonyRequest,
+  type SubmitElectionCeremonyMaterialRequest,
 } from '@/lib/grpc';
 import type {
   ElectionCommandResponse,
@@ -29,9 +38,11 @@ interface ElectionsState {
   elections: ElectionSummary[];
   selectedElectionId: string | null;
   selectedElection: GetElectionResponse | null;
+  ceremonyActionView: GetElectionCeremonyActionViewResponse | null;
   openReadiness: GetElectionOpenReadinessResponse | null;
   isLoadingList: boolean;
   isLoadingDetail: boolean;
+  isLoadingCeremonyActionView: boolean;
   isSubmitting: boolean;
   feedback: ElectionsFeedback | null;
   error: string | null;
@@ -40,6 +51,10 @@ interface ElectionsState {
   clearFeedback: () => void;
   loadOwnerDashboard: (ownerPublicAddress: string) => Promise<void>;
   loadElection: (electionId: string) => Promise<void>;
+  loadCeremonyActionView: (
+    actorPublicAddress: string,
+    electionId?: string
+  ) => Promise<GetElectionCeremonyActionViewResponse | null>;
   createDraft: (draft: ElectionDraftInput, snapshotReason: string) => Promise<boolean>;
   updateDraft: (draft: ElectionDraftInput, snapshotReason: string) => Promise<boolean>;
   inviteTrustee: (request: InviteElectionTrusteeRequest) => Promise<boolean>;
@@ -54,6 +69,24 @@ interface ElectionsState {
     approvalNote?: string
   ) => Promise<boolean>;
   retryGovernedProposalExecution: (proposalId: string) => Promise<boolean>;
+  startElectionCeremony: (request: StartElectionCeremonyRequest) => Promise<boolean>;
+  restartElectionCeremony: (request: RestartElectionCeremonyRequest) => Promise<boolean>;
+  publishElectionCeremonyTransportKey: (
+    request: PublishElectionCeremonyTransportKeyRequest
+  ) => Promise<boolean>;
+  joinElectionCeremony: (request: JoinElectionCeremonyRequest) => Promise<boolean>;
+  recordElectionCeremonySelfTestSuccess: (
+    request: RecordElectionCeremonySelfTestRequest
+  ) => Promise<boolean>;
+  submitElectionCeremonyMaterial: (
+    request: SubmitElectionCeremonyMaterialRequest
+  ) => Promise<boolean>;
+  completeElectionCeremonyTrustee: (
+    request: CompleteElectionCeremonyTrusteeRequest
+  ) => Promise<boolean>;
+  recordElectionCeremonyShareExport: (
+    request: RecordElectionCeremonyShareExportRequest
+  ) => Promise<boolean>;
   openElection: (requiredWarningCodes: ElectionWarningCodeProto[]) => Promise<boolean>;
   closeElection: () => Promise<boolean>;
   finalizeElection: () => Promise<boolean>;
@@ -65,9 +98,11 @@ const initialState = {
   elections: [],
   selectedElectionId: null,
   selectedElection: null,
+  ceremonyActionView: null,
   openReadiness: null,
   isLoadingList: false,
   isLoadingDetail: false,
+  isLoadingCeremonyActionView: false,
   isSubmitting: false,
   feedback: null,
   error: null,
@@ -93,6 +128,33 @@ function buildThrownErrorFeedback(error: unknown, fallbackMessage: string): Elec
   };
 }
 
+function getCommandCeremonyActor(
+  request: { ActorPublicAddress?: string },
+  fallbackActorPublicAddress: string | null,
+  commandResponse: ElectionCommandResponse
+): string | null {
+  return request.ActorPublicAddress
+    ?? commandResponse.CeremonyTrusteeState?.TrusteeUserAddress
+    ?? fallbackActorPublicAddress;
+}
+
+async function refreshElectionContext(
+  get: () => ElectionsState,
+  actorPublicAddress?: string | null
+): Promise<void> {
+  const electionId = get().selectedElectionId;
+  if (!electionId) {
+    return;
+  }
+
+  await get().loadElection(electionId);
+
+  const resolvedActorPublicAddress = actorPublicAddress ?? get().ownerPublicAddress;
+  if (resolvedActorPublicAddress) {
+    await get().loadCeremonyActionView(resolvedActorPublicAddress, electionId);
+  }
+}
+
 export const useElectionsStore = create<ElectionsState>((set, get) => ({
   ...initialState,
 
@@ -104,6 +166,7 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     set({
       selectedElectionId: null,
       selectedElection: null,
+      ceremonyActionView: null,
       openReadiness: null,
       feedback: null,
       error: null,
@@ -170,6 +233,7 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
       if (!response.Success) {
         set({
           selectedElection: response,
+          ceremonyActionView: null,
           openReadiness: null,
           error: response.ErrorMessage || 'Failed to load election details.',
         });
@@ -186,6 +250,46 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
       });
     } finally {
       set({ isLoadingDetail: false });
+    }
+  },
+
+  loadCeremonyActionView: async (actorPublicAddress, electionId) => {
+    const resolvedElectionId = electionId ?? get().selectedElectionId;
+    if (!resolvedElectionId) {
+      set({ ceremonyActionView: null });
+      return null;
+    }
+
+    set({
+      isLoadingCeremonyActionView: true,
+      error: null,
+    });
+
+    try {
+      const response = await electionsService.getElectionCeremonyActionView({
+        ElectionId: resolvedElectionId,
+        ActorPublicAddress: actorPublicAddress,
+      });
+
+      if (!response.Success) {
+        set({
+          ceremonyActionView: response,
+          error: response.ErrorMessage || 'Failed to load ceremony actions.',
+        });
+        return response;
+      }
+
+      set({
+        ceremonyActionView: response,
+      });
+      return response;
+    } catch (error) {
+      set({
+        feedback: buildThrownErrorFeedback(error, 'Failed to load ceremony actions.'),
+      });
+      return null;
+    } finally {
+      set({ isLoadingCeremonyActionView: false });
     }
   },
 
@@ -531,6 +635,288 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     } catch (error) {
       set({
         feedback: buildThrownErrorFeedback(error, 'Failed to retry governed proposal execution.'),
+      });
+      return false;
+    } finally {
+      set({ isSubmitting: false });
+    }
+  },
+
+  startElectionCeremony: async (request) => {
+    set({
+      isSubmitting: true,
+      feedback: null,
+      error: null,
+    });
+
+    try {
+      const response = await electionsService.startElectionCeremony(request);
+      if (!response.Success) {
+        set({ feedback: buildCommandFailureFeedback(response) });
+        return false;
+      }
+
+      await refreshElectionContext(get, request.ActorPublicAddress);
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Ceremony version started.',
+          details: [],
+        },
+      });
+      return true;
+    } catch (error) {
+      set({
+        feedback: buildThrownErrorFeedback(error, 'Failed to start ceremony version.'),
+      });
+      return false;
+    } finally {
+      set({ isSubmitting: false });
+    }
+  },
+
+  restartElectionCeremony: async (request) => {
+    set({
+      isSubmitting: true,
+      feedback: null,
+      error: null,
+    });
+
+    try {
+      const response = await electionsService.restartElectionCeremony(request);
+      if (!response.Success) {
+        set({ feedback: buildCommandFailureFeedback(response) });
+        return false;
+      }
+
+      await refreshElectionContext(get, request.ActorPublicAddress);
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Ceremony version restarted.',
+          details: [],
+        },
+      });
+      return true;
+    } catch (error) {
+      set({
+        feedback: buildThrownErrorFeedback(error, 'Failed to restart ceremony version.'),
+      });
+      return false;
+    } finally {
+      set({ isSubmitting: false });
+    }
+  },
+
+  publishElectionCeremonyTransportKey: async (request) => {
+    set({
+      isSubmitting: true,
+      feedback: null,
+      error: null,
+    });
+
+    try {
+      const response = await electionsService.publishElectionCeremonyTransportKey(request);
+      if (!response.Success) {
+        set({ feedback: buildCommandFailureFeedback(response) });
+        return false;
+      }
+
+      await refreshElectionContext(
+        get,
+        getCommandCeremonyActor(request, get().ownerPublicAddress, response)
+      );
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Transport key published.',
+          details: [],
+        },
+      });
+      return true;
+    } catch (error) {
+      set({
+        feedback: buildThrownErrorFeedback(error, 'Failed to publish transport key.'),
+      });
+      return false;
+    } finally {
+      set({ isSubmitting: false });
+    }
+  },
+
+  joinElectionCeremony: async (request) => {
+    set({
+      isSubmitting: true,
+      feedback: null,
+      error: null,
+    });
+
+    try {
+      const response = await electionsService.joinElectionCeremony(request);
+      if (!response.Success) {
+        set({ feedback: buildCommandFailureFeedback(response) });
+        return false;
+      }
+
+      await refreshElectionContext(
+        get,
+        getCommandCeremonyActor(request, get().ownerPublicAddress, response)
+      );
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Joined the ceremony version.',
+          details: [],
+        },
+      });
+      return true;
+    } catch (error) {
+      set({
+        feedback: buildThrownErrorFeedback(error, 'Failed to join the ceremony version.'),
+      });
+      return false;
+    } finally {
+      set({ isSubmitting: false });
+    }
+  },
+
+  recordElectionCeremonySelfTestSuccess: async (request) => {
+    set({
+      isSubmitting: true,
+      feedback: null,
+      error: null,
+    });
+
+    try {
+      const response = await electionsService.recordElectionCeremonySelfTestSuccess(request);
+      if (!response.Success) {
+        set({ feedback: buildCommandFailureFeedback(response) });
+        return false;
+      }
+
+      await refreshElectionContext(
+        get,
+        getCommandCeremonyActor(request, get().ownerPublicAddress, response)
+      );
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Ceremony self-test recorded.',
+          details: [],
+        },
+      });
+      return true;
+    } catch (error) {
+      set({
+        feedback: buildThrownErrorFeedback(error, 'Failed to record ceremony self-test.'),
+      });
+      return false;
+    } finally {
+      set({ isSubmitting: false });
+    }
+  },
+
+  submitElectionCeremonyMaterial: async (request) => {
+    set({
+      isSubmitting: true,
+      feedback: null,
+      error: null,
+    });
+
+    try {
+      const response = await electionsService.submitElectionCeremonyMaterial(request);
+      if (!response.Success) {
+        set({ feedback: buildCommandFailureFeedback(response) });
+        return false;
+      }
+
+      await refreshElectionContext(
+        get,
+        getCommandCeremonyActor(request, get().ownerPublicAddress, response)
+      );
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Ceremony material submitted.',
+          details: [],
+        },
+      });
+      return true;
+    } catch (error) {
+      set({
+        feedback: buildThrownErrorFeedback(error, 'Failed to submit ceremony material.'),
+      });
+      return false;
+    } finally {
+      set({ isSubmitting: false });
+    }
+  },
+
+  completeElectionCeremonyTrustee: async (request) => {
+    set({
+      isSubmitting: true,
+      feedback: null,
+      error: null,
+    });
+
+    try {
+      const response = await electionsService.completeElectionCeremonyTrustee(request);
+      if (!response.Success) {
+        set({ feedback: buildCommandFailureFeedback(response) });
+        return false;
+      }
+
+      await refreshElectionContext(
+        get,
+        getCommandCeremonyActor(request, get().ownerPublicAddress, response)
+      );
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Trustee ceremony completion recorded.',
+          details: [],
+        },
+      });
+      return true;
+    } catch (error) {
+      set({
+        feedback: buildThrownErrorFeedback(error, 'Failed to complete the trustee ceremony flow.'),
+      });
+      return false;
+    } finally {
+      set({ isSubmitting: false });
+    }
+  },
+
+  recordElectionCeremonyShareExport: async (request) => {
+    set({
+      isSubmitting: true,
+      feedback: null,
+      error: null,
+    });
+
+    try {
+      const response = await electionsService.recordElectionCeremonyShareExport(request);
+      if (!response.Success) {
+        set({ feedback: buildCommandFailureFeedback(response) });
+        return false;
+      }
+
+      await refreshElectionContext(
+        get,
+        getCommandCeremonyActor(request, get().ownerPublicAddress, response)
+      );
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Share export recorded.',
+          details: [],
+        },
+      });
+      return true;
+    } catch (error) {
+      set({
+        feedback: buildThrownErrorFeedback(error, 'Failed to record share export.'),
       });
       return false;
     } finally {

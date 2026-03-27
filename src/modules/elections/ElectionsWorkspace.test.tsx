@@ -1,20 +1,26 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
+  ElectionCeremonyTrusteeState,
   ElectionCommandResponse,
   ElectionDraftInput,
   ElectionDraftSnapshot,
   ElectionRecordView,
   ElectionSummary,
+  GetElectionCeremonyActionViewResponse,
   GetElectionOpenReadinessResponse,
   GetElectionResponse,
 } from '@/lib/grpc';
 import {
+  ElectionCeremonyActionTypeProto,
+  ElectionCeremonyActorRoleProto,
+  ElectionCeremonyVersionStatusProto,
   ElectionBindingStatusProto,
   ElectionClassProto,
   ElectionDisclosureModeProto,
   ElectionGovernanceModeProto,
   ElectionLifecycleStateProto,
+  ElectionTrusteeCeremonyStateProto,
   ElectionTrusteeInvitationStatusProto,
   EligibilityMutationPolicyProto,
   EligibilitySourceTypeProto,
@@ -35,12 +41,15 @@ const { electionsServiceMock } = vi.hoisted(() => ({
     createElectionDraft: vi.fn(),
     finalizeElection: vi.fn(),
     getElection: vi.fn(),
+    getElectionCeremonyActionView: vi.fn(),
     getElectionOpenReadiness: vi.fn(),
     getElectionsByOwner: vi.fn(),
     inviteElectionTrustee: vi.fn(),
     openElection: vi.fn(),
+    restartElectionCeremony: vi.fn(),
     revokeElectionTrusteeInvitation: vi.fn(),
     retryElectionGovernedProposalExecution: vi.fn(),
+    startElectionCeremony: vi.fn(),
     startElectionGovernedProposal: vi.fn(),
     updateElectionDraft: vi.fn(),
   },
@@ -194,6 +203,53 @@ function createElectionResponse(overrides?: Partial<GetElectionResponse>): GetEl
   };
 }
 
+function createCeremonyActionViewResponse(
+  overrides?: Partial<GetElectionCeremonyActionViewResponse>
+): GetElectionCeremonyActionViewResponse {
+  return {
+    Success: true,
+    ErrorMessage: '',
+    ActorRole: ElectionCeremonyActorRoleProto.CeremonyActorOwner,
+    ActorPublicAddress: 'owner-public-key',
+    OwnerActions: [
+      {
+        ActionType: ElectionCeremonyActionTypeProto.CeremonyActionStartVersion,
+        IsAvailable: true,
+        IsCompleted: false,
+        Reason: 'Start the first ceremony version.',
+      },
+      {
+        ActionType: ElectionCeremonyActionTypeProto.CeremonyActionRestartVersion,
+        IsAvailable: false,
+        IsCompleted: false,
+        Reason: 'No active version exists yet.',
+      },
+    ],
+    TrusteeActions: [],
+    PendingIncomingMessageCount: 0,
+    BlockedReasons: [],
+    ...overrides,
+  };
+}
+
+function createCeremonyTrusteeState(
+  overrides?: Partial<ElectionCeremonyTrusteeState>
+): ElectionCeremonyTrusteeState {
+  return {
+    Id: 'ceremony-state-1',
+    ElectionId: 'election-1',
+    CeremonyVersionId: 'ceremony-version-1',
+    TrusteeUserAddress: 'trustee-a',
+    TrusteeDisplayName: 'Alice Trustee',
+    State: ElectionTrusteeCeremonyStateProto.CeremonyStateJoined,
+    TransportPublicKeyFingerprint: 'transport-fingerprint-1',
+    LastUpdatedAt: timestamp,
+    ShareVersion: '',
+    ValidationFailureReason: '',
+    ...overrides,
+  };
+}
+
 function createCommandResponse(overrides?: Partial<ElectionCommandResponse>): ElectionCommandResponse {
   return {
     Success: true,
@@ -224,6 +280,7 @@ describe('ElectionsWorkspace', () => {
     vi.clearAllMocks();
     electionsServiceMock.getElectionsByOwner.mockResolvedValue({ Elections: [] });
     electionsServiceMock.getElection.mockResolvedValue(createElectionResponse());
+    electionsServiceMock.getElectionCeremonyActionView.mockResolvedValue(createCeremonyActionViewResponse());
     electionsServiceMock.getElectionOpenReadiness.mockResolvedValue(createReadinessResponse());
     electionsServiceMock.createElectionDraft.mockResolvedValue(createCommandResponse());
     electionsServiceMock.updateElectionDraft.mockResolvedValue(createCommandResponse());
@@ -235,6 +292,8 @@ describe('ElectionsWorkspace', () => {
     electionsServiceMock.openElection.mockResolvedValue(createCommandResponse());
     electionsServiceMock.closeElection.mockResolvedValue(createCommandResponse());
     electionsServiceMock.finalizeElection.mockResolvedValue(createCommandResponse());
+    electionsServiceMock.startElectionCeremony.mockResolvedValue(createCommandResponse());
+    electionsServiceMock.restartElectionCeremony.mockResolvedValue(createCommandResponse());
   });
 
   it('creates a valid draft and shows save feedback', async () => {
@@ -511,6 +570,213 @@ describe('ElectionsWorkspace', () => {
     expect(unsupportedPanel).toHaveTextContent('single-submission-only vote update policy');
     await waitFor(() => {
       expect(screen.queryByTestId('elections-open-button')).not.toBeInTheDocument();
+    });
+  });
+
+  it('starts a trustee-threshold ceremony version from the owner workspace', async () => {
+    const thresholdElection = createElectionRecord(ElectionLifecycleStateProto.Draft, {
+      GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+      ReviewWindowPolicy: ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+      RequiredApprovalCount: 3,
+    });
+
+    electionsServiceMock.getElectionsByOwner.mockResolvedValueOnce({
+      Elections: [
+        createElectionSummary(ElectionLifecycleStateProto.Draft, {
+          GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+        }),
+      ],
+    });
+    electionsServiceMock.getElection.mockResolvedValue(
+      createElectionResponse({
+        Election: thresholdElection,
+        LatestDraftSnapshot: createDraftSnapshot({
+          Policy: {
+            ElectionClass: ElectionClassProto.OrganizationalRemoteVoting,
+            BindingStatus: ElectionBindingStatusProto.Binding,
+            GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+            DisclosureMode: ElectionDisclosureModeProto.FinalResultsOnly,
+            ParticipationPrivacyMode:
+              ParticipationPrivacyModeProto.PublicCheckoffAnonymousBallotPrivateChoice,
+            VoteUpdatePolicy: VoteUpdatePolicyProto.SingleSubmissionOnly,
+            EligibilitySourceType: EligibilitySourceTypeProto.OrganizationImportedRoster,
+            EligibilityMutationPolicy: EligibilityMutationPolicyProto.FrozenAtOpen,
+            OutcomeRule: thresholdElection.OutcomeRule,
+            ApprovedClientApplications: [{ ApplicationId: 'hushsocial', Version: '1.0.0' }],
+            ProtocolOmegaVersion: 'omega-v1.0.0',
+            ReportingPolicy: ReportingPolicyProto.DefaultPhaseOnePackage,
+            ReviewWindowPolicy: ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+            RequiredApprovalCount: 3,
+          },
+        }),
+        TrusteeInvitations: [
+          {
+            Id: 'invite-1',
+            ElectionId: 'election-1',
+            TrusteeUserAddress: 'trustee-a',
+            TrusteeDisplayName: 'Alice Trustee',
+            InvitedByPublicAddress: 'owner-public-key',
+            LinkedMessageId: 'message-1',
+            Status: ElectionTrusteeInvitationStatusProto.Accepted,
+            SentAtDraftRevision: 1,
+            SentAt: timestamp,
+          },
+          {
+            Id: 'invite-2',
+            ElectionId: 'election-1',
+            TrusteeUserAddress: 'trustee-b',
+            TrusteeDisplayName: 'Bob Trustee',
+            InvitedByPublicAddress: 'owner-public-key',
+            LinkedMessageId: 'message-2',
+            Status: ElectionTrusteeInvitationStatusProto.Accepted,
+            SentAtDraftRevision: 1,
+            SentAt: timestamp,
+          },
+        ],
+        CeremonyProfiles: [
+          {
+            ProfileId: 'prod-3of5-v1',
+            DisplayName: 'Production 3 of 5',
+            Description: 'Production rollout profile',
+            ProviderKey: 'provider-a',
+            ProfileVersion: 'v1',
+            TrusteeCount: 5,
+            RequiredApprovalCount: 3,
+            DevOnly: false,
+            RegisteredAt: timestamp,
+            LastUpdatedAt: timestamp,
+          },
+        ],
+      })
+    );
+    electionsServiceMock.getElectionCeremonyActionView.mockResolvedValue(
+      createCeremonyActionViewResponse()
+    );
+
+    render(<ElectionsWorkspace ownerPublicAddress="owner-public-key" />);
+
+    expect(await screen.findByTestId('elections-ceremony-section')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('elections-ceremony-start-button'));
+    expect(await screen.findByTestId('elections-ceremony-confirm-button')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('elections-ceremony-confirm-button'));
+
+    await waitFor(() => {
+      expect(electionsServiceMock.startElectionCeremony).toHaveBeenCalledWith({
+        ElectionId: 'election-1',
+        ActorPublicAddress: 'owner-public-key',
+        ProfileId: 'prod-3of5-v1',
+      });
+    });
+  });
+
+  it('requires explicit confirmation before restarting a ceremony version', async () => {
+    const thresholdElection = createElectionRecord(ElectionLifecycleStateProto.Draft, {
+      GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+      ReviewWindowPolicy: ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+      RequiredApprovalCount: 3,
+    });
+
+    electionsServiceMock.getElectionsByOwner.mockResolvedValueOnce({
+      Elections: [
+        createElectionSummary(ElectionLifecycleStateProto.Draft, {
+          GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+        }),
+      ],
+    });
+    electionsServiceMock.getElection.mockResolvedValue(
+      createElectionResponse({
+        Election: thresholdElection,
+        LatestDraftSnapshot: createDraftSnapshot({
+          Policy: {
+            ElectionClass: ElectionClassProto.OrganizationalRemoteVoting,
+            BindingStatus: ElectionBindingStatusProto.Binding,
+            GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+            DisclosureMode: ElectionDisclosureModeProto.FinalResultsOnly,
+            ParticipationPrivacyMode:
+              ParticipationPrivacyModeProto.PublicCheckoffAnonymousBallotPrivateChoice,
+            VoteUpdatePolicy: VoteUpdatePolicyProto.SingleSubmissionOnly,
+            EligibilitySourceType: EligibilitySourceTypeProto.OrganizationImportedRoster,
+            EligibilityMutationPolicy: EligibilityMutationPolicyProto.FrozenAtOpen,
+            OutcomeRule: thresholdElection.OutcomeRule,
+            ApprovedClientApplications: [{ ApplicationId: 'hushsocial', Version: '1.0.0' }],
+            ProtocolOmegaVersion: 'omega-v1.0.0',
+            ReportingPolicy: ReportingPolicyProto.DefaultPhaseOnePackage,
+            ReviewWindowPolicy: ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+            RequiredApprovalCount: 3,
+          },
+        }),
+        CeremonyProfiles: [
+          {
+            ProfileId: 'prod-3of5-v1',
+            DisplayName: 'Production 3 of 5',
+            Description: 'Production rollout profile',
+            ProviderKey: 'provider-a',
+            ProfileVersion: 'v1',
+            TrusteeCount: 5,
+            RequiredApprovalCount: 3,
+            DevOnly: false,
+            RegisteredAt: timestamp,
+            LastUpdatedAt: timestamp,
+          },
+        ],
+        CeremonyVersions: [
+          {
+            Id: 'ceremony-version-1',
+            ElectionId: 'election-1',
+            VersionNumber: 4,
+            ProfileId: 'prod-3of5-v1',
+            Status: ElectionCeremonyVersionStatusProto.CeremonyVersionInProgress,
+            TrusteeCount: 5,
+            RequiredApprovalCount: 3,
+            BoundTrustees: [],
+            StartedByPublicAddress: 'owner-public-key',
+            StartedAt: timestamp,
+            SupersededReason: '',
+            TallyPublicKeyFingerprint: '',
+          },
+        ],
+        ActiveCeremonyTrusteeStates: [
+          createCeremonyTrusteeState(),
+        ],
+      })
+    );
+    electionsServiceMock.getElectionCeremonyActionView.mockResolvedValue(
+      createCeremonyActionViewResponse({
+        OwnerActions: [
+          {
+            ActionType: ElectionCeremonyActionTypeProto.CeremonyActionStartVersion,
+            IsAvailable: false,
+            IsCompleted: false,
+            Reason: 'An active version already exists.',
+          },
+          {
+            ActionType: ElectionCeremonyActionTypeProto.CeremonyActionRestartVersion,
+            IsAvailable: true,
+            IsCompleted: false,
+            Reason: 'Supersede the current progress and restart.',
+          },
+        ],
+      })
+    );
+
+    render(<ElectionsWorkspace ownerPublicAddress="owner-public-key" />);
+
+    expect(await screen.findByTestId('elections-ceremony-section')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('elections-ceremony-restart-button'));
+
+    expect(screen.getByTestId('elections-ceremony-restart-reason')).toBeInTheDocument();
+    expect(electionsServiceMock.restartElectionCeremony).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('elections-ceremony-confirm-button'));
+
+    await waitFor(() => {
+      expect(electionsServiceMock.restartElectionCeremony).toHaveBeenCalledWith({
+        ElectionId: 'election-1',
+        ActorPublicAddress: 'owner-public-key',
+        ProfileId: 'prod-3of5-v1',
+        RestartReason: 'Supersede the current version and restart.',
+      });
     });
   });
 });
