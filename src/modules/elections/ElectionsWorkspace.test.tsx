@@ -670,6 +670,106 @@ describe('ElectionsWorkspace', () => {
     });
   });
 
+  it('shows the weak-trustee warning and keeps trustee-only controls out of the owner workspace', async () => {
+    const thresholdElection = createElectionRecord(ElectionLifecycleStateProto.Draft, {
+      GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+      ReviewWindowPolicy: ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+      RequiredApprovalCount: 3,
+    });
+
+    electionsServiceMock.getElectionsByOwner.mockResolvedValueOnce({
+      Elections: [
+        createElectionSummary(ElectionLifecycleStateProto.Draft, {
+          GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+        }),
+      ],
+    });
+    electionsServiceMock.getElection.mockResolvedValue(
+      createElectionResponse({
+        Election: thresholdElection,
+        LatestDraftSnapshot: createDraftSnapshot({
+          Policy: {
+            ElectionClass: ElectionClassProto.OrganizationalRemoteVoting,
+            BindingStatus: ElectionBindingStatusProto.Binding,
+            GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+            DisclosureMode: ElectionDisclosureModeProto.FinalResultsOnly,
+            ParticipationPrivacyMode:
+              ParticipationPrivacyModeProto.PublicCheckoffAnonymousBallotPrivateChoice,
+            VoteUpdatePolicy: VoteUpdatePolicyProto.SingleSubmissionOnly,
+            EligibilitySourceType: EligibilitySourceTypeProto.OrganizationImportedRoster,
+            EligibilityMutationPolicy: EligibilityMutationPolicyProto.FrozenAtOpen,
+            OutcomeRule: thresholdElection.OutcomeRule,
+            ApprovedClientApplications: [{ ApplicationId: 'hushsocial', Version: '1.0.0' }],
+            ProtocolOmegaVersion: 'omega-v1.0.0',
+            ReportingPolicy: ReportingPolicyProto.DefaultPhaseOnePackage,
+            ReviewWindowPolicy: ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+            RequiredApprovalCount: 3,
+          },
+        }),
+        TrusteeInvitations: [
+          {
+            Id: 'invite-1',
+            ElectionId: 'election-1',
+            TrusteeUserAddress: 'trustee-a',
+            TrusteeDisplayName: 'Alice Trustee',
+            InvitedByPublicAddress: 'owner-public-key',
+            LinkedMessageId: 'message-1',
+            Status: ElectionTrusteeInvitationStatusProto.Accepted,
+            SentAtDraftRevision: 1,
+            SentAt: timestamp,
+          },
+          {
+            Id: 'invite-2',
+            ElectionId: 'election-1',
+            TrusteeUserAddress: 'trustee-b',
+            TrusteeDisplayName: 'Bob Trustee',
+            InvitedByPublicAddress: 'owner-public-key',
+            LinkedMessageId: 'message-2',
+            Status: ElectionTrusteeInvitationStatusProto.Accepted,
+            SentAtDraftRevision: 1,
+            SentAt: timestamp,
+          },
+          {
+            Id: 'invite-3',
+            ElectionId: 'election-1',
+            TrusteeUserAddress: 'trustee-c',
+            TrusteeDisplayName: 'Charlie Trustee',
+            InvitedByPublicAddress: 'owner-public-key',
+            LinkedMessageId: 'message-3',
+            Status: ElectionTrusteeInvitationStatusProto.Accepted,
+            SentAtDraftRevision: 1,
+            SentAt: timestamp,
+          },
+        ],
+        CeremonyProfiles: [
+          {
+            ProfileId: 'prod-3of5-v1',
+            DisplayName: 'Production 3 of 5',
+            Description: 'Production rollout profile',
+            ProviderKey: 'provider-a',
+            ProfileVersion: 'v1',
+            TrusteeCount: 5,
+            RequiredApprovalCount: 3,
+            DevOnly: false,
+            RegisteredAt: timestamp,
+            LastUpdatedAt: timestamp,
+          },
+        ],
+      })
+    );
+    electionsServiceMock.getElectionCeremonyActionView.mockResolvedValue(
+      createCeremonyActionViewResponse()
+    );
+
+    render(<ElectionsWorkspace ownerPublicAddress="owner-public-key" />);
+
+    expect(await screen.findByTestId('elections-ceremony-warning-card')).toHaveTextContent(
+      'Opening can still proceed when the ceremony is ready'
+    );
+    expect(screen.queryByTestId('trustee-ceremony-export-button')).not.toBeInTheDocument();
+    expect(screen.queryByText('Record share export')).not.toBeInTheDocument();
+  });
+
   it('requires explicit confirmation before restarting a ceremony version', async () => {
     const thresholdElection = createElectionRecord(ElectionLifecycleStateProto.Draft, {
       GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,

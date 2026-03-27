@@ -326,6 +326,28 @@ describe('TrusteeElectionCeremonyPanel', () => {
     expect(screen.getByTestId('trustee-ceremony-steps')).toHaveTextContent('Run self-test');
     expect(screen.getByTestId('trustee-ceremony-steps')).toHaveTextContent('Submit material');
     expect(screen.getByTestId('trustee-ceremony-steps')).toHaveTextContent('Export share backup');
+    expect(screen.getByTestId('trustee-ceremony-steps')).toHaveTextContent(
+      'Mobile and desktop share the same task boundary.'
+    );
+  });
+
+  it('keeps trustee-only authority and transcript privacy copy visible without owner controls', async () => {
+    render(
+      <TrusteeElectionCeremonyPanel
+        electionId="election-1"
+        actorPublicAddress="trustee-a"
+      />
+    );
+
+    expect(await screen.findByTestId('trustee-ceremony-summary')).toHaveTextContent(
+      'Governed Referendum'
+    );
+    expect(screen.getByText('Authority boundary')).toBeInTheDocument();
+    expect(screen.getByTestId('ceremony-transcript-panel')).toHaveTextContent(
+      'Secret payloads stay outside this view.'
+    );
+    expect(screen.queryByTestId('elections-ceremony-start-button')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('elections-ceremony-restart-button')).not.toBeInTheDocument();
   });
 
   it('shows validation-failed recovery guidance', async () => {
