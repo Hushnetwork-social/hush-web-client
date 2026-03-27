@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   ElectionCeremonyShareCustody,
   ElectionCeremonyTrusteeState,
-  ElectionCommandResponse,
   ElectionRecordView,
   GetElectionCeremonyActionViewResponse,
   GetElectionResponse,
@@ -30,21 +29,93 @@ import {
 import { TrusteeElectionCeremonyPanel } from './TrusteeElectionCeremonyPanel';
 import { useElectionsStore } from './useElectionsStore';
 
-const { electionsServiceMock } = vi.hoisted(() => ({
+const { electionsServiceMock, blockchainServiceMock, transactionServiceMock } = vi.hoisted(() => ({
   electionsServiceMock: {
-    completeElectionCeremonyTrustee: vi.fn(),
     getElection: vi.fn(),
     getElectionCeremonyActionView: vi.fn(),
-    joinElectionCeremony: vi.fn(),
-    publishElectionCeremonyTransportKey: vi.fn(),
-    recordElectionCeremonySelfTestSuccess: vi.fn(),
-    recordElectionCeremonyShareExport: vi.fn(),
-    submitElectionCeremonyMaterial: vi.fn(),
+  },
+  blockchainServiceMock: {
+    submitTransaction: vi.fn(),
+  },
+  transactionServiceMock: {
+    createAcceptElectionTrusteeInvitationTransaction: vi.fn(),
+    createApproveElectionGovernedProposalTransaction: vi.fn(),
+    createCloseElectionTransaction: vi.fn(),
+    createCompleteElectionCeremonyTrusteeTransaction: vi.fn(),
+    createElectionDraftTransaction: vi.fn(),
+    createElectionTrusteeInvitationTransaction: vi.fn(),
+    createFinalizeElectionTransaction: vi.fn(),
+    createJoinElectionCeremonyTransaction: vi.fn(),
+    createOpenElectionTransaction: vi.fn(),
+    createPublishElectionCeremonyTransportKeyTransaction: vi.fn(),
+    createRecordElectionCeremonySelfTestSuccessTransaction: vi.fn(),
+    createRecordElectionCeremonyShareExportTransaction: vi.fn(),
+    createRecordElectionCeremonyShareImportTransaction: vi.fn(),
+    createRecordElectionCeremonyValidationFailureTransaction: vi.fn(),
+    createRejectElectionTrusteeInvitationTransaction: vi.fn(),
+    createRestartElectionCeremonyTransaction: vi.fn(),
+    createRetryElectionGovernedProposalExecutionTransaction: vi.fn(),
+    createRevokeElectionTrusteeInvitationTransaction: vi.fn(),
+    createStartElectionCeremonyTransaction: vi.fn(),
+    createStartElectionGovernedProposalTransaction: vi.fn(),
+    createSubmitElectionCeremonyMaterialTransaction: vi.fn(),
+    createUpdateElectionDraftTransaction: vi.fn(),
   },
 }));
 
 vi.mock('@/lib/grpc/services/elections', () => ({
   electionsService: electionsServiceMock,
+}));
+
+vi.mock('@/modules/blockchain/BlockchainService', () => ({
+  submitTransaction: (...args: unknown[]) => blockchainServiceMock.submitTransaction(...args),
+}));
+
+vi.mock('./transactionService', () => ({
+  createAcceptElectionTrusteeInvitationTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createAcceptElectionTrusteeInvitationTransaction(...args),
+  createApproveElectionGovernedProposalTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createApproveElectionGovernedProposalTransaction(...args),
+  createCloseElectionTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createCloseElectionTransaction(...args),
+  createCompleteElectionCeremonyTrusteeTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createCompleteElectionCeremonyTrusteeTransaction(...args),
+  createElectionDraftTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createElectionDraftTransaction(...args),
+  createElectionTrusteeInvitationTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createElectionTrusteeInvitationTransaction(...args),
+  createFinalizeElectionTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createFinalizeElectionTransaction(...args),
+  createJoinElectionCeremonyTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createJoinElectionCeremonyTransaction(...args),
+  createOpenElectionTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createOpenElectionTransaction(...args),
+  createPublishElectionCeremonyTransportKeyTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createPublishElectionCeremonyTransportKeyTransaction(...args),
+  createRecordElectionCeremonySelfTestSuccessTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createRecordElectionCeremonySelfTestSuccessTransaction(...args),
+  createRecordElectionCeremonyShareExportTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createRecordElectionCeremonyShareExportTransaction(...args),
+  createRecordElectionCeremonyShareImportTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createRecordElectionCeremonyShareImportTransaction(...args),
+  createRecordElectionCeremonyValidationFailureTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createRecordElectionCeremonyValidationFailureTransaction(...args),
+  createRejectElectionTrusteeInvitationTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createRejectElectionTrusteeInvitationTransaction(...args),
+  createRestartElectionCeremonyTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createRestartElectionCeremonyTransaction(...args),
+  createRetryElectionGovernedProposalExecutionTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createRetryElectionGovernedProposalExecutionTransaction(...args),
+  createRevokeElectionTrusteeInvitationTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createRevokeElectionTrusteeInvitationTransaction(...args),
+  createStartElectionCeremonyTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createStartElectionCeremonyTransaction(...args),
+  createStartElectionGovernedProposalTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createStartElectionGovernedProposalTransaction(...args),
+  createSubmitElectionCeremonyMaterialTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createSubmitElectionCeremonyMaterialTransaction(...args),
+  createUpdateElectionDraftTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createUpdateElectionDraftTransaction(...args),
 }));
 
 const timestamp = { seconds: 1_711_410_000, nanos: 0 };
@@ -282,32 +353,16 @@ function createActionViewResponse(
   };
 }
 
-function createCommandResponse(overrides?: Partial<ElectionCommandResponse>): ElectionCommandResponse {
-  return {
-    Success: true,
-    ErrorCode: 0,
-    ErrorMessage: '',
-    ValidationErrors: [],
-    Election: createElectionRecord(),
-    CeremonyTranscriptEvents: [],
-    ...overrides,
-  };
-}
-
 describe('TrusteeElectionCeremonyPanel', () => {
   beforeEach(() => {
     useElectionsStore.getState().reset();
     vi.clearAllMocks();
     electionsServiceMock.getElection.mockResolvedValue(createElectionResponse());
     electionsServiceMock.getElectionCeremonyActionView.mockResolvedValue(createActionViewResponse());
-    electionsServiceMock.publishElectionCeremonyTransportKey.mockResolvedValue(createCommandResponse());
-    electionsServiceMock.joinElectionCeremony.mockResolvedValue(createCommandResponse());
-    electionsServiceMock.recordElectionCeremonySelfTestSuccess.mockResolvedValue(
-      createCommandResponse()
-    );
-    electionsServiceMock.submitElectionCeremonyMaterial.mockResolvedValue(createCommandResponse());
-    electionsServiceMock.completeElectionCeremonyTrustee.mockResolvedValue(createCommandResponse());
-    electionsServiceMock.recordElectionCeremonyShareExport.mockResolvedValue(createCommandResponse());
+    blockchainServiceMock.submitTransaction.mockResolvedValue({ successful: true, message: 'Accepted' });
+    transactionServiceMock.createRecordElectionCeremonyShareExportTransaction.mockResolvedValue({
+      signedTransaction: 'signed-share-export-transaction',
+    });
   });
 
   it('renders the ordered trustee ceremony step flow', async () => {
@@ -315,6 +370,9 @@ describe('TrusteeElectionCeremonyPanel', () => {
       <TrusteeElectionCeremonyPanel
         electionId="election-1"
         actorPublicAddress="trustee-a"
+        actorEncryptionPublicKey="trustee-encryption-key"
+        actorEncryptionPrivateKey="trustee-encryption-private-key"
+        actorSigningPrivateKey="trustee-signing-private-key"
       />
     );
 
@@ -336,6 +394,9 @@ describe('TrusteeElectionCeremonyPanel', () => {
       <TrusteeElectionCeremonyPanel
         electionId="election-1"
         actorPublicAddress="trustee-a"
+        actorEncryptionPublicKey="trustee-encryption-key"
+        actorEncryptionPrivateKey="trustee-encryption-private-key"
+        actorSigningPrivateKey="trustee-signing-private-key"
       />
     );
 
@@ -403,6 +464,9 @@ describe('TrusteeElectionCeremonyPanel', () => {
       <TrusteeElectionCeremonyPanel
         electionId="election-1"
         actorPublicAddress="trustee-a"
+        actorEncryptionPublicKey="trustee-encryption-key"
+        actorEncryptionPrivateKey="trustee-encryption-private-key"
+        actorSigningPrivateKey="trustee-signing-private-key"
       />
     );
 
@@ -415,8 +479,7 @@ describe('TrusteeElectionCeremonyPanel', () => {
   });
 
   it('shows completion and records the share export action', async () => {
-    electionsServiceMock.getElectionCeremonyActionView.mockResolvedValue(
-      createActionViewResponse({
+    const initialActionViewResponse = createActionViewResponse({
         TrusteeActions: [
           {
             ActionType: ElectionCeremonyActionTypeProto.CeremonyActionPublishTransportKey,
@@ -464,13 +527,27 @@ describe('TrusteeElectionCeremonyPanel', () => {
           ShareVersion: 'share-v1',
           Status: ElectionCeremonyShareCustodyStatusProto.ShareCustodyNotExported,
         }),
-      })
-    );
+      });
+    const indexedActionViewResponse = createActionViewResponse({
+      ...initialActionViewResponse,
+      SelfShareCustody: createShareCustody({
+        ShareVersion: 'share-v1',
+        Status: ElectionCeremonyShareCustodyStatusProto.ShareCustodyExported,
+        LastExportedAt: timestamp,
+      }),
+    });
+    electionsServiceMock.getElectionCeremonyActionView
+      .mockResolvedValueOnce(initialActionViewResponse)
+      .mockResolvedValueOnce(indexedActionViewResponse)
+      .mockResolvedValue(indexedActionViewResponse);
 
     render(
       <TrusteeElectionCeremonyPanel
         electionId="election-1"
         actorPublicAddress="trustee-a"
+        actorEncryptionPublicKey="trustee-encryption-key"
+        actorEncryptionPrivateKey="trustee-encryption-private-key"
+        actorSigningPrivateKey="trustee-signing-private-key"
       />
     );
 
@@ -479,12 +556,15 @@ describe('TrusteeElectionCeremonyPanel', () => {
     fireEvent.click(screen.getByTestId('trustee-ceremony-export-button'));
 
     await waitFor(() => {
-      expect(electionsServiceMock.recordElectionCeremonyShareExport).toHaveBeenCalledWith({
-        ElectionId: 'election-1',
-        CeremonyVersionId: 'ceremony-version-1',
-        ActorPublicAddress: 'trustee-a',
-        ShareVersion: 'share-v1',
-      });
+      expect(transactionServiceMock.createRecordElectionCeremonyShareExportTransaction).toHaveBeenCalledWith(
+        'election-1',
+        'trustee-a',
+        'trustee-encryption-key',
+        'trustee-encryption-private-key',
+        'ceremony-version-1',
+        'share-v1',
+        'trustee-signing-private-key'
+      );
     });
   });
 });

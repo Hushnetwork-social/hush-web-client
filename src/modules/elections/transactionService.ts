@@ -51,6 +51,11 @@ export interface InviteElectionTrusteeActionPayload {
   TrusteeDisplayName: string;
 }
 
+export interface ResolveElectionTrusteeInvitationActionPayload {
+  InvitationId: string;
+  ActorPublicAddress: string;
+}
+
 export interface InviteElectionTrusteePayload {
   ElectionId: string;
   InvitationId: string;
@@ -63,6 +68,117 @@ export interface UpdateElectionDraftActionPayload {
   ActorPublicAddress: string;
   SnapshotReason: string;
   Draft: ElectionDraftInput;
+}
+
+export interface StartElectionCeremonyActionPayload {
+  ActorPublicAddress: string;
+  ProfileId: string;
+}
+
+export interface RestartElectionCeremonyActionPayload {
+  ActorPublicAddress: string;
+  ProfileId: string;
+  RestartReason: string;
+}
+
+export interface PublishElectionCeremonyTransportKeyActionPayload {
+  CeremonyVersionId: string;
+  ActorPublicAddress: string;
+  TransportPublicKeyFingerprint: string;
+}
+
+export interface JoinElectionCeremonyActionPayload {
+  CeremonyVersionId: string;
+  ActorPublicAddress: string;
+}
+
+export interface RecordElectionCeremonySelfTestActionPayload {
+  CeremonyVersionId: string;
+  ActorPublicAddress: string;
+}
+
+export interface SubmitElectionCeremonyMaterialActionPayload {
+  CeremonyVersionId: string;
+  ActorPublicAddress: string;
+  RecipientTrusteeUserAddress?: string | null;
+  MessageType: string;
+  PayloadVersion: string;
+  EncryptedPayload: string;
+  PayloadFingerprint: string;
+}
+
+export interface RecordElectionCeremonyValidationFailureActionPayload {
+  CeremonyVersionId: string;
+  ActorPublicAddress: string;
+  TrusteeUserAddress: string;
+  ValidationFailureReason: string;
+  EvidenceReference?: string | null;
+}
+
+export interface CompleteElectionCeremonyTrusteeActionPayload {
+  CeremonyVersionId: string;
+  ActorPublicAddress: string;
+  TrusteeUserAddress: string;
+  ShareVersion: string;
+  TallyPublicKeyFingerprint?: string | null;
+}
+
+export interface RecordElectionCeremonyShareExportActionPayload {
+  CeremonyVersionId: string;
+  ActorPublicAddress: string;
+  ShareVersion: string;
+}
+
+export interface RecordElectionCeremonyShareImportActionPayload {
+  CeremonyVersionId: string;
+  ActorPublicAddress: string;
+  ImportedElectionId: string;
+  ImportedCeremonyVersionId: string;
+  ImportedTrusteeUserAddress: string;
+  ImportedShareVersion: string;
+}
+
+export interface RevokeElectionTrusteeInvitationActionPayload {
+  InvitationId: string;
+  ActorPublicAddress: string;
+}
+
+export interface StartElectionGovernedProposalActionPayload {
+  ProposalId: string;
+  ActionType: number;
+  ActorPublicAddress: string;
+}
+
+export interface ApproveElectionGovernedProposalActionPayload {
+  ProposalId: string;
+  ActorPublicAddress: string;
+  ApprovalNote: string;
+}
+
+export interface RetryElectionGovernedProposalExecutionActionPayload {
+  ProposalId: string;
+  ActorPublicAddress: string;
+}
+
+export interface OpenElectionActionPayload {
+  ActorPublicAddress: string;
+  RequiredWarningCodes: number[];
+  FrozenEligibleVoterSetHash: string | null;
+  TrusteePolicyExecutionReference: string;
+  ReportingPolicyExecutionReference: string;
+  ReviewWindowExecutionReference: string;
+}
+
+export interface CloseElectionActionPayload {
+  ActorPublicAddress: string;
+  AcceptedBallotSetHash: string | null;
+  FinalEncryptedTallyHash: string | null;
+}
+
+export interface FinalizeElectionActionPayload {
+  ActorPublicAddress: string;
+  AcceptedBallotSetHash: string | null;
+  FinalEncryptedTallyHash: string | null;
 }
 
 export interface UpdateElectionDraftPayload {
@@ -126,6 +242,25 @@ const ENCRYPTED_ELECTION_ACTION_TYPES = {
   CREATE_DRAFT: 'create_draft',
   UPDATE_DRAFT: 'update_draft',
   INVITE_TRUSTEE: 'invite_trustee',
+  ACCEPT_TRUSTEE_INVITATION: 'accept_trustee_invitation',
+  REJECT_TRUSTEE_INVITATION: 'reject_trustee_invitation',
+  REVOKE_TRUSTEE_INVITATION: 'revoke_trustee_invitation',
+  START_GOVERNED_PROPOSAL: 'start_governed_proposal',
+  APPROVE_GOVERNED_PROPOSAL: 'approve_governed_proposal',
+  RETRY_GOVERNED_PROPOSAL_EXECUTION: 'retry_governed_proposal_execution',
+  OPEN_ELECTION: 'open_election',
+  CLOSE_ELECTION: 'close_election',
+  FINALIZE_ELECTION: 'finalize_election',
+  START_CEREMONY: 'start_ceremony',
+  RESTART_CEREMONY: 'restart_ceremony',
+  PUBLISH_CEREMONY_TRANSPORT_KEY: 'publish_ceremony_transport_key',
+  JOIN_CEREMONY: 'join_ceremony',
+  RECORD_CEREMONY_SELF_TEST_SUCCESS: 'record_ceremony_self_test_success',
+  SUBMIT_CEREMONY_MATERIAL: 'submit_ceremony_material',
+  RECORD_CEREMONY_VALIDATION_FAILURE: 'record_ceremony_validation_failure',
+  COMPLETE_CEREMONY_TRUSTEE: 'complete_ceremony_trustee',
+  RECORD_CEREMONY_SHARE_EXPORT: 'record_ceremony_share_export',
+  RECORD_CEREMONY_SHARE_IMPORT: 'record_ceremony_share_import',
 } as const;
 
 async function resolveElectionEnvelopePrivateKey(
@@ -326,28 +461,404 @@ export async function createElectionTrusteeInvitationTransaction(
   };
 }
 
+async function createResolveElectionTrusteeInvitationTransaction(
+  actionType:
+    | typeof ENCRYPTED_ELECTION_ACTION_TYPES.ACCEPT_TRUSTEE_INVITATION
+    | typeof ENCRYPTED_ELECTION_ACTION_TYPES.REJECT_TRUSTEE_INVITATION,
+  electionId: string,
+  invitationId: string,
+  actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
+  signingPrivateKeyHex: string,
+): Promise<{ signedTransaction: string }> {
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<ResolveElectionTrusteeInvitationActionPayload>(
+      electionId,
+      actorPublicAddress,
+      actorPublicEncryptAddress,
+      actorPrivateEncryptKeyHex,
+      actionType,
+      {
+        InvitationId: invitationId,
+        ActorPublicAddress: actorPublicAddress,
+      },
+      signingPrivateKeyHex,
+    );
+
+  return {
+    signedTransaction: encryptedEnvelope.signedTransaction,
+  };
+}
+
+export async function createAcceptElectionTrusteeInvitationTransaction(
+  electionId: string,
+  invitationId: string,
+  actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
+  signingPrivateKeyHex: string,
+): Promise<{ signedTransaction: string }> {
+  return createResolveElectionTrusteeInvitationTransaction(
+    ENCRYPTED_ELECTION_ACTION_TYPES.ACCEPT_TRUSTEE_INVITATION,
+    electionId,
+    invitationId,
+    actorPublicAddress,
+    actorPublicEncryptAddress,
+    actorPrivateEncryptKeyHex,
+    signingPrivateKeyHex,
+  );
+}
+
+export async function createRejectElectionTrusteeInvitationTransaction(
+  electionId: string,
+  invitationId: string,
+  actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
+  signingPrivateKeyHex: string,
+): Promise<{ signedTransaction: string }> {
+  return createResolveElectionTrusteeInvitationTransaction(
+    ENCRYPTED_ELECTION_ACTION_TYPES.REJECT_TRUSTEE_INVITATION,
+    electionId,
+    invitationId,
+    actorPublicAddress,
+    actorPublicEncryptAddress,
+    actorPrivateEncryptKeyHex,
+    signingPrivateKeyHex,
+  );
+}
+
+export async function createStartElectionCeremonyTransaction(
+  electionId: string,
+  actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
+  profileId: string,
+  signingPrivateKeyHex: string,
+): Promise<{ signedTransaction: string }> {
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<StartElectionCeremonyActionPayload>(
+      electionId,
+      actorPublicAddress,
+      actorPublicEncryptAddress,
+      actorPrivateEncryptKeyHex,
+      ENCRYPTED_ELECTION_ACTION_TYPES.START_CEREMONY,
+      {
+        ActorPublicAddress: actorPublicAddress,
+        ProfileId: profileId,
+      },
+      signingPrivateKeyHex,
+    );
+
+  return {
+    signedTransaction: encryptedEnvelope.signedTransaction,
+  };
+}
+
+export async function createRestartElectionCeremonyTransaction(
+  electionId: string,
+  actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
+  profileId: string,
+  restartReason: string,
+  signingPrivateKeyHex: string,
+): Promise<{ signedTransaction: string }> {
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<RestartElectionCeremonyActionPayload>(
+      electionId,
+      actorPublicAddress,
+      actorPublicEncryptAddress,
+      actorPrivateEncryptKeyHex,
+      ENCRYPTED_ELECTION_ACTION_TYPES.RESTART_CEREMONY,
+      {
+        ActorPublicAddress: actorPublicAddress,
+        ProfileId: profileId,
+        RestartReason: restartReason,
+      },
+      signingPrivateKeyHex,
+    );
+
+  return {
+    signedTransaction: encryptedEnvelope.signedTransaction,
+  };
+}
+
+export async function createPublishElectionCeremonyTransportKeyTransaction(
+  electionId: string,
+  actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
+  ceremonyVersionId: string,
+  transportPublicKeyFingerprint: string,
+  signingPrivateKeyHex: string,
+): Promise<{ signedTransaction: string }> {
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<PublishElectionCeremonyTransportKeyActionPayload>(
+      electionId,
+      actorPublicAddress,
+      actorPublicEncryptAddress,
+      actorPrivateEncryptKeyHex,
+      ENCRYPTED_ELECTION_ACTION_TYPES.PUBLISH_CEREMONY_TRANSPORT_KEY,
+      {
+        CeremonyVersionId: ceremonyVersionId,
+        ActorPublicAddress: actorPublicAddress,
+        TransportPublicKeyFingerprint: transportPublicKeyFingerprint,
+      },
+      signingPrivateKeyHex,
+    );
+
+  return {
+    signedTransaction: encryptedEnvelope.signedTransaction,
+  };
+}
+
+export async function createJoinElectionCeremonyTransaction(
+  electionId: string,
+  actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
+  ceremonyVersionId: string,
+  signingPrivateKeyHex: string,
+): Promise<{ signedTransaction: string }> {
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<JoinElectionCeremonyActionPayload>(
+      electionId,
+      actorPublicAddress,
+      actorPublicEncryptAddress,
+      actorPrivateEncryptKeyHex,
+      ENCRYPTED_ELECTION_ACTION_TYPES.JOIN_CEREMONY,
+      {
+        CeremonyVersionId: ceremonyVersionId,
+        ActorPublicAddress: actorPublicAddress,
+      },
+      signingPrivateKeyHex,
+    );
+
+  return {
+    signedTransaction: encryptedEnvelope.signedTransaction,
+  };
+}
+
+export async function createRecordElectionCeremonySelfTestSuccessTransaction(
+  electionId: string,
+  actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
+  ceremonyVersionId: string,
+  signingPrivateKeyHex: string,
+): Promise<{ signedTransaction: string }> {
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<RecordElectionCeremonySelfTestActionPayload>(
+      electionId,
+      actorPublicAddress,
+      actorPublicEncryptAddress,
+      actorPrivateEncryptKeyHex,
+      ENCRYPTED_ELECTION_ACTION_TYPES.RECORD_CEREMONY_SELF_TEST_SUCCESS,
+      {
+        CeremonyVersionId: ceremonyVersionId,
+        ActorPublicAddress: actorPublicAddress,
+      },
+      signingPrivateKeyHex,
+    );
+
+  return {
+    signedTransaction: encryptedEnvelope.signedTransaction,
+  };
+}
+
+export async function createSubmitElectionCeremonyMaterialTransaction(
+  electionId: string,
+  actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
+  ceremonyVersionId: string,
+  recipientTrusteeUserAddress: string | null | undefined,
+  messageType: string,
+  payloadVersion: string,
+  encryptedPayload: string,
+  payloadFingerprint: string,
+  signingPrivateKeyHex: string,
+): Promise<{ signedTransaction: string }> {
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<SubmitElectionCeremonyMaterialActionPayload>(
+      electionId,
+      actorPublicAddress,
+      actorPublicEncryptAddress,
+      actorPrivateEncryptKeyHex,
+      ENCRYPTED_ELECTION_ACTION_TYPES.SUBMIT_CEREMONY_MATERIAL,
+      {
+        CeremonyVersionId: ceremonyVersionId,
+        ActorPublicAddress: actorPublicAddress,
+        RecipientTrusteeUserAddress: recipientTrusteeUserAddress,
+        MessageType: messageType,
+        PayloadVersion: payloadVersion,
+        EncryptedPayload: encryptedPayload,
+        PayloadFingerprint: payloadFingerprint,
+      },
+      signingPrivateKeyHex,
+    );
+
+  return {
+    signedTransaction: encryptedEnvelope.signedTransaction,
+  };
+}
+
+export async function createRecordElectionCeremonyValidationFailureTransaction(
+  electionId: string,
+  actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
+  ceremonyVersionId: string,
+  trusteeUserAddress: string,
+  validationFailureReason: string,
+  evidenceReference: string | null | undefined,
+  signingPrivateKeyHex: string,
+): Promise<{ signedTransaction: string }> {
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<RecordElectionCeremonyValidationFailureActionPayload>(
+      electionId,
+      actorPublicAddress,
+      actorPublicEncryptAddress,
+      actorPrivateEncryptKeyHex,
+      ENCRYPTED_ELECTION_ACTION_TYPES.RECORD_CEREMONY_VALIDATION_FAILURE,
+      {
+        CeremonyVersionId: ceremonyVersionId,
+        ActorPublicAddress: actorPublicAddress,
+        TrusteeUserAddress: trusteeUserAddress,
+        ValidationFailureReason: validationFailureReason,
+        EvidenceReference: evidenceReference,
+      },
+      signingPrivateKeyHex,
+    );
+
+  return {
+    signedTransaction: encryptedEnvelope.signedTransaction,
+  };
+}
+
+export async function createCompleteElectionCeremonyTrusteeTransaction(
+  electionId: string,
+  actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
+  ceremonyVersionId: string,
+  trusteeUserAddress: string,
+  shareVersion: string,
+  tallyPublicKeyFingerprint: string | null | undefined,
+  signingPrivateKeyHex: string,
+): Promise<{ signedTransaction: string }> {
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<CompleteElectionCeremonyTrusteeActionPayload>(
+      electionId,
+      actorPublicAddress,
+      actorPublicEncryptAddress,
+      actorPrivateEncryptKeyHex,
+      ENCRYPTED_ELECTION_ACTION_TYPES.COMPLETE_CEREMONY_TRUSTEE,
+      {
+        CeremonyVersionId: ceremonyVersionId,
+        ActorPublicAddress: actorPublicAddress,
+        TrusteeUserAddress: trusteeUserAddress,
+        ShareVersion: shareVersion,
+        TallyPublicKeyFingerprint: tallyPublicKeyFingerprint,
+      },
+      signingPrivateKeyHex,
+    );
+
+  return {
+    signedTransaction: encryptedEnvelope.signedTransaction,
+  };
+}
+
+export async function createRecordElectionCeremonyShareExportTransaction(
+  electionId: string,
+  actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
+  ceremonyVersionId: string,
+  shareVersion: string,
+  signingPrivateKeyHex: string,
+): Promise<{ signedTransaction: string }> {
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<RecordElectionCeremonyShareExportActionPayload>(
+      electionId,
+      actorPublicAddress,
+      actorPublicEncryptAddress,
+      actorPrivateEncryptKeyHex,
+      ENCRYPTED_ELECTION_ACTION_TYPES.RECORD_CEREMONY_SHARE_EXPORT,
+      {
+        CeremonyVersionId: ceremonyVersionId,
+        ActorPublicAddress: actorPublicAddress,
+        ShareVersion: shareVersion,
+      },
+      signingPrivateKeyHex,
+    );
+
+  return {
+    signedTransaction: encryptedEnvelope.signedTransaction,
+  };
+}
+
+export async function createRecordElectionCeremonyShareImportTransaction(
+  electionId: string,
+  actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
+  ceremonyVersionId: string,
+  importedElectionId: string,
+  importedCeremonyVersionId: string,
+  importedTrusteeUserAddress: string,
+  importedShareVersion: string,
+  signingPrivateKeyHex: string,
+): Promise<{ signedTransaction: string }> {
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<RecordElectionCeremonyShareImportActionPayload>(
+      electionId,
+      actorPublicAddress,
+      actorPublicEncryptAddress,
+      actorPrivateEncryptKeyHex,
+      ENCRYPTED_ELECTION_ACTION_TYPES.RECORD_CEREMONY_SHARE_IMPORT,
+      {
+        CeremonyVersionId: ceremonyVersionId,
+        ActorPublicAddress: actorPublicAddress,
+        ImportedElectionId: importedElectionId,
+        ImportedCeremonyVersionId: importedCeremonyVersionId,
+        ImportedTrusteeUserAddress: importedTrusteeUserAddress,
+        ImportedShareVersion: importedShareVersion,
+      },
+      signingPrivateKeyHex,
+    );
+
+  return {
+    signedTransaction: encryptedEnvelope.signedTransaction,
+  };
+}
+
 export async function createRevokeElectionTrusteeInvitationTransaction(
   electionId: string,
   invitationId: string,
   actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
   signingPrivateKeyHex: string,
 ): Promise<{ signedTransaction: string }> {
-  const unsignedTx = createUnsignedTransaction<RevokeElectionTrusteeInvitationPayload>(
-    REVOKE_ELECTION_TRUSTEE_INVITATION_PAYLOAD_KIND,
-    {
-      ElectionId: electionId,
-      InvitationId: invitationId,
-      ActorPublicAddress: actorPublicAddress,
-    },
-  );
-
-  const signedTx = await signByUser(unsignedTx, {
-    privateKey: hexToBytes(signingPrivateKeyHex),
-    publicSigningAddress: actorPublicAddress,
-  });
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<RevokeElectionTrusteeInvitationActionPayload>(
+      electionId,
+      actorPublicAddress,
+      actorPublicEncryptAddress,
+      actorPrivateEncryptKeyHex,
+      ENCRYPTED_ELECTION_ACTION_TYPES.REVOKE_TRUSTEE_INVITATION,
+      {
+        InvitationId: invitationId,
+        ActorPublicAddress: actorPublicAddress,
+      },
+      signingPrivateKeyHex,
+    );
 
   return {
-    signedTransaction: JSON.stringify(signedTx),
+    signedTransaction: encryptedEnvelope.signedTransaction,
   };
 }
 
@@ -355,26 +866,28 @@ export async function createStartElectionGovernedProposalTransaction(
   electionId: string,
   actionType: number,
   actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
   signingPrivateKeyHex: string,
 ): Promise<{ signedTransaction: string; proposalId: string }> {
   const proposalId = generateGuid();
-  const unsignedTx = createUnsignedTransaction<StartElectionGovernedProposalPayload>(
-    START_ELECTION_GOVERNED_PROPOSAL_PAYLOAD_KIND,
-    {
-      ElectionId: electionId,
-      ProposalId: proposalId,
-      ActionType: actionType,
-      ActorPublicAddress: actorPublicAddress,
-    },
-  );
-
-  const signedTx = await signByUser(unsignedTx, {
-    privateKey: hexToBytes(signingPrivateKeyHex),
-    publicSigningAddress: actorPublicAddress,
-  });
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<StartElectionGovernedProposalActionPayload>(
+      electionId,
+      actorPublicAddress,
+      actorPublicEncryptAddress,
+      actorPrivateEncryptKeyHex,
+      ENCRYPTED_ELECTION_ACTION_TYPES.START_GOVERNED_PROPOSAL,
+      {
+        ProposalId: proposalId,
+        ActionType: actionType,
+        ActorPublicAddress: actorPublicAddress,
+      },
+      signingPrivateKeyHex,
+    );
 
   return {
-    signedTransaction: JSON.stringify(signedTx),
+    signedTransaction: encryptedEnvelope.signedTransaction,
     proposalId,
   };
 }
@@ -383,26 +896,28 @@ export async function createApproveElectionGovernedProposalTransaction(
   electionId: string,
   proposalId: string,
   actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
   approvalNote: string,
   signingPrivateKeyHex: string,
 ): Promise<{ signedTransaction: string }> {
-  const unsignedTx = createUnsignedTransaction<ApproveElectionGovernedProposalPayload>(
-    APPROVE_ELECTION_GOVERNED_PROPOSAL_PAYLOAD_KIND,
-    {
-      ElectionId: electionId,
-      ProposalId: proposalId,
-      ActorPublicAddress: actorPublicAddress,
-      ApprovalNote: approvalNote,
-    },
-  );
-
-  const signedTx = await signByUser(unsignedTx, {
-    privateKey: hexToBytes(signingPrivateKeyHex),
-    publicSigningAddress: actorPublicAddress,
-  });
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<ApproveElectionGovernedProposalActionPayload>(
+      electionId,
+      actorPublicAddress,
+      actorPublicEncryptAddress,
+      actorPrivateEncryptKeyHex,
+      ENCRYPTED_ELECTION_ACTION_TYPES.APPROVE_GOVERNED_PROPOSAL,
+      {
+        ProposalId: proposalId,
+        ActorPublicAddress: actorPublicAddress,
+        ApprovalNote: approvalNote,
+      },
+      signingPrivateKeyHex,
+    );
 
   return {
-    signedTransaction: JSON.stringify(signedTx),
+    signedTransaction: encryptedEnvelope.signedTransaction,
   };
 }
 
@@ -410,30 +925,34 @@ export async function createRetryElectionGovernedProposalExecutionTransaction(
   electionId: string,
   proposalId: string,
   actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
   signingPrivateKeyHex: string,
 ): Promise<{ signedTransaction: string }> {
-  const unsignedTx = createUnsignedTransaction<RetryElectionGovernedProposalExecutionPayload>(
-    RETRY_ELECTION_GOVERNED_PROPOSAL_EXECUTION_PAYLOAD_KIND,
-    {
-      ElectionId: electionId,
-      ProposalId: proposalId,
-      ActorPublicAddress: actorPublicAddress,
-    },
-  );
-
-  const signedTx = await signByUser(unsignedTx, {
-    privateKey: hexToBytes(signingPrivateKeyHex),
-    publicSigningAddress: actorPublicAddress,
-  });
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<RetryElectionGovernedProposalExecutionActionPayload>(
+      electionId,
+      actorPublicAddress,
+      actorPublicEncryptAddress,
+      actorPrivateEncryptKeyHex,
+      ENCRYPTED_ELECTION_ACTION_TYPES.RETRY_GOVERNED_PROPOSAL_EXECUTION,
+      {
+        ProposalId: proposalId,
+        ActorPublicAddress: actorPublicAddress,
+      },
+      signingPrivateKeyHex,
+    );
 
   return {
-    signedTransaction: JSON.stringify(signedTx),
+    signedTransaction: encryptedEnvelope.signedTransaction,
   };
 }
 
 export async function createOpenElectionTransaction(
   electionId: string,
   actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
   requiredWarningCodes: number[],
   frozenEligibleVoterSetHash: string | null,
   trusteePolicyExecutionReference: string,
@@ -441,73 +960,83 @@ export async function createOpenElectionTransaction(
   reviewWindowExecutionReference: string,
   signingPrivateKeyHex: string,
 ): Promise<{ signedTransaction: string }> {
-  const unsignedTx = createUnsignedTransaction<OpenElectionPayload>(OPEN_ELECTION_PAYLOAD_KIND, {
-    ElectionId: electionId,
-    ActorPublicAddress: actorPublicAddress,
-    RequiredWarningCodes: requiredWarningCodes,
-    FrozenEligibleVoterSetHash: frozenEligibleVoterSetHash,
-    TrusteePolicyExecutionReference: trusteePolicyExecutionReference,
-    ReportingPolicyExecutionReference: reportingPolicyExecutionReference,
-    ReviewWindowExecutionReference: reviewWindowExecutionReference,
-  });
-
-  const signedTx = await signByUser(unsignedTx, {
-    privateKey: hexToBytes(signingPrivateKeyHex),
-    publicSigningAddress: actorPublicAddress,
-  });
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<OpenElectionActionPayload>(
+      electionId,
+      actorPublicAddress,
+      actorPublicEncryptAddress,
+      actorPrivateEncryptKeyHex,
+      ENCRYPTED_ELECTION_ACTION_TYPES.OPEN_ELECTION,
+      {
+        ActorPublicAddress: actorPublicAddress,
+        RequiredWarningCodes: requiredWarningCodes,
+        FrozenEligibleVoterSetHash: frozenEligibleVoterSetHash,
+        TrusteePolicyExecutionReference: trusteePolicyExecutionReference,
+        ReportingPolicyExecutionReference: reportingPolicyExecutionReference,
+        ReviewWindowExecutionReference: reviewWindowExecutionReference,
+      },
+      signingPrivateKeyHex,
+    );
 
   return {
-    signedTransaction: JSON.stringify(signedTx),
+    signedTransaction: encryptedEnvelope.signedTransaction,
   };
 }
 
 export async function createCloseElectionTransaction(
   electionId: string,
   actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
   acceptedBallotSetHash: string | null,
   finalEncryptedTallyHash: string | null,
   signingPrivateKeyHex: string,
 ): Promise<{ signedTransaction: string }> {
-  const unsignedTx = createUnsignedTransaction<CloseElectionPayload>(CLOSE_ELECTION_PAYLOAD_KIND, {
-    ElectionId: electionId,
-    ActorPublicAddress: actorPublicAddress,
-    AcceptedBallotSetHash: acceptedBallotSetHash,
-    FinalEncryptedTallyHash: finalEncryptedTallyHash,
-  });
-
-  const signedTx = await signByUser(unsignedTx, {
-    privateKey: hexToBytes(signingPrivateKeyHex),
-    publicSigningAddress: actorPublicAddress,
-  });
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<CloseElectionActionPayload>(
+      electionId,
+      actorPublicAddress,
+      actorPublicEncryptAddress,
+      actorPrivateEncryptKeyHex,
+      ENCRYPTED_ELECTION_ACTION_TYPES.CLOSE_ELECTION,
+      {
+        ActorPublicAddress: actorPublicAddress,
+        AcceptedBallotSetHash: acceptedBallotSetHash,
+        FinalEncryptedTallyHash: finalEncryptedTallyHash,
+      },
+      signingPrivateKeyHex,
+    );
 
   return {
-    signedTransaction: JSON.stringify(signedTx),
+    signedTransaction: encryptedEnvelope.signedTransaction,
   };
 }
 
 export async function createFinalizeElectionTransaction(
   electionId: string,
   actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
   acceptedBallotSetHash: string | null,
   finalEncryptedTallyHash: string | null,
   signingPrivateKeyHex: string,
 ): Promise<{ signedTransaction: string }> {
-  const unsignedTx = createUnsignedTransaction<FinalizeElectionPayload>(
-    FINALIZE_ELECTION_PAYLOAD_KIND,
-    {
-      ElectionId: electionId,
-      ActorPublicAddress: actorPublicAddress,
-      AcceptedBallotSetHash: acceptedBallotSetHash,
-      FinalEncryptedTallyHash: finalEncryptedTallyHash,
-    },
-  );
-
-  const signedTx = await signByUser(unsignedTx, {
-    privateKey: hexToBytes(signingPrivateKeyHex),
-    publicSigningAddress: actorPublicAddress,
-  });
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<FinalizeElectionActionPayload>(
+      electionId,
+      actorPublicAddress,
+      actorPublicEncryptAddress,
+      actorPrivateEncryptKeyHex,
+      ENCRYPTED_ELECTION_ACTION_TYPES.FINALIZE_ELECTION,
+      {
+        ActorPublicAddress: actorPublicAddress,
+        AcceptedBallotSetHash: acceptedBallotSetHash,
+        FinalEncryptedTallyHash: finalEncryptedTallyHash,
+      },
+      signingPrivateKeyHex,
+    );
 
   return {
-    signedTransaction: JSON.stringify(signedTx),
+    signedTransaction: encryptedEnvelope.signedTransaction,
   };
 }

@@ -466,7 +466,12 @@ export function ElectionsWorkspace({
       ActorPublicAddress: ownerPublicAddress,
     };
 
-    await revokeInvitation(request, ownerSigningPrivateKey);
+    await revokeInvitation(
+      request,
+      ownerEncryptionPublicKey ?? '',
+      ownerEncryptionPrivateKey ?? '',
+      ownerSigningPrivateKey
+    );
   };
 
   const handleOpenElection = async () => {
@@ -479,15 +484,28 @@ export function ElectionsWorkspace({
       return;
     }
 
-    await openElection(requiredWarningCodes, ownerSigningPrivateKey);
+    await openElection(
+      requiredWarningCodes,
+      ownerEncryptionPublicKey ?? '',
+      ownerEncryptionPrivateKey ?? '',
+      ownerSigningPrivateKey
+    );
   };
 
   const handleCloseElection = async () => {
-    await closeElection(ownerSigningPrivateKey);
+    await closeElection(
+      ownerEncryptionPublicKey ?? '',
+      ownerEncryptionPrivateKey ?? '',
+      ownerSigningPrivateKey
+    );
   };
 
   const handleFinalizeElection = async () => {
-    await finalizeElection(ownerSigningPrivateKey);
+    await finalizeElection(
+      ownerEncryptionPublicKey ?? '',
+      ownerEncryptionPrivateKey ?? '',
+      ownerSigningPrivateKey
+    );
   };
 
   const handleStartGovernedProposal = async (actionType: ElectionGovernedActionTypeProto) => {
@@ -498,11 +516,21 @@ export function ElectionsWorkspace({
       return;
     }
 
-    await startGovernedProposal(actionType, ownerSigningPrivateKey);
+    await startGovernedProposal(
+      actionType,
+      ownerEncryptionPublicKey ?? '',
+      ownerEncryptionPrivateKey ?? '',
+      ownerSigningPrivateKey
+    );
   };
 
   const handleRetryGovernedProposal = async (proposalId: string) => {
-    await retryGovernedProposalExecution(proposalId, ownerSigningPrivateKey);
+    await retryGovernedProposalExecution(
+      proposalId,
+      ownerEncryptionPublicKey ?? '',
+      ownerEncryptionPrivateKey ?? '',
+      ownerSigningPrivateKey
+    );
   };
 
   const handleStartCeremony = async (profileId: string) => {
@@ -514,7 +542,7 @@ export function ElectionsWorkspace({
       ElectionId: selectedElectionId,
       ActorPublicAddress: ownerPublicAddress,
       ProfileId: profileId,
-    });
+    }, ownerEncryptionPublicKey ?? '', ownerEncryptionPrivateKey ?? '', ownerSigningPrivateKey);
   };
 
   const handleRestartCeremony = async (profileId: string, restartReason: string) => {
@@ -527,7 +555,7 @@ export function ElectionsWorkspace({
       ActorPublicAddress: ownerPublicAddress,
       ProfileId: profileId,
       RestartReason: restartReason,
-    });
+    }, ownerEncryptionPublicKey ?? '', ownerEncryptionPrivateKey ?? '', ownerSigningPrivateKey);
   };
 
   return (

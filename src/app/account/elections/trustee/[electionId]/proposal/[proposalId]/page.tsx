@@ -22,15 +22,35 @@ export default function TrusteeProposalPage({ params }: TrusteeProposalPageProps
   useEffect(() => {
     const timer = setTimeout(() => {
       setIsCheckingAuth(false);
-      if (!isAuthenticated || !credentials?.signingPublicKey || !credentials?.signingPrivateKey) {
+      if (
+        !isAuthenticated ||
+        !credentials?.signingPublicKey ||
+        !credentials?.signingPrivateKey ||
+        !credentials?.encryptionPublicKey ||
+        !credentials?.encryptionPrivateKey
+      ) {
         router.replace('/auth');
       }
     }, 100);
 
     return () => clearTimeout(timer);
-  }, [credentials?.signingPrivateKey, credentials?.signingPublicKey, isAuthenticated, router]);
+  }, [
+    credentials?.encryptionPrivateKey,
+    credentials?.encryptionPublicKey,
+    credentials?.signingPrivateKey,
+    credentials?.signingPublicKey,
+    isAuthenticated,
+    router,
+  ]);
 
-  if (isCheckingAuth || !isAuthenticated || !credentials?.signingPublicKey || !credentials?.signingPrivateKey) {
+  if (
+    isCheckingAuth ||
+    !isAuthenticated ||
+    !credentials?.signingPublicKey ||
+    !credentials?.signingPrivateKey ||
+    !credentials?.encryptionPublicKey ||
+    !credentials?.encryptionPrivateKey
+  ) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-hush-bg-dark">
         <Loader2 className="h-8 w-8 animate-spin text-hush-purple" />
@@ -43,6 +63,8 @@ export default function TrusteeProposalPage({ params }: TrusteeProposalPageProps
       electionId={resolvedParams.electionId}
       proposalId={resolvedParams.proposalId}
       actorPublicAddress={credentials.signingPublicKey}
+      actorEncryptionPublicKey={credentials.encryptionPublicKey}
+      actorEncryptionPrivateKey={credentials.encryptionPrivateKey}
       actorSigningPrivateKey={credentials.signingPrivateKey}
     />
   );

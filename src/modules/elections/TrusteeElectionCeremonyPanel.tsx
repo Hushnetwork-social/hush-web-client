@@ -24,6 +24,9 @@ import { useElectionsStore } from './useElectionsStore';
 type TrusteeElectionCeremonyPanelProps = {
   electionId: string;
   actorPublicAddress: string;
+  actorEncryptionPublicKey: string;
+  actorEncryptionPrivateKey: string;
+  actorSigningPrivateKey: string;
 };
 
 const sectionClass =
@@ -32,6 +35,9 @@ const sectionClass =
 export function TrusteeElectionCeremonyPanel({
   electionId,
   actorPublicAddress,
+  actorEncryptionPublicKey,
+  actorEncryptionPrivateKey,
+  actorSigningPrivateKey,
 }: TrusteeElectionCeremonyPanelProps) {
   const {
     ceremonyActionView,
@@ -112,7 +118,7 @@ export function TrusteeElectionCeremonyPanel({
       CeremonyVersionId: activeVersion.Id,
       ActorPublicAddress: actorPublicAddress,
       TransportPublicKeyFingerprint: transportPublicKeyFingerprint,
-    });
+    }, actorEncryptionPublicKey, actorEncryptionPrivateKey, actorSigningPrivateKey);
   };
 
   const handleJoin = async () => {
@@ -124,7 +130,7 @@ export function TrusteeElectionCeremonyPanel({
       ElectionId: electionId,
       CeremonyVersionId: activeVersion.Id,
       ActorPublicAddress: actorPublicAddress,
-    });
+    }, actorEncryptionPublicKey, actorEncryptionPrivateKey, actorSigningPrivateKey);
   };
 
   const handleSelfTest = async () => {
@@ -136,7 +142,7 @@ export function TrusteeElectionCeremonyPanel({
       ElectionId: electionId,
       CeremonyVersionId: activeVersion.Id,
       ActorPublicAddress: actorPublicAddress,
-    });
+    }, actorEncryptionPublicKey, actorEncryptionPrivateKey, actorSigningPrivateKey);
   };
 
   const handleSubmit = async () => {
@@ -153,7 +159,7 @@ export function TrusteeElectionCeremonyPanel({
       PayloadVersion: payloadVersion.trim(),
       EncryptedPayload: encryptedPayload.trim(),
       PayloadFingerprint: payloadFingerprint.trim(),
-    });
+    }, actorEncryptionPublicKey, actorEncryptionPrivateKey, actorSigningPrivateKey);
 
     if (!didSubmit) {
       return;
@@ -166,7 +172,7 @@ export function TrusteeElectionCeremonyPanel({
       TrusteeUserAddress: actorPublicAddress,
       ShareVersion: shareVersion.trim(),
       TallyPublicKeyFingerprint: tallyPublicKeyFingerprint.trim(),
-    });
+    }, actorEncryptionPublicKey, actorEncryptionPrivateKey, actorSigningPrivateKey);
   };
 
   const handleExport = async () => {
@@ -179,7 +185,7 @@ export function TrusteeElectionCeremonyPanel({
       CeremonyVersionId: activeVersion.Id,
       ActorPublicAddress: actorPublicAddress,
       ShareVersion: selfState?.ShareVersion || shareCustody?.ShareVersion || shareVersion.trim(),
-    });
+    }, actorEncryptionPublicKey, actorEncryptionPrivateKey, actorSigningPrivateKey);
   };
 
   return (

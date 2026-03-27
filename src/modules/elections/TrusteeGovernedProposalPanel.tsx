@@ -16,6 +16,8 @@ type TrusteeGovernedProposalPanelProps = {
   electionId: string;
   proposalId: string;
   actorPublicAddress: string;
+  actorEncryptionPublicKey: string;
+  actorEncryptionPrivateKey: string;
   actorSigningPrivateKey: string;
 };
 
@@ -26,6 +28,8 @@ export function TrusteeGovernedProposalPanel({
   electionId,
   proposalId,
   actorPublicAddress,
+  actorEncryptionPublicKey,
+  actorEncryptionPrivateKey,
   actorSigningPrivateKey,
 }: TrusteeGovernedProposalPanelProps) {
   const {
@@ -73,6 +77,8 @@ export function TrusteeGovernedProposalPanel({
     const didApprove = await approveGovernedProposal(
       proposalId,
       actorPublicAddress,
+      actorEncryptionPublicKey,
+      actorEncryptionPrivateKey,
       actorSigningPrivateKey,
       approvalNote
     );

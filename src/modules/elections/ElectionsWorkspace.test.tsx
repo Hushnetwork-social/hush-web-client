@@ -66,7 +66,9 @@ const { electionsServiceMock, blockchainServiceMock, transactionServiceMock } = 
     createFinalizeElectionTransaction: vi.fn(),
     createOpenElectionTransaction: vi.fn(),
     createRevokeElectionTrusteeInvitationTransaction: vi.fn(),
+    createRestartElectionCeremonyTransaction: vi.fn(),
     createRetryElectionGovernedProposalExecutionTransaction: vi.fn(),
+    createStartElectionCeremonyTransaction: vi.fn(),
     createStartElectionGovernedProposalTransaction: vi.fn(),
     createUpdateElectionDraftTransaction: vi.fn(),
   },
@@ -95,8 +97,12 @@ vi.mock('./transactionService', () => ({
     transactionServiceMock.createOpenElectionTransaction(...args),
   createRevokeElectionTrusteeInvitationTransaction: (...args: unknown[]) =>
     transactionServiceMock.createRevokeElectionTrusteeInvitationTransaction(...args),
+  createRestartElectionCeremonyTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createRestartElectionCeremonyTransaction(...args),
   createRetryElectionGovernedProposalExecutionTransaction: (...args: unknown[]) =>
     transactionServiceMock.createRetryElectionGovernedProposalExecutionTransaction(...args),
+  createStartElectionCeremonyTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createStartElectionCeremonyTransaction(...args),
   createStartElectionGovernedProposalTransaction: (...args: unknown[]) =>
     transactionServiceMock.createStartElectionGovernedProposalTransaction(...args),
   createUpdateElectionDraftTransaction: (...args: unknown[]) =>
@@ -375,6 +381,12 @@ describe('ElectionsWorkspace', () => {
     transactionServiceMock.createRevokeElectionTrusteeInvitationTransaction.mockResolvedValue({
       signedTransaction: 'signed-trustee-revoke-transaction',
     });
+    transactionServiceMock.createStartElectionCeremonyTransaction.mockResolvedValue({
+      signedTransaction: 'signed-start-election-ceremony-transaction',
+    });
+    transactionServiceMock.createRestartElectionCeremonyTransaction.mockResolvedValue({
+      signedTransaction: 'signed-restart-election-ceremony-transaction',
+    });
   });
 
   it('creates a valid draft and shows save feedback', async () => {
@@ -466,12 +478,13 @@ describe('ElectionsWorkspace', () => {
       target: { value: 'Bob' },
     });
 
-    fireEvent.click(screen.getByTestId('elections-save-button'));
-    await vi.runAllTimersAsync();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('elections-save-button'));
+      await vi.runAllTimersAsync();
+    });
 
     expect(screen.getByText('Election draft submitted.')).toBeInTheDocument();
     expect(screen.getByText(/waiting for block confirmation/i)).toBeInTheDocument();
-    vi.useRealTimers();
   });
 
   it('updates an existing draft through blockchain submission and waits for the next revision', async () => {
@@ -777,7 +790,14 @@ describe('ElectionsWorkspace', () => {
     await waitFor(() => {
       expect(
         transactionServiceMock.createRevokeElectionTrusteeInvitationTransaction
-      ).toHaveBeenCalledWith('election-1', 'invite-1', 'owner-public-key', 'owner-private-key');
+      ).toHaveBeenCalledWith(
+        'election-1',
+        'invite-1',
+        'owner-public-key',
+        'owner-encryption-key',
+        'owner-encryption-private-key',
+        'owner-private-key'
+      );
     });
     expect(blockchainServiceMock.submitTransaction).toHaveBeenCalledWith(
       'signed-trustee-revoke-transaction'
@@ -939,6 +959,8 @@ describe('ElectionsWorkspace', () => {
     render(
       <ElectionsWorkspace
         ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
         ownerSigningPrivateKey="owner-private-key"
       />
     );
@@ -988,6 +1010,8 @@ describe('ElectionsWorkspace', () => {
     render(
       <ElectionsWorkspace
         ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
         ownerSigningPrivateKey="owner-private-key"
       />
     );
@@ -1066,6 +1090,8 @@ describe('ElectionsWorkspace', () => {
     render(
       <ElectionsWorkspace
         ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
         ownerSigningPrivateKey="owner-private-key"
       />
     );
@@ -1130,6 +1156,8 @@ describe('ElectionsWorkspace', () => {
     render(
       <ElectionsWorkspace
         ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
         ownerSigningPrivateKey="owner-private-key"
       />
     );
@@ -1140,6 +1168,8 @@ describe('ElectionsWorkspace', () => {
     expect(transactionServiceMock.createOpenElectionTransaction).toHaveBeenCalledWith(
       'election-1',
       'owner-public-key',
+      'owner-encryption-key',
+      'owner-encryption-private-key',
       expect.any(Array),
       null,
       '',
@@ -1195,6 +1225,8 @@ describe('ElectionsWorkspace', () => {
     render(
       <ElectionsWorkspace
         ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
         ownerSigningPrivateKey="owner-private-key"
       />
     );
@@ -1205,6 +1237,8 @@ describe('ElectionsWorkspace', () => {
     expect(transactionServiceMock.createCloseElectionTransaction).toHaveBeenCalledWith(
       'election-1',
       'owner-public-key',
+      'owner-encryption-key',
+      'owner-encryption-private-key',
       null,
       null,
       'owner-private-key'
@@ -1263,6 +1297,8 @@ describe('ElectionsWorkspace', () => {
     render(
       <ElectionsWorkspace
         ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
         ownerSigningPrivateKey="owner-private-key"
       />
     );
@@ -1273,6 +1309,8 @@ describe('ElectionsWorkspace', () => {
     expect(transactionServiceMock.createFinalizeElectionTransaction).toHaveBeenCalledWith(
       'election-1',
       'owner-public-key',
+      'owner-encryption-key',
+      'owner-encryption-private-key',
       null,
       null,
       'owner-private-key'
@@ -1329,6 +1367,8 @@ describe('ElectionsWorkspace', () => {
     render(
       <ElectionsWorkspace
         ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
         ownerSigningPrivateKey="owner-private-key"
       />
     );
@@ -1343,6 +1383,8 @@ describe('ElectionsWorkspace', () => {
         'election-1',
         ElectionGovernedActionTypeProto.Close,
         'owner-public-key',
+        'owner-encryption-key',
+        'owner-encryption-private-key',
         'owner-private-key'
       );
     });
@@ -1409,6 +1451,8 @@ describe('ElectionsWorkspace', () => {
     render(
       <ElectionsWorkspace
         ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
         ownerSigningPrivateKey="owner-private-key"
       />
     );
@@ -1423,6 +1467,8 @@ describe('ElectionsWorkspace', () => {
         'election-1',
         'proposal-1',
         'owner-public-key',
+        'owner-encryption-key',
+        'owner-encryption-private-key',
         'owner-private-key'
       );
     });
@@ -1494,8 +1540,7 @@ describe('ElectionsWorkspace', () => {
         }),
       ],
     });
-    electionsServiceMock.getElection.mockResolvedValue(
-      createElectionResponse({
+    const initialElectionResponse = createElectionResponse({
         Election: thresholdElection,
         LatestDraftSnapshot: createDraftSnapshot({
           Policy: {
@@ -1554,8 +1599,39 @@ describe('ElectionsWorkspace', () => {
             LastUpdatedAt: timestamp,
           },
         ],
-      })
-    );
+      });
+    const indexedElectionResponse = createElectionResponse({
+      ...initialElectionResponse,
+      CeremonyVersions: [
+        {
+          Id: 'ceremony-version-1',
+          ElectionId: 'election-1',
+          VersionNumber: 1,
+          ProfileId: 'prod-3of5-v1',
+          Status: ElectionCeremonyVersionStatusProto.CeremonyVersionInProgress,
+          TrusteeCount: 5,
+          RequiredApprovalCount: 3,
+          BoundTrustees: [
+            {
+              TrusteeUserAddress: 'trustee-a',
+              TrusteeDisplayName: 'Alice Trustee',
+            },
+            {
+              TrusteeUserAddress: 'trustee-b',
+              TrusteeDisplayName: 'Bob Trustee',
+            },
+          ],
+          StartedByPublicAddress: 'owner-public-key',
+          StartedAt: timestamp,
+          SupersededReason: '',
+          TallyPublicKeyFingerprint: '',
+        },
+      ],
+    });
+    electionsServiceMock.getElection
+      .mockResolvedValueOnce(initialElectionResponse)
+      .mockResolvedValueOnce(indexedElectionResponse)
+      .mockResolvedValue(indexedElectionResponse);
     electionsServiceMock.getElectionCeremonyActionView.mockResolvedValue(
       createCeremonyActionViewResponse()
     );
@@ -1563,6 +1639,8 @@ describe('ElectionsWorkspace', () => {
     render(
       <ElectionsWorkspace
         ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
         ownerSigningPrivateKey="owner-private-key"
       />
     );
@@ -1574,11 +1652,14 @@ describe('ElectionsWorkspace', () => {
     fireEvent.click(screen.getByTestId('elections-ceremony-confirm-button'));
 
     await waitFor(() => {
-      expect(electionsServiceMock.startElectionCeremony).toHaveBeenCalledWith({
-        ElectionId: 'election-1',
-        ActorPublicAddress: 'owner-public-key',
-        ProfileId: 'prod-3of5-v1',
-      });
+      expect(transactionServiceMock.createStartElectionCeremonyTransaction).toHaveBeenCalledWith(
+        'election-1',
+        'owner-public-key',
+        'owner-encryption-key',
+        'owner-encryption-private-key',
+        'prod-3of5-v1',
+        'owner-private-key'
+      );
     });
   });
 
@@ -1701,8 +1782,7 @@ describe('ElectionsWorkspace', () => {
         }),
       ],
     });
-    electionsServiceMock.getElection.mockResolvedValue(
-      createElectionResponse({
+    const initialElectionResponse = createElectionResponse({
         Election: thresholdElection,
         LatestDraftSnapshot: createDraftSnapshot({
           Policy: {
@@ -1756,8 +1836,31 @@ describe('ElectionsWorkspace', () => {
         ActiveCeremonyTrusteeStates: [
           createCeremonyTrusteeState(),
         ],
-      })
-    );
+      });
+    const indexedElectionResponse = createElectionResponse({
+      ...initialElectionResponse,
+      CeremonyVersions: [
+        {
+          Id: 'ceremony-version-2',
+          ElectionId: 'election-1',
+          VersionNumber: 5,
+          ProfileId: 'prod-3of5-v1',
+          Status: ElectionCeremonyVersionStatusProto.CeremonyVersionInProgress,
+          TrusteeCount: 5,
+          RequiredApprovalCount: 3,
+          BoundTrustees: [],
+          StartedByPublicAddress: 'owner-public-key',
+          StartedAt: timestamp,
+          SupersededReason: '',
+          TallyPublicKeyFingerprint: '',
+        },
+      ],
+      ActiveCeremonyTrusteeStates: [],
+    });
+    electionsServiceMock.getElection
+      .mockResolvedValueOnce(initialElectionResponse)
+      .mockResolvedValueOnce(indexedElectionResponse)
+      .mockResolvedValue(indexedElectionResponse);
     electionsServiceMock.getElectionCeremonyActionView.mockResolvedValue(
       createCeremonyActionViewResponse({
         OwnerActions: [
@@ -1780,6 +1883,8 @@ describe('ElectionsWorkspace', () => {
     render(
       <ElectionsWorkspace
         ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
         ownerSigningPrivateKey="owner-private-key"
       />
     );
@@ -1788,17 +1893,20 @@ describe('ElectionsWorkspace', () => {
     fireEvent.click(screen.getByTestId('elections-ceremony-restart-button'));
 
     expect(screen.getByTestId('elections-ceremony-restart-reason')).toBeInTheDocument();
-    expect(electionsServiceMock.restartElectionCeremony).not.toHaveBeenCalled();
+    expect(transactionServiceMock.createRestartElectionCeremonyTransaction).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByTestId('elections-ceremony-confirm-button'));
 
     await waitFor(() => {
-      expect(electionsServiceMock.restartElectionCeremony).toHaveBeenCalledWith({
-        ElectionId: 'election-1',
-        ActorPublicAddress: 'owner-public-key',
-        ProfileId: 'prod-3of5-v1',
-        RestartReason: 'Supersede the current version and restart.',
-      });
+      expect(transactionServiceMock.createRestartElectionCeremonyTransaction).toHaveBeenCalledWith(
+        'election-1',
+        'owner-public-key',
+        'owner-encryption-key',
+        'owner-encryption-private-key',
+        'prod-3of5-v1',
+        'Supersede the current version and restart.',
+        'owner-private-key'
+      );
     });
   });
 });

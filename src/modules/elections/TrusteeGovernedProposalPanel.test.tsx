@@ -174,6 +174,8 @@ describe('TrusteeGovernedProposalPanel', () => {
         electionId="election-1"
         proposalId="proposal-1"
         actorPublicAddress="trustee-a"
+        actorEncryptionPublicKey="trustee-a-encryption-key"
+        actorEncryptionPrivateKey="trustee-a-encryption-private-key"
         actorSigningPrivateKey="trustee-a-private-key"
       />
     );
@@ -192,6 +194,8 @@ describe('TrusteeGovernedProposalPanel', () => {
         'election-1',
         'proposal-1',
         'trustee-a',
+        'trustee-a-encryption-key',
+        'trustee-a-encryption-private-key',
         'Ready to approve.',
         'trustee-a-private-key'
       );
