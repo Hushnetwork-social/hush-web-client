@@ -186,6 +186,10 @@ function createElectionResponse(overrides?: Partial<GetElectionResponse>): GetEl
     BoundaryArtifacts: [],
     GovernedProposals: [],
     GovernedProposalApprovals: [],
+    CeremonyProfiles: [],
+    CeremonyVersions: [],
+    CeremonyTranscriptEvents: [],
+    ActiveCeremonyTrusteeStates: [],
     ...overrides,
   };
 }
@@ -197,6 +201,7 @@ function createCommandResponse(overrides?: Partial<ElectionCommandResponse>): El
     ErrorMessage: '',
     ValidationErrors: [],
     Election: createElectionRecord(ElectionLifecycleStateProto.Draft),
+    CeremonyTranscriptEvents: [],
     ...overrides,
   };
 }

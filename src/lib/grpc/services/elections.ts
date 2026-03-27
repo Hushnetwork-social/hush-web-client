@@ -5,6 +5,8 @@ import type {
   CreateElectionDraftRequest,
   ElectionCommandResponse,
   FinalizeElectionRequest,
+  GetElectionCeremonyActionViewRequest,
+  GetElectionCeremonyActionViewResponse,
   GetElectionOpenReadinessRequest,
   GetElectionOpenReadinessResponse,
   GetElectionRequest,
@@ -13,9 +15,19 @@ import type {
   GetElectionsByOwnerResponse,
   InviteElectionTrusteeRequest,
   OpenElectionRequest,
+  PublishElectionCeremonyTransportKeyRequest,
+  RecordElectionCeremonySelfTestRequest,
+  RecordElectionCeremonyShareExportRequest,
+  RecordElectionCeremonyShareImportRequest,
+  RecordElectionCeremonyValidationFailureRequest,
   RetryElectionGovernedProposalExecutionRequest,
   ResolveElectionTrusteeInvitationRequest,
+  RestartElectionCeremonyRequest,
+  StartElectionCeremonyRequest,
   StartElectionGovernedProposalRequest,
+  SubmitElectionCeremonyMaterialRequest,
+  CompleteElectionCeremonyTrusteeRequest,
+  JoinElectionCeremonyRequest,
   UpdateElectionDraftRequest,
 } from '../types';
 
@@ -80,6 +92,115 @@ export const electionsService = {
     return client.unaryCall<ResolveElectionTrusteeInvitationRequest, ElectionCommandResponse>(
       SERVICE_NAME,
       'RevokeElectionTrusteeInvitation',
+      request
+    );
+  },
+
+  async startElectionCeremony(
+    request: StartElectionCeremonyRequest
+  ): Promise<ElectionCommandResponse> {
+    const client = getGrpcClient();
+    return client.unaryCall<StartElectionCeremonyRequest, ElectionCommandResponse>(
+      SERVICE_NAME,
+      'StartElectionCeremony',
+      request
+    );
+  },
+
+  async restartElectionCeremony(
+    request: RestartElectionCeremonyRequest
+  ): Promise<ElectionCommandResponse> {
+    const client = getGrpcClient();
+    return client.unaryCall<RestartElectionCeremonyRequest, ElectionCommandResponse>(
+      SERVICE_NAME,
+      'RestartElectionCeremony',
+      request
+    );
+  },
+
+  async publishElectionCeremonyTransportKey(
+    request: PublishElectionCeremonyTransportKeyRequest
+  ): Promise<ElectionCommandResponse> {
+    const client = getGrpcClient();
+    return client.unaryCall<PublishElectionCeremonyTransportKeyRequest, ElectionCommandResponse>(
+      SERVICE_NAME,
+      'PublishElectionCeremonyTransportKey',
+      request
+    );
+  },
+
+  async joinElectionCeremony(
+    request: JoinElectionCeremonyRequest
+  ): Promise<ElectionCommandResponse> {
+    const client = getGrpcClient();
+    return client.unaryCall<JoinElectionCeremonyRequest, ElectionCommandResponse>(
+      SERVICE_NAME,
+      'JoinElectionCeremony',
+      request
+    );
+  },
+
+  async recordElectionCeremonySelfTestSuccess(
+    request: RecordElectionCeremonySelfTestRequest
+  ): Promise<ElectionCommandResponse> {
+    const client = getGrpcClient();
+    return client.unaryCall<RecordElectionCeremonySelfTestRequest, ElectionCommandResponse>(
+      SERVICE_NAME,
+      'RecordElectionCeremonySelfTestSuccess',
+      request
+    );
+  },
+
+  async submitElectionCeremonyMaterial(
+    request: SubmitElectionCeremonyMaterialRequest
+  ): Promise<ElectionCommandResponse> {
+    const client = getGrpcClient();
+    return client.unaryCall<SubmitElectionCeremonyMaterialRequest, ElectionCommandResponse>(
+      SERVICE_NAME,
+      'SubmitElectionCeremonyMaterial',
+      request
+    );
+  },
+
+  async recordElectionCeremonyValidationFailure(
+    request: RecordElectionCeremonyValidationFailureRequest
+  ): Promise<ElectionCommandResponse> {
+    const client = getGrpcClient();
+    return client.unaryCall<
+      RecordElectionCeremonyValidationFailureRequest,
+      ElectionCommandResponse
+    >(SERVICE_NAME, 'RecordElectionCeremonyValidationFailure', request);
+  },
+
+  async completeElectionCeremonyTrustee(
+    request: CompleteElectionCeremonyTrusteeRequest
+  ): Promise<ElectionCommandResponse> {
+    const client = getGrpcClient();
+    return client.unaryCall<CompleteElectionCeremonyTrusteeRequest, ElectionCommandResponse>(
+      SERVICE_NAME,
+      'CompleteElectionCeremonyTrustee',
+      request
+    );
+  },
+
+  async recordElectionCeremonyShareExport(
+    request: RecordElectionCeremonyShareExportRequest
+  ): Promise<ElectionCommandResponse> {
+    const client = getGrpcClient();
+    return client.unaryCall<RecordElectionCeremonyShareExportRequest, ElectionCommandResponse>(
+      SERVICE_NAME,
+      'RecordElectionCeremonyShareExport',
+      request
+    );
+  },
+
+  async recordElectionCeremonyShareImport(
+    request: RecordElectionCeremonyShareImportRequest
+  ): Promise<ElectionCommandResponse> {
+    const client = getGrpcClient();
+    return client.unaryCall<RecordElectionCeremonyShareImportRequest, ElectionCommandResponse>(
+      SERVICE_NAME,
+      'RecordElectionCeremonyShareImport',
       request
     );
   },
@@ -162,6 +283,16 @@ export const electionsService = {
       'GetElection',
       request
     );
+  },
+
+  async getElectionCeremonyActionView(
+    request: GetElectionCeremonyActionViewRequest
+  ): Promise<GetElectionCeremonyActionViewResponse> {
+    const client = getGrpcClient();
+    return client.unaryCall<
+      GetElectionCeremonyActionViewRequest,
+      GetElectionCeremonyActionViewResponse
+    >(SERVICE_NAME, 'GetElectionCeremonyActionView', request);
   },
 
   async getElectionsByOwner(

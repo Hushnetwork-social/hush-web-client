@@ -1,4 +1,8 @@
 import {
+  type ElectionCeremonyProfile,
+  ElectionCeremonyActionTypeProto,
+  ElectionCeremonyActorRoleProto,
+  ElectionCeremonyVersionStatusProto,
   ElectionBindingStatusProto,
   ElectionClassProto,
   ElectionDisclosureModeProto,
@@ -13,9 +17,11 @@ import {
   type ElectionOption,
   type ElectionRecordView,
   type ElectionSummary,
+  ElectionTrusteeCeremonyStateProto,
   ElectionWarningCodeProto,
   EligibilityMutationPolicyProto,
   EligibilitySourceTypeProto,
+  type GetElectionCeremonyActionViewResponse,
   type GetElectionResponse,
   type GrpcTimestamp,
   OutcomeRuleKindProto,
@@ -35,6 +41,13 @@ export type ElectionWarningChoice = {
   code: ElectionWarningCodeProto;
   title: string;
   description: string;
+};
+
+export type CeremonyActionViewState = {
+  actionType: ElectionCeremonyActionTypeProto;
+  label: string;
+  status: 'available' | 'completed' | 'blocked';
+  reason: string;
 };
 
 export const DEFAULT_APPROVED_CLIENT_APPLICATIONS = [
@@ -170,6 +183,42 @@ const GOVERNED_PROPOSAL_STATUS_LABELS: Record<
   [ElectionGovernedProposalExecutionStatusProto.WaitingForApprovals]: 'Waiting for approvals',
   [ElectionGovernedProposalExecutionStatusProto.ExecutionSucceeded]: 'Executed',
   [ElectionGovernedProposalExecutionStatusProto.ExecutionFailed]: 'Execution failed',
+};
+
+const CEREMONY_VERSION_STATUS_LABELS: Record<ElectionCeremonyVersionStatusProto, string> = {
+  [ElectionCeremonyVersionStatusProto.CeremonyVersionInProgress]: 'In progress',
+  [ElectionCeremonyVersionStatusProto.CeremonyVersionReady]: 'Ready',
+  [ElectionCeremonyVersionStatusProto.CeremonyVersionSuperseded]: 'Superseded',
+};
+
+const TRUSTEE_CEREMONY_STATE_LABELS: Record<ElectionTrusteeCeremonyStateProto, string> = {
+  [ElectionTrusteeCeremonyStateProto.CeremonyStateInvited]: 'Invited',
+  [ElectionTrusteeCeremonyStateProto.CeremonyStateAcceptedTrustee]: 'Accepted trustee',
+  [ElectionTrusteeCeremonyStateProto.CeremonyStateNotStarted]: 'Not started',
+  [ElectionTrusteeCeremonyStateProto.CeremonyStateJoined]: 'Joined',
+  [ElectionTrusteeCeremonyStateProto.CeremonyStateMaterialSubmitted]: 'Material submitted',
+  [ElectionTrusteeCeremonyStateProto.CeremonyStateValidationFailed]: 'Validation failed',
+  [ElectionTrusteeCeremonyStateProto.CeremonyStateCompleted]: 'Completed',
+  [ElectionTrusteeCeremonyStateProto.CeremonyStateRemoved]: 'Removed',
+};
+
+const CEREMONY_ACTION_LABELS: Record<ElectionCeremonyActionTypeProto, string> = {
+  [ElectionCeremonyActionTypeProto.CeremonyActionUnknown]: 'Unknown action',
+  [ElectionCeremonyActionTypeProto.CeremonyActionStartVersion]: 'Start ceremony',
+  [ElectionCeremonyActionTypeProto.CeremonyActionRestartVersion]: 'Restart version',
+  [ElectionCeremonyActionTypeProto.CeremonyActionPublishTransportKey]: 'Publish transport key',
+  [ElectionCeremonyActionTypeProto.CeremonyActionJoinVersion]: 'Join version',
+  [ElectionCeremonyActionTypeProto.CeremonyActionRunSelfTest]: 'Run self-test',
+  [ElectionCeremonyActionTypeProto.CeremonyActionSubmitMaterial]: 'Submit material',
+  [ElectionCeremonyActionTypeProto.CeremonyActionExportShare]: 'Export share backup',
+  [ElectionCeremonyActionTypeProto.CeremonyActionImportShare]: 'Import share backup',
+};
+
+const CEREMONY_ACTOR_ROLE_LABELS: Record<ElectionCeremonyActorRoleProto, string> = {
+  [ElectionCeremonyActorRoleProto.CeremonyActorUnknown]: 'Unknown',
+  [ElectionCeremonyActorRoleProto.CeremonyActorOwner]: 'Owner',
+  [ElectionCeremonyActorRoleProto.CeremonyActorTrustee]: 'Trustee',
+  [ElectionCeremonyActorRoleProto.CeremonyActorReadOnly]: 'Read-only',
 };
 
 let nextOptionSeed = 1;
@@ -779,6 +828,43 @@ export function getGovernedActionViewStates(detail: GetElectionResponse | null):
     buildGovernedAvailabilityState(detail, ElectionGovernedActionTypeProto.Close),
     buildGovernedAvailabilityState(detail, ElectionGovernedActionTypeProto.Finalize),
   ];
+}
+
+export function getAllowedCeremonyProfiles(detail: GetElectionResponse | null): ElectionCeremonyProfile[] {
+  return detail?.CeremonyProfiles ?? [];
+}
+
+export function getCeremonyVersionStatusLabel(status: ElectionCeremonyVersionStatusProto): string {
+  return CEREMONY_VERSION_STATUS_LABELS[status] ?? 'Unknown';
+}
+
+export function getTrusteeCeremonyStateLabel(state: ElectionTrusteeCeremonyStateProto): string {
+  return TRUSTEE_CEREMONY_STATE_LABELS[state] ?? 'Unknown';
+}
+
+export function getCeremonyActionLabel(actionType: ElectionCeremonyActionTypeProto): string {
+  return CEREMONY_ACTION_LABELS[actionType] ?? 'Unknown action';
+}
+
+export function getCeremonyActorRoleLabel(actorRole: ElectionCeremonyActorRoleProto): string {
+  return CEREMONY_ACTOR_ROLE_LABELS[actorRole] ?? 'Unknown';
+}
+
+export function getCeremonyActionViewStates(
+  view: GetElectionCeremonyActionViewResponse | null,
+  scope: 'owner' | 'trustee'
+): CeremonyActionViewState[] {
+  const actions = scope === 'owner' ? view?.OwnerActions : view?.TrusteeActions;
+  if (!actions?.length) {
+    return [];
+  }
+
+  return actions.map((action) => ({
+    actionType: action.ActionType,
+    label: getCeremonyActionLabel(action.ActionType),
+    status: action.IsCompleted ? 'completed' : action.IsAvailable ? 'available' : 'blocked',
+    reason: action.Reason,
+  }));
 }
 
 export function getUnsupportedDraftValueMessages(draft: ElectionDraftInput): string[] {

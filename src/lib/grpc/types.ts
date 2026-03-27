@@ -805,6 +805,62 @@ export enum ElectionCommandErrorCodeProto {
   NotSupported = 7,
 }
 
+export enum ElectionCeremonyVersionStatusProto {
+  CeremonyVersionInProgress = 0,
+  CeremonyVersionReady = 1,
+  CeremonyVersionSuperseded = 2,
+}
+
+export enum ElectionCeremonyTranscriptEventTypeProto {
+  CeremonyEventVersionStarted = 0,
+  CeremonyEventTrusteeTransportKeyPublished = 1,
+  CeremonyEventTrusteeJoined = 2,
+  CeremonyEventTrusteeSelfTestSucceeded = 3,
+  CeremonyEventTrusteeMaterialSubmitted = 4,
+  CeremonyEventTrusteeValidationFailed = 5,
+  CeremonyEventTrusteeCompleted = 6,
+  CeremonyEventTrusteeRemoved = 7,
+  CeremonyEventVersionReady = 8,
+  CeremonyEventVersionSuperseded = 9,
+}
+
+export enum ElectionTrusteeCeremonyStateProto {
+  CeremonyStateInvited = 0,
+  CeremonyStateAcceptedTrustee = 1,
+  CeremonyStateNotStarted = 2,
+  CeremonyStateJoined = 3,
+  CeremonyStateMaterialSubmitted = 4,
+  CeremonyStateValidationFailed = 5,
+  CeremonyStateCompleted = 6,
+  CeremonyStateRemoved = 7,
+}
+
+export enum ElectionCeremonyShareCustodyStatusProto {
+  ShareCustodyNotExported = 0,
+  ShareCustodyExported = 1,
+  ShareCustodyImported = 2,
+  ShareCustodyImportFailed = 3,
+}
+
+export enum ElectionCeremonyActorRoleProto {
+  CeremonyActorUnknown = 0,
+  CeremonyActorOwner = 1,
+  CeremonyActorTrustee = 2,
+  CeremonyActorReadOnly = 3,
+}
+
+export enum ElectionCeremonyActionTypeProto {
+  CeremonyActionUnknown = 0,
+  CeremonyActionStartVersion = 1,
+  CeremonyActionRestartVersion = 2,
+  CeremonyActionPublishTransportKey = 3,
+  CeremonyActionJoinVersion = 4,
+  CeremonyActionRunSelfTest = 5,
+  CeremonyActionSubmitMaterial = 6,
+  CeremonyActionExportShare = 7,
+  CeremonyActionImportShare = 8,
+}
+
 export interface ApprovedClientApplication {
   ApplicationId: string;
   Version: string;
@@ -862,6 +918,121 @@ export interface ElectionTrusteeBoundarySnapshot {
   RequiredApprovalCount: number;
   AcceptedTrustees: ElectionTrusteeReference[];
   EveryAcceptedTrusteeMustApprove: boolean;
+}
+
+export interface ElectionCeremonyProfile {
+  ProfileId: string;
+  DisplayName: string;
+  Description: string;
+  ProviderKey: string;
+  ProfileVersion: string;
+  TrusteeCount: number;
+  RequiredApprovalCount: number;
+  DevOnly: boolean;
+  RegisteredAt: GrpcTimestamp;
+  LastUpdatedAt: GrpcTimestamp;
+}
+
+export interface ElectionCeremonyBindingSnapshot {
+  CeremonyVersionId: string;
+  VersionNumber: number;
+  ProfileId: string;
+  TrusteeCount: number;
+  RequiredApprovalCount: number;
+  CompletedTrustees: ElectionTrusteeReference[];
+  TallyPublicKeyFingerprint: string;
+}
+
+export interface ElectionCeremonyVersion {
+  Id: string;
+  ElectionId: string;
+  VersionNumber: number;
+  ProfileId: string;
+  Status: ElectionCeremonyVersionStatusProto;
+  TrusteeCount: number;
+  RequiredApprovalCount: number;
+  BoundTrustees: ElectionTrusteeReference[];
+  StartedByPublicAddress: string;
+  StartedAt: GrpcTimestamp;
+  CompletedAt?: GrpcTimestamp;
+  SupersededAt?: GrpcTimestamp;
+  SupersededReason: string;
+  TallyPublicKeyFingerprint: string;
+}
+
+export interface ElectionCeremonyTranscriptEvent {
+  Id: string;
+  ElectionId: string;
+  CeremonyVersionId: string;
+  VersionNumber: number;
+  EventType: ElectionCeremonyTranscriptEventTypeProto;
+  ActorPublicAddress: string;
+  TrusteeUserAddress: string;
+  TrusteeDisplayName: string;
+  TrusteeState: ElectionTrusteeCeremonyStateProto;
+  EventSummary: string;
+  EvidenceReference: string;
+  RestartReason: string;
+  TallyPublicKeyFingerprint: string;
+  OccurredAt: GrpcTimestamp;
+  HasTrusteeState: boolean;
+}
+
+export interface ElectionCeremonyMessageEnvelope {
+  Id: string;
+  ElectionId: string;
+  CeremonyVersionId: string;
+  VersionNumber: number;
+  ProfileId: string;
+  SenderTrusteeUserAddress: string;
+  RecipientTrusteeUserAddress: string;
+  MessageType: string;
+  PayloadVersion: string;
+  EncryptedPayload: string;
+  PayloadFingerprint: string;
+  SubmittedAt: GrpcTimestamp;
+}
+
+export interface ElectionCeremonyTrusteeState {
+  Id: string;
+  ElectionId: string;
+  CeremonyVersionId: string;
+  TrusteeUserAddress: string;
+  TrusteeDisplayName: string;
+  State: ElectionTrusteeCeremonyStateProto;
+  TransportPublicKeyFingerprint: string;
+  TransportPublicKeyPublishedAt?: GrpcTimestamp;
+  JoinedAt?: GrpcTimestamp;
+  SelfTestSucceededAt?: GrpcTimestamp;
+  MaterialSubmittedAt?: GrpcTimestamp;
+  ValidationFailedAt?: GrpcTimestamp;
+  ValidationFailureReason: string;
+  CompletedAt?: GrpcTimestamp;
+  RemovedAt?: GrpcTimestamp;
+  ShareVersion: string;
+  LastUpdatedAt: GrpcTimestamp;
+}
+
+export interface ElectionCeremonyShareCustody {
+  Id: string;
+  ElectionId: string;
+  CeremonyVersionId: string;
+  TrusteeUserAddress: string;
+  ShareVersion: string;
+  PasswordProtected: boolean;
+  Status: ElectionCeremonyShareCustodyStatusProto;
+  LastExportedAt?: GrpcTimestamp;
+  LastImportedAt?: GrpcTimestamp;
+  LastImportFailedAt?: GrpcTimestamp;
+  LastImportFailureReason: string;
+  LastUpdatedAt: GrpcTimestamp;
+}
+
+export interface ElectionCeremonyActionAvailability {
+  ActionType: ElectionCeremonyActionTypeProto;
+  IsAvailable: boolean;
+  IsCompleted: boolean;
+  Reason: string;
 }
 
 export interface ElectionRecordView {
@@ -943,6 +1114,7 @@ export interface ElectionBoundaryArtifact {
   FinalEncryptedTallyHash: string;
   RecordedAt: GrpcTimestamp;
   RecordedByPublicAddress: string;
+  CeremonySnapshot?: ElectionCeremonyBindingSnapshot;
 }
 
 export interface ElectionWarningAcknowledgement {
@@ -1044,6 +1216,84 @@ export interface ResolveElectionTrusteeInvitationRequest {
   ActorPublicAddress: string;
 }
 
+export interface StartElectionCeremonyRequest {
+  ElectionId: string;
+  ActorPublicAddress: string;
+  ProfileId: string;
+}
+
+export interface RestartElectionCeremonyRequest {
+  ElectionId: string;
+  ActorPublicAddress: string;
+  ProfileId: string;
+  RestartReason: string;
+}
+
+export interface PublishElectionCeremonyTransportKeyRequest {
+  ElectionId: string;
+  CeremonyVersionId: string;
+  ActorPublicAddress: string;
+  TransportPublicKeyFingerprint: string;
+}
+
+export interface JoinElectionCeremonyRequest {
+  ElectionId: string;
+  CeremonyVersionId: string;
+  ActorPublicAddress: string;
+}
+
+export interface RecordElectionCeremonySelfTestRequest {
+  ElectionId: string;
+  CeremonyVersionId: string;
+  ActorPublicAddress: string;
+}
+
+export interface SubmitElectionCeremonyMaterialRequest {
+  ElectionId: string;
+  CeremonyVersionId: string;
+  ActorPublicAddress: string;
+  RecipientTrusteeUserAddress: string;
+  MessageType: string;
+  PayloadVersion: string;
+  EncryptedPayload: string;
+  PayloadFingerprint: string;
+}
+
+export interface RecordElectionCeremonyValidationFailureRequest {
+  ElectionId: string;
+  CeremonyVersionId: string;
+  ActorPublicAddress: string;
+  TrusteeUserAddress: string;
+  ValidationFailureReason: string;
+  EvidenceReference: string;
+}
+
+export interface CompleteElectionCeremonyTrusteeRequest {
+  ElectionId: string;
+  CeremonyVersionId: string;
+  ActorPublicAddress: string;
+  TrusteeUserAddress: string;
+  ShareVersion: string;
+  TallyPublicKeyFingerprint: string;
+}
+
+export interface RecordElectionCeremonyShareExportRequest {
+  ElectionId: string;
+  CeremonyVersionId: string;
+  ActorPublicAddress: string;
+  ShareVersion: string;
+}
+
+export interface RecordElectionCeremonyShareImportRequest {
+  ElectionId: string;
+  CeremonyVersionId: string;
+  ActorPublicAddress: string;
+  ImportedElectionId: string;
+  ImportedCeremonyVersionId: string;
+  ImportedTrusteeUserAddress: string;
+  ImportedShareVersion: string;
+}
+
 export interface StartElectionGovernedProposalRequest {
   ElectionId: string;
   ActionType: ElectionGovernedActionTypeProto;
@@ -1096,6 +1346,11 @@ export interface GetElectionRequest {
   ElectionId: string;
 }
 
+export interface GetElectionCeremonyActionViewRequest {
+  ElectionId: string;
+  ActorPublicAddress: string;
+}
+
 export interface GetElectionsByOwnerRequest {
   OwnerPublicAddress: string;
 }
@@ -1111,6 +1366,12 @@ export interface ElectionCommandResponse {
   TrusteeInvitation?: ElectionTrusteeInvitation;
   GovernedProposal?: ElectionGovernedProposal;
   GovernedProposalApproval?: ElectionGovernedProposalApproval;
+  CeremonyProfile?: ElectionCeremonyProfile;
+  CeremonyVersion?: ElectionCeremonyVersion;
+  CeremonyTranscriptEvents: ElectionCeremonyTranscriptEvent[];
+  CeremonyTrusteeState?: ElectionCeremonyTrusteeState;
+  CeremonyMessageEnvelope?: ElectionCeremonyMessageEnvelope;
+  CeremonyShareCustody?: ElectionCeremonyShareCustody;
 }
 
 export interface GetElectionOpenReadinessResponse {
@@ -1118,6 +1379,7 @@ export interface GetElectionOpenReadinessResponse {
   ValidationErrors: string[];
   RequiredWarningCodes: ElectionWarningCodeProto[];
   MissingWarningAcknowledgements: ElectionWarningCodeProto[];
+  CeremonySnapshot?: ElectionCeremonyBindingSnapshot;
 }
 
 export interface GetElectionResponse {
@@ -1130,6 +1392,24 @@ export interface GetElectionResponse {
   BoundaryArtifacts: ElectionBoundaryArtifact[];
   GovernedProposals: ElectionGovernedProposal[];
   GovernedProposalApprovals: ElectionGovernedProposalApproval[];
+  CeremonyProfiles: ElectionCeremonyProfile[];
+  CeremonyVersions: ElectionCeremonyVersion[];
+  CeremonyTranscriptEvents: ElectionCeremonyTranscriptEvent[];
+  ActiveCeremonyTrusteeStates: ElectionCeremonyTrusteeState[];
+}
+
+export interface GetElectionCeremonyActionViewResponse {
+  Success: boolean;
+  ErrorMessage: string;
+  ActorRole: ElectionCeremonyActorRoleProto;
+  ActorPublicAddress: string;
+  ActiveCeremonyVersion?: ElectionCeremonyVersion;
+  OwnerActions: ElectionCeremonyActionAvailability[];
+  TrusteeActions: ElectionCeremonyActionAvailability[];
+  SelfTrusteeState?: ElectionCeremonyTrusteeState;
+  SelfShareCustody?: ElectionCeremonyShareCustody;
+  PendingIncomingMessageCount: number;
+  BlockedReasons: string[];
 }
 
 export interface GetElectionsByOwnerResponse {

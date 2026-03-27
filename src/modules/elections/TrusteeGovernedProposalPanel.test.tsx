@@ -115,6 +115,10 @@ function createElectionResponse(overrides?: Partial<GetElectionResponse>): GetEl
       },
     ],
     GovernedProposalApprovals: [],
+    CeremonyProfiles: [],
+    CeremonyVersions: [],
+    CeremonyTranscriptEvents: [],
+    ActiveCeremonyTrusteeStates: [],
     ...overrides,
   };
 }
@@ -126,6 +130,7 @@ function createCommandResponse(overrides?: Partial<ElectionCommandResponse>): El
     ErrorMessage: '',
     ValidationErrors: [],
     Election: createElectionRecord(),
+    CeremonyTranscriptEvents: [],
     GovernedProposal: {
       Id: 'proposal-1',
       ElectionId: 'election-1',

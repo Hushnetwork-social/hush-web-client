@@ -96,6 +96,10 @@ function createDetail(overrides?: Partial<GetElectionResponse>): GetElectionResp
     BoundaryArtifacts: [],
     GovernedProposals: [],
     GovernedProposalApprovals: [],
+    CeremonyProfiles: [],
+    CeremonyVersions: [],
+    CeremonyTranscriptEvents: [],
+    ActiveCeremonyTrusteeStates: [],
     ...overrides,
   };
 }
