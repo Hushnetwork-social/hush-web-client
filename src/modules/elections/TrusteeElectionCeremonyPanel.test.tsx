@@ -58,6 +58,7 @@ const { electionsServiceMock, blockchainServiceMock, transactionServiceMock } = 
     createRevokeElectionTrusteeInvitationTransaction: vi.fn(),
     createStartElectionCeremonyTransaction: vi.fn(),
     createStartElectionGovernedProposalTransaction: vi.fn(),
+    createSubmitElectionFinalizationShareTransaction: vi.fn(),
     createSubmitElectionCeremonyMaterialTransaction: vi.fn(),
     createUpdateElectionDraftTransaction: vi.fn(),
   },
@@ -112,6 +113,8 @@ vi.mock('./transactionService', () => ({
     transactionServiceMock.createStartElectionCeremonyTransaction(...args),
   createStartElectionGovernedProposalTransaction: (...args: unknown[]) =>
     transactionServiceMock.createStartElectionGovernedProposalTransaction(...args),
+  createSubmitElectionFinalizationShareTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createSubmitElectionFinalizationShareTransaction(...args),
   createSubmitElectionCeremonyMaterialTransaction: (...args: unknown[]) =>
     transactionServiceMock.createSubmitElectionCeremonyMaterialTransaction(...args),
   createUpdateElectionDraftTransaction: (...args: unknown[]) =>

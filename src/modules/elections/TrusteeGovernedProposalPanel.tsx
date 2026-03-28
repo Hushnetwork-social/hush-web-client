@@ -3,7 +3,10 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, ArrowLeft, CheckCircle2, Loader2, ShieldAlert } from 'lucide-react';
-import { ElectionGovernedProposalExecutionStatusProto } from '@/lib/grpc';
+import {
+  ElectionGovernedActionTypeProto,
+  ElectionGovernedProposalExecutionStatusProto,
+} from '@/lib/grpc';
 import {
   formatTimestamp,
   getGovernedActionLabel,
@@ -213,6 +216,24 @@ export function TrusteeGovernedProposalPanel({
                   {proposal.ExecutionFailureReason || 'Execution failed after approval threshold.'}
                 </div>
               )}
+
+              {proposal.ActionType === ElectionGovernedActionTypeProto.Finalize ? (
+                <div className="mt-5 rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4 text-sm text-hush-text-accent">
+                  <div className="font-medium text-hush-text-primary">Finalize follow-up</div>
+                  <p className="mt-2">
+                    This proposal can authorize one exact FEAT-098 finalization session. The
+                    follow-up page shows the bound session and aggregate-only share action once
+                    execution succeeds.
+                  </p>
+                  <Link
+                    href={`/account/elections/trustee/${electionId}/finalization`}
+                    className="mt-3 inline-flex items-center gap-2 rounded-xl border border-hush-bg-light px-4 py-2 text-sm transition-colors hover:border-hush-purple"
+                    data-testid="trustee-proposal-finalization-link"
+                  >
+                    <span>Open finalization page</span>
+                  </Link>
+                </div>
+              ) : null}
             </section>
 
             <section className={sectionClass} data-testid="trustee-proposal-approval-panel">

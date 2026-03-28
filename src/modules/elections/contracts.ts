@@ -9,6 +9,13 @@ import {
   ElectionDisclosureModeProto,
   type ElectionDraftInput,
   type ElectionDraftSnapshot,
+  type ElectionFinalizationReleaseEvidence,
+  ElectionFinalizationReleaseModeProto,
+  type ElectionFinalizationSession,
+  ElectionFinalizationSessionStatusProto,
+  type ElectionFinalizationShare,
+  ElectionFinalizationShareStatusProto,
+  ElectionFinalizationTargetTypeProto,
   ElectionGovernedActionTypeProto,
   type ElectionGovernedProposal,
   type ElectionGovernedProposalApproval,
@@ -227,6 +234,26 @@ const CEREMONY_SHARE_CUSTODY_STATUS_LABELS: Record<ElectionCeremonyShareCustodyS
   [ElectionCeremonyShareCustodyStatusProto.ShareCustodyExported]: 'Exported',
   [ElectionCeremonyShareCustodyStatusProto.ShareCustodyImported]: 'Imported',
   [ElectionCeremonyShareCustodyStatusProto.ShareCustodyImportFailed]: 'Import failed',
+};
+
+const FINALIZATION_SESSION_STATUS_LABELS: Record<ElectionFinalizationSessionStatusProto, string> = {
+  [ElectionFinalizationSessionStatusProto.FinalizationSessionAwaitingShares]: 'Awaiting shares',
+  [ElectionFinalizationSessionStatusProto.FinalizationSessionCompleted]: 'Completed',
+};
+
+const FINALIZATION_SHARE_STATUS_LABELS: Record<ElectionFinalizationShareStatusProto, string> = {
+  [ElectionFinalizationShareStatusProto.FinalizationShareAccepted]: 'Accepted',
+  [ElectionFinalizationShareStatusProto.FinalizationShareRejected]: 'Rejected',
+};
+
+const FINALIZATION_TARGET_TYPE_LABELS: Record<ElectionFinalizationTargetTypeProto, string> = {
+  [ElectionFinalizationTargetTypeProto.FinalizationTargetAggregateTally]: 'Final aggregate tally',
+  [ElectionFinalizationTargetTypeProto.FinalizationTargetSingleBallot]: 'Single ballot',
+};
+
+const FINALIZATION_RELEASE_MODE_LABELS: Record<ElectionFinalizationReleaseModeProto, string> = {
+  [ElectionFinalizationReleaseModeProto.FinalizationReleaseAggregateTallyOnly]:
+    'Aggregate tally only',
 };
 
 let nextOptionSeed = 1;
@@ -838,6 +865,80 @@ export function getGovernedActionViewStates(detail: GetElectionResponse | null):
   ];
 }
 
+export function getLatestFinalizationSession(
+  detail: GetElectionResponse | null
+): ElectionFinalizationSession | null {
+  const sessions = (detail?.FinalizationSessions ?? [])
+    .slice()
+    .sort(
+      (left, right) => timestampToMilliseconds(right.CreatedAt) - timestampToMilliseconds(left.CreatedAt)
+    );
+
+  return sessions[0] ?? null;
+}
+
+export function getActiveFinalizationSession(
+  detail: GetElectionResponse | null
+): ElectionFinalizationSession | null {
+  const sessions = (detail?.FinalizationSessions ?? [])
+    .filter(
+      (session) =>
+        session.Status === ElectionFinalizationSessionStatusProto.FinalizationSessionAwaitingShares
+    )
+    .sort(
+      (left, right) => timestampToMilliseconds(right.CreatedAt) - timestampToMilliseconds(left.CreatedAt)
+    );
+
+  return sessions[0] ?? null;
+}
+
+export function getFinalizationShares(
+  detail: GetElectionResponse | null,
+  finalizationSessionId?: string
+): ElectionFinalizationShare[] {
+  return (detail?.FinalizationShares ?? [])
+    .filter((share) => !finalizationSessionId || share.FinalizationSessionId === finalizationSessionId)
+    .slice()
+    .sort(
+      (left, right) => timestampToMilliseconds(right.SubmittedAt) - timestampToMilliseconds(left.SubmittedAt)
+    );
+}
+
+export function getLatestFinalizationReleaseEvidence(
+  detail: GetElectionResponse | null,
+  finalizationSessionId?: string
+): ElectionFinalizationReleaseEvidence | null {
+  const records = (detail?.FinalizationReleaseEvidenceRecords ?? [])
+    .filter((record) => !finalizationSessionId || record.FinalizationSessionId === finalizationSessionId)
+    .slice()
+    .sort(
+      (left, right) => timestampToMilliseconds(right.CompletedAt) - timestampToMilliseconds(left.CompletedAt)
+    );
+
+  return records[0] ?? null;
+}
+
+export function getAcceptedFinalizationShareCount(
+  detail: GetElectionResponse | null,
+  finalizationSessionId?: string
+): number {
+  return getFinalizationShares(detail, finalizationSessionId).filter(
+    (share) => share.Status === ElectionFinalizationShareStatusProto.FinalizationShareAccepted
+  ).length;
+}
+
+export function getLatestFinalizationShareForTrustee(
+  detail: GetElectionResponse | null,
+  trusteeUserAddress: string,
+  finalizationSessionId?: string
+): ElectionFinalizationShare | null {
+  return (
+    getFinalizationShares(detail, finalizationSessionId).find(
+      (share) => share.TrusteeUserAddress === trusteeUserAddress
+    ) ?? null
+  );
+}
+
 export function getAllowedCeremonyProfiles(detail: GetElectionResponse | null): ElectionCeremonyProfile[] {
   return detail?.CeremonyProfiles ?? [];
 }
@@ -899,6 +1000,30 @@ export function getCeremonyShareCustodyStatusLabel(
   status: ElectionCeremonyShareCustodyStatusProto
 ): string {
   return CEREMONY_SHARE_CUSTODY_STATUS_LABELS[status] ?? 'Unknown';
+}
+
+export function getFinalizationSessionStatusLabel(
+  status: ElectionFinalizationSessionStatusProto
+): string {
+  return FINALIZATION_SESSION_STATUS_LABELS[status] ?? 'Unknown';
+}
+
+export function getFinalizationShareStatusLabel(
+  status: ElectionFinalizationShareStatusProto
+): string {
+  return FINALIZATION_SHARE_STATUS_LABELS[status] ?? 'Unknown';
+}
+
+export function getFinalizationTargetTypeLabel(
+  targetType: ElectionFinalizationTargetTypeProto
+): string {
+  return FINALIZATION_TARGET_TYPE_LABELS[targetType] ?? 'Unknown';
+}
+
+export function getFinalizationReleaseModeLabel(
+  releaseMode: ElectionFinalizationReleaseModeProto
+): string {
+  return FINALIZATION_RELEASE_MODE_LABELS[releaseMode] ?? 'Unknown';
 }
 
 export function getCeremonyActionViewStates(

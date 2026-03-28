@@ -1,9 +1,11 @@
 import { create } from 'zustand';
 import {
   type CompleteElectionCeremonyTrusteeRequest,
+  ElectionFinalizationShareStatusProto,
   ElectionGovernedActionTypeProto,
   ElectionGovernedProposalExecutionStatusProto,
   ElectionLifecycleStateProto,
+  type SubmitElectionFinalizationShareRequest,
   ElectionTrusteeInvitationStatusProto,
   type GetElectionCeremonyActionViewResponse,
   type JoinElectionCeremonyRequest,
@@ -49,6 +51,7 @@ import {
   createRetryElectionGovernedProposalExecutionTransaction,
   createStartElectionCeremonyTransaction,
   createStartElectionGovernedProposalTransaction,
+  createSubmitElectionFinalizationShareTransaction,
   createSubmitElectionCeremonyMaterialTransaction,
   createUpdateElectionDraftTransaction,
 } from './transactionService';
@@ -187,6 +190,12 @@ interface ElectionsState {
   ) => Promise<boolean>;
   completeElectionCeremonyTrustee: (
     request: CompleteElectionCeremonyTrusteeRequest,
+    actorPublicEncryptAddress: string,
+    actorPrivateEncryptKeyHex: string,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
+  submitFinalizationShare: (
+    request: SubmitElectionFinalizationShareRequest,
     actorPublicEncryptAddress: string,
     actorPrivateEncryptKeyHex: string,
     signingPrivateKeyHex: string
@@ -1980,6 +1989,127 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     } catch (error) {
       set({
         feedback: buildThrownErrorFeedback(error, 'Failed to complete the trustee ceremony flow.'),
+      });
+      return false;
+    } finally {
+      set({ isSubmitting: false });
+    }
+  },
+
+  submitFinalizationShare: async (
+    request,
+    actorPublicEncryptAddress,
+    actorPrivateEncryptKeyHex,
+    signingPrivateKeyHex
+  ) => {
+    if (!actorPublicEncryptAddress || !actorPrivateEncryptKeyHex || !signingPrivateKeyHex) {
+      set({
+        feedback: {
+          tone: 'error',
+          message: 'Actor signing or encryption credentials are missing.',
+          details: [],
+        },
+      });
+      return false;
+    }
+
+    const baselineActorShareCount = (get().selectedElection?.FinalizationShares ?? []).filter(
+      (share) =>
+        share.FinalizationSessionId === request.FinalizationSessionId &&
+        share.TrusteeUserAddress === request.ActorPublicAddress
+    ).length;
+
+    set({
+      isSubmitting: true,
+      feedback: null,
+      error: null,
+    });
+
+    try {
+      const { signedTransaction } = await createSubmitElectionFinalizationShareTransaction(
+        request,
+        actorPublicEncryptAddress,
+        actorPrivateEncryptKeyHex,
+        signingPrivateKeyHex,
+      );
+      const submitResult = await submitTransaction(signedTransaction);
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit finalization share transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Finalization share submitted.',
+          details: ['Waiting for block confirmation before the session progress refreshes.'],
+        },
+      });
+
+      const indexedElection = await waitForIndexedElectionMatch(
+        request.ElectionId,
+        (response) =>
+          (response.FinalizationShares ?? []).filter(
+            (share) =>
+              share.FinalizationSessionId === request.FinalizationSessionId &&
+              share.TrusteeUserAddress === request.ActorPublicAddress
+          ).length > baselineActorShareCount,
+      );
+      if (!indexedElection) {
+        return false;
+      }
+
+      await get().loadElection(request.ElectionId);
+      const ownerPublicAddress = get().ownerPublicAddress;
+      if (ownerPublicAddress) {
+        await get().loadOwnerDashboard(ownerPublicAddress);
+      }
+
+      const latestShare = (indexedElection.FinalizationShares ?? [])
+        .filter(
+          (share) =>
+            share.FinalizationSessionId === request.FinalizationSessionId &&
+            share.TrusteeUserAddress === request.ActorPublicAddress
+        )
+        .sort(
+          (left, right) =>
+            ((right.SubmittedAt?.seconds ?? 0) * 1000 + Math.floor((right.SubmittedAt?.nanos ?? 0) / 1_000_000)) -
+            ((left.SubmittedAt?.seconds ?? 0) * 1000 + Math.floor((left.SubmittedAt?.nanos ?? 0) / 1_000_000))
+        )[0];
+      const releaseEvidence = (indexedElection.FinalizationReleaseEvidenceRecords ?? []).find(
+        (record) => record.FinalizationSessionId === request.FinalizationSessionId
+      );
+
+      if (latestShare?.Status === ElectionFinalizationShareStatusProto.FinalizationShareRejected) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: latestShare.FailureReason || 'Finalization share was rejected.',
+            details: latestShare.FailureCode ? [latestShare.FailureCode] : [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: releaseEvidence
+            ? 'Finalization share recorded and aggregate release completed.'
+            : 'Finalization share recorded.',
+          details: [],
+        },
+      });
+      return true;
+    } catch (error) {
+      set({
+        feedback: buildThrownErrorFeedback(error, 'Failed to submit the finalization share.'),
       });
       return false;
     } finally {

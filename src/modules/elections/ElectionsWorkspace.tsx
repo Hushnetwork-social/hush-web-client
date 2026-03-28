@@ -69,6 +69,7 @@ import {
   renumberElectionOptions,
 } from './contracts';
 import { ElectionCeremonyWorkspaceSection } from './ElectionCeremonyWorkspaceSection';
+import { ElectionFinalizationWorkspaceSection } from './ElectionFinalizationWorkspaceSection';
 import { useElectionsStore } from './useElectionsStore';
 
 type ElectionsWorkspaceProps = {
@@ -217,6 +218,13 @@ export function ElectionsWorkspace({
   const governedActionStates = useMemo(
     () => getGovernedActionViewStates(selectedElection ?? null),
     [selectedElection]
+  );
+  const finalizeActionState = useMemo(
+    () =>
+      governedActionStates.find(
+        (state) => state.actionType === ElectionGovernedActionTypeProto.Finalize
+      ) ?? null,
+    [governedActionStates]
   );
 
   const acceptedTrusteeCount = useMemo(
@@ -1403,6 +1411,13 @@ export function ElectionsWorkspace({
                 isLoadingCeremonyActionView={isLoadingCeremonyActionView}
                 onStart={handleStartCeremony}
                 onRestart={handleRestartCeremony}
+              />
+            )}
+
+            {election?.GovernanceMode === ElectionGovernanceModeProto.TrusteeThreshold && (
+              <ElectionFinalizationWorkspaceSection
+                detail={selectedElection}
+                finalizeActionState={finalizeActionState}
               />
             )}
 

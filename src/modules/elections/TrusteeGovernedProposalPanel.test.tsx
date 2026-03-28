@@ -29,6 +29,7 @@ const { electionsServiceMock, blockchainServiceMock, transactionServiceMock } = 
   },
   transactionServiceMock: {
     createApproveElectionGovernedProposalTransaction: vi.fn(),
+    createSubmitElectionFinalizationShareTransaction: vi.fn(),
   },
 }));
 
@@ -43,6 +44,8 @@ vi.mock('@/modules/blockchain/BlockchainService', () => ({
 vi.mock('./transactionService', () => ({
   createApproveElectionGovernedProposalTransaction: (...args: unknown[]) =>
     transactionServiceMock.createApproveElectionGovernedProposalTransaction(...args),
+  createSubmitElectionFinalizationShareTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createSubmitElectionFinalizationShareTransaction(...args),
 }));
 
 const timestamp = { seconds: 1_711_410_000, nanos: 0 };
@@ -203,5 +206,43 @@ describe('TrusteeGovernedProposalPanel', () => {
     expect(blockchainServiceMock.submitTransaction).toHaveBeenCalledWith(
       'signed-approve-governed-proposal-transaction'
     );
+  });
+
+  it('shows the FEAT-098 follow-up link for finalize proposals', async () => {
+    electionsServiceMock.getElection.mockResolvedValueOnce(
+      createElectionResponse({
+        GovernedProposals: [
+          {
+            Id: 'proposal-finalize-1',
+            ElectionId: 'election-1',
+            ActionType: ElectionGovernedActionTypeProto.Finalize,
+            LifecycleStateAtCreation: ElectionLifecycleStateProto.Closed,
+            ProposedByPublicAddress: 'owner-public-key',
+            CreatedAt: timestamp,
+            ExecutionStatus: ElectionGovernedProposalExecutionStatusProto.WaitingForApprovals,
+            ExecutionFailureReason: '',
+            LastExecutionTriggeredByPublicAddress: '',
+          },
+        ],
+      })
+    );
+
+    render(
+      <TrusteeGovernedProposalPanel
+        electionId="election-1"
+        proposalId="proposal-finalize-1"
+        actorPublicAddress="trustee-a"
+        actorEncryptionPublicKey="trustee-a-encryption-key"
+        actorEncryptionPrivateKey="trustee-a-encryption-private-key"
+        actorSigningPrivateKey="trustee-a-private-key"
+      />
+    );
+
+    const followUpLink = await screen.findByTestId('trustee-proposal-finalization-link');
+    expect(followUpLink).toHaveAttribute(
+      'href',
+      '/account/elections/trustee/election-1/finalization'
+    );
+    expect(followUpLink).toHaveTextContent('Open finalization page');
   });
 });

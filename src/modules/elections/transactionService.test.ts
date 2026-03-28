@@ -1,13 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as secp256k1 from '@noble/secp256k1';
 import { bytesToHex, eciesDecrypt, eciesEncrypt, hexToBytes } from '@/lib/crypto';
-import type { ElectionDraftInput } from '@/lib/grpc';
+import {
+  ElectionFinalizationTargetTypeProto,
+  type ElectionDraftInput,
+  type SubmitElectionFinalizationShareRequest,
+} from '@/lib/grpc';
 import {
   ENCRYPTED_ELECTION_ENVELOPE_PAYLOAD_KIND,
   createApproveElectionGovernedProposalTransaction,
   createElectionDraftTransaction,
   createElectionTrusteeInvitationTransaction,
   createOpenElectionTransaction,
+  createSubmitElectionFinalizationShareTransaction,
 } from './transactionService';
 
 const { blockchainServiceMock, electionsServiceMock, identityServiceMock } = vi.hoisted(() => ({
@@ -402,5 +407,116 @@ describe('transactionService encrypted election envelope helpers', () => {
     expect(decryptedPayload.ActionPayload.ProposalId).toBe('proposal-77');
     expect(decryptedPayload.ActionPayload.ActorPublicAddress).toBe(trusteeSigningPublicKey);
     expect(decryptedPayload.ActionPayload.ApprovalNote).toBe('Looks good');
+  });
+
+  it('creates an encrypted aggregate-only finalization share envelope for a trustee actor', async () => {
+    const trusteeSigningPrivateKeyHex = '6666666666666666666666666666666666666666666666666666666666666666';
+    const trusteeEncryptionPrivateKeyHex = '4444444444444444444444444444444444444444444444444444444444444444';
+    const nodeEncryptionPrivateKeyHex = '3333333333333333333333333333333333333333333333333333333333333333';
+    const electionPrivateKeyHex = '5555555555555555555555555555555555555555555555555555555555555555';
+    const trusteeSigningPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(trusteeSigningPrivateKeyHex), true),
+    );
+    const trusteeEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(trusteeEncryptionPrivateKeyHex), true),
+    );
+    const nodeEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(nodeEncryptionPrivateKeyHex), true),
+    );
+    const actorEncryptedElectionPrivateKey = await eciesEncrypt(
+      electionPrivateKeyHex,
+      trusteeEncryptionPublicKey,
+    );
+
+    blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
+      NodePublicEncryptAddress: nodeEncryptionPublicKey,
+      ElectionEnvelopeVersion: 'election-envelope-v1',
+    });
+    electionsServiceMock.getElectionEnvelopeAccess.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      ActorEncryptedElectionPrivateKey: actorEncryptedElectionPrivateKey,
+    });
+
+    const request: SubmitElectionFinalizationShareRequest = {
+      ElectionId: 'election-123',
+      FinalizationSessionId: 'finalization-session-7',
+      ActorPublicAddress: trusteeSigningPublicKey,
+      ShareIndex: 2,
+      ShareVersion: 'share-v2',
+      TargetType: ElectionFinalizationTargetTypeProto.FinalizationTargetAggregateTally,
+      ClaimedCloseArtifactId: 'close-artifact-3',
+      ClaimedAcceptedBallotSetHash: 'accepted-ballots-hash',
+      ClaimedFinalEncryptedTallyHash: 'final-encrypted-tally-hash',
+      ClaimedTargetTallyId: 'aggregate-tally-1',
+      ClaimedCeremonyVersionId: 'ceremony-version-5',
+      ClaimedTallyPublicKeyFingerprint: 'tally-fingerprint-9',
+      ShareMaterial: 'aggregate-share-material',
+    };
+
+    const { signedTransaction } = await createSubmitElectionFinalizationShareTransaction(
+      request,
+      trusteeEncryptionPublicKey,
+      trusteeEncryptionPrivateKeyHex,
+      trusteeSigningPrivateKeyHex,
+    );
+
+    const parsedTransaction = JSON.parse(signedTransaction) as {
+      PayloadKind: string;
+      Payload: {
+        ActorEncryptedElectionPrivateKey: string;
+        EncryptedPayload: string;
+      };
+    };
+
+    expect(parsedTransaction.PayloadKind).toBe(ENCRYPTED_ELECTION_ENVELOPE_PAYLOAD_KIND);
+
+    const actorElectionPrivateKey = await eciesDecrypt(
+      parsedTransaction.Payload.ActorEncryptedElectionPrivateKey,
+      trusteeEncryptionPrivateKeyHex,
+    );
+    const decryptedPayloadJson = await eciesDecrypt(
+      parsedTransaction.Payload.EncryptedPayload,
+      actorElectionPrivateKey,
+    );
+    const decryptedPayload = JSON.parse(decryptedPayloadJson) as {
+      ActionType: string;
+      ActionPayload: {
+        FinalizationSessionId: string;
+        ActorPublicAddress: string;
+        ShareIndex: number;
+        ShareVersion: string;
+        TargetType: number;
+        ClaimedCloseArtifactId: string;
+        ClaimedAcceptedBallotSetHash: string | null;
+        ClaimedFinalEncryptedTallyHash: string | null;
+        ClaimedTargetTallyId: string;
+        ClaimedCeremonyVersionId: string | null;
+        ClaimedTallyPublicKeyFingerprint: string | null;
+        ShareMaterial: string;
+      };
+    };
+
+    expect(decryptedPayload.ActionType).toBe('submit_finalization_share');
+    expect(decryptedPayload.ActionPayload.FinalizationSessionId).toBe('finalization-session-7');
+    expect(decryptedPayload.ActionPayload.ActorPublicAddress).toBe(trusteeSigningPublicKey);
+    expect(decryptedPayload.ActionPayload.ShareIndex).toBe(2);
+    expect(decryptedPayload.ActionPayload.ShareVersion).toBe('share-v2');
+    expect(decryptedPayload.ActionPayload.TargetType).toBe(
+      ElectionFinalizationTargetTypeProto.FinalizationTargetAggregateTally
+    );
+    expect(decryptedPayload.ActionPayload.ClaimedCloseArtifactId).toBe('close-artifact-3');
+    expect(decryptedPayload.ActionPayload.ClaimedAcceptedBallotSetHash).toBe(
+      'accepted-ballots-hash'
+    );
+    expect(decryptedPayload.ActionPayload.ClaimedFinalEncryptedTallyHash).toBe(
+      'final-encrypted-tally-hash'
+    );
+    expect(decryptedPayload.ActionPayload.ClaimedTargetTallyId).toBe('aggregate-tally-1');
+    expect(decryptedPayload.ActionPayload.ClaimedCeremonyVersionId).toBe('ceremony-version-5');
+    expect(decryptedPayload.ActionPayload.ClaimedTallyPublicKeyFingerprint).toBe(
+      'tally-fingerprint-9'
+    );
+    expect(decryptedPayload.ActionPayload.ShareMaterial).toBe('aggregate-share-material');
   });
 });

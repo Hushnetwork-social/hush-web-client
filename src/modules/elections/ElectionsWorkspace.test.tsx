@@ -1,6 +1,9 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
+  ElectionFinalizationReleaseEvidence,
+  ElectionFinalizationSession,
+  ElectionFinalizationShare,
   ElectionCeremonyTrusteeState,
   ElectionCommandResponse,
   ElectionDraftInput,
@@ -18,6 +21,10 @@ import {
   ElectionBindingStatusProto,
   ElectionClassProto,
   ElectionDisclosureModeProto,
+  ElectionFinalizationReleaseModeProto,
+  ElectionFinalizationSessionStatusProto,
+  ElectionFinalizationShareStatusProto,
+  ElectionFinalizationTargetTypeProto,
   ElectionGovernanceModeProto,
   ElectionGovernedActionTypeProto,
   ElectionGovernedProposalExecutionStatusProto,
@@ -70,6 +77,7 @@ const { electionsServiceMock, blockchainServiceMock, transactionServiceMock } = 
     createRetryElectionGovernedProposalExecutionTransaction: vi.fn(),
     createStartElectionCeremonyTransaction: vi.fn(),
     createStartElectionGovernedProposalTransaction: vi.fn(),
+    createSubmitElectionFinalizationShareTransaction: vi.fn(),
     createUpdateElectionDraftTransaction: vi.fn(),
   },
 }));
@@ -105,6 +113,8 @@ vi.mock('./transactionService', () => ({
     transactionServiceMock.createStartElectionCeremonyTransaction(...args),
   createStartElectionGovernedProposalTransaction: (...args: unknown[]) =>
     transactionServiceMock.createStartElectionGovernedProposalTransaction(...args),
+  createSubmitElectionFinalizationShareTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createSubmitElectionFinalizationShareTransaction(...args),
   createUpdateElectionDraftTransaction: (...args: unknown[]) =>
     transactionServiceMock.createUpdateElectionDraftTransaction(...args),
 }));
@@ -308,6 +318,121 @@ function createCommandResponse(overrides?: Partial<ElectionCommandResponse>): El
     ValidationErrors: [],
     Election: createElectionRecord(ElectionLifecycleStateProto.Draft),
     CeremonyTranscriptEvents: [],
+    ...overrides,
+  };
+}
+
+function createFinalizationSession(
+  overrides?: Partial<ElectionFinalizationSession>
+): ElectionFinalizationSession {
+  return {
+    Id: 'finalization-session-1',
+    ElectionId: 'election-1',
+    GovernedProposalId: 'proposal-finalize-1',
+    GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+    CloseArtifactId: 'close-artifact',
+    AcceptedBallotSetHash: 'accepted-ballot-set-hash',
+    FinalEncryptedTallyHash: 'final-encrypted-tally-hash',
+    TargetTallyId: 'aggregate-tally-1',
+    CeremonySnapshot: {
+      CeremonyVersionId: 'ceremony-version-1',
+      VersionNumber: 1,
+      ProfileId: 'prod-3of5-v1',
+      TrusteeCount: 3,
+      RequiredApprovalCount: 2,
+      CompletedTrustees: [
+        {
+          TrusteeUserAddress: 'trustee-a',
+          TrusteeDisplayName: 'Alice Trustee',
+        },
+        {
+          TrusteeUserAddress: 'trustee-b',
+          TrusteeDisplayName: 'Bob Trustee',
+        },
+      ],
+      TallyPublicKeyFingerprint: 'tally-fingerprint-1',
+    },
+    RequiredShareCount: 2,
+    EligibleTrustees: [
+      {
+        TrusteeUserAddress: 'trustee-a',
+        TrusteeDisplayName: 'Alice Trustee',
+      },
+      {
+        TrusteeUserAddress: 'trustee-b',
+        TrusteeDisplayName: 'Bob Trustee',
+      },
+    ],
+    Status: ElectionFinalizationSessionStatusProto.FinalizationSessionAwaitingShares,
+    CreatedAt: timestamp,
+    CreatedByPublicAddress: 'owner-public-key',
+    CompletedAt: undefined,
+    ReleaseEvidenceId: '',
+    LatestTransactionId: 'transaction-1',
+    LatestBlockHeight: 10,
+    LatestBlockId: 'block-1',
+    ...overrides,
+  };
+}
+
+function createFinalizationShare(
+  overrides?: Partial<ElectionFinalizationShare>
+): ElectionFinalizationShare {
+  return {
+    Id: 'finalization-share-1',
+    FinalizationSessionId: 'finalization-session-1',
+    ElectionId: 'election-1',
+    TrusteeUserAddress: 'trustee-a',
+    TrusteeDisplayName: 'Alice Trustee',
+    SubmittedByPublicAddress: 'trustee-a',
+    ShareIndex: 1,
+    ShareVersion: 'share-v1',
+    TargetType: ElectionFinalizationTargetTypeProto.FinalizationTargetAggregateTally,
+    ClaimedCloseArtifactId: 'close-artifact',
+    ClaimedAcceptedBallotSetHash: 'accepted-ballot-set-hash',
+    ClaimedFinalEncryptedTallyHash: 'final-encrypted-tally-hash',
+    ClaimedTargetTallyId: 'aggregate-tally-1',
+    ClaimedCeremonyVersionId: 'ceremony-version-1',
+    ClaimedTallyPublicKeyFingerprint: 'tally-fingerprint-1',
+    Status: ElectionFinalizationShareStatusProto.FinalizationShareAccepted,
+    FailureCode: '',
+    FailureReason: '',
+    SubmittedAt: timestamp,
+    SourceTransactionId: 'transaction-2',
+    SourceBlockHeight: 11,
+    SourceBlockId: 'block-2',
+    ...overrides,
+  };
+}
+
+function createFinalizationReleaseEvidence(
+  overrides?: Partial<ElectionFinalizationReleaseEvidence>
+): ElectionFinalizationReleaseEvidence {
+  return {
+    Id: 'release-evidence-1',
+    FinalizationSessionId: 'finalization-session-1',
+    ElectionId: 'election-1',
+    ReleaseMode: ElectionFinalizationReleaseModeProto.FinalizationReleaseAggregateOnly,
+    CloseArtifactId: 'close-artifact',
+    AcceptedBallotSetHash: 'accepted-ballot-set-hash',
+    FinalEncryptedTallyHash: 'final-encrypted-tally-hash',
+    TargetTallyId: 'aggregate-tally-1',
+    AcceptedShareCount: 2,
+    AcceptedTrustees: [
+      {
+        TrusteeUserAddress: 'trustee-a',
+        TrusteeDisplayName: 'Alice Trustee',
+      },
+      {
+        TrusteeUserAddress: 'trustee-b',
+        TrusteeDisplayName: 'Bob Trustee',
+      },
+    ],
+    CompletedAt: timestamp,
+    CompletedByPublicAddress: 'owner-public-key',
+    SourceTransactionId: 'transaction-3',
+    SourceBlockHeight: 12,
+    SourceBlockId: 'block-3',
     ...overrides,
   };
 }
@@ -1766,6 +1891,131 @@ describe('ElectionsWorkspace', () => {
     );
     expect(screen.queryByTestId('trustee-ceremony-export-button')).not.toBeInTheDocument();
     expect(screen.queryByText('Record share export')).not.toBeInTheDocument();
+  });
+
+  it('shows the bound FEAT-098 finalization session in the owner workspace', async () => {
+    const thresholdClosedElection = createElectionRecord(ElectionLifecycleStateProto.Closed, {
+      GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+      ReviewWindowPolicy: ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+      RequiredApprovalCount: 2,
+      ClosedAt: timestamp,
+      CloseArtifactId: 'close-artifact',
+    });
+
+    electionsServiceMock.getElectionsByOwner.mockResolvedValueOnce({
+      Elections: [
+        createElectionSummary(ElectionLifecycleStateProto.Closed, {
+          GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+        }),
+      ],
+    });
+    electionsServiceMock.getElection.mockResolvedValueOnce(
+      createElectionResponse({
+        Election: thresholdClosedElection,
+        LatestDraftSnapshot: createDraftSnapshot({
+          Policy: {
+            ElectionClass: ElectionClassProto.OrganizationalRemoteVoting,
+            BindingStatus: ElectionBindingStatusProto.Binding,
+            GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+            DisclosureMode: ElectionDisclosureModeProto.FinalResultsOnly,
+            ParticipationPrivacyMode:
+              ParticipationPrivacyModeProto.PublicCheckoffAnonymousBallotPrivateChoice,
+            VoteUpdatePolicy: VoteUpdatePolicyProto.SingleSubmissionOnly,
+            EligibilitySourceType: EligibilitySourceTypeProto.OrganizationImportedRoster,
+            EligibilityMutationPolicy: EligibilityMutationPolicyProto.FrozenAtOpen,
+            OutcomeRule: thresholdClosedElection.OutcomeRule,
+            ApprovedClientApplications: [{ ApplicationId: 'hushsocial', Version: '1.0.0' }],
+            ProtocolOmegaVersion: 'omega-v1.0.0',
+            ReportingPolicy: ReportingPolicyProto.DefaultPhaseOnePackage,
+            ReviewWindowPolicy: ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+            RequiredApprovalCount: 2,
+          },
+        }),
+        FinalizationSessions: [createFinalizationSession()],
+        FinalizationShares: [createFinalizationShare()],
+        FinalizationReleaseEvidenceRecords: [createFinalizationReleaseEvidence()],
+      })
+    );
+
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />
+    );
+
+    const finalizationSection = await screen.findByTestId('elections-finalization-section');
+    expect(finalizationSection).toHaveTextContent('Finalization Session');
+    expect(screen.getByTestId('elections-finalization-session')).toHaveTextContent(
+      'close-artifact'
+    );
+    expect(screen.getByTestId('elections-finalization-session')).toHaveTextContent(
+      'aggregate-tally-1'
+    );
+    expect(screen.getByTestId('elections-finalization-session')).toHaveTextContent('1 of 2');
+    expect(screen.getByTestId('elections-finalization-session')).toHaveTextContent(
+      'Alice Trustee'
+    );
+    expect(screen.getByTestId('elections-finalization-session')).toHaveTextContent(
+      'Release evidence recorded'
+    );
+  });
+
+  it('shows the blocked FEAT-098 reason when tally readiness is missing', async () => {
+    const thresholdClosedElection = createElectionRecord(ElectionLifecycleStateProto.Closed, {
+      GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+      ReviewWindowPolicy: ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+      RequiredApprovalCount: 2,
+      ClosedAt: timestamp,
+      CloseArtifactId: 'close-artifact',
+      TallyReadyAt: undefined,
+    });
+
+    electionsServiceMock.getElectionsByOwner.mockResolvedValueOnce({
+      Elections: [
+        createElectionSummary(ElectionLifecycleStateProto.Closed, {
+          GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+        }),
+      ],
+    });
+    electionsServiceMock.getElection.mockResolvedValueOnce(
+      createElectionResponse({
+        Election: thresholdClosedElection,
+        LatestDraftSnapshot: createDraftSnapshot({
+          Policy: {
+            ElectionClass: ElectionClassProto.OrganizationalRemoteVoting,
+            BindingStatus: ElectionBindingStatusProto.Binding,
+            GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+            DisclosureMode: ElectionDisclosureModeProto.FinalResultsOnly,
+            ParticipationPrivacyMode:
+              ParticipationPrivacyModeProto.PublicCheckoffAnonymousBallotPrivateChoice,
+            VoteUpdatePolicy: VoteUpdatePolicyProto.SingleSubmissionOnly,
+            EligibilitySourceType: EligibilitySourceTypeProto.OrganizationImportedRoster,
+            EligibilityMutationPolicy: EligibilityMutationPolicyProto.FrozenAtOpen,
+            OutcomeRule: thresholdClosedElection.OutcomeRule,
+            ApprovedClientApplications: [{ ApplicationId: 'hushsocial', Version: '1.0.0' }],
+            ProtocolOmegaVersion: 'omega-v1.0.0',
+            ReportingPolicy: ReportingPolicyProto.DefaultPhaseOnePackage,
+            ReviewWindowPolicy: ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+            RequiredApprovalCount: 2,
+          },
+        }),
+        FinalizationSessions: [],
+        FinalizationShares: [],
+        FinalizationReleaseEvidenceRecords: [],
+      })
+    );
+
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />
+    );
+
+    expect(await screen.findByTestId('elections-finalization-blocked')).toHaveTextContent(
+      'Finalize remains unavailable until tally readiness is recorded.'
+    );
   });
 
   it('requires explicit confirmation before restarting a ceremony version', async () => {

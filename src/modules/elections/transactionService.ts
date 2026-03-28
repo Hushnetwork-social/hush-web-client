@@ -1,4 +1,4 @@
-import type { ElectionDraftInput } from '@/lib/grpc';
+import type { ElectionDraftInput, SubmitElectionFinalizationShareRequest } from '@/lib/grpc';
 import * as secp256k1 from '@noble/secp256k1';
 import { bytesToHex, createUnsignedTransaction, eciesDecrypt, eciesEncrypt, generateGuid, hexToBytes, signByUser } from '@/lib/crypto';
 import { blockchainService } from '@/lib/grpc/services/blockchain';
@@ -181,6 +181,21 @@ export interface FinalizeElectionActionPayload {
   FinalEncryptedTallyHash: string | null;
 }
 
+export interface SubmitElectionFinalizationShareActionPayload {
+  FinalizationSessionId: string;
+  ActorPublicAddress: string;
+  ShareIndex: number;
+  ShareVersion: string;
+  TargetType: number;
+  ClaimedCloseArtifactId: string;
+  ClaimedAcceptedBallotSetHash: string | null;
+  ClaimedFinalEncryptedTallyHash: string | null;
+  ClaimedTargetTallyId: string;
+  ClaimedCeremonyVersionId: string | null;
+  ClaimedTallyPublicKeyFingerprint: string | null;
+  ShareMaterial: string;
+}
+
 export interface UpdateElectionDraftPayload {
   ElectionId: string;
   ActorPublicAddress: string;
@@ -251,6 +266,7 @@ const ENCRYPTED_ELECTION_ACTION_TYPES = {
   OPEN_ELECTION: 'open_election',
   CLOSE_ELECTION: 'close_election',
   FINALIZE_ELECTION: 'finalize_election',
+  SUBMIT_FINALIZATION_SHARE: 'submit_finalization_share',
   START_CEREMONY: 'start_ceremony',
   RESTART_CEREMONY: 'restart_ceremony',
   PUBLISH_CEREMONY_TRANSPORT_KEY: 'publish_ceremony_transport_key',
@@ -1032,6 +1048,41 @@ export async function createFinalizeElectionTransaction(
         ActorPublicAddress: actorPublicAddress,
         AcceptedBallotSetHash: acceptedBallotSetHash,
         FinalEncryptedTallyHash: finalEncryptedTallyHash,
+      },
+      signingPrivateKeyHex,
+    );
+
+  return {
+    signedTransaction: encryptedEnvelope.signedTransaction,
+  };
+}
+
+export async function createSubmitElectionFinalizationShareTransaction(
+  request: SubmitElectionFinalizationShareRequest,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
+  signingPrivateKeyHex: string,
+): Promise<{ signedTransaction: string }> {
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<SubmitElectionFinalizationShareActionPayload>(
+      request.ElectionId,
+      request.ActorPublicAddress,
+      actorPublicEncryptAddress,
+      actorPrivateEncryptKeyHex,
+      ENCRYPTED_ELECTION_ACTION_TYPES.SUBMIT_FINALIZATION_SHARE,
+      {
+        FinalizationSessionId: request.FinalizationSessionId,
+        ActorPublicAddress: request.ActorPublicAddress,
+        ShareIndex: request.ShareIndex,
+        ShareVersion: request.ShareVersion,
+        TargetType: request.TargetType,
+        ClaimedCloseArtifactId: request.ClaimedCloseArtifactId,
+        ClaimedAcceptedBallotSetHash: request.ClaimedAcceptedBallotSetHash ?? null,
+        ClaimedFinalEncryptedTallyHash: request.ClaimedFinalEncryptedTallyHash ?? null,
+        ClaimedTargetTallyId: request.ClaimedTargetTallyId,
+        ClaimedCeremonyVersionId: request.ClaimedCeremonyVersionId ?? null,
+        ClaimedTallyPublicKeyFingerprint: request.ClaimedTallyPublicKeyFingerprint ?? null,
+        ShareMaterial: request.ShareMaterial,
       },
       signingPrivateKeyHex,
     );

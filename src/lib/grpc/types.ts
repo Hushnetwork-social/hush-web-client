@@ -869,6 +869,25 @@ export enum ElectionCeremonyActionTypeProto {
   CeremonyActionImportShare = 8,
 }
 
+export enum ElectionFinalizationSessionStatusProto {
+  FinalizationSessionAwaitingShares = 0,
+  FinalizationSessionCompleted = 1,
+}
+
+export enum ElectionFinalizationShareStatusProto {
+  FinalizationShareAccepted = 0,
+  FinalizationShareRejected = 1,
+}
+
+export enum ElectionFinalizationTargetTypeProto {
+  FinalizationTargetAggregateTally = 0,
+  FinalizationTargetSingleBallot = 1,
+}
+
+export enum ElectionFinalizationReleaseModeProto {
+  FinalizationReleaseAggregateTallyOnly = 0,
+}
+
 export interface ApprovedClientApplication {
   ApplicationId: string;
   Version: string;
@@ -1041,6 +1060,71 @@ export interface ElectionCeremonyActionAvailability {
   IsAvailable: boolean;
   IsCompleted: boolean;
   Reason: string;
+}
+
+export interface ElectionFinalizationSession {
+  Id: string;
+  ElectionId: string;
+  GovernedProposalId: string;
+  GovernanceMode: ElectionGovernanceModeProto;
+  CloseArtifactId: string;
+  AcceptedBallotSetHash: string;
+  FinalEncryptedTallyHash: string;
+  TargetTallyId: string;
+  CeremonySnapshot?: ElectionCeremonyBindingSnapshot;
+  RequiredShareCount: number;
+  EligibleTrustees: ElectionTrusteeReference[];
+  Status: ElectionFinalizationSessionStatusProto;
+  CreatedAt: GrpcTimestamp;
+  CreatedByPublicAddress: string;
+  CompletedAt?: GrpcTimestamp;
+  ReleaseEvidenceId: string;
+  LatestTransactionId: string;
+  LatestBlockHeight?: number;
+  LatestBlockId: string;
+}
+
+export interface ElectionFinalizationShare {
+  Id: string;
+  FinalizationSessionId: string;
+  ElectionId: string;
+  TrusteeUserAddress: string;
+  TrusteeDisplayName: string;
+  SubmittedByPublicAddress: string;
+  ShareIndex: number;
+  ShareVersion: string;
+  TargetType: ElectionFinalizationTargetTypeProto;
+  ClaimedCloseArtifactId: string;
+  ClaimedAcceptedBallotSetHash: string;
+  ClaimedFinalEncryptedTallyHash: string;
+  ClaimedTargetTallyId: string;
+  ClaimedCeremonyVersionId: string;
+  ClaimedTallyPublicKeyFingerprint: string;
+  Status: ElectionFinalizationShareStatusProto;
+  FailureCode: string;
+  FailureReason: string;
+  SubmittedAt: GrpcTimestamp;
+  SourceTransactionId: string;
+  SourceBlockHeight?: number;
+  SourceBlockId: string;
+}
+
+export interface ElectionFinalizationReleaseEvidence {
+  Id: string;
+  FinalizationSessionId: string;
+  ElectionId: string;
+  ReleaseMode: ElectionFinalizationReleaseModeProto;
+  CloseArtifactId: string;
+  AcceptedBallotSetHash: string;
+  FinalEncryptedTallyHash: string;
+  TargetTallyId: string;
+  AcceptedShareCount: number;
+  AcceptedTrustees: ElectionTrusteeReference[];
+  CompletedAt: GrpcTimestamp;
+  CompletedByPublicAddress: string;
+  SourceTransactionId: string;
+  SourceBlockHeight?: number;
+  SourceBlockId: string;
 }
 
 export interface ElectionRecordView {
@@ -1285,6 +1369,22 @@ export interface CompleteElectionCeremonyTrusteeRequest {
   TallyPublicKeyFingerprint: string;
 }
 
+export interface SubmitElectionFinalizationShareRequest {
+  ElectionId: string;
+  FinalizationSessionId: string;
+  ActorPublicAddress: string;
+  ShareIndex: number;
+  ShareVersion: string;
+  TargetType: ElectionFinalizationTargetTypeProto;
+  ClaimedCloseArtifactId: string;
+  ClaimedAcceptedBallotSetHash?: string | null;
+  ClaimedFinalEncryptedTallyHash?: string | null;
+  ClaimedTargetTallyId: string;
+  ClaimedCeremonyVersionId?: string | null;
+  ClaimedTallyPublicKeyFingerprint?: string | null;
+  ShareMaterial: string;
+}
+
 export interface RecordElectionCeremonyShareExportRequest {
   ElectionId: string;
   CeremonyVersionId: string;
@@ -1391,6 +1491,9 @@ export interface ElectionCommandResponse {
   CeremonyTrusteeState?: ElectionCeremonyTrusteeState;
   CeremonyMessageEnvelope?: ElectionCeremonyMessageEnvelope;
   CeremonyShareCustody?: ElectionCeremonyShareCustody;
+  FinalizationSession?: ElectionFinalizationSession;
+  FinalizationShare?: ElectionFinalizationShare;
+  FinalizationReleaseEvidence?: ElectionFinalizationReleaseEvidence;
 }
 
 export interface GetElectionOpenReadinessResponse {
@@ -1415,6 +1518,9 @@ export interface GetElectionResponse {
   CeremonyVersions: ElectionCeremonyVersion[];
   CeremonyTranscriptEvents: ElectionCeremonyTranscriptEvent[];
   ActiveCeremonyTrusteeStates: ElectionCeremonyTrusteeState[];
+  FinalizationSessions?: ElectionFinalizationSession[];
+  FinalizationShares?: ElectionFinalizationShare[];
+  FinalizationReleaseEvidenceRecords?: ElectionFinalizationReleaseEvidence[];
 }
 
 export interface GetElectionCeremonyActionViewResponse {
