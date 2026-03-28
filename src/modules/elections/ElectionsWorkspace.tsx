@@ -69,6 +69,7 @@ import {
   renumberElectionOptions,
 } from './contracts';
 import { ElectionCeremonyWorkspaceSection } from './ElectionCeremonyWorkspaceSection';
+import { ElectionEligibilityWorkspaceSection } from './ElectionEligibilityWorkspaceSection';
 import { ElectionFinalizationWorkspaceSection } from './ElectionFinalizationWorkspaceSection';
 import { useElectionsStore } from './useElectionsStore';
 
@@ -514,6 +515,17 @@ export function ElectionsWorkspace({
       ownerEncryptionPrivateKey ?? '',
       ownerSigningPrivateKey
     );
+  };
+
+  const handleEligibilityContextChanged = async () => {
+    if (!selectedElectionId) {
+      return;
+    }
+
+    await loadElection(selectedElectionId);
+    if (election) {
+      await loadOpenReadiness(requiredWarningCodes);
+    }
   };
 
   const handleStartGovernedProposal = async (actionType: ElectionGovernedActionTypeProto) => {
@@ -1401,6 +1413,18 @@ export function ElectionsWorkspace({
                 </div>
               </div>
             </section>
+
+            {selectedElectionId && (
+              <ElectionEligibilityWorkspaceSection
+                electionId={selectedElectionId}
+                detail={selectedElection}
+                actorPublicAddress={ownerPublicAddress}
+                actorEncryptionPublicKey={ownerEncryptionPublicKey ?? ''}
+                actorEncryptionPrivateKey={ownerEncryptionPrivateKey ?? ''}
+                actorSigningPrivateKey={ownerSigningPrivateKey}
+                onContextChanged={handleEligibilityContextChanged}
+              />
+            )}
 
             {election?.GovernanceMode === ElectionGovernanceModeProto.TrusteeThreshold && (
               <ElectionCeremonyWorkspaceSection

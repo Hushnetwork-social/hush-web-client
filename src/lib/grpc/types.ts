@@ -752,6 +752,47 @@ export enum EligibilitySourceTypeProto {
   OrganizationImportedRoster = 0,
 }
 
+export enum ElectionRosterContactTypeProto {
+  RosterContactEmail = 0,
+  RosterContactPhone = 1,
+}
+
+export enum ElectionVoterLinkStatusProto {
+  VoterLinkUnlinked = 0,
+  VoterLinkLinked = 1,
+}
+
+export enum ElectionVotingRightStatusProto {
+  VotingRightInactive = 0,
+  VotingRightActive = 1,
+}
+
+export enum ElectionParticipationStatusProto {
+  ParticipationDidNotVote = 0,
+  ParticipationCountedAsVoted = 1,
+  ParticipationBlank = 2,
+}
+
+export enum ElectionEligibilityActivationOutcomeProto {
+  EligibilityActivationSucceeded = 0,
+  EligibilityActivationBlocked = 1,
+}
+
+export enum ElectionEligibilityActivationBlockReasonProto {
+  EligibilityActivationBlockReasonNone = 0,
+  EligibilityActivationBlockReasonRosterEntryNotFound = 1,
+  EligibilityActivationBlockReasonNotRosteredAtOpen = 2,
+  EligibilityActivationBlockReasonAlreadyActive = 3,
+  EligibilityActivationBlockReasonPolicyDisallowsLateActivation = 4,
+  EligibilityActivationBlockReasonElectionNotOpen = 5,
+  EligibilityActivationBlockReasonNotLinkedToHushAccount = 6,
+}
+
+export enum ElectionEligibilitySnapshotTypeProto {
+  EligibilitySnapshotOpen = 0,
+  EligibilitySnapshotClose = 1,
+}
+
 export enum EligibilityMutationPolicyProto {
   FrozenAtOpen = 0,
   LateActivationForRosteredVotersOnly = 1,
@@ -1454,6 +1495,11 @@ export interface GetElectionRequest {
   ElectionId: string;
 }
 
+export interface GetElectionEligibilityViewRequest {
+  ElectionId: string;
+  ActorPublicAddress: string;
+}
+
 export interface GetElectionEnvelopeAccessRequest {
   ElectionId: string;
   ActorPublicAddress: string;
@@ -1468,6 +1514,69 @@ export interface GetElectionEnvelopeAccessResponse {
 export interface GetElectionCeremonyActionViewRequest {
   ElectionId: string;
   ActorPublicAddress: string;
+}
+
+export enum ElectionEligibilityActorRoleProto {
+  EligibilityActorUnknown = 0,
+  EligibilityActorOwner = 1,
+  EligibilityActorRestrictedReviewer = 2,
+  EligibilityActorLinkedVoter = 3,
+  EligibilityActorReadOnly = 4,
+}
+
+export interface ElectionEligibilitySummaryView {
+  RosteredCount: number;
+  LinkedCount: number;
+  ActiveCount: number;
+  ActiveAtOpenCount: number;
+  CurrentDenominatorCount: number;
+  CountedParticipationCount: number;
+  BlankCount: number;
+  DidNotVoteCount: number;
+  ActivationEventCount: number;
+}
+
+export interface ElectionRosterEntryView {
+  ElectionId: string;
+  OrganizationVoterId: string;
+  ContactType: ElectionRosterContactTypeProto;
+  ContactValueHint: string;
+  LinkStatus: ElectionVoterLinkStatusProto;
+  VotingRightStatus: ElectionVotingRightStatusProto;
+  WasPresentAtOpen: boolean;
+  WasActiveAtOpen: boolean;
+  InCurrentDenominator: boolean;
+  ParticipationStatus: ElectionParticipationStatusProto;
+  CountsAsParticipation: boolean;
+}
+
+export interface ElectionEligibilityActivationEventView {
+  Id: string;
+  ElectionId: string;
+  OrganizationVoterId: string;
+  AttemptedByPublicAddress: string;
+  Outcome: ElectionEligibilityActivationOutcomeProto;
+  BlockReason: ElectionEligibilityActivationBlockReasonProto;
+  OccurredAt: GrpcTimestamp;
+}
+
+export interface ElectionEligibilitySnapshotView {
+  Id: string;
+  ElectionId: string;
+  SnapshotType: ElectionEligibilitySnapshotTypeProto;
+  EligibilityMutationPolicy: EligibilityMutationPolicyProto;
+  RosteredCount: number;
+  LinkedCount: number;
+  ActiveDenominatorCount: number;
+  CountedParticipationCount: number;
+  BlankCount: number;
+  DidNotVoteCount: number;
+  RosteredVoterSetHash: string;
+  ActiveDenominatorSetHash: string;
+  CountedParticipationSetHash: string;
+  BoundaryArtifactId: string;
+  RecordedAt: GrpcTimestamp;
+  RecordedByPublicAddress: string;
 }
 
 export interface GetElectionsByOwnerRequest {
@@ -1535,6 +1644,24 @@ export interface GetElectionCeremonyActionViewResponse {
   SelfShareCustody?: ElectionCeremonyShareCustody;
   PendingIncomingMessageCount: number;
   BlockedReasons: string[];
+}
+
+export interface GetElectionEligibilityViewResponse {
+  Success: boolean;
+  ErrorMessage: string;
+  ActorPublicAddress: string;
+  ActorRole: ElectionEligibilityActorRoleProto;
+  CanImportRoster: boolean;
+  CanActivateRoster: boolean;
+  CanReviewRestrictedRoster: boolean;
+  CanClaimIdentity: boolean;
+  UsesTemporaryVerificationCode: boolean;
+  TemporaryVerificationCode: string;
+  Summary: ElectionEligibilitySummaryView;
+  SelfRosterEntry?: ElectionRosterEntryView;
+  RestrictedRosterEntries: ElectionRosterEntryView[];
+  ActivationEvents: ElectionEligibilityActivationEventView[];
+  EligibilitySnapshots: ElectionEligibilitySnapshotView[];
 }
 
 export interface GetElectionsByOwnerResponse {

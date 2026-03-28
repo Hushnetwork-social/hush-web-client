@@ -70,6 +70,29 @@ export interface UpdateElectionDraftActionPayload {
   Draft: ElectionDraftInput;
 }
 
+export interface ElectionRosterImportItemPayload {
+  OrganizationVoterId: string;
+  ContactType: number;
+  ContactValue: string;
+  IsInitiallyActive: boolean;
+}
+
+export interface ImportElectionRosterActionPayload {
+  ActorPublicAddress: string;
+  RosterEntries: ElectionRosterImportItemPayload[];
+}
+
+export interface ClaimElectionRosterEntryActionPayload {
+  ActorPublicAddress: string;
+  OrganizationVoterId: string;
+  VerificationCode: string;
+}
+
+export interface ActivateElectionRosterEntryActionPayload {
+  ActorPublicAddress: string;
+  OrganizationVoterId: string;
+}
+
 export interface StartElectionCeremonyActionPayload {
   ActorPublicAddress: string;
   ProfileId: string;
@@ -256,6 +279,9 @@ export interface FinalizeElectionPayload {
 const ENCRYPTED_ELECTION_ACTION_TYPES = {
   CREATE_DRAFT: 'create_draft',
   UPDATE_DRAFT: 'update_draft',
+  IMPORT_ROSTER: 'import_roster',
+  CLAIM_ROSTER_ENTRY: 'claim_roster_entry',
+  ACTIVATE_ROSTER_ENTRY: 'activate_roster_entry',
   INVITE_TRUSTEE: 'invite_trustee',
   ACCEPT_TRUSTEE_INVITATION: 'accept_trustee_invitation',
   REJECT_TRUSTEE_INVITATION: 'reject_trustee_invitation',
@@ -283,7 +309,10 @@ async function resolveElectionEnvelopePrivateKey(
   electionId: string | undefined,
   actorPublicAddress: string,
   actorPublicEncryptAddress: string,
-  actorPrivateEncryptKeyHex: string | undefined
+  actorPrivateEncryptKeyHex: string | undefined,
+  options?: {
+    allowBootstrapEnvelopeAccess?: boolean;
+  }
 ): Promise<{ electionId: string; electionPrivateEncryptKeyHex: string; electionPublicEncryptKeyHex: string }> {
   const resolvedElectionId = electionId ?? generateGuid();
 
@@ -292,22 +321,26 @@ async function resolveElectionEnvelopePrivateKey(
     const generatedPrivateKey = secp256k1.utils.randomSecretKey();
     electionPrivateEncryptKeyHex = bytesToHex(generatedPrivateKey);
   } else {
-    if (!actorPrivateEncryptKeyHex) {
-      throw new Error('Actor encryption private key is required to reuse the election envelope.');
-    }
-
     const accessResponse = await electionsService.getElectionEnvelopeAccess({
       ElectionId: electionId,
       ActorPublicAddress: actorPublicAddress,
     });
-    if (!accessResponse.Success || !accessResponse.ActorEncryptedElectionPrivateKey) {
+
+    if (accessResponse.Success && accessResponse.ActorEncryptedElectionPrivateKey) {
+      if (!actorPrivateEncryptKeyHex) {
+        throw new Error('Actor encryption private key is required to reuse the election envelope.');
+      }
+
+      electionPrivateEncryptKeyHex = await eciesDecrypt(
+        accessResponse.ActorEncryptedElectionPrivateKey,
+        actorPrivateEncryptKeyHex
+      );
+    } else if (options?.allowBootstrapEnvelopeAccess) {
+      const generatedPrivateKey = secp256k1.utils.randomSecretKey();
+      electionPrivateEncryptKeyHex = bytesToHex(generatedPrivateKey);
+    } else {
       throw new Error(accessResponse.ErrorMessage || 'Election envelope access is not available for this actor.');
     }
-
-    electionPrivateEncryptKeyHex = await eciesDecrypt(
-      accessResponse.ActorEncryptedElectionPrivateKey,
-      actorPrivateEncryptKeyHex
-    );
   }
 
   const electionPublicEncryptKeyHex = bytesToHex(
@@ -333,13 +366,17 @@ async function createEncryptedElectionEnvelopeTransaction<TActionPayload>(
   actionType: string,
   actionPayload: TActionPayload,
   signingPrivateKeyHex: string,
+  options?: {
+    allowBootstrapEnvelopeAccess?: boolean;
+  }
 ): Promise<{ signedTransaction: string; electionId: string }> {
   const envelopeContext = await blockchainService.getElectionEnvelopeContext();
   const envelopeKeys = await resolveElectionEnvelopePrivateKey(
     electionId,
     actorPublicAddress,
     actorPublicEncryptAddress,
-    actorPrivateEncryptKeyHex
+    actorPrivateEncryptKeyHex,
+    options
   );
 
   const nodeEncryptedElectionPrivateKey = await eciesEncrypt(
@@ -424,6 +461,90 @@ export async function createUpdateElectionDraftTransaction(
     },
     signingPrivateKeyHex,
   );
+
+  return {
+    signedTransaction: encryptedEnvelope.signedTransaction,
+  };
+}
+
+export async function createImportElectionRosterTransaction(
+  electionId: string,
+  actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
+  rosterEntries: ElectionRosterImportItemPayload[],
+  signingPrivateKeyHex: string,
+): Promise<{ signedTransaction: string }> {
+  const encryptedEnvelope = await createEncryptedElectionEnvelopeTransaction<ImportElectionRosterActionPayload>(
+    electionId,
+    actorPublicAddress,
+    actorPublicEncryptAddress,
+    actorPrivateEncryptKeyHex,
+    ENCRYPTED_ELECTION_ACTION_TYPES.IMPORT_ROSTER,
+    {
+      ActorPublicAddress: actorPublicAddress,
+      RosterEntries: rosterEntries,
+    },
+    signingPrivateKeyHex,
+  );
+
+  return {
+    signedTransaction: encryptedEnvelope.signedTransaction,
+  };
+}
+
+export async function createClaimElectionRosterEntryTransaction(
+  electionId: string,
+  actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  organizationVoterId: string,
+  verificationCode: string,
+  signingPrivateKeyHex: string,
+  actorPrivateEncryptKeyHex?: string,
+): Promise<{ signedTransaction: string }> {
+  const encryptedEnvelope = await createEncryptedElectionEnvelopeTransaction<ClaimElectionRosterEntryActionPayload>(
+    electionId,
+    actorPublicAddress,
+    actorPublicEncryptAddress,
+    actorPrivateEncryptKeyHex,
+    ENCRYPTED_ELECTION_ACTION_TYPES.CLAIM_ROSTER_ENTRY,
+    {
+      ActorPublicAddress: actorPublicAddress,
+      OrganizationVoterId: organizationVoterId,
+      VerificationCode: verificationCode,
+    },
+    signingPrivateKeyHex,
+    {
+      allowBootstrapEnvelopeAccess: true,
+    }
+  );
+
+  return {
+    signedTransaction: encryptedEnvelope.signedTransaction,
+  };
+}
+
+export async function createActivateElectionRosterEntryTransaction(
+  electionId: string,
+  actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
+  organizationVoterId: string,
+  signingPrivateKeyHex: string,
+): Promise<{ signedTransaction: string }> {
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<ActivateElectionRosterEntryActionPayload>(
+      electionId,
+      actorPublicAddress,
+      actorPublicEncryptAddress,
+      actorPrivateEncryptKeyHex,
+      ENCRYPTED_ELECTION_ACTION_TYPES.ACTIVATE_ROSTER_ENTRY,
+      {
+        ActorPublicAddress: actorPublicAddress,
+        OrganizationVoterId: organizationVoterId,
+      },
+      signingPrivateKeyHex,
+    );
 
   return {
     signedTransaction: encryptedEnvelope.signedTransaction,

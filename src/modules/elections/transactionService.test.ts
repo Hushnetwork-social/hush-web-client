@@ -9,6 +9,7 @@ import {
 import {
   ENCRYPTED_ELECTION_ENVELOPE_PAYLOAD_KIND,
   createApproveElectionGovernedProposalTransaction,
+  createClaimElectionRosterEntryTransaction,
   createElectionDraftTransaction,
   createElectionTrusteeInvitationTransaction,
   createOpenElectionTransaction,
@@ -407,6 +408,74 @@ describe('transactionService encrypted election envelope helpers', () => {
     expect(decryptedPayload.ActionPayload.ProposalId).toBe('proposal-77');
     expect(decryptedPayload.ActionPayload.ActorPublicAddress).toBe(trusteeSigningPublicKey);
     expect(decryptedPayload.ActionPayload.ApprovalNote).toBe('Looks good');
+  });
+
+  it('bootstraps a claim-link envelope when stored election access does not exist yet', async () => {
+    const voterSigningPrivateKeyHex = '7777777777777777777777777777777777777777777777777777777777777777';
+    const voterEncryptionPrivateKeyHex = '8888888888888888888888888888888888888888888888888888888888888888';
+    const nodeEncryptionPrivateKeyHex = '3333333333333333333333333333333333333333333333333333333333333333';
+    const voterSigningPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(voterSigningPrivateKeyHex), true),
+    );
+    const voterEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(voterEncryptionPrivateKeyHex), true),
+    );
+    const nodeEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(nodeEncryptionPrivateKeyHex), true),
+    );
+
+    blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
+      NodePublicEncryptAddress: nodeEncryptionPublicKey,
+      ElectionEnvelopeVersion: 'election-envelope-v1',
+    });
+    electionsServiceMock.getElectionEnvelopeAccess.mockResolvedValue({
+      Success: false,
+      ErrorMessage: 'No election envelope access was found for actor.',
+      ActorEncryptedElectionPrivateKey: '',
+    });
+
+    const { signedTransaction } = await createClaimElectionRosterEntryTransaction(
+      'election-123',
+      voterSigningPublicKey,
+      voterEncryptionPublicKey,
+      '10042',
+      '1111',
+      voterSigningPrivateKeyHex,
+      voterEncryptionPrivateKeyHex,
+    );
+
+    const parsedTransaction = JSON.parse(signedTransaction) as {
+      PayloadKind: string;
+      Payload: {
+        ActorEncryptedElectionPrivateKey: string;
+        EncryptedPayload: string;
+      };
+    };
+
+    expect(parsedTransaction.PayloadKind).toBe(ENCRYPTED_ELECTION_ENVELOPE_PAYLOAD_KIND);
+
+    const actorElectionPrivateKey = await eciesDecrypt(
+      parsedTransaction.Payload.ActorEncryptedElectionPrivateKey,
+      voterEncryptionPrivateKeyHex,
+    );
+    const decryptedPayloadJson = await eciesDecrypt(
+      parsedTransaction.Payload.EncryptedPayload,
+      actorElectionPrivateKey,
+    );
+    const decryptedPayload = JSON.parse(decryptedPayloadJson) as {
+      ActionType: string;
+      ActionPayload: {
+        ActorPublicAddress: string;
+        OrganizationVoterId: string;
+        VerificationCode: string;
+      };
+    };
+
+    expect(hexToBytes(actorElectionPrivateKey)).toHaveLength(32);
+    expect(decryptedPayload.ActionType).toBe('claim_roster_entry');
+    expect(decryptedPayload.ActionPayload.ActorPublicAddress).toBe(voterSigningPublicKey);
+    expect(decryptedPayload.ActionPayload.OrganizationVoterId).toBe('10042');
+    expect(decryptedPayload.ActionPayload.VerificationCode).toBe('1111');
   });
 
   it('creates an encrypted aggregate-only finalization share envelope for a trustee actor', async () => {
