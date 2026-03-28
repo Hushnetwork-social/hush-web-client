@@ -3,17 +3,16 @@
 import { use, useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { TrusteeGovernedProposalPanel } from '@/modules/elections/TrusteeGovernedProposalPanel';
+import { TrusteeElectionCeremonyPanel } from '@/modules/elections/TrusteeElectionCeremonyPanel';
 import { useAppStore } from '@/stores';
 
-type TrusteeProposalPageProps = {
+type TrusteeCeremonyPageProps = {
   params: Promise<{
     electionId: string;
-    proposalId: string;
   }>;
 };
 
-export default function TrusteeProposalPage({ params }: TrusteeProposalPageProps) {
+export default function TrusteeCeremonyPage({ params }: TrusteeCeremonyPageProps) {
   const resolvedParams = use(params);
   const router = useRouter();
   const { credentials, isAuthenticated } = useAppStore();
@@ -23,11 +22,11 @@ export default function TrusteeProposalPage({ params }: TrusteeProposalPageProps
     const timer = setTimeout(() => {
       setIsCheckingAuth(false);
       if (
-        !isAuthenticated ||
-        !credentials?.signingPublicKey ||
-        !credentials?.signingPrivateKey ||
-        !credentials?.encryptionPublicKey ||
-        !credentials?.encryptionPrivateKey
+        !isAuthenticated
+        || !credentials?.signingPublicKey
+        || !credentials?.signingPrivateKey
+        || !credentials?.encryptionPublicKey
+        || !credentials?.encryptionPrivateKey
       ) {
         router.replace('/auth');
       }
@@ -44,12 +43,12 @@ export default function TrusteeProposalPage({ params }: TrusteeProposalPageProps
   ]);
 
   if (
-    isCheckingAuth ||
-    !isAuthenticated ||
-    !credentials?.signingPublicKey ||
-    !credentials?.signingPrivateKey ||
-    !credentials?.encryptionPublicKey ||
-    !credentials?.encryptionPrivateKey
+    isCheckingAuth
+    || !isAuthenticated
+    || !credentials?.signingPublicKey
+    || !credentials?.signingPrivateKey
+    || !credentials?.encryptionPublicKey
+    || !credentials?.encryptionPrivateKey
   ) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-hush-bg-dark">
@@ -59,9 +58,8 @@ export default function TrusteeProposalPage({ params }: TrusteeProposalPageProps
   }
 
   return (
-    <TrusteeGovernedProposalPanel
+    <TrusteeElectionCeremonyPanel
       electionId={resolvedParams.electionId}
-      proposalId={resolvedParams.proposalId}
       actorPublicAddress={credentials.signingPublicKey}
       actorEncryptionPublicKey={credentials.encryptionPublicKey}
       actorEncryptionPrivateKey={credentials.encryptionPrivateKey}

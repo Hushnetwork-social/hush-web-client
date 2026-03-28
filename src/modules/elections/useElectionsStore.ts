@@ -1,10 +1,22 @@
 import { create } from 'zustand';
 import {
+  type CompleteElectionCeremonyTrusteeRequest,
   ElectionGovernedActionTypeProto,
   ElectionGovernedProposalExecutionStatusProto,
+  ElectionLifecycleStateProto,
+  ElectionTrusteeInvitationStatusProto,
+  type GetElectionCeremonyActionViewResponse,
+  type JoinElectionCeremonyRequest,
+  type PublishElectionCeremonyTransportKeyRequest,
+  type RecordElectionCeremonySelfTestRequest,
+  type RecordElectionCeremonyShareExportRequest,
+  type RecordElectionCeremonyShareImportRequest,
+  type RecordElectionCeremonyValidationFailureRequest,
+  type RestartElectionCeremonyRequest,
+  type StartElectionCeremonyRequest,
+  type SubmitElectionCeremonyMaterialRequest,
 } from '@/lib/grpc';
 import type {
-  ElectionCommandResponse,
   ElectionDraftInput,
   ElectionWarningCodeProto,
   ElectionSummary,
@@ -14,7 +26,32 @@ import type {
   ResolveElectionTrusteeInvitationRequest,
 } from '@/lib/grpc';
 import { electionsService } from '@/lib/grpc/services/elections';
+import { submitTransaction } from '@/modules/blockchain/BlockchainService';
 import { getGovernedActionLabel } from './contracts';
+import {
+  createAcceptElectionTrusteeInvitationTransaction,
+  createApproveElectionGovernedProposalTransaction,
+  createCloseElectionTransaction,
+  createCompleteElectionCeremonyTrusteeTransaction,
+  createElectionDraftTransaction,
+  createElectionTrusteeInvitationTransaction,
+  createFinalizeElectionTransaction,
+  createJoinElectionCeremonyTransaction,
+  createOpenElectionTransaction,
+  createPublishElectionCeremonyTransportKeyTransaction,
+  createRejectElectionTrusteeInvitationTransaction,
+  createRecordElectionCeremonySelfTestSuccessTransaction,
+  createRecordElectionCeremonyShareExportTransaction,
+  createRecordElectionCeremonyShareImportTransaction,
+  createRecordElectionCeremonyValidationFailureTransaction,
+  createRevokeElectionTrusteeInvitationTransaction,
+  createRestartElectionCeremonyTransaction,
+  createRetryElectionGovernedProposalExecutionTransaction,
+  createStartElectionCeremonyTransaction,
+  createStartElectionGovernedProposalTransaction,
+  createSubmitElectionCeremonyMaterialTransaction,
+  createUpdateElectionDraftTransaction,
+} from './transactionService';
 
 export type ElectionsFeedbackTone = 'success' | 'error';
 
@@ -29,9 +66,11 @@ interface ElectionsState {
   elections: ElectionSummary[];
   selectedElectionId: string | null;
   selectedElection: GetElectionResponse | null;
+  ceremonyActionView: GetElectionCeremonyActionViewResponse | null;
   openReadiness: GetElectionOpenReadinessResponse | null;
   isLoadingList: boolean;
   isLoadingDetail: boolean;
+  isLoadingCeremonyActionView: boolean;
   isSubmitting: boolean;
   feedback: ElectionsFeedback | null;
   error: string | null;
@@ -40,23 +79,146 @@ interface ElectionsState {
   clearFeedback: () => void;
   loadOwnerDashboard: (ownerPublicAddress: string) => Promise<void>;
   loadElection: (electionId: string) => Promise<void>;
-  createDraft: (draft: ElectionDraftInput, snapshotReason: string) => Promise<boolean>;
-  updateDraft: (draft: ElectionDraftInput, snapshotReason: string) => Promise<boolean>;
-  inviteTrustee: (request: InviteElectionTrusteeRequest) => Promise<boolean>;
-  revokeInvitation: (request: ResolveElectionTrusteeInvitationRequest) => Promise<boolean>;
+  loadCeremonyActionView: (
+    actorPublicAddress: string,
+    electionId?: string
+  ) => Promise<GetElectionCeremonyActionViewResponse | null>;
+  createDraft: (
+    draft: ElectionDraftInput,
+    snapshotReason: string,
+    ownerPublicEncryptAddress: string,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
+  updateDraft: (
+    draft: ElectionDraftInput,
+    snapshotReason: string,
+    ownerPublicEncryptAddress: string,
+    ownerPrivateEncryptKeyHex: string,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
+  inviteTrustee: (
+    request: InviteElectionTrusteeRequest,
+    ownerPublicEncryptAddress: string,
+    ownerPrivateEncryptKeyHex: string,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
+  acceptTrusteeInvitation: (
+    request: ResolveElectionTrusteeInvitationRequest,
+    actorPublicEncryptAddress: string,
+    actorPrivateEncryptKeyHex: string,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
+  rejectTrusteeInvitation: (
+    request: ResolveElectionTrusteeInvitationRequest,
+    actorPublicEncryptAddress: string,
+    actorPrivateEncryptKeyHex: string,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
+  revokeInvitation: (
+    request: ResolveElectionTrusteeInvitationRequest,
+    actorPublicEncryptAddress: string,
+    actorPrivateEncryptKeyHex: string,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
   loadOpenReadiness: (
     requiredWarningCodes: ElectionWarningCodeProto[]
   ) => Promise<GetElectionOpenReadinessResponse | null>;
-  startGovernedProposal: (actionType: ElectionGovernedActionTypeProto) => Promise<boolean>;
+  startGovernedProposal: (
+    actionType: ElectionGovernedActionTypeProto,
+    actorPublicEncryptAddress: string,
+    actorPrivateEncryptKeyHex: string,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
   approveGovernedProposal: (
     proposalId: string,
     actorPublicAddress: string,
+    actorPublicEncryptAddress: string,
+    actorPrivateEncryptKeyHex: string,
+    signingPrivateKeyHex: string,
     approvalNote?: string
   ) => Promise<boolean>;
-  retryGovernedProposalExecution: (proposalId: string) => Promise<boolean>;
-  openElection: (requiredWarningCodes: ElectionWarningCodeProto[]) => Promise<boolean>;
-  closeElection: () => Promise<boolean>;
-  finalizeElection: () => Promise<boolean>;
+  retryGovernedProposalExecution: (
+    proposalId: string,
+    actorPublicEncryptAddress: string,
+    actorPrivateEncryptKeyHex: string,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
+  startElectionCeremony: (
+    request: StartElectionCeremonyRequest,
+    actorPublicEncryptAddress: string,
+    actorPrivateEncryptKeyHex: string,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
+  restartElectionCeremony: (
+    request: RestartElectionCeremonyRequest,
+    actorPublicEncryptAddress: string,
+    actorPrivateEncryptKeyHex: string,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
+  publishElectionCeremonyTransportKey: (
+    request: PublishElectionCeremonyTransportKeyRequest,
+    actorPublicEncryptAddress: string,
+    actorPrivateEncryptKeyHex: string,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
+  joinElectionCeremony: (
+    request: JoinElectionCeremonyRequest,
+    actorPublicEncryptAddress: string,
+    actorPrivateEncryptKeyHex: string,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
+  recordElectionCeremonySelfTestSuccess: (
+    request: RecordElectionCeremonySelfTestRequest,
+    actorPublicEncryptAddress: string,
+    actorPrivateEncryptKeyHex: string,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
+  submitElectionCeremonyMaterial: (
+    request: SubmitElectionCeremonyMaterialRequest,
+    actorPublicEncryptAddress: string,
+    actorPrivateEncryptKeyHex: string,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
+  recordElectionCeremonyValidationFailure: (
+    request: RecordElectionCeremonyValidationFailureRequest,
+    actorPublicEncryptAddress: string,
+    actorPrivateEncryptKeyHex: string,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
+  completeElectionCeremonyTrustee: (
+    request: CompleteElectionCeremonyTrusteeRequest,
+    actorPublicEncryptAddress: string,
+    actorPrivateEncryptKeyHex: string,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
+  recordElectionCeremonyShareExport: (
+    request: RecordElectionCeremonyShareExportRequest,
+    actorPublicEncryptAddress: string,
+    actorPrivateEncryptKeyHex: string,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
+  recordElectionCeremonyShareImport: (
+    request: RecordElectionCeremonyShareImportRequest,
+    actorPublicEncryptAddress: string,
+    actorPrivateEncryptKeyHex: string,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
+  openElection: (
+    requiredWarningCodes: ElectionWarningCodeProto[],
+    actorPublicEncryptAddress: string,
+    actorPrivateEncryptKeyHex: string,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
+  closeElection: (
+    actorPublicEncryptAddress: string,
+    actorPrivateEncryptKeyHex: string,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
+  finalizeElection: (
+    actorPublicEncryptAddress: string,
+    actorPrivateEncryptKeyHex: string,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
   reset: () => void;
 }
 
@@ -65,25 +227,15 @@ const initialState = {
   elections: [],
   selectedElectionId: null,
   selectedElection: null,
+  ceremonyActionView: null,
   openReadiness: null,
   isLoadingList: false,
   isLoadingDetail: false,
+  isLoadingCeremonyActionView: false,
   isSubmitting: false,
   feedback: null,
   error: null,
 };
-
-function buildCommandFailureFeedback(response: ElectionCommandResponse): ElectionsFeedback {
-  const details = response.ValidationErrors.length > 0
-    ? response.ValidationErrors
-    : [response.ErrorMessage || 'The election command was rejected.'];
-
-  return {
-    tone: 'error',
-    message: response.ErrorMessage || details[0] || 'The election command was rejected.',
-    details,
-  };
-}
 
 function buildThrownErrorFeedback(error: unknown, fallbackMessage: string): ElectionsFeedback {
   return {
@@ -91,6 +243,87 @@ function buildThrownErrorFeedback(error: unknown, fallbackMessage: string): Elec
     message: error instanceof Error ? error.message : fallbackMessage,
     details: [],
   };
+}
+
+async function refreshElectionContext(
+  get: () => ElectionsState,
+  actorPublicAddress?: string | null
+): Promise<void> {
+  const electionId = get().selectedElectionId;
+  if (!electionId) {
+    return;
+  }
+
+  await get().loadElection(electionId);
+
+  const resolvedActorPublicAddress = actorPublicAddress ?? get().ownerPublicAddress;
+  if (resolvedActorPublicAddress) {
+    await get().loadCeremonyActionView(resolvedActorPublicAddress, electionId);
+  }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForIndexedElection(
+  electionId: string,
+  maxAttempts: number = 12,
+  delayMs: number = 500
+): Promise<GetElectionResponse | null> {
+  return waitForIndexedElectionMatch(electionId, () => true, maxAttempts, delayMs);
+}
+
+async function waitForIndexedElectionMatch(
+  electionId: string,
+  isMatch: (response: GetElectionResponse) => boolean,
+  maxAttempts: number = 12,
+  delayMs: number = 500
+): Promise<GetElectionResponse | null> {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      const response = await electionsService.getElection({ ElectionId: electionId });
+      if (response.Success && response.Election && isMatch(response)) {
+        return response;
+      }
+    } catch {
+      // Query surface is eventually consistent after block indexing. Retry below.
+    }
+
+    if (attempt < maxAttempts - 1) {
+      await delay(delayMs);
+    }
+  }
+
+  return null;
+}
+
+async function waitForIndexedCeremonyActionViewMatch(
+  electionId: string,
+  actorPublicAddress: string,
+  isMatch: (response: GetElectionCeremonyActionViewResponse) => boolean,
+  maxAttempts: number = 12,
+  delayMs: number = 500
+): Promise<GetElectionCeremonyActionViewResponse | null> {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      const response = await electionsService.getElectionCeremonyActionView({
+        ElectionId: electionId,
+        ActorPublicAddress: actorPublicAddress,
+      });
+      if (response.Success && isMatch(response)) {
+        return response;
+      }
+    } catch {
+      // Query surface is eventually consistent after block indexing. Retry below.
+    }
+
+    if (attempt < maxAttempts - 1) {
+      await delay(delayMs);
+    }
+  }
+
+  return null;
 }
 
 export const useElectionsStore = create<ElectionsState>((set, get) => ({
@@ -104,6 +337,7 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     set({
       selectedElectionId: null,
       selectedElection: null,
+      ceremonyActionView: null,
       openReadiness: null,
       feedback: null,
       error: null,
@@ -170,6 +404,7 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
       if (!response.Success) {
         set({
           selectedElection: response,
+          ceremonyActionView: null,
           openReadiness: null,
           error: response.ErrorMessage || 'Failed to load election details.',
         });
@@ -189,13 +424,53 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     }
   },
 
-  createDraft: async (draft, snapshotReason) => {
+  loadCeremonyActionView: async (actorPublicAddress, electionId) => {
+    const resolvedElectionId = electionId ?? get().selectedElectionId;
+    if (!resolvedElectionId) {
+      set({ ceremonyActionView: null });
+      return null;
+    }
+
+    set({
+      isLoadingCeremonyActionView: true,
+      error: null,
+    });
+
+    try {
+      const response = await electionsService.getElectionCeremonyActionView({
+        ElectionId: resolvedElectionId,
+        ActorPublicAddress: actorPublicAddress,
+      });
+
+      if (!response.Success) {
+        set({
+          ceremonyActionView: response,
+          error: response.ErrorMessage || 'Failed to load ceremony actions.',
+        });
+        return response;
+      }
+
+      set({
+        ceremonyActionView: response,
+      });
+      return response;
+    } catch (error) {
+      set({
+        feedback: buildThrownErrorFeedback(error, 'Failed to load ceremony actions.'),
+      });
+      return null;
+    } finally {
+      set({ isLoadingCeremonyActionView: false });
+    }
+  },
+
+  createDraft: async (draft, snapshotReason, ownerPublicEncryptAddress, signingPrivateKeyHex) => {
     const ownerPublicAddress = get().ownerPublicAddress;
-    if (!ownerPublicAddress) {
+    if (!ownerPublicAddress || !ownerPublicEncryptAddress || !signingPrivateKeyHex) {
       set({
         feedback: {
           tone: 'error',
-          message: 'Owner public address is missing.',
+          message: 'Owner signing or encryption credentials are missing.',
           details: [],
         },
       });
@@ -209,34 +484,54 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     });
 
     try {
-      const response = await electionsService.createElectionDraft({
-        OwnerPublicAddress: ownerPublicAddress,
-        ActorPublicAddress: ownerPublicAddress,
-        SnapshotReason: snapshotReason,
-        Draft: draft,
-      });
+      const { signedTransaction, electionId } = await createElectionDraftTransaction(
+        ownerPublicAddress,
+        ownerPublicEncryptAddress,
+        snapshotReason,
+        draft,
+        signingPrivateKeyHex
+      );
+      const submitResult = await submitTransaction(signedTransaction);
 
-      if (!response.Success) {
-        set({ feedback: buildCommandFailureFeedback(response) });
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit election draft transaction.',
+            details: [],
+          },
+        });
         return false;
       }
 
-      const electionId = response.Election?.ElectionId ?? null;
+      const indexedElection = await waitForIndexedElection(electionId);
+
+      set({ selectedElectionId: electionId });
       await get().loadOwnerDashboard(ownerPublicAddress);
 
-      if (electionId) {
+      if (indexedElection?.Success && indexedElection.Election) {
         await get().loadElection(electionId);
+        set({
+          feedback: {
+            tone: 'success',
+            message: 'Election draft created.',
+            details: [],
+          },
+        });
+        return true;
       }
 
       set({
         feedback: {
           tone: 'success',
-          message: 'Election draft created.',
-          details: [],
+          message: 'Election draft submitted.',
+          details: [
+            'The transaction was accepted and is waiting for block confirmation before the draft appears in the query view.',
+          ],
         },
       });
 
-      return true;
+      return false;
     } catch (error) {
       set({
         feedback: buildThrownErrorFeedback(error, 'Failed to create election draft.'),
@@ -247,15 +542,29 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     }
   },
 
-  updateDraft: async (draft, snapshotReason) => {
+  updateDraft: async (
+    draft,
+    snapshotReason,
+    ownerPublicEncryptAddress,
+    ownerPrivateEncryptKeyHex,
+    signingPrivateKeyHex
+  ) => {
     const electionId = get().selectedElectionId;
     const ownerPublicAddress = get().ownerPublicAddress;
 
-    if (!electionId || !ownerPublicAddress) {
+    if (
+      !electionId ||
+      !ownerPublicAddress ||
+      !ownerPublicEncryptAddress ||
+      !ownerPrivateEncryptKeyHex ||
+      !signingPrivateKeyHex
+    ) {
       set({
         feedback: {
           tone: 'error',
-          message: 'No draft election is selected.',
+          message: !electionId || !ownerPublicAddress
+            ? 'No draft election is selected.'
+            : 'Owner signing or encryption credentials are missing.',
           details: [],
         },
       });
@@ -269,15 +578,47 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     });
 
     try {
-      const response = await electionsService.updateElectionDraft({
-        ElectionId: electionId,
-        ActorPublicAddress: ownerPublicAddress,
-        SnapshotReason: snapshotReason,
-        Draft: draft,
+      const currentRevision = get().selectedElection?.Election?.CurrentDraftRevision ?? 0;
+      const { signedTransaction } = await createUpdateElectionDraftTransaction(
+        electionId,
+        ownerPublicAddress,
+        ownerPublicEncryptAddress,
+        ownerPrivateEncryptKeyHex,
+        snapshotReason,
+        draft,
+        signingPrivateKeyHex
+      );
+      const submitResult = await submitTransaction(signedTransaction);
+
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit election draft update transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Election draft update submitted.',
+          details: [
+            'Waiting for block confirmation before the updated draft revision appears in the query view.',
+          ],
+        },
       });
 
-      if (!response.Success) {
-        set({ feedback: buildCommandFailureFeedback(response) });
+      const indexedElection = await waitForIndexedElectionMatch(
+        electionId,
+        (response) =>
+          (response.Election?.CurrentDraftRevision ?? 0) > currentRevision
+          && (response.LatestDraftSnapshot?.DraftRevision ?? 0) > currentRevision
+      );
+
+      if (!indexedElection?.Success || !indexedElection.Election) {
         return false;
       }
 
@@ -303,7 +644,23 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     }
   },
 
-  inviteTrustee: async (request) => {
+  inviteTrustee: async (
+    request,
+    ownerPublicEncryptAddress,
+    ownerPrivateEncryptKeyHex,
+    signingPrivateKeyHex
+  ) => {
+    if (!ownerPublicEncryptAddress || !ownerPrivateEncryptKeyHex || !signingPrivateKeyHex) {
+      set({
+        feedback: {
+          tone: 'error',
+          message: 'Owner signing or encryption credentials are missing.',
+          details: [],
+        },
+      });
+      return false;
+    }
+
     set({
       isSubmitting: true,
       feedback: null,
@@ -311,9 +668,45 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     });
 
     try {
-      const response = await electionsService.inviteElectionTrustee(request);
-      if (!response.Success) {
-        set({ feedback: buildCommandFailureFeedback(response) });
+      const { signedTransaction, invitationId } = await createElectionTrusteeInvitationTransaction(
+        request.ElectionId,
+        request.ActorPublicAddress,
+        ownerPublicEncryptAddress,
+        ownerPrivateEncryptKeyHex,
+        request.TrusteeUserAddress,
+        request.TrusteeDisplayName,
+        signingPrivateKeyHex
+      );
+      const submitResult = await submitTransaction(signedTransaction);
+
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit trustee invitation transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Trustee invitation submitted.',
+          details: [
+            'Waiting for block confirmation before the invitation appears in the trustee roster.',
+          ],
+        },
+      });
+
+      const indexedElection = await waitForIndexedElectionMatch(
+        request.ElectionId,
+        (response) =>
+          response.TrusteeInvitations.some((invitation) => invitation.Id === invitationId)
+      );
+
+      if (!indexedElection?.Success || !indexedElection.Election) {
         return false;
       }
 
@@ -336,7 +729,23 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     }
   },
 
-  revokeInvitation: async (request) => {
+  acceptTrusteeInvitation: async (
+    request,
+    actorPublicEncryptAddress,
+    actorPrivateEncryptKeyHex,
+    signingPrivateKeyHex
+  ) => {
+    if (!actorPublicEncryptAddress || !actorPrivateEncryptKeyHex || !signingPrivateKeyHex) {
+      set({
+        feedback: {
+          tone: 'error',
+          message: 'Actor signing or encryption credentials are missing.',
+          details: [],
+        },
+      });
+      return false;
+    }
+
     set({
       isSubmitting: true,
       feedback: null,
@@ -344,9 +753,220 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     });
 
     try {
-      const response = await electionsService.revokeElectionTrusteeInvitation(request);
-      if (!response.Success) {
-        set({ feedback: buildCommandFailureFeedback(response) });
+      const { signedTransaction } = await createAcceptElectionTrusteeInvitationTransaction(
+        request.ElectionId,
+        request.InvitationId,
+        request.ActorPublicAddress,
+        actorPublicEncryptAddress,
+        actorPrivateEncryptKeyHex,
+        signingPrivateKeyHex
+      );
+      const submitResult = await submitTransaction(signedTransaction);
+
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit trustee acceptance transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Trustee acceptance submitted.',
+          details: [
+            'Waiting for block confirmation before the invitation status updates in the trustee roster.',
+          ],
+        },
+      });
+
+      const indexedElection = await waitForIndexedElectionMatch(
+        request.ElectionId,
+        (response) =>
+          response.TrusteeInvitations.some((invitation) =>
+            invitation.Id === request.InvitationId
+            && invitation.Status === ElectionTrusteeInvitationStatusProto.Accepted)
+      );
+
+      if (!indexedElection?.Success || !indexedElection.Election) {
+        return false;
+      }
+
+      await get().loadElection(request.ElectionId);
+      await get().loadCeremonyActionView(request.ActorPublicAddress, request.ElectionId);
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Trustee invitation accepted.',
+          details: [],
+        },
+      });
+      return true;
+    } catch (error) {
+      set({
+        feedback: buildThrownErrorFeedback(error, 'Failed to accept trustee invitation.'),
+      });
+      return false;
+    } finally {
+      set({ isSubmitting: false });
+    }
+  },
+
+  rejectTrusteeInvitation: async (
+    request,
+    actorPublicEncryptAddress,
+    actorPrivateEncryptKeyHex,
+    signingPrivateKeyHex
+  ) => {
+    if (!actorPublicEncryptAddress || !actorPrivateEncryptKeyHex || !signingPrivateKeyHex) {
+      set({
+        feedback: {
+          tone: 'error',
+          message: 'Actor signing or encryption credentials are missing.',
+          details: [],
+        },
+      });
+      return false;
+    }
+
+    set({
+      isSubmitting: true,
+      feedback: null,
+      error: null,
+    });
+
+    try {
+      const { signedTransaction } = await createRejectElectionTrusteeInvitationTransaction(
+        request.ElectionId,
+        request.InvitationId,
+        request.ActorPublicAddress,
+        actorPublicEncryptAddress,
+        actorPrivateEncryptKeyHex,
+        signingPrivateKeyHex
+      );
+      const submitResult = await submitTransaction(signedTransaction);
+
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit trustee rejection transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Trustee rejection submitted.',
+          details: [
+            'Waiting for block confirmation before the invitation status updates in the trustee roster.',
+          ],
+        },
+      });
+
+      const indexedElection = await waitForIndexedElectionMatch(
+        request.ElectionId,
+        (response) =>
+          response.TrusteeInvitations.some((invitation) =>
+            invitation.Id === request.InvitationId
+            && invitation.Status === ElectionTrusteeInvitationStatusProto.Rejected)
+      );
+
+      if (!indexedElection?.Success || !indexedElection.Election) {
+        return false;
+      }
+
+      await get().loadElection(request.ElectionId);
+      await get().loadCeremonyActionView(request.ActorPublicAddress, request.ElectionId);
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Trustee invitation rejected.',
+          details: [],
+        },
+      });
+      return true;
+    } catch (error) {
+      set({
+        feedback: buildThrownErrorFeedback(error, 'Failed to reject trustee invitation.'),
+      });
+      return false;
+    } finally {
+      set({ isSubmitting: false });
+    }
+  },
+
+  revokeInvitation: async (
+    request,
+    actorPublicEncryptAddress,
+    actorPrivateEncryptKeyHex,
+    signingPrivateKeyHex
+  ) => {
+    if (!actorPublicEncryptAddress || !actorPrivateEncryptKeyHex || !signingPrivateKeyHex) {
+      set({
+        feedback: {
+          tone: 'error',
+          message: 'Owner signing or encryption credentials are missing.',
+          details: [],
+        },
+      });
+      return false;
+    }
+
+    set({
+      isSubmitting: true,
+      feedback: null,
+      error: null,
+    });
+
+    try {
+      const { signedTransaction } = await createRevokeElectionTrusteeInvitationTransaction(
+        request.ElectionId,
+        request.InvitationId,
+        request.ActorPublicAddress,
+        actorPublicEncryptAddress,
+        actorPrivateEncryptKeyHex,
+        signingPrivateKeyHex
+      );
+      const submitResult = await submitTransaction(signedTransaction);
+
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit trustee revocation transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Trustee revocation submitted.',
+          details: [
+            'Waiting for block confirmation before the trustee roster shows the revoked invitation.',
+          ],
+        },
+      });
+
+      const indexedElection = await waitForIndexedElectionMatch(
+        request.ElectionId,
+        (response) =>
+          response.TrusteeInvitations.some((invitation) =>
+            invitation.Id === request.InvitationId
+            && invitation.Status === ElectionTrusteeInvitationStatusProto.Revoked)
+      );
+
+      if (!indexedElection?.Success || !indexedElection.Election) {
         return false;
       }
 
@@ -392,11 +1012,22 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     }
   },
 
-  startGovernedProposal: async (actionType) => {
+  startGovernedProposal: async (
+    actionType,
+    actorPublicEncryptAddress,
+    actorPrivateEncryptKeyHex,
+    signingPrivateKeyHex
+  ) => {
     const electionId = get().selectedElectionId;
     const ownerPublicAddress = get().ownerPublicAddress;
 
-    if (!electionId || !ownerPublicAddress) {
+    if (
+      !electionId ||
+      !ownerPublicAddress ||
+      !actorPublicEncryptAddress ||
+      !actorPrivateEncryptKeyHex ||
+      !signingPrivateKeyHex
+    ) {
       return false;
     }
 
@@ -407,14 +1038,51 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     });
 
     try {
-      const response = await electionsService.startElectionGovernedProposal({
-        ElectionId: electionId,
-        ActionType: actionType,
-        ActorPublicAddress: ownerPublicAddress,
+      const { signedTransaction, proposalId } = await createStartElectionGovernedProposalTransaction(
+        electionId,
+        actionType,
+        ownerPublicAddress,
+        actorPublicEncryptAddress,
+        actorPrivateEncryptKeyHex,
+        signingPrivateKeyHex,
+      );
+
+      const submitResult = await submitTransaction(signedTransaction);
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit governed proposal transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: `${getGovernedActionLabel(actionType)} proposal submitted.`,
+          details: ['Waiting for block confirmation before the governed proposal appears in the query view.'],
+        },
       });
 
-      if (!response.Success) {
-        set({ feedback: buildCommandFailureFeedback(response) });
+      const indexedElection = await waitForIndexedElectionMatch(
+        electionId,
+        (response) => {
+          const proposal = response.GovernedProposals.find((candidate) => candidate.Id === proposalId);
+          if (!proposal) {
+            return false;
+          }
+
+          if (actionType === ElectionGovernedActionTypeProto.Close) {
+            return Boolean(response.Election?.VoteAcceptanceLockedAt);
+          }
+
+          return true;
+        },
+      );
+      if (!indexedElection) {
         return false;
       }
 
@@ -438,9 +1106,16 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     }
   },
 
-  approveGovernedProposal: async (proposalId, actorPublicAddress, approvalNote = '') => {
+  approveGovernedProposal: async (
+    proposalId,
+    actorPublicAddress,
+    actorPublicEncryptAddress,
+    actorPrivateEncryptKeyHex,
+    signingPrivateKeyHex,
+    approvalNote = ''
+  ) => {
     const electionId = get().selectedElectionId;
-    if (!electionId) {
+    if (!electionId || !actorPublicEncryptAddress || !actorPrivateEncryptKeyHex || !signingPrivateKeyHex) {
       return false;
     }
 
@@ -451,15 +1126,43 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     });
 
     try {
-      const response = await electionsService.approveElectionGovernedProposal({
-        ElectionId: electionId,
-        ProposalId: proposalId,
-        ActorPublicAddress: actorPublicAddress,
-        ApprovalNote: approvalNote,
+      const { signedTransaction } = await createApproveElectionGovernedProposalTransaction(
+        electionId,
+        proposalId,
+        actorPublicAddress,
+        actorPublicEncryptAddress,
+        actorPrivateEncryptKeyHex,
+        approvalNote,
+        signingPrivateKeyHex,
+      );
+
+      const submitResult = await submitTransaction(signedTransaction);
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit governed approval transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Governed approval submitted.',
+          details: ['Waiting for block confirmation before the approval appears in the query view.'],
+        },
       });
 
-      if (!response.Success) {
-        set({ feedback: buildCommandFailureFeedback(response) });
+      const indexedElection = await waitForIndexedElectionMatch(
+        electionId,
+        (response) =>
+          response.GovernedProposalApprovals.some((approval) =>
+            approval.ProposalId === proposalId && approval.TrusteeUserAddress === actorPublicAddress),
+      );
+      if (!indexedElection) {
         return false;
       }
 
@@ -470,11 +1173,15 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
         await get().loadOwnerDashboard(ownerPublicAddress);
       }
 
+      const indexedProposal = indexedElection.GovernedProposals.find(
+        (candidate) => candidate.Id === proposalId
+      );
+
       set({
         feedback: {
           tone: 'success',
           message:
-            response.GovernedProposal?.ExecutionStatus ===
+            indexedProposal?.ExecutionStatus ===
             ElectionGovernedProposalExecutionStatusProto.ExecutionSucceeded
               ? 'Approval recorded and proposal executed.'
               : 'Approval recorded.',
@@ -492,13 +1199,31 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     }
   },
 
-  retryGovernedProposalExecution: async (proposalId) => {
+  retryGovernedProposalExecution: async (
+    proposalId,
+    actorPublicEncryptAddress,
+    actorPrivateEncryptKeyHex,
+    signingPrivateKeyHex
+  ) => {
     const electionId = get().selectedElectionId;
     const ownerPublicAddress = get().ownerPublicAddress;
 
-    if (!electionId || !ownerPublicAddress) {
+    if (
+      !electionId ||
+      !ownerPublicAddress ||
+      !actorPublicEncryptAddress ||
+      !actorPrivateEncryptKeyHex ||
+      !signingPrivateKeyHex
+    ) {
       return false;
     }
+
+    const baselineProposal = get().selectedElection?.GovernedProposals.find(
+      (candidate) => candidate.Id === proposalId
+    );
+    const baselineAttemptKey = baselineProposal?.LastExecutionAttemptedAt
+      ? `${baselineProposal.LastExecutionAttemptedAt.seconds}:${baselineProposal.LastExecutionAttemptedAt.nanos}`
+      : '';
 
     set({
       isSubmitting: true,
@@ -507,23 +1232,70 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     });
 
     try {
-      const response = await electionsService.retryElectionGovernedProposalExecution({
-        ElectionId: electionId,
-        ProposalId: proposalId,
-        ActorPublicAddress: ownerPublicAddress,
+      const { signedTransaction } = await createRetryElectionGovernedProposalExecutionTransaction(
+        electionId,
+        proposalId,
+        ownerPublicAddress,
+        actorPublicEncryptAddress,
+        actorPrivateEncryptKeyHex,
+        signingPrivateKeyHex,
+      );
+
+      const submitResult = await submitTransaction(signedTransaction);
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit governed retry transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Governed proposal retry submitted.',
+          details: ['Waiting for block confirmation before the proposal execution state updates.'],
+        },
       });
 
-      if (!response.Success) {
-        set({ feedback: buildCommandFailureFeedback(response) });
+      const indexedElection = await waitForIndexedElectionMatch(
+        electionId,
+        (response) => {
+          const proposal = response.GovernedProposals.find((candidate) => candidate.Id === proposalId);
+          if (!proposal) {
+            return false;
+          }
+
+          if (proposal.ExecutionStatus === ElectionGovernedProposalExecutionStatusProto.ExecutionSucceeded) {
+            return true;
+          }
+
+          const nextAttemptKey = proposal.LastExecutionAttemptedAt
+            ? `${proposal.LastExecutionAttemptedAt.seconds}:${proposal.LastExecutionAttemptedAt.nanos}`
+            : '';
+          return nextAttemptKey !== baselineAttemptKey;
+        },
+      );
+      if (!indexedElection) {
         return false;
       }
 
       await get().loadElection(electionId);
       await get().loadOwnerDashboard(ownerPublicAddress);
+      const indexedProposal = indexedElection.GovernedProposals.find(
+        (candidate) => candidate.Id === proposalId
+      );
       set({
         feedback: {
           tone: 'success',
-          message: 'Governed proposal execution retried.',
+          message:
+            indexedProposal?.ExecutionStatus ===
+            ElectionGovernedProposalExecutionStatusProto.ExecutionSucceeded
+              ? 'Governed proposal execution retried.'
+              : 'Governed proposal retry indexed, but execution is still failing.',
           details: [],
         },
       });
@@ -538,11 +1310,195 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     }
   },
 
-  openElection: async (requiredWarningCodes) => {
-    const electionId = get().selectedElectionId;
-    const ownerPublicAddress = get().ownerPublicAddress;
+  startElectionCeremony: async (
+    request,
+    actorPublicEncryptAddress,
+    actorPrivateEncryptKeyHex,
+    signingPrivateKeyHex
+  ) => {
+    if (!actorPublicEncryptAddress || !actorPrivateEncryptKeyHex || !signingPrivateKeyHex) {
+      set({
+        feedback: {
+          tone: 'error',
+          message: 'Actor signing or encryption credentials are missing.',
+          details: [],
+        },
+      });
+      return false;
+    }
 
-    if (!electionId || !ownerPublicAddress) {
+    const baselineVersionNumber = Math.max(
+      0,
+      ...(get().selectedElection?.CeremonyVersions ?? []).map((version) => version.VersionNumber)
+    );
+
+    set({
+      isSubmitting: true,
+      feedback: null,
+      error: null,
+    });
+
+    try {
+      const { signedTransaction } = await createStartElectionCeremonyTransaction(
+        request.ElectionId,
+        request.ActorPublicAddress,
+        actorPublicEncryptAddress,
+        actorPrivateEncryptKeyHex,
+        request.ProfileId,
+        signingPrivateKeyHex,
+      );
+      const submitResult = await submitTransaction(signedTransaction);
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit start ceremony transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Ceremony version start submitted.',
+          details: ['Waiting for block confirmation before the ceremony version appears in the query view.'],
+        },
+      });
+
+      const indexedElection = await waitForIndexedElectionMatch(
+        request.ElectionId,
+        (response) =>
+          response.CeremonyVersions.some((version) =>
+            version.ProfileId === request.ProfileId
+            && version.VersionNumber > baselineVersionNumber),
+      );
+      if (!indexedElection) {
+        return false;
+      }
+
+      await refreshElectionContext(get, request.ActorPublicAddress);
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Ceremony version started.',
+          details: [],
+        },
+      });
+      return true;
+    } catch (error) {
+      set({
+        feedback: buildThrownErrorFeedback(error, 'Failed to start ceremony version.'),
+      });
+      return false;
+    } finally {
+      set({ isSubmitting: false });
+    }
+  },
+
+  restartElectionCeremony: async (
+    request,
+    actorPublicEncryptAddress,
+    actorPrivateEncryptKeyHex,
+    signingPrivateKeyHex
+  ) => {
+    if (!actorPublicEncryptAddress || !actorPrivateEncryptKeyHex || !signingPrivateKeyHex) {
+      set({
+        feedback: {
+          tone: 'error',
+          message: 'Actor signing or encryption credentials are missing.',
+          details: [],
+        },
+      });
+      return false;
+    }
+
+    const baselineVersionNumber = Math.max(
+      0,
+      ...(get().selectedElection?.CeremonyVersions ?? []).map((version) => version.VersionNumber)
+    );
+
+    set({
+      isSubmitting: true,
+      feedback: null,
+      error: null,
+    });
+
+    try {
+      const { signedTransaction } = await createRestartElectionCeremonyTransaction(
+        request.ElectionId,
+        request.ActorPublicAddress,
+        actorPublicEncryptAddress,
+        actorPrivateEncryptKeyHex,
+        request.ProfileId,
+        request.RestartReason,
+        signingPrivateKeyHex,
+      );
+      const submitResult = await submitTransaction(signedTransaction);
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit restart ceremony transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Ceremony version restart submitted.',
+          details: ['Waiting for block confirmation before the new ceremony version appears in the query view.'],
+        },
+      });
+
+      const indexedElection = await waitForIndexedElectionMatch(
+        request.ElectionId,
+        (response) =>
+          response.CeremonyVersions.some((version) =>
+            version.ProfileId === request.ProfileId
+            && version.VersionNumber > baselineVersionNumber),
+      );
+      if (!indexedElection) {
+        return false;
+      }
+
+      await refreshElectionContext(get, request.ActorPublicAddress);
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Ceremony version restarted.',
+          details: [],
+        },
+      });
+      return true;
+    } catch (error) {
+      set({
+        feedback: buildThrownErrorFeedback(error, 'Failed to restart ceremony version.'),
+      });
+      return false;
+    } finally {
+      set({ isSubmitting: false });
+    }
+  },
+
+  publishElectionCeremonyTransportKey: async (
+    request,
+    actorPublicEncryptAddress,
+    actorPrivateEncryptKeyHex,
+    signingPrivateKeyHex
+  ) => {
+    if (!actorPublicEncryptAddress || !actorPrivateEncryptKeyHex || !signingPrivateKeyHex) {
+      set({
+        feedback: {
+          tone: 'error',
+          message: 'Actor signing or encryption credentials are missing.',
+          details: [],
+        },
+      });
       return false;
     }
 
@@ -553,18 +1509,717 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     });
 
     try {
-      const response = await electionsService.openElection({
-        ElectionId: electionId,
-        ActorPublicAddress: ownerPublicAddress,
-        RequiredWarningCodes: requiredWarningCodes,
-        FrozenEligibleVoterSetHash: '',
-        TrusteePolicyExecutionReference: '',
-        ReportingPolicyExecutionReference: '',
-        ReviewWindowExecutionReference: '',
+      const { signedTransaction } = await createPublishElectionCeremonyTransportKeyTransaction(
+        request.ElectionId,
+        request.ActorPublicAddress,
+        actorPublicEncryptAddress,
+        actorPrivateEncryptKeyHex,
+        request.CeremonyVersionId,
+        request.TransportPublicKeyFingerprint,
+        signingPrivateKeyHex,
+      );
+      const submitResult = await submitTransaction(signedTransaction);
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit transport key transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Transport key submission accepted.',
+          details: ['Waiting for block confirmation before the trustee transport key appears in the query view.'],
+        },
       });
 
-      if (!response.Success) {
-        set({ feedback: buildCommandFailureFeedback(response) });
+      const indexedActionView = await waitForIndexedCeremonyActionViewMatch(
+        request.ElectionId,
+        request.ActorPublicAddress,
+        (response) =>
+          response.SelfTrusteeState?.TransportPublicKeyFingerprint === request.TransportPublicKeyFingerprint
+          && Boolean(response.SelfTrusteeState?.TransportPublicKeyPublishedAt),
+      );
+      if (!indexedActionView) {
+        return false;
+      }
+
+      await refreshElectionContext(get, request.ActorPublicAddress);
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Transport key published.',
+          details: [],
+        },
+      });
+      return true;
+    } catch (error) {
+      set({
+        feedback: buildThrownErrorFeedback(error, 'Failed to publish transport key.'),
+      });
+      return false;
+    } finally {
+      set({ isSubmitting: false });
+    }
+  },
+
+  joinElectionCeremony: async (
+    request,
+    actorPublicEncryptAddress,
+    actorPrivateEncryptKeyHex,
+    signingPrivateKeyHex
+  ) => {
+    if (!actorPublicEncryptAddress || !actorPrivateEncryptKeyHex || !signingPrivateKeyHex) {
+      set({
+        feedback: {
+          tone: 'error',
+          message: 'Actor signing or encryption credentials are missing.',
+          details: [],
+        },
+      });
+      return false;
+    }
+
+    set({
+      isSubmitting: true,
+      feedback: null,
+      error: null,
+    });
+
+    try {
+      const { signedTransaction } = await createJoinElectionCeremonyTransaction(
+        request.ElectionId,
+        request.ActorPublicAddress,
+        actorPublicEncryptAddress,
+        actorPrivateEncryptKeyHex,
+        request.CeremonyVersionId,
+        signingPrivateKeyHex,
+      );
+      const submitResult = await submitTransaction(signedTransaction);
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit join ceremony transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Ceremony join submitted.',
+          details: ['Waiting for block confirmation before the joined state appears in the query view.'],
+        },
+      });
+
+      const indexedActionView = await waitForIndexedCeremonyActionViewMatch(
+        request.ElectionId,
+        request.ActorPublicAddress,
+        (response) => Boolean(response.SelfTrusteeState?.JoinedAt),
+      );
+      if (!indexedActionView) {
+        return false;
+      }
+
+      await refreshElectionContext(get, request.ActorPublicAddress);
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Joined the ceremony version.',
+          details: [],
+        },
+      });
+      return true;
+    } catch (error) {
+      set({
+        feedback: buildThrownErrorFeedback(error, 'Failed to join the ceremony version.'),
+      });
+      return false;
+    } finally {
+      set({ isSubmitting: false });
+    }
+  },
+
+  recordElectionCeremonySelfTestSuccess: async (
+    request,
+    actorPublicEncryptAddress,
+    actorPrivateEncryptKeyHex,
+    signingPrivateKeyHex
+  ) => {
+    if (!actorPublicEncryptAddress || !actorPrivateEncryptKeyHex || !signingPrivateKeyHex) {
+      set({
+        feedback: {
+          tone: 'error',
+          message: 'Actor signing or encryption credentials are missing.',
+          details: [],
+        },
+      });
+      return false;
+    }
+
+    set({
+      isSubmitting: true,
+      feedback: null,
+      error: null,
+    });
+
+    try {
+      const { signedTransaction } = await createRecordElectionCeremonySelfTestSuccessTransaction(
+        request.ElectionId,
+        request.ActorPublicAddress,
+        actorPublicEncryptAddress,
+        actorPrivateEncryptKeyHex,
+        request.CeremonyVersionId,
+        signingPrivateKeyHex,
+      );
+      const submitResult = await submitTransaction(signedTransaction);
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit ceremony self-test transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Ceremony self-test submission accepted.',
+          details: ['Waiting for block confirmation before the self-test state appears in the query view.'],
+        },
+      });
+
+      const indexedActionView = await waitForIndexedCeremonyActionViewMatch(
+        request.ElectionId,
+        request.ActorPublicAddress,
+        (response) => Boolean(response.SelfTrusteeState?.SelfTestSucceededAt),
+      );
+      if (!indexedActionView) {
+        return false;
+      }
+
+      await refreshElectionContext(get, request.ActorPublicAddress);
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Ceremony self-test recorded.',
+          details: [],
+        },
+      });
+      return true;
+    } catch (error) {
+      set({
+        feedback: buildThrownErrorFeedback(error, 'Failed to record ceremony self-test.'),
+      });
+      return false;
+    } finally {
+      set({ isSubmitting: false });
+    }
+  },
+
+  submitElectionCeremonyMaterial: async (
+    request,
+    actorPublicEncryptAddress,
+    actorPrivateEncryptKeyHex,
+    signingPrivateKeyHex
+  ) => {
+    if (!actorPublicEncryptAddress || !actorPrivateEncryptKeyHex || !signingPrivateKeyHex) {
+      set({
+        feedback: {
+          tone: 'error',
+          message: 'Actor signing or encryption credentials are missing.',
+          details: [],
+        },
+      });
+      return false;
+    }
+
+    set({
+      isSubmitting: true,
+      feedback: null,
+      error: null,
+    });
+
+    try {
+      const { signedTransaction } = await createSubmitElectionCeremonyMaterialTransaction(
+        request.ElectionId,
+        request.ActorPublicAddress,
+        actorPublicEncryptAddress,
+        actorPrivateEncryptKeyHex,
+        request.CeremonyVersionId,
+        request.RecipientTrusteeUserAddress,
+        request.MessageType,
+        request.PayloadVersion,
+        request.EncryptedPayload,
+        request.PayloadFingerprint,
+        signingPrivateKeyHex,
+      );
+      const submitResult = await submitTransaction(signedTransaction);
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit ceremony material transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Ceremony material submission accepted.',
+          details: ['Waiting for block confirmation before the material appears in the query view.'],
+        },
+      });
+
+      const indexedActionView = await waitForIndexedCeremonyActionViewMatch(
+        request.ElectionId,
+        request.ActorPublicAddress,
+        (response) =>
+          Boolean(response.SelfTrusteeState?.MaterialSubmittedAt)
+          || Boolean(response.SelfTrusteeState?.CompletedAt),
+      );
+      if (!indexedActionView) {
+        return false;
+      }
+
+      await refreshElectionContext(get, request.ActorPublicAddress);
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Ceremony material submitted.',
+          details: [],
+        },
+      });
+      return true;
+    } catch (error) {
+      set({
+        feedback: buildThrownErrorFeedback(error, 'Failed to submit ceremony material.'),
+      });
+      return false;
+    } finally {
+      set({ isSubmitting: false });
+    }
+  },
+
+  recordElectionCeremonyValidationFailure: async (
+    request,
+    actorPublicEncryptAddress,
+    actorPrivateEncryptKeyHex,
+    signingPrivateKeyHex
+  ) => {
+    if (!actorPublicEncryptAddress || !actorPrivateEncryptKeyHex || !signingPrivateKeyHex) {
+      set({
+        feedback: {
+          tone: 'error',
+          message: 'Actor signing or encryption credentials are missing.',
+          details: [],
+        },
+      });
+      return false;
+    }
+
+    set({
+      isSubmitting: true,
+      feedback: null,
+      error: null,
+    });
+
+    try {
+      const { signedTransaction } =
+        await createRecordElectionCeremonyValidationFailureTransaction(
+          request.ElectionId,
+          request.ActorPublicAddress,
+          actorPublicEncryptAddress,
+          actorPrivateEncryptKeyHex,
+          request.CeremonyVersionId,
+          request.TrusteeUserAddress,
+          request.ValidationFailureReason,
+          request.EvidenceReference,
+          signingPrivateKeyHex,
+        );
+      const submitResult = await submitTransaction(signedTransaction);
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit ceremony validation failure transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Ceremony validation failure submission accepted.',
+          details: ['Waiting for block confirmation before the trustee validation state updates in the query view.'],
+        },
+      });
+
+      const indexedElection = await waitForIndexedElectionMatch(
+        request.ElectionId,
+        (response) =>
+          response.ActiveCeremonyTrusteeStates.some((state) =>
+            state.TrusteeUserAddress === request.TrusteeUserAddress
+            && Boolean(state.ValidationFailedAt)),
+      );
+      if (!indexedElection) {
+        return false;
+      }
+
+      await refreshElectionContext(get, request.ActorPublicAddress);
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Ceremony validation failure recorded.',
+          details: [],
+        },
+      });
+      return true;
+    } catch (error) {
+      set({
+        feedback: buildThrownErrorFeedback(error, 'Failed to record ceremony validation failure.'),
+      });
+      return false;
+    } finally {
+      set({ isSubmitting: false });
+    }
+  },
+
+  completeElectionCeremonyTrustee: async (
+    request,
+    actorPublicEncryptAddress,
+    actorPrivateEncryptKeyHex,
+    signingPrivateKeyHex
+  ) => {
+    if (!actorPublicEncryptAddress || !actorPrivateEncryptKeyHex || !signingPrivateKeyHex) {
+      set({
+        feedback: {
+          tone: 'error',
+          message: 'Actor signing or encryption credentials are missing.',
+          details: [],
+        },
+      });
+      return false;
+    }
+
+    set({
+      isSubmitting: true,
+      feedback: null,
+      error: null,
+    });
+
+    try {
+      const { signedTransaction } = await createCompleteElectionCeremonyTrusteeTransaction(
+        request.ElectionId,
+        request.ActorPublicAddress,
+        actorPublicEncryptAddress,
+        actorPrivateEncryptKeyHex,
+        request.CeremonyVersionId,
+        request.TrusteeUserAddress,
+        request.ShareVersion,
+        request.TallyPublicKeyFingerprint,
+        signingPrivateKeyHex,
+      );
+      const submitResult = await submitTransaction(signedTransaction);
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit ceremony completion transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Trustee ceremony completion submission accepted.',
+          details: ['Waiting for block confirmation before the completed trustee state appears in the query view.'],
+        },
+      });
+
+      const indexedActionView = await waitForIndexedCeremonyActionViewMatch(
+        request.ElectionId,
+        request.TrusteeUserAddress,
+        (response) =>
+          response.SelfTrusteeState?.TrusteeUserAddress === request.TrusteeUserAddress
+          && Boolean(response.SelfTrusteeState?.CompletedAt)
+          && response.SelfTrusteeState?.ShareVersion === request.ShareVersion,
+      );
+      if (!indexedActionView) {
+        return false;
+      }
+
+      await refreshElectionContext(get, request.TrusteeUserAddress);
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Trustee ceremony completion recorded.',
+          details: [],
+        },
+      });
+      return true;
+    } catch (error) {
+      set({
+        feedback: buildThrownErrorFeedback(error, 'Failed to complete the trustee ceremony flow.'),
+      });
+      return false;
+    } finally {
+      set({ isSubmitting: false });
+    }
+  },
+
+  recordElectionCeremonyShareExport: async (
+    request,
+    actorPublicEncryptAddress,
+    actorPrivateEncryptKeyHex,
+    signingPrivateKeyHex
+  ) => {
+    if (!actorPublicEncryptAddress || !actorPrivateEncryptKeyHex || !signingPrivateKeyHex) {
+      set({
+        feedback: {
+          tone: 'error',
+          message: 'Actor signing or encryption credentials are missing.',
+          details: [],
+        },
+      });
+      return false;
+    }
+
+    set({
+      isSubmitting: true,
+      feedback: null,
+      error: null,
+    });
+
+    try {
+      const { signedTransaction } = await createRecordElectionCeremonyShareExportTransaction(
+        request.ElectionId,
+        request.ActorPublicAddress,
+        actorPublicEncryptAddress,
+        actorPrivateEncryptKeyHex,
+        request.CeremonyVersionId,
+        request.ShareVersion,
+        signingPrivateKeyHex,
+      );
+      const submitResult = await submitTransaction(signedTransaction);
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit share export transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Share export submission accepted.',
+          details: ['Waiting for block confirmation before the share custody state updates in the query view.'],
+        },
+      });
+
+      const indexedActionView = await waitForIndexedCeremonyActionViewMatch(
+        request.ElectionId,
+        request.ActorPublicAddress,
+        (response) =>
+          response.SelfShareCustody?.ShareVersion === request.ShareVersion
+          && Boolean(response.SelfShareCustody?.LastExportedAt),
+      );
+      if (!indexedActionView) {
+        return false;
+      }
+
+      await refreshElectionContext(get, request.ActorPublicAddress);
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Share export recorded.',
+          details: [],
+        },
+      });
+      return true;
+    } catch (error) {
+      set({
+        feedback: buildThrownErrorFeedback(error, 'Failed to record share export.'),
+      });
+      return false;
+    } finally {
+      set({ isSubmitting: false });
+    }
+  },
+
+  recordElectionCeremonyShareImport: async (
+    request,
+    actorPublicEncryptAddress,
+    actorPrivateEncryptKeyHex,
+    signingPrivateKeyHex
+  ) => {
+    if (!actorPublicEncryptAddress || !actorPrivateEncryptKeyHex || !signingPrivateKeyHex) {
+      set({
+        feedback: {
+          tone: 'error',
+          message: 'Actor signing or encryption credentials are missing.',
+          details: [],
+        },
+      });
+      return false;
+    }
+
+    set({
+      isSubmitting: true,
+      feedback: null,
+      error: null,
+    });
+
+    try {
+      const { signedTransaction } = await createRecordElectionCeremonyShareImportTransaction(
+        request.ElectionId,
+        request.ActorPublicAddress,
+        actorPublicEncryptAddress,
+        actorPrivateEncryptKeyHex,
+        request.CeremonyVersionId,
+        request.ImportedElectionId,
+        request.ImportedCeremonyVersionId,
+        request.ImportedTrusteeUserAddress,
+        request.ImportedShareVersion,
+        signingPrivateKeyHex,
+      );
+      const submitResult = await submitTransaction(signedTransaction);
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit share import transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Share import submission accepted.',
+          details: ['Waiting for block confirmation before the share import state appears in the query view.'],
+        },
+      });
+
+      const indexedActionView = await waitForIndexedCeremonyActionViewMatch(
+        request.ElectionId,
+        request.ActorPublicAddress,
+        (response) => Boolean(response.SelfShareCustody?.LastImportedAt),
+      );
+      if (!indexedActionView) {
+        return false;
+      }
+
+      await refreshElectionContext(get, request.ActorPublicAddress);
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Share import recorded.',
+          details: [],
+        },
+      });
+      return true;
+    } catch (error) {
+      set({
+        feedback: buildThrownErrorFeedback(error, 'Failed to record share import.'),
+      });
+      return false;
+    } finally {
+      set({ isSubmitting: false });
+    }
+  },
+
+  openElection: async (
+    requiredWarningCodes,
+    actorPublicEncryptAddress,
+    actorPrivateEncryptKeyHex,
+    signingPrivateKeyHex
+  ) => {
+    const electionId = get().selectedElectionId;
+    const ownerPublicAddress = get().ownerPublicAddress;
+
+    if (
+      !electionId ||
+      !ownerPublicAddress ||
+      !actorPublicEncryptAddress ||
+      !actorPrivateEncryptKeyHex ||
+      !signingPrivateKeyHex
+    ) {
+      return false;
+    }
+
+    set({
+      isSubmitting: true,
+      feedback: null,
+      error: null,
+    });
+
+    try {
+      const { signedTransaction } = await createOpenElectionTransaction(
+        electionId,
+        ownerPublicAddress,
+        actorPublicEncryptAddress,
+        actorPrivateEncryptKeyHex,
+        requiredWarningCodes,
+        null,
+        '',
+        '',
+        '',
+        signingPrivateKeyHex,
+      );
+
+      const submitResult = await submitTransaction(signedTransaction);
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit open election transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Election open submitted.',
+          details: ['Waiting for block confirmation before the open boundary appears in the query view.'],
+        },
+      });
+
+      const indexedElection = await waitForIndexedElectionMatch(
+        electionId,
+        (response) =>
+          response.Election?.LifecycleState === ElectionLifecycleStateProto.Open
+          && Boolean(response.Election?.OpenArtifactId),
+      );
+      if (!indexedElection) {
         return false;
       }
 
@@ -588,11 +2243,21 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     }
   },
 
-  closeElection: async () => {
+  closeElection: async (
+    actorPublicEncryptAddress,
+    actorPrivateEncryptKeyHex,
+    signingPrivateKeyHex
+  ) => {
     const electionId = get().selectedElectionId;
     const ownerPublicAddress = get().ownerPublicAddress;
 
-    if (!electionId || !ownerPublicAddress) {
+    if (
+      !electionId ||
+      !ownerPublicAddress ||
+      !actorPublicEncryptAddress ||
+      !actorPrivateEncryptKeyHex ||
+      !signingPrivateKeyHex
+    ) {
       return false;
     }
 
@@ -603,15 +2268,43 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     });
 
     try {
-      const response = await electionsService.closeElection({
-        ElectionId: electionId,
-        ActorPublicAddress: ownerPublicAddress,
-        AcceptedBallotSetHash: '',
-        FinalEncryptedTallyHash: '',
+      const { signedTransaction } = await createCloseElectionTransaction(
+        electionId,
+        ownerPublicAddress,
+        actorPublicEncryptAddress,
+        actorPrivateEncryptKeyHex,
+        null,
+        null,
+        signingPrivateKeyHex,
+      );
+
+      const submitResult = await submitTransaction(signedTransaction);
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit close election transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Election close submitted.',
+          details: ['Waiting for block confirmation before the close boundary appears in the query view.'],
+        },
       });
 
-      if (!response.Success) {
-        set({ feedback: buildCommandFailureFeedback(response) });
+      const indexedElection = await waitForIndexedElectionMatch(
+        electionId,
+        (response) =>
+          response.Election?.LifecycleState === ElectionLifecycleStateProto.Closed
+          && Boolean(response.Election?.CloseArtifactId),
+      );
+      if (!indexedElection) {
         return false;
       }
 
@@ -635,11 +2328,21 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     }
   },
 
-  finalizeElection: async () => {
+  finalizeElection: async (
+    actorPublicEncryptAddress,
+    actorPrivateEncryptKeyHex,
+    signingPrivateKeyHex
+  ) => {
     const electionId = get().selectedElectionId;
     const ownerPublicAddress = get().ownerPublicAddress;
 
-    if (!electionId || !ownerPublicAddress) {
+    if (
+      !electionId ||
+      !ownerPublicAddress ||
+      !actorPublicEncryptAddress ||
+      !actorPrivateEncryptKeyHex ||
+      !signingPrivateKeyHex
+    ) {
       return false;
     }
 
@@ -650,15 +2353,43 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     });
 
     try {
-      const response = await electionsService.finalizeElection({
-        ElectionId: electionId,
-        ActorPublicAddress: ownerPublicAddress,
-        AcceptedBallotSetHash: '',
-        FinalEncryptedTallyHash: '',
+      const { signedTransaction } = await createFinalizeElectionTransaction(
+        electionId,
+        ownerPublicAddress,
+        actorPublicEncryptAddress,
+        actorPrivateEncryptKeyHex,
+        null,
+        null,
+        signingPrivateKeyHex,
+      );
+
+      const submitResult = await submitTransaction(signedTransaction);
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit finalize election transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Election finalize submitted.',
+          details: ['Waiting for block confirmation before the finalize boundary appears in the query view.'],
+        },
       });
 
-      if (!response.Success) {
-        set({ feedback: buildCommandFailureFeedback(response) });
+      const indexedElection = await waitForIndexedElectionMatch(
+        electionId,
+        (response) =>
+          response.Election?.LifecycleState === ElectionLifecycleStateProto.Finalized
+          && Boolean(response.Election?.FinalizeArtifactId),
+      );
+      if (!indexedElection) {
         return false;
       }
 

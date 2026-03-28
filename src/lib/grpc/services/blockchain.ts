@@ -3,11 +3,13 @@ import { getGrpcClient } from '../client';
 import type {
   GetBlockchainHeightRequest,
   GetBlockchainHeightReply,
+  GetElectionEnvelopeContextReply,
   SubmitSignedTransactionReply,
   TransactionStatus,
 } from '../types';
 
 const SERVICE_NAME = 'rpcHush.HushBlockchain';
+let electionEnvelopeContextPromise: Promise<GetElectionEnvelopeContextReply> | null = null;
 
 export const blockchainService = {
   /**
@@ -21,6 +23,30 @@ export const blockchainService = {
       'GetBlockchainHeight',
       request
     );
+  },
+
+  async getElectionEnvelopeContext(): Promise<GetElectionEnvelopeContextReply> {
+    if (!electionEnvelopeContextPromise) {
+      electionEnvelopeContextPromise = fetch(buildApiUrl('/api/blockchain/election-envelope-context'))
+        .then(async (response) => {
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `HTTP ${response.status}`);
+          }
+
+          const data = await response.json();
+          return {
+            NodePublicEncryptAddress: data.nodePublicEncryptAddress ?? '',
+            ElectionEnvelopeVersion: data.electionEnvelopeVersion ?? '',
+          };
+        })
+        .catch((error) => {
+          electionEnvelopeContextPromise = null;
+          throw error;
+        });
+    }
+
+    return electionEnvelopeContextPromise;
   },
 
   /**

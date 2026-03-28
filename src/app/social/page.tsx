@@ -518,6 +518,7 @@ export default function SocialPage() {
   const [notificationOpenState, setNotificationOpenState] = useState<NotificationOpenState | null>(null);
   const [renderFollowingItems, setRenderFollowingItems] = useState<FollowingItem[]>([]);
   const [renderCircleItems, setRenderCircleItems] = useState<CircleItem[]>([]);
+  const [authoritativeOwnInnerCircle, setAuthoritativeOwnInnerCircle] = useState<CircleItem | null>(null);
   const [remoteCircleItems, setRemoteCircleItems] = useState<CircleItem[]>([]);
   const [newPostDraft, setNewPostDraft] = useState("");
   const [postAudience, setPostAudience] = useState<"public" | "close">("close");
@@ -546,6 +547,58 @@ export default function SocialPage() {
   const ownAuthorLabel = `${ownDisplayName} (YOU)`;
   const ownAddressNormalized = normalizePublicAddress(credentials?.signingPublicKey ?? "");
   const ownInitials = currentUser?.initials?.trim() || getDisplayInitials(ownDisplayName);
+  useEffect(() => {
+    let cancelled = false;
+
+    if (selectedNav !== "following" || ownAddressNormalized.length === 0) {
+      setAuthoritativeOwnInnerCircle(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void (async () => {
+      try {
+        const innerCircle = await getInnerCircle(ownAddressNormalized);
+        if (!innerCircle.exists || !innerCircle.feedId) {
+          if (!cancelled) {
+            setAuthoritativeOwnInnerCircle(null);
+          }
+          return;
+        }
+
+        const members = Array.from(
+          new Set(
+            (await groupService.getGroupMembers(innerCircle.feedId))
+              .map((member) => normalizePublicAddress(member.publicAddress))
+              .filter((member) => member.length > 0)
+          )
+        );
+
+        if (cancelled) {
+          return;
+        }
+
+        setAuthoritativeOwnInnerCircle({
+          feedId: innerCircle.feedId,
+          name: "Inner Circle",
+          isInnerCircle: true,
+          members,
+          memberCount: members.length,
+          ownerPublicAddress: ownAddressNormalized,
+        });
+      } catch {
+        if (!cancelled) {
+          setAuthoritativeOwnInnerCircle(null);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [innerCircleSync.attemptCount, innerCircleSync.status, ownAddressNormalized, selectedNav]);
+
   const circleNameByFeedId = useMemo(() => {
     const lookup = new Map<string, string>();
     for (const circle of renderCircleItems) {
@@ -690,7 +743,40 @@ export default function SocialPage() {
   );
   const followingItems = useMemo<FollowingItem[]>(() => {
     const ownAddress = credentials?.signingPublicKey;
-    const circleFeeds = feeds.filter((feed) => feed.type === "group" && isCircleFeed(feed.name, feed.description));
+    const localCircleMemberships = feeds
+      .filter((feed) => feed.type === "group" && isCircleFeed(feed.name, feed.description))
+      .map((feed) => ({
+        feedId: normalizeFeedId(feed.id),
+        name: isInnerCircleName(feed.name) ? "Inner Circle" : feed.name,
+        members: Array.from(
+          new Set(
+            (
+              groupMembers[feed.id]?.map((member) => normalizePublicAddress(member.publicAddress)) ??
+              feed.participants.map((participant) => normalizePublicAddress(participant))
+            ).filter((member) => member.length > 0)
+          )
+        ),
+      }));
+    const authoritativeCircleMemberships = authoritativeOwnInnerCircle
+      ? [
+          {
+            feedId: normalizeFeedId(authoritativeOwnInnerCircle.feedId),
+            name: authoritativeOwnInnerCircle.name,
+            members: authoritativeOwnInnerCircle.members,
+          },
+        ]
+      : [];
+    const circleMembershipsByFeedId = new Map<
+      string,
+      { feedId: string; name: string; members: string[] }
+    >();
+    for (const membership of localCircleMemberships) {
+      circleMembershipsByFeedId.set(membership.feedId, membership);
+    }
+    for (const membership of authoritativeCircleMemberships) {
+      circleMembershipsByFeedId.set(membership.feedId, membership);
+    }
+    const resolvedCircleMemberships = Array.from(circleMembershipsByFeedId.values());
     const followedByAddress = new Map<string, FollowingItem>();
 
     for (const feed of feeds) {
@@ -706,14 +792,11 @@ export default function SocialPage() {
       }
       const normalizedOtherParticipant = normalizePublicAddress(otherParticipant);
 
-      const circleNames = circleFeeds
-        .filter((circleFeed) => {
-          const members =
-            groupMembers[circleFeed.id]?.map((member) => normalizePublicAddress(member.publicAddress)) ??
-            circleFeed.participants.map((participant) => normalizePublicAddress(participant));
-          return members.includes(normalizedOtherParticipant);
+      const circleNames = resolvedCircleMemberships
+        .filter((circleMembership) => {
+          return circleMembership.members.includes(normalizedOtherParticipant);
         })
-        .map((circleFeed) => (isInnerCircleName(circleFeed.name) ? "Inner Circle" : circleFeed.name))
+        .map((circleMembership) => circleMembership.name)
         .filter((name): name is string => Boolean(name));
 
       const entry = followedByAddress.get(normalizedOtherParticipant);
@@ -734,7 +817,7 @@ export default function SocialPage() {
     }
 
     return Array.from(followedByAddress.values()).sort((a, b) => a.displayName.localeCompare(b.displayName));
-  }, [credentials?.signingPublicKey, feeds, groupMembers]);
+  }, [authoritativeOwnInnerCircle, credentials?.signingPublicKey, feeds, groupMembers]);
 
   const circleItems = useMemo<CircleItem[]>(() => {
     const ownAddress = credentials?.signingPublicKey;
@@ -771,17 +854,18 @@ export default function SocialPage() {
       };
     });
 
-    for (const remoteCircle of remoteCircleItems) {
-      if (allCircles.some((circle) => circle.feedId === remoteCircle.feedId)) {
+    const authoritativeOwnCircleItems = authoritativeOwnInnerCircle ? [authoritativeOwnInnerCircle] : [];
+    for (const authoritativeCircle of authoritativeOwnCircleItems.concat(remoteCircleItems)) {
+      if (allCircles.some((circle) => circle.feedId === authoritativeCircle.feedId)) {
         continue;
       }
 
       const uniqueMembers = Array.from(
-        new Set(remoteCircle.members.filter((member) => member !== normalizedOwnAddress))
+        new Set(authoritativeCircle.members.filter((member) => member !== normalizedOwnAddress))
       );
 
       allCircles.push({
-        ...remoteCircle,
+        ...authoritativeCircle,
         members: uniqueMembers,
         memberCount: uniqueMembers.length,
       });
@@ -807,7 +891,7 @@ export default function SocialPage() {
       }
       return left.name.localeCompare(right.name);
     });
-  }, [credentials?.signingPublicKey, feeds, groupMembers, remoteCircleItems]);
+  }, [authoritativeOwnInnerCircle, credentials?.signingPublicKey, feeds, groupMembers, remoteCircleItems]);
 
   const followingSignature = useMemo(
     () =>
@@ -2950,20 +3034,23 @@ export default function SocialPage() {
         <section data-testid="social-following-list-shell" className="min-h-0 flex-1">
           <div data-testid="social-following-list" className="min-h-0 flex-1 space-y-1.5 overflow-y-auto">
           {renderFollowingItems.map((item) => {
-            const isSelectedOnMobile = selectedMemberAddress === item.publicAddress && isMobileCirclesOpen;
+            const isSelectedMember = selectedMemberAddress === item.publicAddress;
             const normalizedItemAddress = normalizePublicAddress(item.publicAddress);
             const isOpeningMessage = openingMessageForAddress === normalizedItemAddress;
             return (
               <article
                 key={item.publicAddress}
                 data-testid={`social-following-item-${item.publicAddress}`}
+                onClick={() => {
+                  setSelectedMemberAddress(item.publicAddress);
+                }}
                 onMouseDown={(event) => {
                   event.preventDefault();
                   setPointerDragMemberAddress(item.publicAddress);
                   logSocialDrag("pointerdrag.start", { memberAddress: item.publicAddress });
                 }}
                 className={`w-full select-none cursor-grab rounded-lg border bg-hush-bg-dark px-4 py-2 transition active:cursor-grabbing ${
-                  isSelectedOnMobile
+                  isSelectedMember
                     ? "border-hush-purple shadow-[0_0_0_1px_rgba(149,98,255,0.3)]"
                     : "border-hush-bg-hover"
                 }`}

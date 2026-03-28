@@ -14,15 +14,35 @@ export default function AccountElectionsPage() {
   useEffect(() => {
     const timer = setTimeout(() => {
       setIsCheckingAuth(false);
-      if (!isAuthenticated || !credentials?.signingPublicKey) {
+      if (
+        !isAuthenticated ||
+        !credentials?.signingPublicKey ||
+        !credentials?.signingPrivateKey ||
+        !credentials?.encryptionPublicKey ||
+        !credentials?.encryptionPrivateKey
+      ) {
         router.replace('/auth');
       }
     }, 100);
 
     return () => clearTimeout(timer);
-  }, [credentials?.signingPublicKey, isAuthenticated, router]);
+  }, [
+    credentials?.encryptionPublicKey,
+    credentials?.encryptionPrivateKey,
+    credentials?.signingPrivateKey,
+    credentials?.signingPublicKey,
+    isAuthenticated,
+    router,
+  ]);
 
-  if (isCheckingAuth || !isAuthenticated || !credentials?.signingPublicKey) {
+  if (
+    isCheckingAuth ||
+    !isAuthenticated ||
+    !credentials?.signingPublicKey ||
+    !credentials?.signingPrivateKey ||
+    !credentials?.encryptionPublicKey ||
+    !credentials?.encryptionPrivateKey
+  ) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-hush-bg-dark">
         <Loader2 className="h-8 w-8 animate-spin text-hush-purple" />
@@ -30,5 +50,12 @@ export default function AccountElectionsPage() {
     );
   }
 
-  return <ElectionsWorkspace ownerPublicAddress={credentials.signingPublicKey} />;
+  return (
+    <ElectionsWorkspace
+      ownerPublicAddress={credentials.signingPublicKey}
+      ownerEncryptionPublicKey={credentials.encryptionPublicKey}
+      ownerEncryptionPrivateKey={credentials.encryptionPrivateKey}
+      ownerSigningPrivateKey={credentials.signingPrivateKey}
+    />
+  );
 }

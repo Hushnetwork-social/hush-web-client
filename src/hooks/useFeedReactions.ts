@@ -697,7 +697,12 @@ export function useFeedReactions({
 
   // Whether the reactions system is ready for full operation
   const isReady = useMemo(() => {
-    return !!feedPublicKey && isProverReady && !!userSecret;
+    const forcedMode = getForcedE2EReactionMode();
+    const canUseDevMode =
+      forcedMode === "dev" ||
+      (forcedMode !== "non-dev" && isReactionDevModeAllowed());
+
+    return !!feedPublicKey && (canUseDevMode || (isProverReady && !!userSecret));
   }, [feedPublicKey, isProverReady, userSecret]);
 
   return {
