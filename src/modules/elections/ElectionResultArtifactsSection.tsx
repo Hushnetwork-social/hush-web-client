@@ -3,19 +3,26 @@
 import {
   BarChart3,
   Clock3,
+  Download,
   Eye,
   FileDigit,
   KeyRound,
+  ShieldAlert,
   ShieldCheck,
 } from 'lucide-react';
 import type {
   ElectionRecordView,
+  ElectionReportArtifactView,
   ElectionResultArtifact,
   GetElectionResultViewResponse,
 } from '@/lib/grpc';
 import {
   ElectionClosedProgressStatusProto,
   ElectionLifecycleStateProto,
+  ElectionReportArtifactAccessScopeProto,
+  ElectionReportArtifactFormatProto,
+  ElectionReportArtifactKindProto,
+  ElectionReportPackageStatusProto,
   ElectionResultArtifactVisibilityProto,
 } from '@/lib/grpc';
 import {
@@ -63,6 +70,89 @@ function renderProgressCopy(
           'The election is closed, but the unofficial result artifact is not available yet.',
       };
   }
+}
+
+function formatHash(value?: Uint8Array): string {
+  if (!value || value.length === 0) {
+    return 'Not recorded';
+  }
+
+  const hex = Array.from(value, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return hex.length <= 24 ? hex : `${hex.slice(0, 12)}...${hex.slice(-8)}`;
+}
+
+function getPackageStatusCopy(
+  status: ElectionReportPackageStatusProto
+): { title: string; body: string; className: string } {
+  switch (status) {
+    case ElectionReportPackageStatusProto.ReportPackageSealed:
+      return {
+        title: 'Sealed package available',
+        body: 'Machine and human canonical artifacts were generated together from the frozen evidence set.',
+        className: 'border-green-500/30 bg-green-500/10 text-green-100',
+      };
+    default:
+      return {
+        title: 'Finalization incomplete',
+        body: 'Report package generation failed. Retry from the owner finalization workflow to seal a new attempt from the same frozen evidence.',
+        className: 'border-red-500/30 bg-red-500/10 text-red-100',
+      };
+  }
+}
+
+function getReportArtifactKindLabel(kind: ElectionReportArtifactKindProto): string {
+  switch (kind) {
+    case ElectionReportArtifactKindProto.ReportArtifactHumanManifest:
+      return 'Manifest';
+    case ElectionReportArtifactKindProto.ReportArtifactHumanResultReport:
+      return 'Result report';
+    case ElectionReportArtifactKindProto.ReportArtifactHumanNamedParticipationRoster:
+      return 'Named roster';
+    case ElectionReportArtifactKindProto.ReportArtifactHumanAuditProvenanceReport:
+      return 'Audit report';
+    case ElectionReportArtifactKindProto.ReportArtifactHumanOutcomeDetermination:
+      return 'Outcome';
+    case ElectionReportArtifactKindProto.ReportArtifactHumanDisputeReviewIndex:
+      return 'Dispute index';
+    case ElectionReportArtifactKindProto.ReportArtifactMachineManifest:
+      return 'Machine manifest';
+    case ElectionReportArtifactKindProto.ReportArtifactMachineEvidenceGraph:
+      return 'Evidence graph';
+    case ElectionReportArtifactKindProto.ReportArtifactMachineResultReportProjection:
+      return 'Result projection';
+    case ElectionReportArtifactKindProto.ReportArtifactMachineNamedParticipationRosterProjection:
+      return 'Roster projection';
+    case ElectionReportArtifactKindProto.ReportArtifactMachineAuditProvenanceReportProjection:
+      return 'Audit projection';
+    case ElectionReportArtifactKindProto.ReportArtifactMachineOutcomeDeterminationProjection:
+      return 'Outcome projection';
+    case ElectionReportArtifactKindProto.ReportArtifactMachineDisputeReviewIndexProjection:
+      return 'Dispute projection';
+    default:
+      return 'Artifact';
+  }
+}
+
+function getAccessScopeLabel(scope: ElectionReportArtifactAccessScopeProto): string {
+  return scope === ElectionReportArtifactAccessScopeProto.ReportArtifactOwnerAuditorOnly
+    ? 'Owner + auditor'
+    : 'Owner + auditor + trustee';
+}
+
+function getFormatLabel(format: ElectionReportArtifactFormatProto): string {
+  return format === ElectionReportArtifactFormatProto.ReportArtifactJson ? 'JSON' : 'Markdown';
+}
+
+function downloadReportArtifact(artifact: ElectionReportArtifactView) {
+  const blob = new Blob([artifact.Content], { type: artifact.MediaType || 'text/plain;charset=utf-8' });
+  const objectUrl = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = objectUrl;
+  link.download = artifact.FileName || `${artifact.Title}.txt`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(objectUrl);
 }
 
 function ResultArtifactCard({
@@ -201,6 +291,73 @@ function ResultArtifactCard({
   );
 }
 
+function ReportArtifactCatalogCard({ artifact }: { artifact: ElectionReportArtifactView }) {
+  return (
+    <section
+      className="rounded-2xl border border-hush-bg-light bg-hush-bg-dark/70 p-4"
+      data-testid={`report-artifact-${artifact.Id}`}
+    >
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+            {getReportArtifactKindLabel(artifact.ArtifactKind)}
+          </div>
+          <h3 className="mt-2 text-lg font-semibold text-hush-text-primary">{artifact.Title}</h3>
+          <div className="mt-2 flex flex-wrap gap-2 text-xs text-hush-text-accent">
+            <span className="rounded-full border border-hush-bg-light px-2 py-1">
+              {getFormatLabel(artifact.Format)}
+            </span>
+            <span className="rounded-full border border-hush-bg-light px-2 py-1">
+              {getAccessScopeLabel(artifact.AccessScope)}
+            </span>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => downloadReportArtifact(artifact)}
+          className="inline-flex items-center gap-2 rounded-xl border border-hush-purple/40 px-3 py-2 text-sm text-hush-text-primary transition-colors hover:border-hush-purple"
+          data-testid={`report-artifact-download-${artifact.Id}`}
+        >
+          <Download className="h-4 w-4" />
+          <span>Download</span>
+        </button>
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <div className="rounded-xl border border-hush-bg-light bg-hush-bg-element/60 p-3 text-sm text-hush-text-primary">
+          <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+            Artifact id
+          </div>
+          <div className="mt-2 font-mono">{formatArtifactValue(artifact.Id)}</div>
+          <div className="mt-3 text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+            Content hash
+          </div>
+          <div className="mt-2 font-mono">{formatHash(artifact.ContentHash)}</div>
+        </div>
+        <div className="rounded-xl border border-hush-bg-light bg-hush-bg-element/60 p-3 text-sm text-hush-text-primary">
+          <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+            File
+          </div>
+          <div className="mt-2">{artifact.FileName}</div>
+          <div className="mt-3 text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+            Paired artifact
+          </div>
+          <div className="mt-2 font-mono">{formatArtifactValue(artifact.PairedArtifactId)}</div>
+        </div>
+      </div>
+
+      <details className="mt-4 rounded-xl border border-hush-bg-light bg-black/20 p-3">
+        <summary className="cursor-pointer text-sm font-medium text-hush-text-primary">
+          Open content
+        </summary>
+        <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-xs text-hush-text-accent">
+          {artifact.Content}
+        </pre>
+      </details>
+    </section>
+  );
+}
+
 export function ElectionResultArtifactsSection({
   election,
   resultView,
@@ -211,16 +368,109 @@ export function ElectionResultArtifactsSection({
 
   const unofficialResult = resultView?.UnofficialResult;
   const officialResult = resultView?.OfficialResult;
+  const latestReportPackage = resultView?.LatestReportPackage;
+  const visibleReportArtifacts = resultView?.VisibleReportArtifacts ?? [];
   const hasArtifacts = Boolean(unofficialResult || officialResult);
+  const hasReportPackage = Boolean(resultView?.CanViewReportPackage && latestReportPackage);
+  const reportPackageStatusCopy = latestReportPackage
+    ? getPackageStatusCopy(latestReportPackage.Status)
+    : null;
+  const ReportPackageStatusIcon =
+    latestReportPackage?.Status === ElectionReportPackageStatusProto.ReportPackageSealed
+      ? ShieldCheck
+      : ShieldAlert;
   const shouldShowClosedProgress =
     election.LifecycleState === ElectionLifecycleStateProto.Closed && !unofficialResult;
 
-  if (!hasArtifacts && !shouldShowClosedProgress) {
+  if (!hasArtifacts && !shouldShowClosedProgress && !hasReportPackage) {
     return null;
   }
 
   return (
     <div className="space-y-5" data-testid="election-results-section">
+      {hasReportPackage && latestReportPackage ? (
+        <section className={`${sectionClass} space-y-4`} data-testid="report-package-summary">
+          <div
+            className={`rounded-2xl border p-4 text-sm ${reportPackageStatusCopy?.className ?? ''}`}
+          >
+            <div className="flex items-start gap-3">
+              <ReportPackageStatusIcon className="mt-0.5 h-5 w-5" />
+              <div>
+                <div className="font-semibold">
+                  {reportPackageStatusCopy?.title}
+                </div>
+                <div className="mt-2">{reportPackageStatusCopy?.body}</div>
+                {resultView?.CanRetryFailedPackageFinalization ? (
+                  <div className="mt-3 text-xs uppercase tracking-[0.2em] text-red-100/80">
+                    Retry available from owner finalization controls
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                Package id
+              </div>
+              <div className="mt-2 font-mono text-sm text-hush-text-primary">
+                {formatArtifactValue(latestReportPackage.Id)}
+              </div>
+            </div>
+            <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                Attempt
+              </div>
+              <div className="mt-2 text-sm text-hush-text-primary">
+                #{latestReportPackage.AttemptNumber}
+              </div>
+              <div className="mt-2 text-xs text-hush-text-accent">
+                Previous: {formatArtifactValue(latestReportPackage.PreviousAttemptId)}
+              </div>
+            </div>
+            <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                Frozen evidence
+              </div>
+              <div className="mt-2 font-mono text-sm text-hush-text-primary">
+                {formatHash(latestReportPackage.FrozenEvidenceHash)}
+              </div>
+              <div className="mt-2 text-xs text-hush-text-accent">
+                {latestReportPackage.FrozenEvidenceFingerprint}
+              </div>
+            </div>
+            <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                Sealed / artifacts
+              </div>
+              <div className="mt-2 text-sm text-hush-text-primary">
+                {latestReportPackage.HasSealedAt
+                  ? formatTimestamp(latestReportPackage.SealedAt)
+                  : 'Not sealed'}
+              </div>
+              <div className="mt-2 text-xs text-hush-text-accent">
+                {latestReportPackage.ArtifactCount} stored artifacts
+              </div>
+            </div>
+          </div>
+
+          {latestReportPackage.FailureReason ? (
+            <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">
+              {latestReportPackage.FailureReason}
+            </div>
+          ) : null}
+
+          {visibleReportArtifacts.length > 0 ? (
+            <div className="space-y-4" data-testid="report-package-catalog">
+              {visibleReportArtifacts.map((artifact) => (
+                <ReportArtifactCatalogCard key={artifact.Id} artifact={artifact} />
+              ))}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
       {shouldShowClosedProgress ? (
         <section
           className="rounded-2xl border border-blue-500/30 bg-blue-500/10 p-5 text-blue-100"
