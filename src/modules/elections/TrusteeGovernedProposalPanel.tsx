@@ -217,20 +217,29 @@ export function TrusteeGovernedProposalPanel({
                 </div>
               )}
 
-              {proposal.ActionType === ElectionGovernedActionTypeProto.Finalize ? (
+              {proposal.ActionType === ElectionGovernedActionTypeProto.Close ||
+              proposal.ActionType === ElectionGovernedActionTypeProto.Finalize ? (
                 <div className="mt-5 rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4 text-sm text-hush-text-accent">
-                  <div className="font-medium text-hush-text-primary">Finalize follow-up</div>
+                  <div className="font-medium text-hush-text-primary">
+                    {proposal.ActionType === ElectionGovernedActionTypeProto.Close
+                      ? 'Close follow-up'
+                      : 'Finalize follow-up'}
+                  </div>
                   <p className="mt-2">
-                    This proposal can authorize one exact FEAT-098 finalization session. The
-                    follow-up page shows the bound session and aggregate-only share action once
-                    execution succeeds.
+                    {proposal.ActionType === ElectionGovernedActionTypeProto.Close
+                      ? 'This proposal can lead to one exact close-counting share session after the election is frozen. The follow-up page shows the bound session and aggregate-only share action once execution succeeds.'
+                      : 'This proposal can authorize one exact finalization workflow. The follow-up page shows the bound session and aggregate-only share action once execution succeeds.'}
                   </p>
                   <Link
                     href={`/account/elections/trustee/${electionId}/finalization`}
                     className="mt-3 inline-flex items-center gap-2 rounded-xl border border-hush-bg-light px-4 py-2 text-sm transition-colors hover:border-hush-purple"
                     data-testid="trustee-proposal-finalization-link"
                   >
-                    <span>Open finalization page</span>
+                    <span>
+                      {proposal.ActionType === ElectionGovernedActionTypeProto.Close
+                        ? 'Open counting share page'
+                        : 'Open finalization page'}
+                    </span>
                   </Link>
                 </div>
               ) : null}

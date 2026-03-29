@@ -846,10 +846,22 @@ export enum ReviewWindowPolicyProto {
   GovernedReviewWindowReserved = 1,
 }
 
+export enum OfficialResultVisibilityPolicyProto {
+  ParticipantEncryptedOnly = 0,
+  PublicPlaintext = 1,
+}
+
+export enum ElectionClosedProgressStatusProto {
+  ClosedProgressNone = 0,
+  ClosedProgressWaitingForTrusteeShares = 1,
+  ClosedProgressTallyCalculationInProgress = 2,
+}
+
 export enum ElectionBoundaryArtifactTypeProto {
   OpenArtifact = 0,
   CloseArtifact = 1,
-  FinalizeArtifact = 2,
+  TallyReadyArtifact = 2,
+  FinalizeArtifact = 3,
 }
 
 export enum ElectionWarningCodeProto {
@@ -948,6 +960,11 @@ export enum ElectionFinalizationSessionStatusProto {
   FinalizationSessionCompleted = 1,
 }
 
+export enum ElectionFinalizationSessionPurposeProto {
+  FinalizationSessionPurposeCloseCounting = 0,
+  FinalizationSessionPurposeFinalize = 1,
+}
+
 export enum ElectionFinalizationShareStatusProto {
   FinalizationShareAccepted = 0,
   FinalizationShareRejected = 1,
@@ -960,6 +977,16 @@ export enum ElectionFinalizationTargetTypeProto {
 
 export enum ElectionFinalizationReleaseModeProto {
   FinalizationReleaseAggregateTallyOnly = 0,
+}
+
+export enum ElectionResultArtifactKindProto {
+  ElectionResultArtifactUnofficial = 0,
+  ElectionResultArtifactOfficial = 1,
+}
+
+export enum ElectionResultArtifactVisibilityProto {
+  ElectionResultArtifactParticipantEncrypted = 0,
+  ElectionResultArtifactPublicPlaintext = 1,
 }
 
 export interface ApprovedClientApplication {
@@ -1141,6 +1168,7 @@ export interface ElectionFinalizationSession {
   ElectionId: string;
   GovernedProposalId: string;
   GovernanceMode: ElectionGovernanceModeProto;
+  SessionPurpose: ElectionFinalizationSessionPurposeProto;
   CloseArtifactId: string;
   AcceptedBallotSetHash: string;
   FinalEncryptedTallyHash: string;
@@ -1187,6 +1215,7 @@ export interface ElectionFinalizationReleaseEvidence {
   Id: string;
   FinalizationSessionId: string;
   ElectionId: string;
+  SessionPurpose: ElectionFinalizationSessionPurposeProto;
   ReleaseMode: ElectionFinalizationReleaseModeProto;
   CloseArtifactId: string;
   AcceptedBallotSetHash: string;
@@ -1199,6 +1228,42 @@ export interface ElectionFinalizationReleaseEvidence {
   SourceTransactionId: string;
   SourceBlockHeight?: number;
   SourceBlockId: string;
+}
+
+export interface ElectionResultOptionCount {
+  OptionId: string;
+  DisplayLabel: string;
+  ShortDescription: string;
+  BallotOrder: number;
+  Rank: number;
+  VoteCount: number;
+}
+
+export interface ElectionResultDenominatorEvidence {
+  SnapshotType: ElectionEligibilitySnapshotTypeProto;
+  EligibilitySnapshotId: string;
+  BoundaryArtifactId: string;
+  ActiveDenominatorSetHash: string;
+}
+
+export interface ElectionResultArtifact {
+  Id: string;
+  ElectionId: string;
+  ArtifactKind: ElectionResultArtifactKindProto;
+  Visibility: ElectionResultArtifactVisibilityProto;
+  Title: string;
+  NamedOptionResults: ElectionResultOptionCount[];
+  BlankCount: number;
+  TotalVotedCount: number;
+  EligibleToVoteCount: number;
+  DidNotVoteCount: number;
+  DenominatorEvidence: ElectionResultDenominatorEvidence;
+  TallyReadyArtifactId: string;
+  SourceResultArtifactId: string;
+  EncryptedPayload: string;
+  PublicPayload: string;
+  RecordedAt: GrpcTimestamp;
+  RecordedByPublicAddress: string;
 }
 
 export interface ElectionRecordView {
@@ -1235,6 +1300,11 @@ export interface ElectionRecordView {
   FinalizeArtifactId: string;
   TallyReadyAt?: GrpcTimestamp;
   VoteAcceptanceLockedAt?: GrpcTimestamp;
+  TallyReadyArtifactId: string;
+  OfficialResultVisibilityPolicy: OfficialResultVisibilityPolicyProto;
+  ClosedProgressStatus: ElectionClosedProgressStatusProto;
+  UnofficialResultArtifactId: string;
+  OfficialResultArtifactId: string;
 }
 
 export interface ElectionSummary {
@@ -1278,6 +1348,9 @@ export interface ElectionBoundaryArtifact {
   ReviewWindowExecutionReference: string;
   AcceptedBallotSetHash: string;
   FinalEncryptedTallyHash: string;
+  AcceptedBallotCount?: number;
+  PublishedBallotCount?: number;
+  PublishedBallotStreamHash: string;
   RecordedAt: GrpcTimestamp;
   RecordedByPublicAddress: string;
   CeremonySnapshot?: ElectionCeremonyBindingSnapshot;
@@ -1591,6 +1664,22 @@ export interface GetElectionEnvelopeAccessResponse {
   ActorEncryptedElectionPrivateKey: string;
 }
 
+export interface GetElectionResultViewRequest {
+  ElectionId: string;
+  ActorPublicAddress: string;
+}
+
+export interface GetElectionResultViewResponse {
+  Success: boolean;
+  ErrorMessage: string;
+  ActorPublicAddress: string;
+  CanViewParticipantEncryptedResults: boolean;
+  OfficialResultVisibilityPolicy: OfficialResultVisibilityPolicyProto;
+  ClosedProgressStatus: ElectionClosedProgressStatusProto;
+  UnofficialResult?: ElectionResultArtifact;
+  OfficialResult?: ElectionResultArtifact;
+}
+
 export interface GetElectionCeremonyActionViewRequest {
   ElectionId: string;
   ActorPublicAddress: string;
@@ -1710,6 +1799,7 @@ export interface GetElectionResponse {
   FinalizationSessions?: ElectionFinalizationSession[];
   FinalizationShares?: ElectionFinalizationShare[];
   FinalizationReleaseEvidenceRecords?: ElectionFinalizationReleaseEvidence[];
+  ResultArtifacts?: ElectionResultArtifact[];
 }
 
 export interface GetElectionCeremonyActionViewResponse {

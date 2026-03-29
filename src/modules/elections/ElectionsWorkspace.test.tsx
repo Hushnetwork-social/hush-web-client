@@ -22,6 +22,7 @@ import {
   ElectionClassProto,
   ElectionDisclosureModeProto,
   ElectionFinalizationReleaseModeProto,
+  ElectionFinalizationSessionPurposeProto,
   ElectionFinalizationSessionStatusProto,
   ElectionFinalizationShareStatusProto,
   ElectionFinalizationTargetTypeProto,
@@ -330,6 +331,7 @@ function createFinalizationSession(
     ElectionId: 'election-1',
     GovernedProposalId: 'proposal-finalize-1',
     GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+    SessionPurpose: ElectionFinalizationSessionPurposeProto.FinalizationSessionPurposeFinalize,
     CloseArtifactId: 'close-artifact',
     AcceptedBallotSetHash: 'accepted-ballot-set-hash',
     FinalEncryptedTallyHash: 'final-encrypted-tally-hash',
@@ -412,7 +414,8 @@ function createFinalizationReleaseEvidence(
     Id: 'release-evidence-1',
     FinalizationSessionId: 'finalization-session-1',
     ElectionId: 'election-1',
-    ReleaseMode: ElectionFinalizationReleaseModeProto.FinalizationReleaseAggregateOnly,
+    SessionPurpose: ElectionFinalizationSessionPurposeProto.FinalizationSessionPurposeFinalize,
+    ReleaseMode: ElectionFinalizationReleaseModeProto.FinalizationReleaseAggregateTallyOnly,
     CloseArtifactId: 'close-artifact',
     AcceptedBallotSetHash: 'accepted-ballot-set-hash',
     FinalEncryptedTallyHash: 'final-encrypted-tally-hash',
@@ -1945,7 +1948,8 @@ describe('ElectionsWorkspace', () => {
     );
 
     const finalizationSection = await screen.findByTestId('elections-finalization-section');
-    expect(finalizationSection).toHaveTextContent('Finalization Session');
+    expect(finalizationSection).toHaveTextContent('Counting And Finalization');
+    expect(finalizationSection).toHaveTextContent('Finalize');
     expect(screen.getByTestId('elections-finalization-session')).toHaveTextContent(
       'close-artifact'
     );

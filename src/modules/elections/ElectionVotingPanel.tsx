@@ -22,6 +22,7 @@ import {
   ElectionVotingSubmissionStatusProto,
   TransactionStatus,
   type GetElectionResponse,
+  type GetElectionResultViewResponse,
   type GetElectionVotingViewResponse,
 } from '@/lib/grpc';
 import { electionsService } from '@/lib/grpc/services/elections';
@@ -30,6 +31,8 @@ import {
   createAcceptElectionBallotCastTransaction,
   createRegisterElectionVotingCommitmentTransaction,
 } from './transactionService';
+import { ElectionResultArtifactsSection } from './ElectionResultArtifactsSection';
+import { getLifecycleLabel } from './contracts';
 
 type ElectionVotingPanelProps = {
   electionId: string;
@@ -249,6 +252,20 @@ function createReceiptFromVotingView(
   };
 }
 
+async function loadElectionResultViewSafely(
+  electionId: string,
+  actorPublicAddress: string,
+): Promise<GetElectionResultViewResponse | null> {
+  try {
+    return await electionsService.getElectionResultView({
+      ElectionId: electionId,
+      ActorPublicAddress: actorPublicAddress,
+    });
+  } catch {
+    return null;
+  }
+}
+
 function getCastFailureCopy(code: string, fallbackMessage: string): string {
   switch (code) {
     case 'election_cast_still_processing':
@@ -283,6 +300,7 @@ export function ElectionVotingPanel({
 }: ElectionVotingPanelProps) {
   const [detail, setDetail] = useState<GetElectionResponse | null>(null);
   const [votingView, setVotingView] = useState<GetElectionVotingViewResponse | null>(null);
+  const [resultView, setResultView] = useState<GetElectionResultViewResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmittingCommitment, setIsSubmittingCommitment] = useState(false);
   const [isSubmittingCast, setIsSubmittingCast] = useState(false);
@@ -308,17 +326,19 @@ export function ElectionVotingPanel({
     const storedPending = loadPendingSubmission(electionId);
     const resolvedKey =
       submissionIdempotencyKey ?? storedPending?.idempotencyKey ?? pendingSubmission?.idempotencyKey ?? '';
-    const [detailResponse, votingResponse] = await Promise.all([
+    const [detailResponse, votingResponse, resultResponse] = await Promise.all([
       electionsService.getElection({ ElectionId: electionId }),
       electionsService.getElectionVotingView({
         ElectionId: electionId,
         ActorPublicAddress: actorPublicAddress,
         SubmissionIdempotencyKey: resolvedKey,
       }),
+      loadElectionResultViewSafely(electionId, actorPublicAddress),
     ]);
 
     setDetail(detailResponse);
     setVotingView(votingResponse);
+    setResultView(resultResponse);
 
     if (votingResponse.Success && votingResponse.HasAcceptedAt) {
       const createdReceipt = createReceiptFromVotingView(
@@ -347,13 +367,14 @@ export function ElectionVotingPanel({
       try {
         const storedPending = loadPendingSubmission(electionId);
         const resolvedKey = storedPending?.idempotencyKey ?? '';
-        const [detailResponse, votingResponse] = await Promise.all([
+        const [detailResponse, votingResponse, resultResponse] = await Promise.all([
           electionsService.getElection({ ElectionId: electionId }),
           electionsService.getElectionVotingView({
             ElectionId: electionId,
             ActorPublicAddress: actorPublicAddress,
             SubmissionIdempotencyKey: resolvedKey,
           }),
+          loadElectionResultViewSafely(electionId, actorPublicAddress),
         ]);
 
         if (!isActive) {
@@ -362,6 +383,7 @@ export function ElectionVotingPanel({
 
         setDetail(detailResponse);
         setVotingView(votingResponse);
+        setResultView(resultResponse);
 
         if (votingResponse.Success && votingResponse.HasAcceptedAt) {
           const createdReceipt = createReceiptFromVotingView(
@@ -401,8 +423,10 @@ export function ElectionVotingPanel({
   }, [actorPublicAddress, electionId]);
 
   const election = detail?.Election;
+  const hasVotingAccess = votingView?.Success === true;
   const selfRosterEntry = votingView?.SelfRosterEntry;
   const isOpenElection = election?.LifecycleState === ElectionLifecycleStateProto.Open;
+  const hasResultArtifacts = Boolean(resultView?.UnofficialResult || resultView?.OfficialResult);
   const isLinked = !!selfRosterEntry;
   const isActiveVoter =
     selfRosterEntry?.VotingRightStatus === ElectionVotingRightStatusProto.VotingRightActive;
@@ -694,11 +718,11 @@ export function ElectionVotingPanel({
     );
   }
 
-  if (!votingView?.Success) {
+  if (!detail?.Success || !election) {
     return (
       <div className="min-h-screen bg-hush-bg-dark px-4 py-8 text-hush-text-primary">
         <div className="mx-auto max-w-5xl rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-5 text-sm text-red-100">
-          {votingView?.ErrorMessage || 'Voting data is unavailable.'}
+          {detail?.ErrorMessage || 'Election data is unavailable.'}
         </div>
       </div>
     );
@@ -720,7 +744,9 @@ export function ElectionVotingPanel({
               {election?.Title || 'Election cast acceptance'}
             </h1>
             <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
-              FEAT-099 keeps commitment registration, cast acceptance, pending recovery, and local receipt retention explicit.
+              FEAT-099 keeps commitment registration, cast acceptance, pending recovery, and local
+              receipt retention explicit. FEAT-101 adds post-close unofficial and official result
+              release on the same election route.
             </p>
           </div>
           <Link
@@ -747,39 +773,80 @@ export function ElectionVotingPanel({
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-2xl border border-hush-bg-light bg-hush-bg-element/95 p-4">
             <div className="text-xs uppercase tracking-[0.2em] text-hush-text-accent">Lifecycle</div>
-            <div className="mt-2 text-xl font-semibold">{isOpenElection ? 'Open' : 'Not open'}</div>
+            <div className="mt-2 text-xl font-semibold">{getLifecycleLabel(election.LifecycleState)}</div>
           </div>
           <div className="rounded-2xl border border-hush-bg-light bg-hush-bg-element/95 p-4">
-            <div className="text-xs uppercase tracking-[0.2em] text-hush-text-accent">Identity</div>
-            <div className="mt-2 text-xl font-semibold">{isLinked ? 'Linked' : 'Unlinked'}</div>
+            <div className="text-xs uppercase tracking-[0.2em] text-hush-text-accent">
+              {hasVotingAccess ? 'Identity' : 'Result access'}
+            </div>
+            <div className="mt-2 text-xl font-semibold">
+              {hasVotingAccess
+                ? (isLinked ? 'Linked' : 'Unlinked')
+                : (resultView?.CanViewParticipantEncryptedResults ? 'Participant' : 'Public only')}
+            </div>
           </div>
           <div className="rounded-2xl border border-hush-bg-light bg-hush-bg-element/95 p-4">
-            <div className="text-xs uppercase tracking-[0.2em] text-hush-text-accent">Commitment</div>
-            <div className="mt-2 text-xl font-semibold">{isCommitmentRegistered ? 'Registered' : 'Missing'}</div>
+            <div className="text-xs uppercase tracking-[0.2em] text-hush-text-accent">
+              {hasVotingAccess ? 'Commitment' : 'Unofficial result'}
+            </div>
+            <div className="mt-2 text-xl font-semibold">
+              {hasVotingAccess
+                ? (isCommitmentRegistered ? 'Registered' : 'Missing')
+                : (resultView?.UnofficialResult ? 'Available' : 'Pending')}
+            </div>
           </div>
           <div className="rounded-2xl border border-hush-bg-light bg-hush-bg-element/95 p-4">
-            <div className="text-xs uppercase tracking-[0.2em] text-hush-text-accent">Participation</div>
-            <div className="mt-2 text-xl font-semibold">{participationLabel}</div>
+            <div className="text-xs uppercase tracking-[0.2em] text-hush-text-accent">
+              {hasVotingAccess ? 'Participation' : 'Official result'}
+            </div>
+            <div className="mt-2 text-xl font-semibold">
+              {hasVotingAccess
+                ? participationLabel
+                : (resultView?.OfficialResult ? 'Available' : 'Pending')}
+            </div>
           </div>
         </div>
 
-        <section className="rounded-2xl border border-hush-bg-light bg-hush-bg-element/95 p-5">
-          <div className="text-sm font-semibold">Current election boundary</div>
-          <div className="mt-3 grid gap-3 md:grid-cols-2">
-            <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 px-4 py-3 text-sm text-hush-text-accent">
-              Open artifact: <span className="font-mono text-hush-text-primary">{truncateMiddle(votingView.OpenArtifactId)}</span>
+        {hasVotingAccess ? (
+          <section className="rounded-2xl border border-hush-bg-light bg-hush-bg-element/95 p-5">
+            <div className="text-sm font-semibold">Current election boundary</div>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 px-4 py-3 text-sm text-hush-text-accent">
+                Open artifact: <span className="font-mono text-hush-text-primary">{truncateMiddle(votingView.OpenArtifactId)}</span>
+              </div>
+              <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 px-4 py-3 text-sm text-hush-text-accent">
+                Eligible set hash: <span className="font-mono text-hush-text-primary">{truncateMiddle(votingView.EligibleSetHash)}</span>
+              </div>
+              <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 px-4 py-3 text-sm text-hush-text-accent">
+                Ceremony: <span className="font-mono text-hush-text-primary">{truncateMiddle(votingView.CeremonyVersionId)}</span>
+              </div>
+              <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 px-4 py-3 text-sm text-hush-text-accent">
+                Tally key: <span className="font-mono text-hush-text-primary">{truncateMiddle(votingView.TallyPublicKeyFingerprint)}</span>
+              </div>
             </div>
-            <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 px-4 py-3 text-sm text-hush-text-accent">
-              Eligible set hash: <span className="font-mono text-hush-text-primary">{truncateMiddle(votingView.EligibleSetHash)}</span>
+          </section>
+        ) : null}
+
+        {!hasVotingAccess && hasResultArtifacts ? (
+          <section className="rounded-2xl border border-blue-500/30 bg-blue-500/10 p-5 text-blue-100">
+            <div className="flex items-start gap-3">
+              <ShieldAlert className="mt-0.5 h-5 w-5" />
+              <div>
+                Vote-cast controls are not available for this actor on the current query surface, but
+                FEAT-101 result visibility is available for your election role.
+              </div>
             </div>
-            <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 px-4 py-3 text-sm text-hush-text-accent">
-              Ceremony: <span className="font-mono text-hush-text-primary">{truncateMiddle(votingView.CeremonyVersionId)}</span>
+          </section>
+        ) : null}
+
+        {!hasVotingAccess && !hasResultArtifacts ? (
+          <section className="rounded-2xl border border-red-500/30 bg-red-500/10 p-5 text-red-100">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="mt-0.5 h-5 w-5" />
+              <div>{votingView?.ErrorMessage || 'Voting data is unavailable for this actor.'}</div>
             </div>
-            <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 px-4 py-3 text-sm text-hush-text-accent">
-              Tally key: <span className="font-mono text-hush-text-primary">{truncateMiddle(votingView.TallyPublicKeyFingerprint)}</span>
-            </div>
-          </div>
-        </section>
+          </section>
+        ) : null}
 
         {!isLinked ? (
           <section className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-5 text-amber-100">
@@ -790,7 +857,7 @@ export function ElectionVotingPanel({
           </section>
         ) : null}
 
-        {isLinked && !isActiveVoter ? (
+        {hasVotingAccess && isLinked && !isActiveVoter ? (
           <section className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-5 text-amber-100">
             <div className="flex items-start gap-3">
               <ShieldAlert className="mt-0.5 h-5 w-5" />
@@ -946,6 +1013,8 @@ export function ElectionVotingPanel({
             )}
           </section>
         ) : null}
+
+        <ElectionResultArtifactsSection election={election} resultView={resultView} />
 
         {isAccepted ? (
           <section className="rounded-2xl border border-green-500/30 bg-green-500/10 p-5 text-green-100" data-testid="voting-accepted-panel">
