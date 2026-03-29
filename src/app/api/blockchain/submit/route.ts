@@ -56,6 +56,7 @@ export async function POST(request: NextRequest) {
       successful: result.successful,
       message: result.message,
       status: result.status,  // FEAT-057: Include transaction status for idempotency
+      validationCode: result.validationCode,
     });
   } catch (error) {
     console.error('[API] Transaction submission failed:', error);

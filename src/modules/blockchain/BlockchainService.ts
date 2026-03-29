@@ -7,6 +7,7 @@
  */
 
 import { buildApiUrl } from '@/lib/api-config';
+import { TransactionStatus } from '@/lib/grpc';
 
 /**
  * Fetches the current blockchain height from the API.
@@ -40,6 +41,8 @@ export async function submitTransaction(
 ): Promise<{
   successful: boolean;
   message: string;
+  status: TransactionStatus;
+  validationCode: string;
 }> {
   const response = await fetch(buildApiUrl('/api/blockchain/submit'), {
     method: 'POST',
@@ -56,5 +59,7 @@ export async function submitTransaction(
   return {
     successful: data.successful ?? false,
     message: data.message ?? data.error ?? '',
+    status: (data.status ?? TransactionStatus.UNSPECIFIED) as TransactionStatus,
+    validationCode: data.validationCode ?? '',
   };
 }

@@ -43,6 +43,7 @@ export interface SubmitSignedTransactionReply {
   Successfull: boolean;
   Message: string;
   Status?: TransactionStatus;  // FEAT-057: Idempotency status
+  ValidationCode?: string;
 }
 
 // ============= Identity Service Types =============
@@ -788,6 +789,38 @@ export enum ElectionEligibilityActivationBlockReasonProto {
   EligibilityActivationBlockReasonNotLinkedToHushAccount = 6,
 }
 
+export enum ElectionCommitmentRegistrationFailureReasonProto {
+  CommitmentRegistrationFailureReasonNone = 0,
+  CommitmentRegistrationFailureReasonValidationFailed = 1,
+  CommitmentRegistrationFailureReasonNotFound = 2,
+  CommitmentRegistrationFailureReasonNotLinked = 3,
+  CommitmentRegistrationFailureReasonNotActive = 4,
+  CommitmentRegistrationFailureReasonAlreadyRegistered = 5,
+  CommitmentRegistrationFailureReasonElectionNotOpenableForRegistration = 6,
+  CommitmentRegistrationFailureReasonClosePersisted = 7,
+}
+
+export enum ElectionCastAcceptanceFailureReasonProto {
+  CastAcceptanceFailureReasonNone = 0,
+  CastAcceptanceFailureReasonValidationFailed = 1,
+  CastAcceptanceFailureReasonNotFound = 2,
+  CastAcceptanceFailureReasonNotLinked = 3,
+  CastAcceptanceFailureReasonNotActive = 4,
+  CastAcceptanceFailureReasonCommitmentMissing = 5,
+  CastAcceptanceFailureReasonStillProcessing = 6,
+  CastAcceptanceFailureReasonAlreadyUsed = 7,
+  CastAcceptanceFailureReasonDuplicateNullifier = 8,
+  CastAcceptanceFailureReasonWrongElectionContext = 9,
+  CastAcceptanceFailureReasonClosePersisted = 10,
+  CastAcceptanceFailureReasonAlreadyVoted = 11,
+}
+
+export enum ElectionVotingSubmissionStatusProto {
+  VotingSubmissionStatusNone = 0,
+  VotingSubmissionStatusStillProcessing = 1,
+  VotingSubmissionStatusAlreadyUsed = 2,
+}
+
 export enum ElectionEligibilitySnapshotTypeProto {
   EligibilitySnapshotOpen = 0,
   EligibilitySnapshotClose = 1,
@@ -1491,6 +1524,47 @@ export interface FinalizeElectionRequest {
   FinalEncryptedTallyHash: string;
 }
 
+export interface RegisterElectionVotingCommitmentRequest {
+  ElectionId: string;
+  ActorPublicAddress: string;
+  CommitmentHash: string;
+}
+
+export interface RegisterElectionVotingCommitmentResponse {
+  Success: boolean;
+  FailureReason: ElectionCommitmentRegistrationFailureReasonProto;
+  ErrorMessage: string;
+  Election?: ElectionRecordView;
+  SelfRosterEntry?: ElectionRosterEntryView;
+  CommitmentRegisteredAt?: GrpcTimestamp;
+  HasCommitmentRegisteredAt: boolean;
+}
+
+export interface AcceptElectionBallotCastRequest {
+  ElectionId: string;
+  ActorPublicAddress: string;
+  IdempotencyKey: string;
+  EncryptedBallotPackage: string;
+  ProofBundle: string;
+  BallotNullifier: string;
+  OpenArtifactId: string;
+  EligibleSetHash: string;
+  CeremonyVersionId: string;
+  DkgProfileId: string;
+  TallyPublicKeyFingerprint: string;
+}
+
+export interface AcceptElectionBallotCastResponse {
+  Success: boolean;
+  FailureReason: ElectionCastAcceptanceFailureReasonProto;
+  ErrorMessage: string;
+  Election?: ElectionRecordView;
+  SelfRosterEntry?: ElectionRosterEntryView;
+  PersonalParticipationStatus: ElectionParticipationStatusProto;
+  AcceptedAt?: GrpcTimestamp;
+  HasAcceptedAt: boolean;
+}
+
 export interface GetElectionRequest {
   ElectionId: string;
 }
@@ -1498,6 +1572,12 @@ export interface GetElectionRequest {
 export interface GetElectionEligibilityViewRequest {
   ElectionId: string;
   ActorPublicAddress: string;
+}
+
+export interface GetElectionVotingViewRequest {
+  ElectionId: string;
+  ActorPublicAddress: string;
+  SubmissionIdempotencyKey: string;
 }
 
 export interface GetElectionEnvelopeAccessRequest {
@@ -1662,6 +1742,29 @@ export interface GetElectionEligibilityViewResponse {
   RestrictedRosterEntries: ElectionRosterEntryView[];
   ActivationEvents: ElectionEligibilityActivationEventView[];
   EligibilitySnapshots: ElectionEligibilitySnapshotView[];
+}
+
+export interface GetElectionVotingViewResponse {
+  Success: boolean;
+  ErrorMessage: string;
+  ActorPublicAddress: string;
+  Election?: ElectionRecordView;
+  SelfRosterEntry?: ElectionRosterEntryView;
+  CommitmentRegistered: boolean;
+  CommitmentRegisteredAt?: GrpcTimestamp;
+  HasCommitmentRegisteredAt: boolean;
+  PersonalParticipationStatus: ElectionParticipationStatusProto;
+  AcceptedAt?: GrpcTimestamp;
+  HasAcceptedAt: boolean;
+  SubmissionStatus: ElectionVotingSubmissionStatusProto;
+  OpenArtifactId: string;
+  EligibleSetHash: string;
+  CeremonyVersionId: string;
+  DkgProfileId: string;
+  TallyPublicKeyFingerprint: string;
+  ReceiptId: string;
+  AcceptanceId: string;
+  ServerProof: string;
 }
 
 export interface GetElectionsByOwnerResponse {

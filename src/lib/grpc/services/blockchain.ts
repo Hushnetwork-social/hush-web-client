@@ -76,6 +76,7 @@ export const blockchainService = {
       Successfull: data.successful,
       Message: data.message || '',
       Status: data.status as TransactionStatus,  // FEAT-057: Include transaction status
+      ValidationCode: data.validationCode || '',
     };
   },
 };

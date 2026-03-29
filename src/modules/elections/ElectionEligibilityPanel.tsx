@@ -298,24 +298,37 @@ export function ElectionEligibilityPanel({
                 </div>
 
                 {eligibilityView.SelfRosterEntry ? (
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
-                      <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">Linked voter id</div>
-                      <div className="mt-2 font-mono text-lg">{eligibilityView.SelfRosterEntry.OrganizationVoterId}</div>
-                      <div className="mt-3 text-sm text-hush-text-accent">{eligibilityView.SelfRosterEntry.ContactValueHint}</div>
+                  <div>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+                        <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">Linked voter id</div>
+                        <div className="mt-2 font-mono text-lg">{eligibilityView.SelfRosterEntry.OrganizationVoterId}</div>
+                        <div className="mt-3 text-sm text-hush-text-accent">{eligibilityView.SelfRosterEntry.ContactValueHint}</div>
+                      </div>
+                      <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+                        <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">Participation status</div>
+                        <div className="mt-2 text-lg font-semibold">
+                          {getParticipationLabel(
+                            eligibilityView.SelfRosterEntry.ParticipationStatus,
+                            election?.LifecycleState === 1,
+                            eligibilityView.SelfRosterEntry.InCurrentDenominator
+                          )}
+                        </div>
+                        <div className="mt-3 text-sm text-hush-text-accent">
+                          Voting right: {eligibilityView.SelfRosterEntry.VotingRightStatus === 1 ? 'Active' : 'Inactive'}
+                        </div>
+                      </div>
                     </div>
-                    <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
-                      <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">Participation status</div>
-                      <div className="mt-2 text-lg font-semibold">
-                        {getParticipationLabel(
-                          eligibilityView.SelfRosterEntry.ParticipationStatus,
-                          election?.LifecycleState === 1,
-                          eligibilityView.SelfRosterEntry.InCurrentDenominator
-                        )}
-                      </div>
-                      <div className="mt-3 text-sm text-hush-text-accent">
-                        Voting right: {eligibilityView.SelfRosterEntry.VotingRightStatus === 1 ? 'Active' : 'Inactive'}
-                      </div>
+
+                    <div className="mt-4 flex flex-wrap justify-end gap-3">
+                      <Link
+                        href={`/account/elections/${electionId}`}
+                        className="inline-flex items-center gap-2 rounded-xl border border-hush-bg-light px-4 py-2 text-sm transition-colors hover:border-hush-purple"
+                        data-testid="eligibility-open-voting-detail"
+                      >
+                        <ShieldCheck className="h-4 w-4" />
+                        <span>Open voting detail</span>
+                      </Link>
                     </div>
                   </div>
                 ) : (

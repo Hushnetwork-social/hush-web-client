@@ -972,6 +972,7 @@ export interface SubmitTransactionResponse {
   successful: boolean;
   message: string;
   status: TransactionStatusEnum;  // FEAT-057: Idempotency status
+  validationCode: string;
 }
 
 export function parseSubmitTransactionResponse(messageBytes: Uint8Array): SubmitTransactionResponse {
@@ -979,6 +980,7 @@ export function parseSubmitTransactionResponse(messageBytes: Uint8Array): Submit
     successful: false,
     message: '',
     status: TransactionStatusEnum.UNSPECIFIED,
+    validationCode: '',
   };
 
   let offset = 0;
@@ -1003,6 +1005,11 @@ export function parseSubmitTransactionResponse(messageBytes: Uint8Array): Submit
       const lenResult = parseVarint(messageBytes, offset);
       offset += lenResult.bytesRead;
       result.message = parseString(messageBytes, offset, lenResult.value);
+      offset += lenResult.value;
+    } else if (wireType === 2 && fieldNumber === 4) {
+      const lenResult = parseVarint(messageBytes, offset);
+      offset += lenResult.bytesRead;
+      result.validationCode = parseString(messageBytes, offset, lenResult.value);
       offset += lenResult.value;
     } else if (wireType === 0) {
       const valueResult = parseVarint(messageBytes, offset);

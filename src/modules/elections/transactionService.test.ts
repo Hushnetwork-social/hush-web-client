@@ -8,6 +8,8 @@ import {
 } from '@/lib/grpc';
 import {
   ENCRYPTED_ELECTION_ENVELOPE_PAYLOAD_KIND,
+  createAcceptElectionBallotCastTransaction,
+  createRegisterElectionVotingCommitmentTransaction,
   createApproveElectionGovernedProposalTransaction,
   createClaimElectionRosterEntryTransaction,
   createElectionDraftTransaction,
@@ -476,6 +478,168 @@ describe('transactionService encrypted election envelope helpers', () => {
     expect(decryptedPayload.ActionPayload.ActorPublicAddress).toBe(voterSigningPublicKey);
     expect(decryptedPayload.ActionPayload.OrganizationVoterId).toBe('10042');
     expect(decryptedPayload.ActionPayload.VerificationCode).toBe('1111');
+  });
+
+  it('creates a register-voting-commitment envelope using the existing election key wrappers', async () => {
+    const voterSigningPrivateKeyHex = '7777777777777777777777777777777777777777777777777777777777777777';
+    const voterEncryptionPrivateKeyHex = '8888888888888888888888888888888888888888888888888888888888888888';
+    const nodeEncryptionPrivateKeyHex = '3333333333333333333333333333333333333333333333333333333333333333';
+    const electionPrivateKeyHex = '5555555555555555555555555555555555555555555555555555555555555555';
+    const voterSigningPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(voterSigningPrivateKeyHex), true),
+    );
+    const voterEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(voterEncryptionPrivateKeyHex), true),
+    );
+    const nodeEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(nodeEncryptionPrivateKeyHex), true),
+    );
+    const actorEncryptedElectionPrivateKey = await eciesEncrypt(
+      electionPrivateKeyHex,
+      voterEncryptionPublicKey,
+    );
+
+    blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
+      NodePublicEncryptAddress: nodeEncryptionPublicKey,
+      ElectionEnvelopeVersion: 'election-envelope-v1',
+    });
+    electionsServiceMock.getElectionEnvelopeAccess.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      ActorEncryptedElectionPrivateKey: actorEncryptedElectionPrivateKey,
+    });
+
+    const { signedTransaction } = await createRegisterElectionVotingCommitmentTransaction(
+      'election-123',
+      voterSigningPublicKey,
+      voterEncryptionPublicKey,
+      voterEncryptionPrivateKeyHex,
+      'commitment-hash-1',
+      voterSigningPrivateKeyHex,
+    );
+
+    const parsedTransaction = JSON.parse(signedTransaction) as {
+      PayloadKind: string;
+      Payload: {
+        ActorEncryptedElectionPrivateKey: string;
+        EncryptedPayload: string;
+      };
+    };
+
+    expect(parsedTransaction.PayloadKind).toBe(ENCRYPTED_ELECTION_ENVELOPE_PAYLOAD_KIND);
+
+    const actorElectionPrivateKey = await eciesDecrypt(
+      parsedTransaction.Payload.ActorEncryptedElectionPrivateKey,
+      voterEncryptionPrivateKeyHex,
+    );
+    const decryptedPayloadJson = await eciesDecrypt(
+      parsedTransaction.Payload.EncryptedPayload,
+      actorElectionPrivateKey,
+    );
+    const decryptedPayload = JSON.parse(decryptedPayloadJson) as {
+      ActionType: string;
+      ActionPayload: {
+        ActorPublicAddress: string;
+        CommitmentHash: string;
+      };
+    };
+
+    expect(decryptedPayload.ActionType).toBe('register_voting_commitment');
+    expect(decryptedPayload.ActionPayload.ActorPublicAddress).toBe(voterSigningPublicKey);
+    expect(decryptedPayload.ActionPayload.CommitmentHash).toBe('commitment-hash-1');
+  });
+
+  it('creates an accept-ballot-cast envelope with the FEAT-099 cast boundary fields', async () => {
+    const voterSigningPrivateKeyHex = '7777777777777777777777777777777777777777777777777777777777777777';
+    const voterEncryptionPrivateKeyHex = '8888888888888888888888888888888888888888888888888888888888888888';
+    const nodeEncryptionPrivateKeyHex = '3333333333333333333333333333333333333333333333333333333333333333';
+    const electionPrivateKeyHex = '5555555555555555555555555555555555555555555555555555555555555555';
+    const voterSigningPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(voterSigningPrivateKeyHex), true),
+    );
+    const voterEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(voterEncryptionPrivateKeyHex), true),
+    );
+    const nodeEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(nodeEncryptionPrivateKeyHex), true),
+    );
+    const actorEncryptedElectionPrivateKey = await eciesEncrypt(
+      electionPrivateKeyHex,
+      voterEncryptionPublicKey,
+    );
+
+    blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
+      NodePublicEncryptAddress: nodeEncryptionPublicKey,
+      ElectionEnvelopeVersion: 'election-envelope-v1',
+    });
+    electionsServiceMock.getElectionEnvelopeAccess.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      ActorEncryptedElectionPrivateKey: actorEncryptedElectionPrivateKey,
+    });
+
+    const { signedTransaction } = await createAcceptElectionBallotCastTransaction(
+      'election-123',
+      voterSigningPublicKey,
+      voterEncryptionPublicKey,
+      voterEncryptionPrivateKeyHex,
+      'cast-key-1',
+      'ciphertext-ballot-package',
+      'proof-bundle',
+      'nullifier-1',
+      'open-artifact-7',
+      'AQIDBA==',
+      'ceremony-version-5',
+      'dkg-prod-1of1',
+      'tally-fingerprint-9',
+      voterSigningPrivateKeyHex,
+    );
+
+    const parsedTransaction = JSON.parse(signedTransaction) as {
+      PayloadKind: string;
+      Payload: {
+        ActorEncryptedElectionPrivateKey: string;
+        EncryptedPayload: string;
+      };
+    };
+
+    expect(parsedTransaction.PayloadKind).toBe(ENCRYPTED_ELECTION_ENVELOPE_PAYLOAD_KIND);
+
+    const actorElectionPrivateKey = await eciesDecrypt(
+      parsedTransaction.Payload.ActorEncryptedElectionPrivateKey,
+      voterEncryptionPrivateKeyHex,
+    );
+    const decryptedPayloadJson = await eciesDecrypt(
+      parsedTransaction.Payload.EncryptedPayload,
+      actorElectionPrivateKey,
+    );
+    const decryptedPayload = JSON.parse(decryptedPayloadJson) as {
+      ActionType: string;
+      ActionPayload: {
+        ActorPublicAddress: string;
+        IdempotencyKey: string;
+        EncryptedBallotPackage: string;
+        ProofBundle: string;
+        BallotNullifier: string;
+        OpenArtifactId: string;
+        EligibleSetHash: string;
+        CeremonyVersionId: string;
+        DkgProfileId: string;
+        TallyPublicKeyFingerprint: string;
+      };
+    };
+
+    expect(decryptedPayload.ActionType).toBe('accept_ballot_cast');
+    expect(decryptedPayload.ActionPayload.ActorPublicAddress).toBe(voterSigningPublicKey);
+    expect(decryptedPayload.ActionPayload.IdempotencyKey).toBe('cast-key-1');
+    expect(decryptedPayload.ActionPayload.EncryptedBallotPackage).toBe('ciphertext-ballot-package');
+    expect(decryptedPayload.ActionPayload.ProofBundle).toBe('proof-bundle');
+    expect(decryptedPayload.ActionPayload.BallotNullifier).toBe('nullifier-1');
+    expect(decryptedPayload.ActionPayload.OpenArtifactId).toBe('open-artifact-7');
+    expect(decryptedPayload.ActionPayload.EligibleSetHash).toBe('AQIDBA==');
+    expect(decryptedPayload.ActionPayload.CeremonyVersionId).toBe('ceremony-version-5');
+    expect(decryptedPayload.ActionPayload.DkgProfileId).toBe('dkg-prod-1of1');
+    expect(decryptedPayload.ActionPayload.TallyPublicKeyFingerprint).toBe('tally-fingerprint-9');
   });
 
   it('creates an encrypted aggregate-only finalization share envelope for a trustee actor', async () => {

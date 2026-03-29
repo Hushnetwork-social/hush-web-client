@@ -4,6 +4,8 @@ import type {
   GetElectionCeremonyActionViewResponse,
   GetElectionEligibilityViewRequest,
   GetElectionEligibilityViewResponse,
+  GetElectionVotingViewRequest,
+  GetElectionVotingViewResponse,
   GetElectionOpenReadinessRequest,
   GetElectionOpenReadinessResponse,
   GetElectionRequest,
@@ -44,6 +46,17 @@ export const electionsService = {
     return client.unaryCall<GetElectionEligibilityViewRequest, GetElectionEligibilityViewResponse>(
       SERVICE_NAME,
       'GetElectionEligibilityView',
+      request
+    );
+  },
+
+  async getElectionVotingView(
+    request: GetElectionVotingViewRequest
+  ): Promise<GetElectionVotingViewResponse> {
+    const client = getGrpcClient();
+    return client.unaryCall<GetElectionVotingViewRequest, GetElectionVotingViewResponse>(
+      SERVICE_NAME,
+      'GetElectionVotingView',
       request
     );
   },

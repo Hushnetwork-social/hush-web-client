@@ -93,6 +93,24 @@ export interface ActivateElectionRosterEntryActionPayload {
   OrganizationVoterId: string;
 }
 
+export interface RegisterElectionVotingCommitmentActionPayload {
+  ActorPublicAddress: string;
+  CommitmentHash: string;
+}
+
+export interface AcceptElectionBallotCastActionPayload {
+  ActorPublicAddress: string;
+  IdempotencyKey: string;
+  EncryptedBallotPackage: string;
+  ProofBundle: string;
+  BallotNullifier: string;
+  OpenArtifactId: string;
+  EligibleSetHash: string;
+  CeremonyVersionId: string;
+  DkgProfileId: string;
+  TallyPublicKeyFingerprint: string;
+}
+
 export interface StartElectionCeremonyActionPayload {
   ActorPublicAddress: string;
   ProfileId: string;
@@ -282,6 +300,8 @@ const ENCRYPTED_ELECTION_ACTION_TYPES = {
   IMPORT_ROSTER: 'import_roster',
   CLAIM_ROSTER_ENTRY: 'claim_roster_entry',
   ACTIVATE_ROSTER_ENTRY: 'activate_roster_entry',
+  REGISTER_VOTING_COMMITMENT: 'register_voting_commitment',
+  ACCEPT_BALLOT_CAST: 'accept_ballot_cast',
   INVITE_TRUSTEE: 'invite_trustee',
   ACCEPT_TRUSTEE_INVITATION: 'accept_trustee_invitation',
   REJECT_TRUSTEE_INVITATION: 'reject_trustee_invitation',
@@ -542,6 +562,76 @@ export async function createActivateElectionRosterEntryTransaction(
       {
         ActorPublicAddress: actorPublicAddress,
         OrganizationVoterId: organizationVoterId,
+      },
+      signingPrivateKeyHex,
+    );
+
+  return {
+    signedTransaction: encryptedEnvelope.signedTransaction,
+  };
+}
+
+export async function createRegisterElectionVotingCommitmentTransaction(
+  electionId: string,
+  actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
+  commitmentHash: string,
+  signingPrivateKeyHex: string,
+): Promise<{ signedTransaction: string }> {
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<RegisterElectionVotingCommitmentActionPayload>(
+      electionId,
+      actorPublicAddress,
+      actorPublicEncryptAddress,
+      actorPrivateEncryptKeyHex,
+      ENCRYPTED_ELECTION_ACTION_TYPES.REGISTER_VOTING_COMMITMENT,
+      {
+        ActorPublicAddress: actorPublicAddress,
+        CommitmentHash: commitmentHash,
+      },
+      signingPrivateKeyHex,
+    );
+
+  return {
+    signedTransaction: encryptedEnvelope.signedTransaction,
+  };
+}
+
+export async function createAcceptElectionBallotCastTransaction(
+  electionId: string,
+  actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
+  idempotencyKey: string,
+  encryptedBallotPackage: string,
+  proofBundle: string,
+  ballotNullifier: string,
+  openArtifactId: string,
+  eligibleSetHash: string,
+  ceremonyVersionId: string,
+  dkgProfileId: string,
+  tallyPublicKeyFingerprint: string,
+  signingPrivateKeyHex: string,
+): Promise<{ signedTransaction: string }> {
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<AcceptElectionBallotCastActionPayload>(
+      electionId,
+      actorPublicAddress,
+      actorPublicEncryptAddress,
+      actorPrivateEncryptKeyHex,
+      ENCRYPTED_ELECTION_ACTION_TYPES.ACCEPT_BALLOT_CAST,
+      {
+        ActorPublicAddress: actorPublicAddress,
+        IdempotencyKey: idempotencyKey,
+        EncryptedBallotPackage: encryptedBallotPackage,
+        ProofBundle: proofBundle,
+        BallotNullifier: ballotNullifier,
+        OpenArtifactId: openArtifactId,
+        EligibleSetHash: eligibleSetHash,
+        CeremonyVersionId: ceremonyVersionId,
+        DkgProfileId: dkgProfileId,
+        TallyPublicKeyFingerprint: tallyPublicKeyFingerprint,
       },
       signingPrivateKeyHex,
     );
