@@ -1,4 +1,5 @@
 import {
+  ElectionClosedProgressStatusProto,
   type ElectionCeremonyProfile,
   ElectionCeremonyActionTypeProto,
   ElectionCeremonyActorRoleProto,
@@ -12,6 +13,7 @@ import {
   type ElectionFinalizationReleaseEvidence,
   ElectionFinalizationReleaseModeProto,
   type ElectionFinalizationSession,
+  ElectionFinalizationSessionPurposeProto,
   ElectionFinalizationSessionStatusProto,
   type ElectionFinalizationShare,
   ElectionFinalizationShareStatusProto,
@@ -32,6 +34,7 @@ import {
   type GetElectionCeremonyActionViewResponse,
   type GetElectionResponse,
   type GrpcTimestamp,
+  OfficialResultVisibilityPolicyProto,
   OutcomeRuleKindProto,
   ParticipationPrivacyModeProto,
   ReportingPolicyProto,
@@ -178,6 +181,19 @@ const REVIEW_WINDOW_LABELS: Record<ReviewWindowPolicyProto, string> = {
   [ReviewWindowPolicyProto.GovernedReviewWindowReserved]: 'Governed review window reserved',
 };
 
+const OFFICIAL_RESULT_VISIBILITY_LABELS: Record<OfficialResultVisibilityPolicyProto, string> = {
+  [OfficialResultVisibilityPolicyProto.ParticipantEncryptedOnly]: 'Participant encrypted only',
+  [OfficialResultVisibilityPolicyProto.PublicPlaintext]: 'Public plaintext',
+};
+
+const CLOSED_PROGRESS_STATUS_LABELS: Record<ElectionClosedProgressStatusProto, string> = {
+  [ElectionClosedProgressStatusProto.ClosedProgressNone]: 'No active close processing',
+  [ElectionClosedProgressStatusProto.ClosedProgressWaitingForTrusteeShares]:
+    'Waiting for trustee shares',
+  [ElectionClosedProgressStatusProto.ClosedProgressTallyCalculationInProgress]:
+    'Tally calculation in progress',
+};
+
 const GOVERNED_ACTION_LABELS: Record<ElectionGovernedActionTypeProto, string> = {
   [ElectionGovernedActionTypeProto.Open]: 'Open',
   [ElectionGovernedActionTypeProto.Close]: 'Close',
@@ -239,6 +255,12 @@ const CEREMONY_SHARE_CUSTODY_STATUS_LABELS: Record<ElectionCeremonyShareCustodyS
 const FINALIZATION_SESSION_STATUS_LABELS: Record<ElectionFinalizationSessionStatusProto, string> = {
   [ElectionFinalizationSessionStatusProto.FinalizationSessionAwaitingShares]: 'Awaiting shares',
   [ElectionFinalizationSessionStatusProto.FinalizationSessionCompleted]: 'Completed',
+};
+
+const FINALIZATION_SESSION_PURPOSE_LABELS: Record<ElectionFinalizationSessionPurposeProto, string> = {
+  [ElectionFinalizationSessionPurposeProto.FinalizationSessionPurposeCloseCounting]:
+    'Close counting',
+  [ElectionFinalizationSessionPurposeProto.FinalizationSessionPurposeFinalize]: 'Finalize',
 };
 
 const FINALIZATION_SHARE_STATUS_LABELS: Record<ElectionFinalizationShareStatusProto, string> = {
@@ -517,6 +539,18 @@ export function getReportingPolicyLabel(policy: ReportingPolicyProto): string {
 
 export function getReviewWindowPolicyLabel(policy: ReviewWindowPolicyProto): string {
   return REVIEW_WINDOW_LABELS[policy];
+}
+
+export function getOfficialResultVisibilityLabel(
+  policy: OfficialResultVisibilityPolicyProto
+): string {
+  return OFFICIAL_RESULT_VISIBILITY_LABELS[policy];
+}
+
+export function getClosedProgressStatusLabel(
+  status: ElectionClosedProgressStatusProto
+): string {
+  return CLOSED_PROGRESS_STATUS_LABELS[status] ?? 'Unknown';
 }
 
 export function getWarningTitle(code: ElectionWarningCodeProto): string {
@@ -1006,6 +1040,12 @@ export function getFinalizationSessionStatusLabel(
   status: ElectionFinalizationSessionStatusProto
 ): string {
   return FINALIZATION_SESSION_STATUS_LABELS[status] ?? 'Unknown';
+}
+
+export function getFinalizationSessionPurposeLabel(
+  purpose: ElectionFinalizationSessionPurposeProto
+): string {
+  return FINALIZATION_SESSION_PURPOSE_LABELS[purpose] ?? 'Unknown';
 }
 
 export function getFinalizationShareStatusLabel(

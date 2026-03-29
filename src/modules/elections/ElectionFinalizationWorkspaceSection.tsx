@@ -8,6 +8,7 @@ import {
   formatTimestamp,
   getAcceptedFinalizationShareCount,
   getActiveFinalizationSession,
+  getFinalizationSessionPurposeLabel,
   getFinalizationReleaseModeLabel,
   getFinalizationSessionStatusLabel,
   getFinalizationShareStatusLabel,
@@ -61,14 +62,15 @@ export function ElectionFinalizationWorkspaceSection({
     <section className={sectionClass} data-testid="elections-finalization-section">
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
-          <h2 className="text-lg font-semibold">Finalization Session</h2>
+          <h2 className="text-lg font-semibold">Counting And Finalization</h2>
           <p className="mt-1 text-sm text-hush-text-accent">
-            FEAT-098 binds release to one exact close target and accepts only aggregate-tally shares
-            from the eligible trustee roster.
+            FEAT-101 introduces close-counting share sessions before tally readiness, while FEAT-098
+            keeps the aggregate-only release boundary for the exact target session.
           </p>
         </div>
         {session ? (
           <div className="rounded-xl border border-hush-purple/30 bg-hush-purple/10 px-3 py-2 text-xs text-hush-text-primary">
+            {getFinalizationSessionPurposeLabel(session.SessionPurpose)} |{' '}
             {getFinalizationSessionStatusLabel(session.Status)}
           </div>
         ) : null}
@@ -87,7 +89,15 @@ export function ElectionFinalizationWorkspaceSection({
         </div>
       ) : (
         <div className="space-y-5" data-testid="elections-finalization-session">
-          <div className="grid gap-4 md:grid-cols-4">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+            <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                Session purpose
+              </div>
+              <div className="mt-2 text-sm text-hush-text-primary">
+                {getFinalizationSessionPurposeLabel(session.SessionPurpose)}
+              </div>
+            </div>
             <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
               <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
                 Close artifact

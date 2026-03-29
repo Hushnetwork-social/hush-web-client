@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, ArrowLeft, CheckCircle2, Loader2, ShieldAlert } from 'lucide-react';
 import {
+  ElectionFinalizationSessionPurposeProto,
   ElectionFinalizationSessionStatusProto,
   ElectionFinalizationShareStatusProto,
   ElectionFinalizationTargetTypeProto,
@@ -14,6 +15,7 @@ import {
   formatTimestamp,
   getAcceptedFinalizationShareCount,
   getActiveFinalizationSession,
+  getFinalizationSessionPurposeLabel,
   getFinalizationSessionStatusLabel,
   getFinalizationShareStatusLabel,
   getGovernedActionViewStates,
@@ -81,6 +83,12 @@ export function TrusteeElectionFinalizationPanel({
       ) ?? null,
     [selectedElection]
   );
+  const sessionPurpose =
+    session?.SessionPurpose ??
+    ElectionFinalizationSessionPurposeProto.FinalizationSessionPurposeFinalize;
+  const isCloseCountingSession =
+    sessionPurpose ===
+    ElectionFinalizationSessionPurposeProto.FinalizationSessionPurposeCloseCounting;
   const eligibleTrustee = useMemo(
     () =>
       session?.EligibleTrustees.find(
@@ -151,7 +159,9 @@ export function TrusteeElectionFinalizationPanel({
             <ArrowLeft className="h-4 w-4" />
             <span>Back to elections</span>
           </Link>
-          <h1 className="text-2xl font-semibold">Trustee Finalization Share</h1>
+          <h1 className="text-2xl font-semibold">
+            {isCloseCountingSession ? 'Trustee Close Counting Share' : 'Trustee Finalization Share'}
+          </h1>
           <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
             Submit one trustee share for the exact aggregate-tally release target. This page does
             not provide arbitrary ballot-inspection or single-ballot decryption controls.
@@ -218,12 +228,20 @@ export function TrusteeElectionFinalizationPanel({
                 </div>
                 <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-2 text-xs text-hush-text-accent">
                   {session
-                    ? getFinalizationSessionStatusLabel(session.Status)
-                    : finalizeActionState?.reason || 'No active finalization session'}
+                    ? `${getFinalizationSessionPurposeLabel(session.SessionPurpose)} | ${getFinalizationSessionStatusLabel(session.Status)}`
+                    : finalizeActionState?.reason || 'No active share session'}
                 </div>
               </div>
 
-              <div className="mt-5 grid gap-4 md:grid-cols-4">
+              <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+                <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                    Session purpose
+                  </div>
+                  <div className="mt-2 text-sm text-hush-text-primary">
+                    {session ? getFinalizationSessionPurposeLabel(session.SessionPurpose) : 'Not available'}
+                  </div>
+                </div>
                 <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
                   <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
                     Session id
@@ -292,9 +310,11 @@ export function TrusteeElectionFinalizationPanel({
 
             <section className={sectionClass} data-testid="trustee-finalization-panel">
               <div className="mb-4">
-                <h2 className="text-lg font-semibold">Aggregate Share Submission</h2>
+                <h2 className="text-lg font-semibold">
+                  {isCloseCountingSession ? 'Close Counting Share Submission' : 'Aggregate Share Submission'}
+                </h2>
                 <p className="mt-1 text-sm text-hush-text-accent">
-                  Submit one exact share for the bound finalization session. The client fixes the
+                  Submit one exact share for the bound session. The client fixes the
                   target to the final aggregate tally and does not expose a single-ballot option.
                 </p>
               </div>
@@ -304,7 +324,8 @@ export function TrusteeElectionFinalizationPanel({
                   className="rounded-xl border border-hush-bg-light bg-hush-bg-dark px-4 py-3 text-sm text-hush-text-accent"
                   data-testid="trustee-finalization-blocked"
                 >
-                  {finalizeActionState?.reason || 'Finalization is not available for this election yet.'}
+                  {finalizeActionState?.reason ||
+                    'A close-counting or finalization share session is not available for this election yet.'}
                 </div>
               ) : !eligibleTrustee ? (
                 <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-100">
@@ -378,7 +399,7 @@ export function TrusteeElectionFinalizationPanel({
                       ) : (
                         <CheckCircle2 className="h-4 w-4" />
                       )}
-                      <span>Submit aggregate share</span>
+                      <span>{isCloseCountingSession ? 'Submit counting share' : 'Submit aggregate share'}</span>
                     </button>
                   </div>
                 </>
