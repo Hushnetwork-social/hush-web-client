@@ -1416,8 +1416,9 @@ export function getElectionWorkspaceSectionOrder(
   }
 
   const sections: ElectionWorkspaceSectionId[] = [];
+  const canOpenVoterSurface = entry.ActorRoles.IsVoter || entry.CanClaimIdentity;
   const isOpenVoter =
-    entry.ActorRoles.IsVoter && entry.Election.LifecycleState === ElectionLifecycleStateProto.Open;
+    canOpenVoterSurface && entry.Election.LifecycleState === ElectionLifecycleStateProto.Open;
 
   if (isOpenVoter) {
     sections.push('voter');
@@ -1435,7 +1436,7 @@ export function getElectionWorkspaceSectionOrder(
     sections.push('auditor');
   }
 
-  if (entry.ActorRoles.IsVoter && !isOpenVoter) {
+  if (canOpenVoterSurface && !isOpenVoter) {
     sections.push('voter');
   }
 

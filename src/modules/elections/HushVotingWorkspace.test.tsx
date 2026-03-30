@@ -277,4 +277,143 @@ describe('HushVotingWorkspace', () => {
     expect(await screen.findByText('No election surfaces available')).toBeInTheDocument();
     expect(screen.getByText('No election roles are assigned to this actor.')).toBeInTheDocument();
   });
+
+  it('renders the pre-link voter section when the hub entry only allows claim-linking', async () => {
+    const loadElectionHub = vi.fn().mockResolvedValue(undefined);
+    const claimEntry = createHubEntry(
+      'election-claim',
+      ElectionLifecycleStateProto.Finalized,
+      'Claim-Link Election',
+      {
+        ActorRoles: {
+          IsOwnerAdmin: false,
+          IsTrustee: false,
+          IsVoter: false,
+          IsDesignatedAuditor: false,
+        },
+        CanClaimIdentity: true,
+        CanViewParticipantResults: false,
+        CanViewReportPackage: false,
+        CanViewNamedParticipationRoster: false,
+        HasUnofficialResult: false,
+        HasOfficialResult: false,
+        SuggestedAction: ElectionHubNextActionHintProto.ElectionHubActionNone,
+      }
+    );
+
+    useElectionsStore.setState({
+      loadElectionHub,
+      clearGrantCandidateSearch: vi.fn(),
+      selectHubElection: vi.fn().mockResolvedValue(undefined),
+      reset: vi.fn(),
+      hubView: createHubView([claimEntry]),
+      hubEntries: [claimEntry],
+      selectedElectionId: 'election-claim',
+      selectedHubEntry: claimEntry,
+      selectedElection: createDetail(
+        'election-claim',
+        ElectionLifecycleStateProto.Finalized,
+        'Claim-Link Election'
+      ),
+      canManageReportAccessGrants: false,
+      reportAccessGrantDeniedReason: '',
+      reportAccessGrants: [],
+      feedback: null,
+      error: null,
+      isLoadingHub: false,
+      isLoadingDetail: false,
+      actorPublicAddress: 'actor-address',
+    });
+
+    render(
+      <HushVotingWorkspace
+        actorPublicAddress="actor-address"
+        actorEncryptionPublicKey="actor-encrypt-address"
+        actorEncryptionPrivateKey="actor-private-encrypt-key"
+        actorSigningPrivateKey="actor-signing-private-key"
+      />
+    );
+
+    expect(await screen.findByTestId('hush-voting-section-voter')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open identity and eligibility' })).toHaveAttribute(
+      'href',
+      '/account/elections/election-claim/eligibility'
+    );
+  });
+
+  it('keeps the mixed-role vertical-slice links available from the shared workspace shell', async () => {
+    const loadElectionHub = vi.fn().mockResolvedValue(undefined);
+    const mixedRoleEntry = createHubEntry(
+      'election-mixed',
+      ElectionLifecycleStateProto.Finalized,
+      'Mixed Role Election',
+      {
+        ActorRoles: {
+          IsOwnerAdmin: true,
+          IsTrustee: true,
+          IsVoter: true,
+          IsDesignatedAuditor: true,
+        },
+        CanViewNamedParticipationRoster: true,
+        CanViewReportPackage: true,
+        CanViewParticipantResults: true,
+        HasUnofficialResult: true,
+        HasOfficialResult: true,
+      }
+    );
+
+    useElectionsStore.setState({
+      loadElectionHub,
+      clearGrantCandidateSearch: vi.fn(),
+      selectHubElection: vi.fn().mockResolvedValue(undefined),
+      reset: vi.fn(),
+      hubView: createHubView([mixedRoleEntry]),
+      hubEntries: [mixedRoleEntry],
+      selectedElectionId: 'election-mixed',
+      selectedHubEntry: mixedRoleEntry,
+      selectedElection: createDetail(
+        'election-mixed',
+        ElectionLifecycleStateProto.Finalized,
+        'Mixed Role Election'
+      ),
+      canManageReportAccessGrants: false,
+      reportAccessGrantDeniedReason: '',
+      reportAccessGrants: [],
+      feedback: null,
+      error: null,
+      isLoadingHub: false,
+      isLoadingDetail: false,
+      actorPublicAddress: 'actor-address',
+    });
+
+    render(
+      <HushVotingWorkspace
+        actorPublicAddress="actor-address"
+        actorEncryptionPublicKey="actor-encrypt-address"
+        actorEncryptionPrivateKey="actor-private-encrypt-key"
+        actorSigningPrivateKey="actor-signing-private-key"
+      />
+    );
+
+    expect(await screen.findByTestId('hush-voting-section-owner-admin')).toBeInTheDocument();
+    expect(screen.getByTestId('hush-voting-section-trustee')).toBeInTheDocument();
+    expect(screen.getByTestId('hush-voting-section-auditor')).toBeInTheDocument();
+    expect(screen.getByTestId('hush-voting-section-results')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open detailed owner workspace' })).toHaveAttribute(
+      'href',
+      '/account/elections/owner'
+    );
+    expect(screen.getByRole('link', { name: 'Open ceremony workspace' })).toHaveAttribute(
+      'href',
+      '/account/elections/trustee/election-mixed/ceremony'
+    );
+    expect(screen.getByRole('link', { name: 'Open share workspace' })).toHaveAttribute(
+      'href',
+      '/account/elections/trustee/election-mixed/finalization'
+    );
+    expect(screen.getByRole('link', { name: 'Open voter result detail' })).toHaveAttribute(
+      'href',
+      '/account/elections/voter/election-mixed'
+    );
+  });
 });
