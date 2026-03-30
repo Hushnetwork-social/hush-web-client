@@ -851,6 +851,37 @@ export enum OfficialResultVisibilityPolicyProto {
   PublicPlaintext = 1,
 }
 
+export enum ElectionReportPackageStatusProto {
+  ReportPackageGenerationFailed = 0,
+  ReportPackageSealed = 1,
+}
+
+export enum ElectionReportArtifactKindProto {
+  ReportArtifactHumanManifest = 0,
+  ReportArtifactHumanResultReport = 1,
+  ReportArtifactHumanNamedParticipationRoster = 2,
+  ReportArtifactHumanAuditProvenanceReport = 3,
+  ReportArtifactHumanOutcomeDetermination = 4,
+  ReportArtifactHumanDisputeReviewIndex = 5,
+  ReportArtifactMachineManifest = 6,
+  ReportArtifactMachineEvidenceGraph = 7,
+  ReportArtifactMachineResultReportProjection = 8,
+  ReportArtifactMachineNamedParticipationRosterProjection = 9,
+  ReportArtifactMachineAuditProvenanceReportProjection = 10,
+  ReportArtifactMachineOutcomeDeterminationProjection = 11,
+  ReportArtifactMachineDisputeReviewIndexProjection = 12,
+}
+
+export enum ElectionReportArtifactFormatProto {
+  ReportArtifactMarkdown = 0,
+  ReportArtifactJson = 1,
+}
+
+export enum ElectionReportArtifactAccessScopeProto {
+  ReportArtifactOwnerAuditorOnly = 0,
+  ReportArtifactOwnerAuditorTrustee = 1,
+}
+
 export enum ElectionClosedProgressStatusProto {
   ClosedProgressNone = 0,
   ClosedProgressWaitingForTrusteeShares = 1,
@@ -1266,6 +1297,48 @@ export interface ElectionResultArtifact {
   RecordedByPublicAddress: string;
 }
 
+export interface ElectionReportPackageSummaryView {
+  Id: string;
+  Status: ElectionReportPackageStatusProto;
+  AttemptNumber: number;
+  PreviousAttemptId: string;
+  FinalizationSessionId: string;
+  TallyReadyArtifactId: string;
+  UnofficialResultArtifactId: string;
+  OfficialResultArtifactId: string;
+  FinalizeArtifactId: string;
+  CloseBoundaryArtifactId: string;
+  CloseEligibilitySnapshotId: string;
+  FinalizationReleaseEvidenceId: string;
+  FrozenEvidenceHash: Uint8Array;
+  FrozenEvidenceFingerprint: string;
+  PackageHash: Uint8Array;
+  ArtifactCount: number;
+  FailureCode: string;
+  FailureReason: string;
+  AttemptedAt: GrpcTimestamp;
+  SealedAt?: GrpcTimestamp;
+  HasSealedAt: boolean;
+  AttemptedByPublicAddress: string;
+}
+
+export interface ElectionReportArtifactView {
+  Id: string;
+  ReportPackageId: string;
+  ElectionId: string;
+  ArtifactKind: ElectionReportArtifactKindProto;
+  Format: ElectionReportArtifactFormatProto;
+  AccessScope: ElectionReportArtifactAccessScopeProto;
+  SortOrder: number;
+  Title: string;
+  FileName: string;
+  MediaType: string;
+  ContentHash: Uint8Array;
+  Content: string;
+  PairedArtifactId: string;
+  RecordedAt: GrpcTimestamp;
+}
+
 export interface ElectionRecordView {
   ElectionId: string;
   Title: string;
@@ -1678,6 +1751,10 @@ export interface GetElectionResultViewResponse {
   ClosedProgressStatus: ElectionClosedProgressStatusProto;
   UnofficialResult?: ElectionResultArtifact;
   OfficialResult?: ElectionResultArtifact;
+  CanViewReportPackage: boolean;
+  CanRetryFailedPackageFinalization: boolean;
+  LatestReportPackage?: ElectionReportPackageSummaryView;
+  VisibleReportArtifacts: ElectionReportArtifactView[];
 }
 
 export interface GetElectionCeremonyActionViewRequest {
