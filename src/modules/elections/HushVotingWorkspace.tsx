@@ -1,7 +1,7 @@
 "use client";
 
 import Link from 'next/link';
-import { useEffect, useMemo } from 'react';
+import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   AlertCircle,
@@ -10,12 +10,21 @@ import {
   Files,
   Loader2,
   LockKeyhole,
+  Search,
   ShieldAlert,
   ShieldCheck,
   Vote,
 } from 'lucide-react';
-import type { ElectionGovernedProposal, ElectionHubEntryView, GetElectionResponse } from '@/lib/grpc';
+import type {
+  ElectionGovernedProposal,
+  ElectionHubEntryView,
+  ElectionSummary,
+  GetElectionResponse,
+  Identity,
+} from '@/lib/grpc';
 import { ElectionLifecycleStateProto } from '@/lib/grpc';
+import { electionsService } from '@/lib/grpc/services/elections';
+import { identityService } from '@/lib/grpc/services/identity';
 import { ClosedProgressBanner } from './ClosedProgressBanner';
 import { DesignatedAuditorGrantManager } from './DesignatedAuditorGrantManager';
 import { ElectionAccessBoundaryNotice } from './ElectionAccessBoundaryNotice';
@@ -48,12 +57,25 @@ type HushVotingWorkspaceProps = {
 const sectionClass =
   'rounded-3xl border border-hush-bg-light bg-hush-bg-element/95 p-5 shadow-sm shadow-black/10';
 
+type ElectionDiscoveryResult = {
+  election: ElectionSummary;
+  ownerDisplayName: string;
+};
+
 function timestampToMillis(timestamp?: { seconds?: number; nanos?: number }): number {
   if (!timestamp) {
     return 0;
   }
 
   return (timestamp.seconds ?? 0) * 1000 + Math.floor((timestamp.nanos ?? 0) / 1_000_000);
+}
+
+function abbreviateAddress(address: string): string {
+  if (address.length <= 18) {
+    return address;
+  }
+
+  return `${address.slice(0, 10)}...${address.slice(-6)}`;
 }
 
 function getLatestProposal(detail: GetElectionResponse | null): ElectionGovernedProposal | null {
@@ -82,6 +104,177 @@ function AvailabilityCard({
         {value}
       </div>
     </div>
+  );
+}
+
+function ElectionDiscoveryPanel({
+  onOpenEligibility,
+}: {
+  onOpenEligibility: (electionId: string) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<ElectionDiscoveryResult[]>([]);
+  const [hasSearched, setHasSearched] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const normalizedQuery = query.trim();
+    if (!normalizedQuery) {
+      setResults([]);
+      setHasSearched(false);
+      setError('Enter an election title or owner alias to search.');
+      return;
+    }
+
+    setIsSearching(true);
+    setError(null);
+
+    try {
+      const ownerLookup = new Map<string, Identity>();
+      try {
+        const identityResponse = await identityService.searchByDisplayName(normalizedQuery);
+        for (const identity of identityResponse.Identities ?? []) {
+          if (!ownerLookup.has(identity.PublicSigningAddress)) {
+            ownerLookup.set(identity.PublicSigningAddress, identity);
+          }
+        }
+      } catch {
+        // Title search should remain available even when alias lookup is unavailable.
+      }
+
+      const directoryResponse = await electionsService.searchElectionDirectory({
+        SearchTerm: normalizedQuery,
+        OwnerPublicAddresses: Array.from(ownerLookup.keys()),
+        Limit: 12,
+      });
+
+      if (!directoryResponse.Success) {
+        throw new Error(directoryResponse.ErrorMessage || 'Failed to search elections.');
+      }
+
+      const dedupedResults = new Map<string, ElectionDiscoveryResult>();
+      for (const election of directoryResponse.Elections ?? []) {
+        dedupedResults.set(election.ElectionId, {
+          election,
+          ownerDisplayName: ownerLookup.get(election.OwnerPublicAddress)?.DisplayName ?? '',
+        });
+      }
+
+      setResults(Array.from(dedupedResults.values()));
+      setHasSearched(true);
+    } catch (searchError) {
+      setResults([]);
+      setHasSearched(true);
+      setError(searchError instanceof Error ? searchError.message : 'Failed to search elections.');
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  return (
+    <section className={sectionClass} data-testid="election-discovery-panel">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-[0.24em] text-hush-text-accent">
+            Election Discovery
+          </div>
+          <h2 className="mt-2 text-xl font-semibold text-hush-text-primary">
+            Search before claim-linking
+          </h2>
+          <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
+            The hub only lists elections already linked to this Hush account. Search by election
+            title or owner alias, then open the eligibility route to claim-link an organization
+            voter identifier with the temporary code.
+          </p>
+        </div>
+
+        <div className="rounded-2xl border border-hush-bg-light bg-hush-bg-dark/70 px-4 py-3 text-xs text-hush-text-accent">
+          Temporary code: <span className="font-mono text-hush-text-primary">1111</span>
+        </div>
+      </div>
+
+      <form className="mt-5" onSubmit={handleSubmit}>
+        <label className="block text-sm font-medium text-hush-text-primary" htmlFor="election-search-input">
+          Find an election
+        </label>
+        <div className="mt-2 flex flex-col gap-3 md:flex-row">
+          <input
+            id="election-search-input"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Election title or owner alias"
+            className="min-w-0 flex-1 rounded-2xl border border-hush-bg-light bg-hush-bg-dark/80 px-4 py-3 text-sm text-hush-text-primary outline-none transition-colors placeholder:text-hush-text-accent focus:border-hush-purple"
+            aria-label="Search elections"
+          />
+          <button
+            type="submit"
+            disabled={isSearching}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-hush-purple px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 disabled:cursor-not-allowed disabled:bg-hush-purple/60"
+          >
+            {isSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+            <span>{isSearching ? 'Searching...' : 'Search elections'}</span>
+          </button>
+        </div>
+      </form>
+
+      <div className="mt-3 text-xs text-hush-text-accent">
+        Open a result to enter the organization voter ID, confirm with <span className="font-mono text-hush-text-primary">1111</span>, and attach that election to this hub.
+      </div>
+
+      {error ? (
+        <div className="mt-4 rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-100" role="alert">
+          {error}
+        </div>
+      ) : null}
+
+      {isSearching ? (
+        <div className="mt-4 flex items-center gap-3 rounded-2xl border border-hush-bg-light bg-hush-bg-dark/70 px-4 py-3 text-sm text-hush-text-accent">
+          <Loader2 className="h-4 w-4 animate-spin text-hush-purple" />
+          <span>Searching the election directory...</span>
+        </div>
+      ) : null}
+
+      {!isSearching && results.length > 0 ? (
+        <div className="mt-4 space-y-3">
+          {results.map((result) => (
+            <button
+              key={result.election.ElectionId}
+              type="button"
+              className="flex w-full items-start justify-between gap-4 rounded-2xl border border-hush-bg-light bg-hush-bg-dark/70 px-4 py-4 text-left transition-colors hover:border-hush-purple"
+              onClick={() => onOpenEligibility(result.election.ElectionId)}
+            >
+              <div>
+                <div className="text-sm font-semibold text-hush-text-primary">
+                  {result.election.Title || result.election.ElectionId}
+                </div>
+                <div className="mt-1 text-xs uppercase tracking-[0.2em] text-hush-text-accent">
+                  {getLifecycleLabel(result.election.LifecycleState)}
+                </div>
+                <div className="mt-2 text-sm text-hush-text-accent">
+                  Owner:{' '}
+                  <span className="text-hush-text-primary">
+                    {result.ownerDisplayName || abbreviateAddress(result.election.OwnerPublicAddress)}
+                  </span>
+                </div>
+              </div>
+              <div className="inline-flex items-center gap-2 text-sm font-medium text-hush-purple">
+                <span>Open eligibility</span>
+                <ArrowRight className="h-4 w-4" />
+              </div>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {!isSearching && hasSearched && results.length === 0 && !error ? (
+        <div className="mt-4 rounded-2xl border border-hush-bg-light bg-hush-bg-dark/70 px-4 py-3 text-sm text-hush-text-accent">
+          No elections matched that title or owner alias.
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -547,6 +740,9 @@ export function HushVotingWorkspace({
     error ||
     hubView?.EmptyStateReason ||
     'This account does not currently hold any FEAT-103 election role.';
+  const handleOpenEligibility = (electionId: string) => {
+    router.push(`/account/elections/${electionId}/eligibility`);
+  };
 
   return (
     <div className="min-h-screen bg-hush-bg-dark text-hush-text-primary">
@@ -602,19 +798,28 @@ export function HushVotingWorkspace({
             <span className="text-sm text-hush-text-accent">Loading actor-scoped election hub...</span>
           </div>
         ) : hubEntries.length === 0 ? (
-          <ElectionAccessBoundaryNotice
-            title="No election surfaces available"
-            message={emptyStateReason}
-          />
+          <div className="space-y-5">
+            <ElectionDiscoveryPanel onOpenEligibility={handleOpenEligibility} />
+            <ElectionAccessBoundaryNotice
+              title="No linked election surfaces available"
+              message={emptyStateReason}
+              details={[
+                'Search above to find an election before claim-linking your organization voter identifier.',
+                'After the eligibility claim succeeds, the election will appear in this hub.',
+              ]}
+            />
+          </div>
         ) : (
           <div className="grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
             <aside className="space-y-4">
+              <ElectionDiscoveryPanel onOpenEligibility={handleOpenEligibility} />
+
               <div className={`${sectionClass} p-4`}>
                 <div className="text-xs font-semibold uppercase tracking-[0.24em] text-hush-text-accent">
                   Election Hub
                 </div>
                 <p className="mt-2 text-sm text-hush-text-accent">
-                  One row per election, grouped by lifecycle and filtered to this actor&apos;s
+                  One row per linked election, grouped by lifecycle and filtered to this actor&apos;s
                   allowed surfaces.
                 </p>
               </div>

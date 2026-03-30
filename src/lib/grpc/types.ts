@@ -1725,6 +1725,12 @@ export interface GetElectionRequest {
   ElectionId: string;
 }
 
+export interface SearchElectionDirectoryRequest {
+  SearchTerm: string;
+  OwnerPublicAddresses: string[];
+  Limit: number;
+}
+
 export interface GetElectionHubViewRequest {
   ActorPublicAddress: string;
 }
@@ -1958,6 +1964,13 @@ export interface GetElectionResponse {
   FinalizationShares?: ElectionFinalizationShare[];
   FinalizationReleaseEvidenceRecords?: ElectionFinalizationReleaseEvidence[];
   ResultArtifacts?: ElectionResultArtifact[];
+}
+
+export interface SearchElectionDirectoryResponse {
+  Success: boolean;
+  ErrorMessage: string;
+  SearchTerm: string;
+  Elections: ElectionSummary[];
 }
 
 export interface GetElectionCeremonyActionViewResponse {

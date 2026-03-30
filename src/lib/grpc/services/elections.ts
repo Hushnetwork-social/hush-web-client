@@ -20,6 +20,8 @@ import type {
   GetElectionResponse,
   GetElectionsByOwnerRequest,
   GetElectionsByOwnerResponse,
+  SearchElectionDirectoryRequest,
+  SearchElectionDirectoryResponse,
 } from '../types';
 
 const SERVICE_NAME = 'rpcHush.HushElections';
@@ -41,6 +43,17 @@ export const electionsService = {
     return client.unaryCall<GetElectionRequest, GetElectionResponse>(
       SERVICE_NAME,
       'GetElection',
+      request
+    );
+  },
+
+  async searchElectionDirectory(
+    request: SearchElectionDirectoryRequest
+  ): Promise<SearchElectionDirectoryResponse> {
+    const client = getGrpcClient();
+    return client.unaryCall<SearchElectionDirectoryRequest, SearchElectionDirectoryResponse>(
+      SERVICE_NAME,
+      'SearchElectionDirectory',
       request
     );
   },

@@ -14,8 +14,15 @@ import {
   ElectionHubNextActionHintProto,
   ElectionLifecycleStateProto,
 } from '@/lib/grpc';
+import { electionsService } from '@/lib/grpc/services/elections';
+import { identityService } from '@/lib/grpc/services/identity';
 import { HushVotingWorkspace } from './HushVotingWorkspace';
 import { useElectionsStore } from './useElectionsStore';
+
+const { mockSearchElectionDirectory, mockSearchByDisplayName } = vi.hoisted(() => ({
+  mockSearchElectionDirectory: vi.fn(),
+  mockSearchByDisplayName: vi.fn(),
+}));
 
 const mockPush = vi.fn();
 const storeReset = useElectionsStore.getState().reset;
@@ -26,17 +33,40 @@ vi.mock('next/navigation', () => ({
   }),
 }));
 
+vi.mock('@/lib/grpc/services/elections', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/grpc/services/elections')>('@/lib/grpc/services/elections');
+  return {
+    ...actual,
+    electionsService: {
+      ...actual.electionsService,
+      searchElectionDirectory: mockSearchElectionDirectory,
+    },
+  };
+});
+
+vi.mock('@/lib/grpc/services/identity', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/grpc/services/identity')>('@/lib/grpc/services/identity');
+  return {
+    ...actual,
+    identityService: {
+      ...actual.identityService,
+      searchByDisplayName: mockSearchByDisplayName,
+    },
+  };
+});
+
 const timestamp = { seconds: 1_711_410_000, nanos: 0 };
 
 function createSummary(
   electionId: string,
   lifecycleState: ElectionLifecycleStateProto,
-  title: string
+  title: string,
+  ownerPublicAddress: string = 'actor-address'
 ): ElectionSummary {
   return {
     ElectionId: electionId,
     Title: title,
-    OwnerPublicAddress: 'actor-address',
+    OwnerPublicAddress: ownerPublicAddress,
     LifecycleState: lifecycleState,
     BindingStatus: ElectionBindingStatusProto.Binding,
     GovernanceMode: ElectionGovernanceModeProto.AdminOnly,
@@ -162,6 +192,8 @@ describe('HushVotingWorkspace', () => {
     cleanup();
     storeReset();
     mockPush.mockReset();
+    mockSearchElectionDirectory.mockReset();
+    mockSearchByDisplayName.mockReset();
   });
 
   afterEach(() => {
@@ -274,8 +306,147 @@ describe('HushVotingWorkspace', () => {
       />
     );
 
-    expect(await screen.findByText('No election surfaces available')).toBeInTheDocument();
+    expect(await screen.findByTestId('election-discovery-panel')).toBeInTheDocument();
+    expect(screen.getByText('No linked election surfaces available')).toBeInTheDocument();
     expect(screen.getByText('No election roles are assigned to this actor.')).toBeInTheDocument();
+  });
+
+  it('searches the election directory and routes results into the eligibility flow', async () => {
+    const loadElectionHub = vi.fn().mockResolvedValue(undefined);
+
+    mockSearchByDisplayName.mockResolvedValue({
+      Identities: [
+        {
+          DisplayName: 'Alice Owner',
+          PublicSigningAddress: 'owner-address',
+          PublicEncryptAddress: 'owner-encrypt',
+        },
+      ],
+    });
+    mockSearchElectionDirectory.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      SearchTerm: 'alice',
+      Elections: [
+        createSummary(
+          'election-search',
+          ElectionLifecycleStateProto.Draft,
+          'Board Election',
+          'owner-address'
+        ),
+      ],
+    });
+
+    useElectionsStore.setState({
+      loadElectionHub,
+      clearGrantCandidateSearch: vi.fn(),
+      selectHubElection: vi.fn().mockResolvedValue(undefined),
+      reset: vi.fn(),
+      hubView: createHubView([]),
+      hubEntries: [],
+      selectedElectionId: null,
+      selectedHubEntry: null,
+      selectedElection: null,
+      canManageReportAccessGrants: false,
+      reportAccessGrantDeniedReason: '',
+      reportAccessGrants: [],
+      feedback: null,
+      error: null,
+      isLoadingHub: false,
+      isLoadingDetail: false,
+      actorPublicAddress: 'actor-address',
+    });
+
+    render(
+      <HushVotingWorkspace
+        actorPublicAddress="actor-address"
+        actorEncryptionPublicKey="actor-encrypt-address"
+        actorEncryptionPrivateKey="actor-private-encrypt-key"
+        actorSigningPrivateKey="actor-signing-private-key"
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText('Search elections'), {
+      target: { value: 'alice' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Search elections' }));
+
+    await waitFor(() => {
+      expect(identityService.searchByDisplayName).toHaveBeenCalledWith('alice');
+      expect(electionsService.searchElectionDirectory).toHaveBeenCalledWith({
+        SearchTerm: 'alice',
+        OwnerPublicAddresses: ['owner-address'],
+        Limit: 12,
+      });
+    });
+
+    expect(await screen.findByText('Board Election')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Open eligibility/i }));
+
+    expect(mockPush).toHaveBeenCalledWith('/account/elections/election-search/eligibility');
+  });
+
+  it('falls back to title-only discovery when owner alias lookup fails', async () => {
+    const loadElectionHub = vi.fn().mockResolvedValue(undefined);
+
+    mockSearchByDisplayName.mockRejectedValue(new Error('identity directory unavailable'));
+    mockSearchElectionDirectory.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      SearchTerm: 'board',
+      Elections: [
+        createSummary(
+          'election-title-only',
+          ElectionLifecycleStateProto.Open,
+          'Board Election'
+        ),
+      ],
+    });
+
+    useElectionsStore.setState({
+      loadElectionHub,
+      clearGrantCandidateSearch: vi.fn(),
+      selectHubElection: vi.fn().mockResolvedValue(undefined),
+      reset: vi.fn(),
+      hubView: createHubView([]),
+      hubEntries: [],
+      selectedElectionId: null,
+      selectedHubEntry: null,
+      selectedElection: null,
+      canManageReportAccessGrants: false,
+      reportAccessGrantDeniedReason: '',
+      reportAccessGrants: [],
+      feedback: null,
+      error: null,
+      isLoadingHub: false,
+      isLoadingDetail: false,
+      actorPublicAddress: 'actor-address',
+    });
+
+    render(
+      <HushVotingWorkspace
+        actorPublicAddress="actor-address"
+        actorEncryptionPublicKey="actor-encrypt-address"
+        actorEncryptionPrivateKey="actor-private-encrypt-key"
+        actorSigningPrivateKey="actor-signing-private-key"
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText('Search elections'), {
+      target: { value: 'board' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Search elections' }));
+
+    await waitFor(() => {
+      expect(electionsService.searchElectionDirectory).toHaveBeenCalledWith({
+        SearchTerm: 'board',
+        OwnerPublicAddresses: [],
+        Limit: 12,
+      });
+    });
+
+    expect(await screen.findByText('Board Election')).toBeInTheDocument();
   });
 
   it('renders the pre-link voter section when the hub entry only allows claim-linking', async () => {
