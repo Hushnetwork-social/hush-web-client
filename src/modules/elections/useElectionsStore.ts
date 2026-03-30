@@ -1,13 +1,17 @@
 import { create } from 'zustand';
 import {
   type CompleteElectionCeremonyTrusteeRequest,
+  type ElectionHubEntryView,
+  type ElectionReportAccessGrantView,
   ElectionFinalizationShareStatusProto,
   ElectionGovernedActionTypeProto,
   ElectionGovernedProposalExecutionStatusProto,
   ElectionLifecycleStateProto,
+  type GetElectionHubViewResponse,
   type SubmitElectionFinalizationShareRequest,
   ElectionTrusteeInvitationStatusProto,
   type GetElectionCeremonyActionViewResponse,
+  type Identity,
   type JoinElectionCeremonyRequest,
   type PublishElectionCeremonyTransportKeyRequest,
   type RecordElectionCeremonySelfTestRequest,
@@ -23,11 +27,13 @@ import type {
   ElectionWarningCodeProto,
   ElectionSummary,
   GetElectionOpenReadinessResponse,
+  GetElectionReportAccessGrantsResponse,
   GetElectionResponse,
   InviteElectionTrusteeRequest,
   ResolveElectionTrusteeInvitationRequest,
 } from '@/lib/grpc';
 import { electionsService } from '@/lib/grpc/services/elections';
+import { identityService } from '@/lib/grpc/services/identity';
 import { submitTransaction } from '@/modules/blockchain/BlockchainService';
 import { getGovernedActionLabel } from './contracts';
 import {
@@ -36,6 +42,7 @@ import {
   createCloseElectionTransaction,
   createCompleteElectionCeremonyTrusteeTransaction,
   createElectionDraftTransaction,
+  createElectionReportAccessGrantTransaction,
   createElectionTrusteeInvitationTransaction,
   createFinalizeElectionTransaction,
   createJoinElectionCeremonyTransaction,
@@ -65,27 +72,55 @@ export interface ElectionsFeedback {
 }
 
 interface ElectionsState {
+  actorPublicAddress: string | null;
   ownerPublicAddress: string | null;
   elections: ElectionSummary[];
+  hubView: GetElectionHubViewResponse | null;
+  hubEntries: ElectionHubEntryView[];
+  selectedHubEntry: ElectionHubEntryView | null;
+  reportAccessGrants: ElectionReportAccessGrantView[];
+  canManageReportAccessGrants: boolean;
+  reportAccessGrantDeniedReason: string;
+  grantSearchResults: Identity[];
+  grantSearchQuery: string;
   selectedElectionId: string | null;
   selectedElection: GetElectionResponse | null;
   ceremonyActionView: GetElectionCeremonyActionViewResponse | null;
   openReadiness: GetElectionOpenReadinessResponse | null;
+  isLoadingHub: boolean;
+  isLoadingReportAccessGrants: boolean;
   isLoadingList: boolean;
   isLoadingDetail: boolean;
   isLoadingCeremonyActionView: boolean;
+  isSearchingGrantCandidates: boolean;
   isSubmitting: boolean;
   feedback: ElectionsFeedback | null;
   error: string | null;
+  grantSearchError: string | null;
+  setActorPublicAddress: (actorPublicAddress: string) => void;
   setOwnerPublicAddress: (ownerPublicAddress: string) => void;
   beginNewElection: () => void;
   clearFeedback: () => void;
+  clearGrantCandidateSearch: () => void;
+  loadElectionHub: (actorPublicAddress: string) => Promise<void>;
+  selectHubElection: (actorPublicAddress: string, electionId: string) => Promise<void>;
+  loadReportAccessGrants: (
+    actorPublicAddress: string,
+    electionId?: string
+  ) => Promise<GetElectionReportAccessGrantsResponse | null>;
+  searchGrantCandidates: (query: string) => Promise<void>;
   loadOwnerDashboard: (ownerPublicAddress: string) => Promise<void>;
   loadElection: (electionId: string) => Promise<void>;
   loadCeremonyActionView: (
     actorPublicAddress: string,
     electionId?: string
   ) => Promise<GetElectionCeremonyActionViewResponse | null>;
+  createReportAccessGrant: (
+    designatedAuditorPublicAddress: string,
+    actorPublicEncryptAddress: string,
+    actorPrivateEncryptKeyHex: string,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
   createDraft: (
     draft: ElectionDraftInput,
     snapshotReason: string,
@@ -232,18 +267,31 @@ interface ElectionsState {
 }
 
 const initialState = {
+  actorPublicAddress: null,
   ownerPublicAddress: null,
   elections: [],
+  hubView: null,
+  hubEntries: [],
+  selectedHubEntry: null,
+  reportAccessGrants: [],
+  canManageReportAccessGrants: false,
+  reportAccessGrantDeniedReason: '',
+  grantSearchResults: [],
+  grantSearchQuery: '',
   selectedElectionId: null,
   selectedElection: null,
   ceremonyActionView: null,
   openReadiness: null,
+  isLoadingHub: false,
+  isLoadingReportAccessGrants: false,
   isLoadingList: false,
   isLoadingDetail: false,
   isLoadingCeremonyActionView: false,
+  isSearchingGrantCandidates: false,
   isSubmitting: false,
   feedback: null,
   error: null,
+  grantSearchError: null,
 };
 
 function buildThrownErrorFeedback(error: unknown, fallbackMessage: string): ElectionsFeedback {
@@ -252,6 +300,10 @@ function buildThrownErrorFeedback(error: unknown, fallbackMessage: string): Elec
     message: error instanceof Error ? error.message : fallbackMessage,
     details: [],
   };
+}
+
+function getResolvedActorPublicAddress(get: () => ElectionsState): string | null {
+  return get().actorPublicAddress ?? get().ownerPublicAddress;
 }
 
 async function refreshElectionContext(
@@ -307,6 +359,34 @@ async function waitForIndexedElectionMatch(
   return null;
 }
 
+async function waitForIndexedGrantListMatch(
+  electionId: string,
+  actorPublicAddress: string,
+  isMatch: (response: GetElectionReportAccessGrantsResponse) => boolean,
+  maxAttempts: number = 12,
+  delayMs: number = 500
+): Promise<GetElectionReportAccessGrantsResponse | null> {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      const response = await electionsService.getElectionReportAccessGrants({
+        ElectionId: electionId,
+        ActorPublicAddress: actorPublicAddress,
+      });
+      if (response.Success && isMatch(response)) {
+        return response;
+      }
+    } catch {
+      // Query surface is eventually consistent after block indexing. Retry below.
+    }
+
+    if (attempt < maxAttempts - 1) {
+      await delay(delayMs);
+    }
+  }
+
+  return null;
+}
+
 async function waitForIndexedCeremonyActionViewMatch(
   electionId: string,
   actorPublicAddress: string,
@@ -338,16 +418,24 @@ async function waitForIndexedCeremonyActionViewMatch(
 export const useElectionsStore = create<ElectionsState>((set, get) => ({
   ...initialState,
 
+  setActorPublicAddress: (actorPublicAddress) => {
+    set({ actorPublicAddress });
+  },
+
   setOwnerPublicAddress: (ownerPublicAddress) => {
-    set({ ownerPublicAddress });
+    set({ ownerPublicAddress, actorPublicAddress: ownerPublicAddress });
   },
 
   beginNewElection: () => {
     set({
       selectedElectionId: null,
+      selectedHubEntry: null,
       selectedElection: null,
       ceremonyActionView: null,
       openReadiness: null,
+      reportAccessGrants: [],
+      canManageReportAccessGrants: false,
+      reportAccessGrantDeniedReason: '',
       feedback: null,
       error: null,
     });
@@ -357,8 +445,164 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     set({ feedback: null, error: null });
   },
 
+  clearGrantCandidateSearch: () => {
+    set({
+      grantSearchResults: [],
+      grantSearchQuery: '',
+      grantSearchError: null,
+    });
+  },
+
+  loadElectionHub: async (actorPublicAddress) => {
+    set({
+      actorPublicAddress,
+      isLoadingHub: true,
+      feedback: null,
+      error: null,
+    });
+
+    try {
+      const response = await electionsService.getElectionHubView({
+        ActorPublicAddress: actorPublicAddress,
+      });
+      const selectedElectionId = get().selectedElectionId;
+      const hasExistingSelection = !!selectedElectionId
+        && response.Elections.some((entry) => entry.Election.ElectionId === selectedElectionId);
+      const resolvedSelection = hasExistingSelection
+        ? selectedElectionId
+        : response.Elections[0]?.Election.ElectionId ?? null;
+      const selectedHubEntry =
+        response.Elections.find((entry) => entry.Election.ElectionId === resolvedSelection) ?? null;
+
+      set({
+        hubView: response,
+        hubEntries: response.Elections,
+        selectedHubEntry,
+        selectedElectionId: resolvedSelection,
+        error: response.Success ? null : response.ErrorMessage || 'Failed to load election hub.',
+      });
+
+      if (response.Success && resolvedSelection) {
+        await Promise.all([
+          get().loadElection(resolvedSelection),
+          get().loadReportAccessGrants(actorPublicAddress, resolvedSelection),
+        ]);
+      } else if (!resolvedSelection) {
+        set({
+          selectedElection: null,
+          reportAccessGrants: [],
+          canManageReportAccessGrants: false,
+          reportAccessGrantDeniedReason: response.EmptyStateReason || '',
+        });
+      }
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : 'Failed to load election hub.',
+        hubView: null,
+        hubEntries: [],
+        selectedHubEntry: null,
+      });
+    } finally {
+      set({ isLoadingHub: false });
+    }
+  },
+
+  selectHubElection: async (actorPublicAddress, electionId) => {
+    set({
+      actorPublicAddress,
+      selectedElectionId: electionId,
+      selectedHubEntry:
+        get().hubEntries.find((entry) => entry.Election.ElectionId === electionId) ?? null,
+      feedback: null,
+      error: null,
+    });
+
+    await Promise.all([
+      get().loadElection(electionId),
+      get().loadReportAccessGrants(actorPublicAddress, electionId),
+    ]);
+  },
+
+  loadReportAccessGrants: async (actorPublicAddress, electionId) => {
+    const resolvedElectionId = electionId ?? get().selectedElectionId;
+    if (!resolvedElectionId) {
+      set({
+        reportAccessGrants: [],
+        canManageReportAccessGrants: false,
+        reportAccessGrantDeniedReason: '',
+      });
+      return null;
+    }
+
+    set({
+      actorPublicAddress,
+      isLoadingReportAccessGrants: true,
+      reportAccessGrantDeniedReason: '',
+    });
+
+    try {
+      const response = await electionsService.getElectionReportAccessGrants({
+        ElectionId: resolvedElectionId,
+        ActorPublicAddress: actorPublicAddress,
+      });
+
+      set({
+        reportAccessGrants: response.Success ? response.Grants : [],
+        canManageReportAccessGrants: response.Success && response.CanManageGrants,
+        reportAccessGrantDeniedReason:
+          response.DeniedReason || (!response.Success ? response.ErrorMessage : ''),
+      });
+
+      return response;
+    } catch (error) {
+      set({
+        reportAccessGrants: [],
+        canManageReportAccessGrants: false,
+        reportAccessGrantDeniedReason: '',
+        error: error instanceof Error ? error.message : 'Failed to load report access grants.',
+      });
+      return null;
+    } finally {
+      set({ isLoadingReportAccessGrants: false });
+    }
+  },
+
+  searchGrantCandidates: async (query) => {
+    const normalizedQuery = query.trim();
+    if (!normalizedQuery) {
+      set({
+        grantSearchResults: [],
+        grantSearchQuery: '',
+        grantSearchError: null,
+      });
+      return;
+    }
+
+    set({
+      isSearchingGrantCandidates: true,
+      grantSearchQuery: query,
+      grantSearchError: null,
+    });
+
+    try {
+      const response = await identityService.searchByDisplayName(normalizedQuery);
+      set({
+        grantSearchResults: response.Identities ?? [],
+      });
+    } catch (error) {
+      set({
+        grantSearchResults: [],
+        grantSearchError:
+          error instanceof Error ? error.message : 'Failed to search grant candidates.',
+      });
+    } finally {
+      set({ isSearchingGrantCandidates: false });
+    }
+  },
+
   loadOwnerDashboard: async (ownerPublicAddress) => {
     set({
+      actorPublicAddress: ownerPublicAddress,
       ownerPublicAddress,
       isLoadingList: true,
       feedback: null,
@@ -380,6 +624,8 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
       set({
         elections: response.Elections,
         selectedElectionId: resolvedSelection,
+        selectedHubEntry:
+          get().hubEntries.find((entry) => entry.Election.ElectionId === resolvedSelection) ?? null,
       });
 
       if (resolvedSelection) {
@@ -403,6 +649,8 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     set({
       isLoadingDetail: true,
       selectedElectionId: electionId,
+      selectedHubEntry:
+        get().hubEntries.find((entry) => entry.Election.ElectionId === electionId) ?? null,
       feedback: null,
       error: null,
     });
@@ -412,6 +660,8 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
 
       if (!response.Success) {
         set({
+          selectedHubEntry:
+            get().hubEntries.find((entry) => entry.Election.ElectionId === electionId) ?? null,
           selectedElection: response,
           ceremonyActionView: null,
           openReadiness: null,
@@ -421,6 +671,8 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
       }
 
       set({
+        selectedHubEntry:
+          get().hubEntries.find((entry) => entry.Election.ElectionId === electionId) ?? null,
         selectedElection: response,
         openReadiness: null,
       });
@@ -470,6 +722,101 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
       return null;
     } finally {
       set({ isLoadingCeremonyActionView: false });
+    }
+  },
+
+  createReportAccessGrant: async (
+    designatedAuditorPublicAddress,
+    actorPublicEncryptAddress,
+    actorPrivateEncryptKeyHex,
+    signingPrivateKeyHex
+  ) => {
+    const actorPublicAddress = getResolvedActorPublicAddress(get);
+    const electionId = get().selectedElectionId;
+    if (!actorPublicAddress || !electionId) {
+      set({
+        feedback: {
+          tone: 'error',
+          message: 'Select an election before managing designated-auditor access.',
+          details: [],
+        },
+      });
+      return false;
+    }
+
+    set({
+      isSubmitting: true,
+      feedback: null,
+      error: null,
+    });
+
+    try {
+      const { signedTransaction } = await createElectionReportAccessGrantTransaction(
+        electionId,
+        actorPublicAddress,
+        actorPublicEncryptAddress,
+        actorPrivateEncryptKeyHex,
+        designatedAuditorPublicAddress,
+        signingPrivateKeyHex
+      );
+      const submitResult = await submitTransaction(signedTransaction);
+
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message:
+              submitResult.message
+              || 'Failed to submit designated-auditor grant transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      const indexedGrants = await waitForIndexedGrantListMatch(
+        electionId,
+        actorPublicAddress,
+        (response) =>
+          response.Grants.some(
+            (grant) =>
+              grant.ActorPublicAddress === designatedAuditorPublicAddress
+              && grant.ElectionId === electionId
+          )
+      );
+      if (!indexedGrants) {
+        return false;
+      }
+
+      set({
+        reportAccessGrants: indexedGrants.Grants,
+        canManageReportAccessGrants: indexedGrants.CanManageGrants,
+        reportAccessGrantDeniedReason: indexedGrants.DeniedReason,
+        grantSearchResults: [],
+        grantSearchQuery: '',
+        grantSearchError: null,
+      });
+
+      await Promise.all([
+        get().loadElectionHub(actorPublicAddress),
+        get().loadElection(electionId),
+      ]);
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Designated-auditor access granted.',
+          details: [],
+        },
+      });
+      return true;
+    } catch (error) {
+      set({
+        feedback: buildThrownErrorFeedback(error, 'Failed to grant designated-auditor access.'),
+      });
+      return false;
+    } finally {
+      set({ isSubmitting: false });
     }
   },
 

@@ -1,5 +1,7 @@
 import {
   ElectionClosedProgressStatusProto,
+  type ElectionHubEntryView,
+  ElectionHubNextActionHintProto,
   type ElectionCeremonyProfile,
   ElectionCeremonyActionTypeProto,
   ElectionCeremonyActorRoleProto,
@@ -59,6 +61,18 @@ export type CeremonyActionViewState = {
   label: string;
   status: 'available' | 'completed' | 'blocked';
   reason: string;
+};
+
+export type ElectionWorkspaceSectionId =
+  | 'voter'
+  | 'owner-admin'
+  | 'trustee'
+  | 'auditor'
+  | 'results';
+
+export type ClosedProgressBannerState = {
+  title: string;
+  description: string;
 };
 
 export const DEFAULT_APPROVED_CLIENT_APPLICATIONS = [
@@ -1301,4 +1315,97 @@ export function getDraftRevisionLabel(
 
 export function getSummaryBadge(summary: ElectionSummary): string {
   return `${getLifecycleLabel(summary.LifecycleState)} | ${getGovernanceLabel(summary.GovernanceMode)}`;
+}
+
+export function getElectionHubSuggestedActionLabel(
+  suggestedAction: ElectionHubNextActionHintProto
+): string {
+  switch (suggestedAction) {
+    case ElectionHubNextActionHintProto.ElectionHubActionOwnerManageDraft:
+      return 'Manage draft';
+    case ElectionHubNextActionHintProto.ElectionHubActionOwnerOpenElection:
+      return 'Open election';
+    case ElectionHubNextActionHintProto.ElectionHubActionOwnerMonitorClosedProgress:
+      return 'Monitor close progress';
+    case ElectionHubNextActionHintProto.ElectionHubActionOwnerReviewFinalResult:
+      return 'Review final result';
+    case ElectionHubNextActionHintProto.ElectionHubActionVoterClaimIdentity:
+      return 'Claim voter identity';
+    case ElectionHubNextActionHintProto.ElectionHubActionVoterCastBallot:
+      return 'Cast ballot';
+    case ElectionHubNextActionHintProto.ElectionHubActionVoterReviewResult:
+      return 'Review result';
+    case ElectionHubNextActionHintProto.ElectionHubActionTrusteeApproveGovernedAction:
+      return 'Review governed action';
+    case ElectionHubNextActionHintProto.ElectionHubActionTrusteeReviewResult:
+      return 'Review trustee result';
+    case ElectionHubNextActionHintProto.ElectionHubActionAuditorReviewPackage:
+      return 'Review package';
+    case ElectionHubNextActionHintProto.ElectionHubActionNone:
+    default:
+      return 'No suggested action';
+  }
+}
+
+export function getClosedProgressBannerState(
+  entry: ElectionHubEntryView | null
+): ClosedProgressBannerState | null {
+  if (!entry || entry.Election.LifecycleState !== ElectionLifecycleStateProto.Closed) {
+    return null;
+  }
+
+  switch (entry.ClosedProgressStatus) {
+    case ElectionClosedProgressStatusProto.ClosedProgressWaitingForTrusteeShares:
+      return {
+        title: 'Waiting for trustee shares',
+        description:
+          'The election is closed and waiting for the required trustee shares before tally work can continue.',
+      };
+    case ElectionClosedProgressStatusProto.ClosedProgressTallyCalculationInProgress:
+      return {
+        title: 'Tally calculation in progress',
+        description:
+          'The close boundary is sealed and tally processing is running on the persisted election state.',
+      };
+    default:
+      return null;
+  }
+}
+
+export function getElectionWorkspaceSectionOrder(
+  entry: ElectionHubEntryView | null
+): ElectionWorkspaceSectionId[] {
+  if (!entry) {
+    return [];
+  }
+
+  const sections: ElectionWorkspaceSectionId[] = [];
+  const isOpenVoter =
+    entry.ActorRoles.IsVoter && entry.Election.LifecycleState === ElectionLifecycleStateProto.Open;
+
+  if (isOpenVoter) {
+    sections.push('voter');
+  }
+
+  if (entry.ActorRoles.IsOwnerAdmin) {
+    sections.push('owner-admin');
+  }
+
+  if (entry.ActorRoles.IsTrustee) {
+    sections.push('trustee');
+  }
+
+  if (entry.ActorRoles.IsDesignatedAuditor) {
+    sections.push('auditor');
+  }
+
+  if (entry.ActorRoles.IsVoter && !isOpenVoter) {
+    sections.push('voter');
+  }
+
+  if (entry.CanViewParticipantResults || entry.CanViewReportPackage) {
+    sections.push('results');
+  }
+
+  return sections;
 }
