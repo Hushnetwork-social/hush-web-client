@@ -8,6 +8,7 @@ import {
   resolveEntryRoute,
   shouldClearBadgesOnAppSwitch,
   SOCIAL_HOME_ROUTE,
+  VOTING_HOME_ROUTE,
 } from './appRoutes';
 import {
   DEFAULT_ACTIVE_APP,
@@ -86,6 +87,7 @@ describe('app shell integration', () => {
     expect(getActiveAppFromPath('/social')).toBe('social');
     expect(getActiveAppFromPath('/social/post/1')).toBe('social');
     expect(getActiveAppFromPath('/feeds')).toBe('feeds');
+    expect(VOTING_HOME_ROUTE).toBe('/account/elections');
 
     expect(getAppHomeRoute('social')).toBe(SOCIAL_HOME_ROUTE);
     expect(getAppHomeRoute('feeds')).toBe(FEEDS_HOME_ROUTE);

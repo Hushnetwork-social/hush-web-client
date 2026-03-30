@@ -3,6 +3,7 @@ import type { AppId } from '@/stores/useAppStore';
 export const FEEDS_HOME_ROUTE = '/feeds';
 export const SOCIAL_HOME_ROUTE = '/social';
 export const SOCIAL_POST_ROUTE = `${SOCIAL_HOME_ROUTE}/post`;
+export const VOTING_HOME_ROUTE = '/account/elections';
 export const AUTH_ROUTE = '/auth';
 export const LEGACY_DASHBOARD_ROUTE = '/dashboard';
 

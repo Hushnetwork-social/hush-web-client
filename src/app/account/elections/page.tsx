@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { ElectionsWorkspace } from '@/modules/elections';
+import { HushVotingWorkspace } from '@/modules/elections';
 import { useAppStore } from '@/stores';
 
 export default function AccountElectionsPage() {
@@ -51,11 +51,11 @@ export default function AccountElectionsPage() {
   }
 
   return (
-    <ElectionsWorkspace
-      ownerPublicAddress={credentials.signingPublicKey}
-      ownerEncryptionPublicKey={credentials.encryptionPublicKey}
-      ownerEncryptionPrivateKey={credentials.encryptionPrivateKey}
-      ownerSigningPrivateKey={credentials.signingPrivateKey}
+    <HushVotingWorkspace
+      actorPublicAddress={credentials.signingPublicKey}
+      actorEncryptionPublicKey={credentials.encryptionPublicKey}
+      actorEncryptionPrivateKey={credentials.encryptionPrivateKey}
+      actorSigningPrivateKey={credentials.signingPrivateKey}
     />
   );
 }

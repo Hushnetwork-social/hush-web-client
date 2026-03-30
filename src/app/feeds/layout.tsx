@@ -15,7 +15,13 @@ import { Loader2 } from "lucide-react";
 import { debugLog, debugError } from "@/lib/debug-logger";
 import { GroupCreationWizard } from "@/components/groups/GroupCreationWizard";
 import { checkPendingNavigation, setupVisibilityChangeListener } from "@/lib/push";
-import { getActiveAppFromPath, getAppDisplayName, getAppHomeRoute, getAuthRoute } from "@/lib/navigation/appRoutes";
+import {
+  getActiveAppFromPath,
+  getAppDisplayName,
+  getAppHomeRoute,
+  getAuthRoute,
+  VOTING_HOME_ROUTE,
+} from "@/lib/navigation/appRoutes";
 import { SocialMenuPanel } from "@/components/social/SocialMenuPanel";
 
 // Dynamic imports to prevent dev mode race condition
@@ -154,9 +160,15 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     if (id === "create-group") {
       // Open wizard modal instead of changing view
       setShowGroupWizard(true);
-    } else {
-      setSelectedNav(id);
+      return;
     }
+
+    if (id === "open-voting") {
+      router.push(VOTING_HOME_ROUTE);
+      return;
+    }
+
+    setSelectedNav(id);
   }, [router, setActiveApp, setSelectedNav]);
 
   const handleHeaderHome = useCallback(() => {

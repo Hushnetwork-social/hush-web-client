@@ -1,4 +1,4 @@
-import { Globe, Search, PlusSquare, MessageSquare, PlusCircle, UsersRound } from "lucide-react";
+import { Globe, Search, PlusSquare, MessageSquare, PlusCircle, UsersRound, Vote } from "lucide-react";
 import type { AppId } from "@/stores/useAppStore";
 
 export interface AppNavItem {
@@ -20,6 +20,11 @@ export function getAppNavItems(activeApp: AppId, crossAppBadges: Record<AppId, n
         icon: <MessageSquare className="w-5 h-5" />,
         badgeCount: crossAppBadges.feeds,
       },
+      {
+        id: "open-voting",
+        label: "HushVoting!",
+        icon: <Vote className="w-5 h-5" />,
+      },
     ];
   }
 
@@ -32,6 +37,11 @@ export function getAppNavItems(activeApp: AppId, crossAppBadges: Record<AppId, n
       label: "HushSocial!",
       icon: <Globe className="w-5 h-5" />,
       badgeCount: crossAppBadges.social,
+    },
+    {
+      id: "open-voting",
+      label: "HushVoting!",
+      icon: <Vote className="w-5 h-5" />,
     },
   ];
 }

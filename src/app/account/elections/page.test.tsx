@@ -18,19 +18,19 @@ vi.mock('next/navigation', () => ({
 }));
 
 vi.mock('@/modules/elections', () => ({
-  ElectionsWorkspace: ({
-    ownerPublicAddress,
-    ownerEncryptionPublicKey,
-    ownerEncryptionPrivateKey,
-    ownerSigningPrivateKey,
+  HushVotingWorkspace: ({
+    actorPublicAddress,
+    actorEncryptionPublicKey,
+    actorEncryptionPrivateKey,
+    actorSigningPrivateKey,
   }: {
-    ownerPublicAddress: string;
-    ownerEncryptionPublicKey: string;
-    ownerEncryptionPrivateKey: string;
-    ownerSigningPrivateKey: string;
+    actorPublicAddress: string;
+    actorEncryptionPublicKey: string;
+    actorEncryptionPrivateKey: string;
+    actorSigningPrivateKey: string;
   }) => (
-    <div data-testid="elections-workspace-stub">
-      {ownerPublicAddress}:{ownerEncryptionPublicKey}:{ownerEncryptionPrivateKey}:{ownerSigningPrivateKey}
+    <div data-testid="hush-voting-workspace-stub">
+      {actorPublicAddress}:{actorEncryptionPublicKey}:{actorEncryptionPrivateKey}:{actorSigningPrivateKey}
     </div>
   ),
 }));
@@ -80,7 +80,7 @@ describe('AccountElectionsPage', () => {
     render(<AccountElectionsPage />);
     await settleAuthGate();
 
-    expect(await screen.findByTestId('elections-workspace-stub')).toHaveTextContent(
+    expect(await screen.findByTestId('hush-voting-workspace-stub')).toHaveTextContent(
       'owner-public-key:owner-encryption-key:private-encryption-key:private-signing-key'
     );
     expect(mockReplace).not.toHaveBeenCalled();

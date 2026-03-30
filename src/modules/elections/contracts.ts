@@ -913,6 +913,42 @@ export function getGovernedActionViewStates(detail: GetElectionResponse | null):
   ];
 }
 
+export function getGovernedActionStatusLabel(status: GovernedActionViewState['status']): string {
+  switch (status) {
+    case 'available':
+      return 'Available';
+    case 'pending':
+      return 'Pending';
+    case 'execution_failed':
+      return 'Execution failed';
+    case 'completed':
+      return 'Completed';
+    case 'finalize_not_tally_ready':
+      return 'Awaiting tally readiness';
+    case 'unavailable':
+    default:
+      return 'Unavailable';
+  }
+}
+
+export function getGovernedActionStatusClass(status: GovernedActionViewState['status']): string {
+  switch (status) {
+    case 'available':
+      return 'border-green-500/40 bg-green-500/10 text-green-100';
+    case 'pending':
+      return 'border-amber-500/40 bg-amber-500/10 text-amber-100';
+    case 'execution_failed':
+      return 'border-red-500/40 bg-red-500/10 text-red-100';
+    case 'completed':
+      return 'border-hush-purple/40 bg-hush-purple/10 text-hush-purple';
+    case 'finalize_not_tally_ready':
+      return 'border-blue-500/40 bg-blue-500/10 text-blue-100';
+    case 'unavailable':
+    default:
+      return 'border-hush-bg-light bg-hush-bg-dark text-hush-text-accent';
+  }
+}
+
 export function getLatestFinalizationSession(
   detail: GetElectionResponse | null
 ): ElectionFinalizationSession | null {

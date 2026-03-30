@@ -1,19 +1,12 @@
 "use client";
 
-import { use, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { HushVotingWorkspace } from '@/modules/elections';
+import { ElectionsWorkspace } from '@/modules/elections';
 import { useAppStore } from '@/stores';
 
-type ElectionVotingPageProps = {
-  params: Promise<{
-    electionId: string;
-  }>;
-};
-
-export default function ElectionVotingPage({ params }: ElectionVotingPageProps) {
-  const resolvedParams = use(params);
+export default function OwnerElectionsWorkspacePage() {
   const router = useRouter();
   const { credentials, isAuthenticated } = useAppStore();
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
@@ -34,8 +27,8 @@ export default function ElectionVotingPage({ params }: ElectionVotingPageProps) 
 
     return () => clearTimeout(timer);
   }, [
-    credentials?.encryptionPrivateKey,
     credentials?.encryptionPublicKey,
+    credentials?.encryptionPrivateKey,
     credentials?.signingPrivateKey,
     credentials?.signingPublicKey,
     isAuthenticated,
@@ -58,12 +51,11 @@ export default function ElectionVotingPage({ params }: ElectionVotingPageProps) 
   }
 
   return (
-    <HushVotingWorkspace
-      actorPublicAddress={credentials.signingPublicKey}
-      actorEncryptionPublicKey={credentials.encryptionPublicKey}
-      actorEncryptionPrivateKey={credentials.encryptionPrivateKey}
-      actorSigningPrivateKey={credentials.signingPrivateKey}
-      initialElectionId={resolvedParams.electionId}
+    <ElectionsWorkspace
+      ownerPublicAddress={credentials.signingPublicKey}
+      ownerEncryptionPublicKey={credentials.encryptionPublicKey}
+      ownerEncryptionPrivateKey={credentials.encryptionPrivateKey}
+      ownerSigningPrivateKey={credentials.signingPrivateKey}
     />
   );
 }

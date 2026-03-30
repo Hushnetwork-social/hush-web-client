@@ -127,24 +127,27 @@ describe('BottomNav', () => {
   });
 
   describe('Navigation', () => {
-    it('should render feeds-app navigation with HushSocial switch item last', () => {
+    it('should render feeds-app navigation with HushVoting after HushSocial', () => {
       render(<BottomNav {...defaultProps} />);
 
       expect(screen.getByText('Feeds')).toBeInTheDocument();
       expect(screen.getByText('New Feed')).toBeInTheDocument();
       expect(screen.getByText('Create Group')).toBeInTheDocument();
       expect(screen.getByText('HushSocial!')).toBeInTheDocument();
+      expect(screen.getByText('HushVoting!')).toBeInTheDocument();
 
       const navButtons = screen.getAllByRole('button').filter((button) =>
         button.textContent?.includes('Feeds') ||
         button.textContent?.includes('New Feed') ||
         button.textContent?.includes('Create Group') ||
-        button.textContent?.includes('HushSocial!')
+        button.textContent?.includes('HushSocial!') ||
+        button.textContent?.includes('HushVoting!')
       );
-      expect(navButtons[navButtons.length - 1]).toHaveTextContent('HushSocial!');
+      expect(navButtons[navButtons.length - 2]).toHaveTextContent('HushSocial!');
+      expect(navButtons[navButtons.length - 1]).toHaveTextContent('HushVoting!');
     });
 
-    it('should render social-app action navigation', () => {
+    it('should render social-app action navigation with HushVoting after HushFeeds', () => {
       render(
         <BottomNav
           {...defaultProps}
@@ -155,6 +158,7 @@ describe('BottomNav', () => {
 
       expect(screen.getByText('Search')).toBeInTheDocument();
       expect(screen.getByText('HushFeeds!')).toBeInTheDocument();
+      expect(screen.getByText('HushVoting!')).toBeInTheDocument();
       expect(screen.queryByText('New Post')).not.toBeInTheDocument();
       expect(screen.queryByText('Feeds')).not.toBeInTheDocument();
     });
@@ -201,6 +205,14 @@ describe('BottomNav', () => {
       fireEvent.click(screen.getByText('Create Group'));
 
       expect(defaultProps.onNavSelect).toHaveBeenCalledWith('create-group');
+    });
+
+    it('should call onNavSelect with open-voting when HushVoting is clicked', () => {
+      render(<BottomNav {...defaultProps} />);
+
+      fireEvent.click(screen.getByText('HushVoting!'));
+
+      expect(defaultProps.onNavSelect).toHaveBeenCalledWith('open-voting');
     });
 
     it('routes guest bottom-nav clicks through guest action', () => {

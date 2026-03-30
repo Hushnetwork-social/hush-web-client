@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, LogOut, Menu, MessageSquare, Search, UserCircle } from "lucide-react";
+import { Download, LogOut, Menu, MessageSquare, Search, UserCircle, Vote } from "lucide-react";
 import { useState } from "react";
 import type { AppId } from "@/stores/useAppStore";
 import { DEFAULT_CROSS_APP_BADGES } from "@/stores/useAppStore";
@@ -82,6 +82,12 @@ export function BottomNav({
             icon: <MessageSquare className="w-5 h-5" />,
             badgeCount: crossAppBadges.feeds,
             isActive: false,
+          },
+          {
+            id: "open-voting",
+            label: "HushVoting!",
+            icon: <Vote className="w-5 h-5" />,
+            isActive: selectedNav === "open-voting",
           },
         ]
       : getAppNavItems(activeApp, crossAppBadges);

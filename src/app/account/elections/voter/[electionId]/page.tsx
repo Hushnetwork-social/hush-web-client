@@ -3,16 +3,16 @@
 import { use, useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { HushVotingWorkspace } from '@/modules/elections';
+import { ElectionVotingPanel } from '@/modules/elections/ElectionVotingPanel';
 import { useAppStore } from '@/stores';
 
-type ElectionVotingPageProps = {
+type VoterElectionPageProps = {
   params: Promise<{
     electionId: string;
   }>;
 };
 
-export default function ElectionVotingPage({ params }: ElectionVotingPageProps) {
+export default function VoterElectionPage({ params }: VoterElectionPageProps) {
   const resolvedParams = use(params);
   const router = useRouter();
   const { credentials, isAuthenticated } = useAppStore();
@@ -58,12 +58,12 @@ export default function ElectionVotingPage({ params }: ElectionVotingPageProps) 
   }
 
   return (
-    <HushVotingWorkspace
+    <ElectionVotingPanel
+      electionId={resolvedParams.electionId}
       actorPublicAddress={credentials.signingPublicKey}
       actorEncryptionPublicKey={credentials.encryptionPublicKey}
       actorEncryptionPrivateKey={credentials.encryptionPrivateKey}
       actorSigningPrivateKey={credentials.signingPrivateKey}
-      initialElectionId={resolvedParams.electionId}
     />
   );
 }
