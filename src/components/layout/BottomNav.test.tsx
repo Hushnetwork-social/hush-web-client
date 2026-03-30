@@ -28,7 +28,9 @@ describe('BottomNav', () => {
 
       // Click on profile button
       const profileButton = screen.getByText('Profile');
+      expect(profileButton.closest('button')).toHaveAttribute('aria-expanded', 'false');
       fireEvent.click(profileButton);
+      expect(profileButton.closest('button')).toHaveAttribute('aria-expanded', 'true');
 
       // Menu items should be visible
       expect(screen.getByText('Download keys')).toBeInTheDocument();
@@ -115,11 +117,7 @@ describe('BottomNav', () => {
       fireEvent.click(screen.getByText('Profile'));
       expect(screen.getByText('Account Details')).toBeInTheDocument();
 
-      // Click backdrop (the fixed inset-0 div)
-      const backdrop = document.querySelector('.fixed.inset-0');
-      if (backdrop) {
-        fireEvent.click(backdrop);
-      }
+      fireEvent.click(screen.getByTestId('profile-menu-backdrop'));
 
       // Menu should be closed
       expect(screen.queryByText('Account Details')).not.toBeInTheDocument();
@@ -172,7 +170,10 @@ describe('BottomNav', () => {
         />
       );
 
-      fireEvent.click(screen.getByTestId('nav-social-menu'));
+      const socialMenuButton = screen.getByTestId('nav-social-menu');
+      expect(socialMenuButton).toHaveAttribute('aria-expanded', 'false');
+      fireEvent.click(socialMenuButton);
+      expect(socialMenuButton).toHaveAttribute('aria-expanded', 'true');
 
       expect(screen.getByTestId('social-mobile-menu-feed-wall')).toBeInTheDocument();
       expect(screen.getByTestId('social-mobile-menu-following')).toBeInTheDocument();

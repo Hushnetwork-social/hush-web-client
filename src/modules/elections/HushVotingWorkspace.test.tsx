@@ -264,6 +264,8 @@ describe('HushVotingWorkspace', () => {
     expect(await screen.findByText('HushVoting Hub')).toBeInTheDocument();
     expect(loadElectionHub).toHaveBeenCalledWith('actor-address');
     expect(screen.getByTestId('election-hub-list')).toBeInTheDocument();
+    expect(screen.getByTestId('election-hub-card-election-open')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('election-hub-card-election-draft')).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByTestId('hush-voting-section-voter')).toBeInTheDocument();
     expect(screen.getByTestId('hush-voting-section-owner-admin')).toBeInTheDocument();
 
@@ -272,6 +274,11 @@ describe('HushVotingWorkspace', () => {
     await waitFor(() => {
       expect(selectHubElection).toHaveBeenCalledWith('actor-address', 'election-draft');
     });
+
+    expect(screen.getByTestId('election-hub-card-election-draft')).toHaveAttribute(
+      'aria-label',
+      'Open election Draft Policy Election'
+    );
   });
 
   it('shows the shared no-role boundary when the actor has no election surfaces', async () => {
@@ -307,6 +314,8 @@ describe('HushVotingWorkspace', () => {
     );
 
     expect(await screen.findByTestId('election-discovery-panel')).toBeInTheDocument();
+    expect(screen.getByText('Search before claim-linking')).toBeInTheDocument();
+    expect(screen.getByText(/Temporary code:/i)).toBeInTheDocument();
     expect(screen.getByText('No linked election surfaces available')).toBeInTheDocument();
     expect(screen.getByText('No election roles are assigned to this actor.')).toBeInTheDocument();
   });

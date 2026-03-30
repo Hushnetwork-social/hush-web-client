@@ -98,6 +98,7 @@ export function BottomNav({
         {navItems.map((item) => (
           <button
             key={item.id}
+            type="button"
             onClick={() => {
               if (guestMode) {
                 onGuestAction?.();
@@ -113,7 +114,7 @@ export function BottomNav({
             }}
             className={`
               flex flex-col items-center space-y-0.5 px-3 py-2 rounded-lg
-              transition-colors duration-150
+              transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-element
               ${guestMode ? "cursor-pointer opacity-75" : "cursor-pointer"}
               ${
                 (item.isActive ?? selectedNav === item.id) && !guestMode
@@ -123,6 +124,9 @@ export function BottomNav({
             `}
             aria-disabled={guestMode}
             aria-label={item.ariaLabel ?? item.label}
+            aria-haspopup={item.id === "social-menu" ? "menu" : undefined}
+            aria-expanded={item.id === "social-menu" ? showSocialMenu : undefined}
+            aria-controls={item.id === "social-menu" ? "bottom-nav-social-menu" : undefined}
             data-testid={`nav-${item.id}`}
           >
             {item.icon}
@@ -140,6 +144,7 @@ export function BottomNav({
 
         {/* Profile Button */}
         <button
+          type="button"
           onClick={() => {
             if (guestMode) {
               onGuestAction?.();
@@ -148,7 +153,10 @@ export function BottomNav({
             setShowSocialMenu(false);
             setShowUserMenu(!showUserMenu);
           }}
-          className="flex flex-col items-center space-y-1 px-3 py-2 rounded-lg text-hush-text-accent hover:bg-hush-bg-hover transition-colors cursor-pointer"
+          aria-haspopup="menu"
+          aria-expanded={showUserMenu}
+          aria-controls="bottom-nav-user-menu"
+          className="flex flex-col items-center space-y-1 px-3 py-2 rounded-lg text-hush-text-accent hover:bg-hush-bg-hover transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-element"
         >
           <div className="w-6 h-6 rounded-full bg-hush-purple flex items-center justify-center">
             <span className="text-[10px] font-bold text-hush-bg-dark">
@@ -161,11 +169,17 @@ export function BottomNav({
 
       {showSocialMenu && activeApp === "social" && (
         <>
-          <div
+          <button
+            type="button"
+            aria-label="Close HushSocial menu"
+            data-testid="social-mobile-menu-backdrop"
             className="fixed inset-0 z-40"
             onClick={() => setShowSocialMenu(false)}
           />
-          <div className="absolute bottom-full left-2 right-2 mb-2 bg-hush-bg-dark rounded-xl border border-hush-bg-element shadow-lg z-50 p-1.5 space-y-1">
+          <div
+            id="bottom-nav-social-menu"
+            className="absolute bottom-full left-2 right-2 mb-2 bg-hush-bg-dark rounded-xl border border-hush-bg-element shadow-lg z-50 p-1.5 space-y-1"
+          >
             {SOCIAL_MOBILE_MENU_ITEMS.map((item) => (
               <button
                 key={item.id}
@@ -179,10 +193,10 @@ export function BottomNav({
                   setShowSocialMenu(false);
                   onNavSelect(item.id);
                 }}
-                className={`w-full rounded-lg px-3 py-2.5 text-left text-sm transition-colors ${
+                className={`w-full rounded-lg px-3 py-2.5 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark ${
                   selectedNav === item.id
-                    ? "bg-hush-purple text-hush-bg-dark font-semibold"
-                    : "text-hush-text-primary hover:bg-hush-bg-hover"
+                    ? "bg-hush-purple text-hush-bg-dark font-semibold focus-visible:ring-hush-purple"
+                    : "text-hush-text-primary hover:bg-hush-bg-hover focus-visible:ring-hush-purple"
                 }`}
               >
                 {item.label}
@@ -195,40 +209,48 @@ export function BottomNav({
       {/* User Menu Popup */}
       {showUserMenu && (
         <>
-          {/* Backdrop */}
-          <div
+          <button
+            type="button"
+            aria-label="Close profile menu"
+            data-testid="profile-menu-backdrop"
             className="fixed inset-0 z-40"
             onClick={() => setShowUserMenu(false)}
           />
           {/* Menu */}
-          <div className="absolute bottom-full right-2 mb-2 bg-hush-bg-dark rounded-xl border border-hush-bg-element shadow-lg z-50 min-w-[200px] p-1.5 space-y-1">
+          <div
+            id="bottom-nav-user-menu"
+            className="absolute bottom-full right-2 mb-2 bg-hush-bg-dark rounded-xl border border-hush-bg-element shadow-lg z-50 min-w-[200px] p-1.5 space-y-1"
+          >
             <button
+              type="button"
               onClick={() => {
                 onDownloadKeys?.();
                 setShowUserMenu(false);
               }}
-              className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg border border-transparent hover:border-hush-purple active:bg-hush-purple active:text-hush-bg-dark transition-colors text-hush-text-primary group"
+              className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg border border-transparent hover:border-hush-purple active:bg-hush-purple active:text-hush-bg-dark transition-colors text-hush-text-primary group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
             >
               <Download className="w-4 h-4 text-hush-text-accent group-active:text-hush-bg-dark" />
               <span className="text-sm">Download keys</span>
             </button>
             <button
+              type="button"
               onClick={() => {
                 onAccountDetails?.();
                 setShowUserMenu(false);
               }}
-              className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg border border-transparent hover:border-hush-purple active:bg-hush-purple active:text-hush-bg-dark transition-colors text-hush-text-primary group"
+              className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg border border-transparent hover:border-hush-purple active:bg-hush-purple active:text-hush-bg-dark transition-colors text-hush-text-primary group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
             >
               <UserCircle className="w-4 h-4 text-hush-text-accent group-active:text-hush-bg-dark" />
               <span className="text-sm">Account Details</span>
             </button>
             <button
+              type="button"
               data-testid="logout-button"
               onClick={() => {
                 onLogout?.();
                 setShowUserMenu(false);
               }}
-              className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg border border-transparent hover:border-hush-purple active:bg-hush-purple active:text-hush-bg-dark transition-colors text-hush-text-primary group"
+              className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg border border-transparent hover:border-hush-purple active:bg-hush-purple active:text-hush-bg-dark transition-colors text-hush-text-primary group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
             >
               <LogOut className="w-4 h-4 text-hush-text-accent group-active:text-hush-bg-dark" />
               <span className="text-sm">Logout</span>

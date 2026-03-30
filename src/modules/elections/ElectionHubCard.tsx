@@ -38,11 +38,14 @@ export function ElectionHubCard({ entry, isSelected, onSelect }: ElectionHubCard
     <button
       type="button"
       onClick={() => onSelect(entry.Election.ElectionId)}
-      className={`w-full rounded-3xl border p-4 text-left transition-all ${
+      className={`w-full rounded-3xl border p-4 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark ${
         isSelected
-          ? 'border-hush-purple bg-hush-purple/10 shadow-lg shadow-hush-purple/10'
-          : 'border-hush-bg-light bg-hush-bg-dark/70 hover:border-hush-purple/50 hover:bg-hush-bg-dark'
+          ? 'border-hush-purple bg-hush-purple/10 shadow-lg shadow-hush-purple/10 focus-visible:ring-hush-purple'
+          : 'border-hush-bg-light bg-hush-bg-dark/70 hover:border-hush-purple/50 hover:bg-hush-bg-dark focus-visible:ring-hush-purple'
       }`}
+      aria-pressed={isSelected}
+      aria-label={`Open election ${entry.Election.Title || entry.Election.ElectionId}`}
+      data-state={isSelected ? 'selected' : 'idle'}
       data-testid={`election-hub-card-${entry.Election.ElectionId}`}
     >
       <div className="flex items-start justify-between gap-4">

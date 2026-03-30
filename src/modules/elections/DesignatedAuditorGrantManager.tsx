@@ -119,7 +119,7 @@ export function DesignatedAuditorGrantManager({
                     electionId
                   )
                 }
-                className="rounded-xl border border-hush-bg-light px-3 py-2 text-xs text-hush-text-primary transition-colors hover:border-hush-purple hover:text-hush-purple"
+                className="rounded-xl border border-hush-bg-light px-3 py-2 text-xs text-hush-text-primary transition-colors hover:border-hush-purple hover:text-hush-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
               >
                 Refresh
               </button>
@@ -166,13 +166,13 @@ export function DesignatedAuditorGrantManager({
                 id="auditor-search"
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
-                className="min-w-0 flex-1 rounded-xl border border-hush-bg-light bg-hush-bg-element px-4 py-2 text-sm text-hush-text-primary outline-none transition-colors focus:border-hush-purple"
+                className="min-w-0 flex-1 rounded-xl border border-hush-bg-light bg-hush-bg-element px-4 py-2 text-sm text-hush-text-primary outline-none transition-colors focus:border-hush-purple focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
                 placeholder="Handle or name"
               />
               <button
                 type="submit"
                 disabled={!canManageReportAccessGrants || isSearchingGrantCandidates}
-                className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 disabled:cursor-not-allowed disabled:bg-hush-bg-light disabled:text-hush-text-accent"
+                className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark disabled:cursor-not-allowed disabled:bg-hush-bg-light disabled:text-hush-text-accent"
               >
                 {isSearchingGrantCandidates ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -201,7 +201,7 @@ export function DesignatedAuditorGrantManager({
                   setSearchQuery('');
                   clearGrantCandidateSearch();
                 }}
-                className="inline-flex items-center gap-1 text-xs text-hush-text-accent transition-colors hover:text-hush-purple"
+                className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-hush-text-accent transition-colors hover:text-hush-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
               >
                 <X className="h-3.5 w-3.5" />
                 <span>Clear</span>
@@ -241,7 +241,7 @@ export function DesignatedAuditorGrantManager({
                       type="button"
                       onClick={() => void handleGrant(candidate)}
                       disabled={Boolean(restrictionReason) || isSubmitting || !canManageReportAccessGrants}
-                      className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 disabled:cursor-not-allowed disabled:bg-hush-bg-light disabled:text-hush-text-accent"
+                      className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark disabled:cursor-not-allowed disabled:bg-hush-bg-light disabled:text-hush-text-accent"
                     >
                       {isSubmitting ? (
                         <Loader2 className="h-4 w-4 animate-spin" />

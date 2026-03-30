@@ -47,7 +47,7 @@ export function ElectionAccessBoundaryNotice({
       <div className="mt-5 flex flex-wrap gap-3">
         <Link
           href={primaryHref}
-          className="inline-flex items-center gap-2 rounded-xl bg-red-50 px-4 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-white"
+          className="inline-flex items-center gap-2 rounded-xl bg-red-50 px-4 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200 focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
         >
           <ArrowLeft className="h-4 w-4" />
           <span>{primaryLabel}</span>
@@ -55,7 +55,7 @@ export function ElectionAccessBoundaryNotice({
         {secondaryHref && secondaryLabel ? (
           <Link
             href={secondaryHref}
-            className="inline-flex items-center gap-2 rounded-xl border border-red-200/30 px-4 py-2 text-sm font-medium text-red-50 transition-colors hover:border-red-100/50 hover:bg-red-500/10"
+            className="inline-flex items-center gap-2 rounded-xl border border-red-200/30 px-4 py-2 text-sm font-medium text-red-50 transition-colors hover:border-red-100/50 hover:bg-red-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200 focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
           >
             <ExternalLink className="h-4 w-4" />
             <span>{secondaryLabel}</span>

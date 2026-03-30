@@ -28,8 +28,10 @@ describe('Sidebar', () => {
       render(<Sidebar {...defaultProps} />);
 
       // Click on profile button
-      const profileButton = screen.getByText('Test User');
+      const profileButton = screen.getByTestId('user-menu-trigger');
+      expect(profileButton).toHaveAttribute('aria-expanded', 'false');
       fireEvent.click(profileButton);
+      expect(profileButton).toHaveAttribute('aria-expanded', 'true');
 
       // Menu items should be visible
       expect(screen.getByText('Download keys')).toBeInTheDocument();
@@ -195,7 +197,7 @@ describe('Sidebar', () => {
       render(<Sidebar {...defaultProps} guestMode={true} onGuestAction={onGuestAction} />);
 
       expect(screen.getByText('Create User')).toBeInTheDocument();
-      fireEvent.click(screen.getByText('Create User'));
+      fireEvent.click(screen.getByTestId('user-menu-trigger'));
 
       expect(onGuestAction).toHaveBeenCalledTimes(1);
       expect(screen.queryByText('Download keys')).not.toBeInTheDocument();

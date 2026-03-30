@@ -51,6 +51,7 @@ export function Sidebar({
         {navItems.map((item) => (
           <button
             key={item.id}
+            type="button"
             data-testid={`nav-${item.id}`}
             onClick={() => {
               if (item.comingSoon) {
@@ -66,7 +67,7 @@ export function Sidebar({
             aria-disabled={guestMode || item.comingSoon}
             className={`
               w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl
-              transition-colors duration-150
+              transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-element
               ${item.comingSoon ? "cursor-not-allowed opacity-60" : guestMode ? "cursor-pointer opacity-75" : "cursor-pointer"}
               ${
                 selectedNav === item.id && !item.comingSoon && !guestMode
@@ -108,6 +109,7 @@ export function Sidebar({
       <div className="flex-shrink-0 bg-hush-bg-element rounded-bl-xl p-2">
         <div className="relative">
           <button
+            type="button"
             data-testid="user-menu-trigger"
             onClick={() => {
               if (guestMode) {
@@ -116,7 +118,10 @@ export function Sidebar({
               }
               setShowUserMenu(!showUserMenu);
             }}
-            className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl hover:bg-hush-bg-hover transition-colors cursor-pointer"
+            aria-haspopup="menu"
+            aria-expanded={showUserMenu}
+            aria-controls="sidebar-user-menu"
+            className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl hover:bg-hush-bg-hover transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-element"
           >
             {/* Avatar */}
             <div className="w-10 h-10 rounded-full bg-hush-purple flex items-center justify-center flex-shrink-0">
@@ -132,35 +137,41 @@ export function Sidebar({
 
           {/* Dropdown Menu */}
           {showUserMenu && !guestMode && (
-            <div className="absolute bottom-full left-0 right-0 mb-2 bg-hush-bg-dark rounded-xl border border-hush-bg-element shadow-lg p-1.5 space-y-1">
+            <div
+              id="sidebar-user-menu"
+              className="absolute bottom-full left-0 right-0 mb-2 bg-hush-bg-dark rounded-xl border border-hush-bg-element shadow-lg p-1.5 space-y-1"
+            >
               <button
+                type="button"
                 onClick={() => {
                   onDownloadKeys?.();
                   setShowUserMenu(false);
                 }}
-                className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg border border-transparent hover:border-hush-purple active:bg-hush-purple active:text-hush-bg-dark transition-colors text-hush-text-primary group"
+                className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg border border-transparent hover:border-hush-purple active:bg-hush-purple active:text-hush-bg-dark transition-colors text-hush-text-primary group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
               >
                 <Download className="w-4 h-4 text-hush-text-accent group-active:text-hush-bg-dark" />
                 <span className="text-sm">Download keys</span>
               </button>
               <button
+                type="button"
                 data-testid="menu-account-details"
                 onClick={() => {
                   onAccountDetails?.();
                   setShowUserMenu(false);
                 }}
-                className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg border border-transparent hover:border-hush-purple active:bg-hush-purple active:text-hush-bg-dark transition-colors text-hush-text-primary group"
+                className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg border border-transparent hover:border-hush-purple active:bg-hush-purple active:text-hush-bg-dark transition-colors text-hush-text-primary group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
               >
                 <UserCircle className="w-4 h-4 text-hush-text-accent group-active:text-hush-bg-dark" />
                 <span className="text-sm">Account Details</span>
               </button>
               <button
+                type="button"
                 data-testid="logout-button"
                 onClick={() => {
                   onLogout?.();
                   setShowUserMenu(false);
                 }}
-                className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg border border-transparent hover:border-hush-purple active:bg-hush-purple active:text-hush-bg-dark transition-colors text-hush-text-primary group"
+                className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg border border-transparent hover:border-hush-purple active:bg-hush-purple active:text-hush-bg-dark transition-colors text-hush-text-primary group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
               >
                 <LogOut className="w-4 h-4 text-hush-text-accent group-active:text-hush-bg-dark" />
                 <span className="text-sm">Logout</span>

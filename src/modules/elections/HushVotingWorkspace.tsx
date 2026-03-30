@@ -206,13 +206,13 @@ function ElectionDiscoveryPanel({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Election title or owner alias"
-            className="min-w-0 flex-1 rounded-2xl border border-hush-bg-light bg-hush-bg-dark/80 px-4 py-3 text-sm text-hush-text-primary outline-none transition-colors placeholder:text-hush-text-accent focus:border-hush-purple"
+            className="min-w-0 flex-1 rounded-2xl border border-hush-bg-light bg-hush-bg-dark/80 px-4 py-3 text-sm text-hush-text-primary outline-none transition-colors placeholder:text-hush-text-accent focus:border-hush-purple focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
             aria-label="Search elections"
           />
           <button
             type="submit"
             disabled={isSearching}
-            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-hush-purple px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 disabled:cursor-not-allowed disabled:bg-hush-purple/60"
+            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-hush-purple px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark disabled:cursor-not-allowed disabled:bg-hush-purple/60"
           >
             {isSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
             <span>{isSearching ? 'Searching...' : 'Search elections'}</span>
@@ -243,7 +243,7 @@ function ElectionDiscoveryPanel({
             <button
               key={result.election.ElectionId}
               type="button"
-              className="flex w-full items-start justify-between gap-4 rounded-2xl border border-hush-bg-light bg-hush-bg-dark/70 px-4 py-4 text-left transition-colors hover:border-hush-purple"
+              className="flex w-full items-start justify-between gap-4 rounded-2xl border border-hush-bg-light bg-hush-bg-dark/70 px-4 py-4 text-left transition-colors hover:border-hush-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
               onClick={() => onOpenEligibility(result.election.ElectionId)}
             >
               <div>
@@ -310,7 +310,7 @@ function VoterWorkspaceSummary({ entry }: { entry: ElectionHubEntryView }) {
 
         <Link
           href={primaryHref}
-          className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90"
+          className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
         >
           <Vote className="h-4 w-4" />
           <span>{primaryLabel}</span>
@@ -373,7 +373,7 @@ function OwnerAdminWorkspaceSummary({
 
         <Link
           href="/account/elections/owner"
-          className="inline-flex items-center gap-2 rounded-xl border border-hush-bg-light px-4 py-2 text-sm font-medium text-hush-text-primary transition-colors hover:border-hush-purple hover:text-hush-purple"
+          className="inline-flex items-center gap-2 rounded-xl border border-hush-bg-light px-4 py-2 text-sm font-medium text-hush-text-primary transition-colors hover:border-hush-purple hover:text-hush-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
         >
           <ShieldCheck className="h-4 w-4" />
           <span>Open detailed owner workspace</span>
@@ -457,14 +457,14 @@ function TrusteeWorkspaceSummary({
         <div className="flex flex-wrap gap-3">
           <Link
             href={`/account/elections/trustee/${entry.Election.ElectionId}/ceremony`}
-            className="inline-flex items-center gap-2 rounded-xl border border-hush-bg-light px-4 py-2 text-sm font-medium text-hush-text-primary transition-colors hover:border-hush-purple hover:text-hush-purple"
+            className="inline-flex items-center gap-2 rounded-xl border border-hush-bg-light px-4 py-2 text-sm font-medium text-hush-text-primary transition-colors hover:border-hush-purple hover:text-hush-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
           >
             <ShieldCheck className="h-4 w-4" />
             <span>Open ceremony workspace</span>
           </Link>
           <Link
             href={`/account/elections/trustee/${entry.Election.ElectionId}/finalization`}
-            className="inline-flex items-center gap-2 rounded-xl border border-hush-bg-light px-4 py-2 text-sm font-medium text-hush-text-primary transition-colors hover:border-hush-purple hover:text-hush-purple"
+            className="inline-flex items-center gap-2 rounded-xl border border-hush-bg-light px-4 py-2 text-sm font-medium text-hush-text-primary transition-colors hover:border-hush-purple hover:text-hush-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
           >
             <Files className="h-4 w-4" />
             <span>Open share workspace</span>
@@ -503,7 +503,7 @@ function TrusteeWorkspaceSummary({
         <div className="mt-4">
           <Link
             href={`/account/elections/trustee/${entry.Election.ElectionId}/proposal/${latestProposal.Id}`}
-            className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90"
+            className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
           >
             <ArrowRight className="h-4 w-4" />
             <span>Open latest trustee proposal</span>
@@ -587,7 +587,7 @@ function ResultsWorkspaceSummary({
         {entry.ActorRoles.IsVoter ? (
           <Link
             href={`/account/elections/voter/${entry.Election.ElectionId}`}
-            className="inline-flex items-center gap-2 rounded-xl border border-hush-bg-light px-4 py-2 text-sm font-medium text-hush-text-primary transition-colors hover:border-hush-purple hover:text-hush-purple"
+            className="inline-flex items-center gap-2 rounded-xl border border-hush-bg-light px-4 py-2 text-sm font-medium text-hush-text-primary transition-colors hover:border-hush-purple hover:text-hush-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
           >
             <Vote className="h-4 w-4" />
             <span>Open voter result detail</span>
