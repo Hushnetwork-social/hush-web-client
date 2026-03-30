@@ -51,6 +51,11 @@ export interface InviteElectionTrusteeActionPayload {
   TrusteeDisplayName: string;
 }
 
+export interface CreateElectionReportAccessGrantActionPayload {
+  ActorPublicAddress: string;
+  DesignatedAuditorPublicAddress: string;
+}
+
 export interface ResolveElectionTrusteeInvitationActionPayload {
   InvitationId: string;
   ActorPublicAddress: string;
@@ -303,6 +308,7 @@ const ENCRYPTED_ELECTION_ACTION_TYPES = {
   REGISTER_VOTING_COMMITMENT: 'register_voting_commitment',
   ACCEPT_BALLOT_CAST: 'accept_ballot_cast',
   INVITE_TRUSTEE: 'invite_trustee',
+  CREATE_REPORT_ACCESS_GRANT: 'create_report_access_grant',
   ACCEPT_TRUSTEE_INVITATION: 'accept_trustee_invitation',
   REJECT_TRUSTEE_INVITATION: 'reject_trustee_invitation',
   REVOKE_TRUSTEE_INVITATION: 'revoke_trustee_invitation',
@@ -685,6 +691,33 @@ export async function createElectionTrusteeInvitationTransaction(
   return {
     signedTransaction: encryptedEnvelope.signedTransaction,
     invitationId,
+  };
+}
+
+export async function createElectionReportAccessGrantTransaction(
+  electionId: string,
+  actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
+  designatedAuditorPublicAddress: string,
+  signingPrivateKeyHex: string,
+): Promise<{ signedTransaction: string }> {
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<CreateElectionReportAccessGrantActionPayload>(
+      electionId,
+      actorPublicAddress,
+      actorPublicEncryptAddress,
+      actorPrivateEncryptKeyHex,
+      ENCRYPTED_ELECTION_ACTION_TYPES.CREATE_REPORT_ACCESS_GRANT,
+      {
+        ActorPublicAddress: actorPublicAddress,
+        DesignatedAuditorPublicAddress: designatedAuditorPublicAddress,
+      },
+      signingPrivateKeyHex,
+    );
+
+  return {
+    signedTransaction: encryptedEnvelope.signedTransaction,
   };
 }
 

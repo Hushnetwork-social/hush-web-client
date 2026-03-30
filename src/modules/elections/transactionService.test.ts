@@ -13,6 +13,7 @@ import {
   createApproveElectionGovernedProposalTransaction,
   createClaimElectionRosterEntryTransaction,
   createElectionDraftTransaction,
+  createElectionReportAccessGrantTransaction,
   createElectionTrusteeInvitationTransaction,
   createOpenElectionTransaction,
   createSubmitElectionFinalizationShareTransaction,
@@ -263,6 +264,77 @@ describe('transactionService encrypted election envelope helpers', () => {
     expect(decryptedPayload.ActionType).toBe('invite_trustee');
     expect(decryptedPayload.ActionPayload.TrusteeUserAddress).toBe('trustee-address');
     expect(trusteeElectionPrivateKey).toBe(electionPrivateKeyHex);
+  });
+
+  it('creates a designated-auditor grant envelope using the existing election key wrappers', async () => {
+    const ownerSigningPrivateKeyHex = '1111111111111111111111111111111111111111111111111111111111111111';
+    const ownerEncryptionPrivateKeyHex = '2222222222222222222222222222222222222222222222222222222222222222';
+    const nodeEncryptionPrivateKeyHex = '3333333333333333333333333333333333333333333333333333333333333333';
+    const electionPrivateKeyHex = '5555555555555555555555555555555555555555555555555555555555555555';
+    const ownerSigningPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(ownerSigningPrivateKeyHex), true),
+    );
+    const ownerEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(ownerEncryptionPrivateKeyHex), true),
+    );
+    const nodeEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(nodeEncryptionPrivateKeyHex), true),
+    );
+    const actorEncryptedElectionPrivateKey = await eciesEncrypt(
+      electionPrivateKeyHex,
+      ownerEncryptionPublicKey,
+    );
+
+    blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
+      NodePublicEncryptAddress: nodeEncryptionPublicKey,
+      ElectionEnvelopeVersion: 'election-envelope-v1',
+    });
+    electionsServiceMock.getElectionEnvelopeAccess.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      ActorEncryptedElectionPrivateKey: actorEncryptedElectionPrivateKey,
+    });
+
+    const { signedTransaction } = await createElectionReportAccessGrantTransaction(
+      'election-123',
+      ownerSigningPublicKey,
+      ownerEncryptionPublicKey,
+      ownerEncryptionPrivateKeyHex,
+      'auditor-address',
+      ownerSigningPrivateKeyHex,
+    );
+
+    const parsedTransaction = JSON.parse(signedTransaction) as {
+      PayloadKind: string;
+      Payload: {
+        ActorEncryptedElectionPrivateKey: string;
+        EncryptedPayload: string;
+      };
+    };
+
+    expect(parsedTransaction.PayloadKind).toBe(ENCRYPTED_ELECTION_ENVELOPE_PAYLOAD_KIND);
+
+    const actorElectionPrivateKey = await eciesDecrypt(
+      parsedTransaction.Payload.ActorEncryptedElectionPrivateKey,
+      ownerEncryptionPrivateKeyHex,
+    );
+    const decryptedPayloadJson = await eciesDecrypt(
+      parsedTransaction.Payload.EncryptedPayload,
+      actorElectionPrivateKey,
+    );
+    const decryptedPayload = JSON.parse(decryptedPayloadJson) as {
+      ActionType: string;
+      ActionPayload: {
+        ActorPublicAddress: string;
+        DesignatedAuditorPublicAddress: string;
+      };
+    };
+
+    expect(decryptedPayload.ActionType).toBe('create_report_access_grant');
+    expect(decryptedPayload.ActionPayload.ActorPublicAddress).toBe(ownerSigningPublicKey);
+    expect(decryptedPayload.ActionPayload.DesignatedAuditorPublicAddress).toBe(
+      'auditor-address',
+    );
   });
 
   it('creates an encrypted open-election envelope using the existing election key wrappers', async () => {
