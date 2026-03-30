@@ -2,8 +2,12 @@ import { getGrpcClient } from '../client';
 import type {
   GetElectionCeremonyActionViewRequest,
   GetElectionCeremonyActionViewResponse,
+  GetElectionHubViewRequest,
+  GetElectionHubViewResponse,
   GetElectionEligibilityViewRequest,
   GetElectionEligibilityViewResponse,
+  GetElectionReportAccessGrantsRequest,
+  GetElectionReportAccessGrantsResponse,
   GetElectionResultViewRequest,
   GetElectionResultViewResponse,
   GetElectionVotingViewRequest,
@@ -37,6 +41,17 @@ export const electionsService = {
     return client.unaryCall<GetElectionRequest, GetElectionResponse>(
       SERVICE_NAME,
       'GetElection',
+      request
+    );
+  },
+
+  async getElectionHubView(
+    request: GetElectionHubViewRequest
+  ): Promise<GetElectionHubViewResponse> {
+    const client = getGrpcClient();
+    return client.unaryCall<GetElectionHubViewRequest, GetElectionHubViewResponse>(
+      SERVICE_NAME,
+      'GetElectionHubView',
       request
     );
   },
@@ -83,6 +98,16 @@ export const electionsService = {
       'GetElectionResultView',
       request
     );
+  },
+
+  async getElectionReportAccessGrants(
+    request: GetElectionReportAccessGrantsRequest
+  ): Promise<GetElectionReportAccessGrantsResponse> {
+    const client = getGrpcClient();
+    return client.unaryCall<
+      GetElectionReportAccessGrantsRequest,
+      GetElectionReportAccessGrantsResponse
+    >(SERVICE_NAME, 'GetElectionReportAccessGrants', request);
   },
 
   async getElectionCeremonyActionView(

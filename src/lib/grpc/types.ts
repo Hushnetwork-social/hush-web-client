@@ -882,6 +882,10 @@ export enum ElectionReportArtifactAccessScopeProto {
   ReportArtifactOwnerAuditorTrustee = 1,
 }
 
+export enum ElectionReportAccessGrantRoleProto {
+  ReportAccessGrantDesignatedAuditor = 0,
+}
+
 export enum ElectionClosedProgressStatusProto {
   ClosedProgressNone = 0,
   ClosedProgressWaitingForTrusteeShares = 1,
@@ -1522,6 +1526,12 @@ export interface InviteElectionTrusteeRequest {
   TrusteeDisplayName: string;
 }
 
+export interface CreateElectionReportAccessGrantRequest {
+  ElectionId: string;
+  ActorPublicAddress: string;
+  DesignatedAuditorPublicAddress: string;
+}
+
 export interface ResolveElectionTrusteeInvitationRequest {
   ElectionId: string;
   InvitationId: string;
@@ -1715,6 +1725,10 @@ export interface GetElectionRequest {
   ElectionId: string;
 }
 
+export interface GetElectionHubViewRequest {
+  ActorPublicAddress: string;
+}
+
 export interface GetElectionEligibilityViewRequest {
   ElectionId: string;
   ActorPublicAddress: string;
@@ -1738,6 +1752,11 @@ export interface GetElectionEnvelopeAccessResponse {
 }
 
 export interface GetElectionResultViewRequest {
+  ElectionId: string;
+  ActorPublicAddress: string;
+}
+
+export interface GetElectionReportAccessGrantsRequest {
   ElectionId: string;
   ActorPublicAddress: string;
 }
@@ -1768,6 +1787,68 @@ export enum ElectionEligibilityActorRoleProto {
   EligibilityActorRestrictedReviewer = 2,
   EligibilityActorLinkedVoter = 3,
   EligibilityActorReadOnly = 4,
+}
+
+export enum ElectionHubNextActionHintProto {
+  ElectionHubActionNone = 0,
+  ElectionHubActionOwnerManageDraft = 1,
+  ElectionHubActionOwnerOpenElection = 2,
+  ElectionHubActionOwnerMonitorClosedProgress = 3,
+  ElectionHubActionOwnerReviewFinalResult = 4,
+  ElectionHubActionVoterClaimIdentity = 5,
+  ElectionHubActionVoterCastBallot = 6,
+  ElectionHubActionVoterReviewResult = 7,
+  ElectionHubActionTrusteeApproveGovernedAction = 8,
+  ElectionHubActionTrusteeReviewResult = 9,
+  ElectionHubActionAuditorReviewPackage = 10,
+}
+
+export interface ElectionApplicationRoleFlagsView {
+  IsOwnerAdmin: boolean;
+  IsTrustee: boolean;
+  IsVoter: boolean;
+  IsDesignatedAuditor: boolean;
+}
+
+export interface ElectionHubEntryView {
+  Election: ElectionSummary;
+  ActorRoles: ElectionApplicationRoleFlagsView;
+  SuggestedAction: ElectionHubNextActionHintProto;
+  SuggestedActionReason: string;
+  CanClaimIdentity: boolean;
+  CanViewNamedParticipationRoster: boolean;
+  CanViewReportPackage: boolean;
+  CanViewParticipantResults: boolean;
+  ClosedProgressStatus: ElectionClosedProgressStatusProto;
+  HasUnofficialResult: boolean;
+  HasOfficialResult: boolean;
+}
+
+export interface GetElectionHubViewResponse {
+  Success: boolean;
+  ErrorMessage: string;
+  ActorPublicAddress: string;
+  Elections: ElectionHubEntryView[];
+  HasAnyElectionRoles: boolean;
+  EmptyStateReason: string;
+}
+
+export interface ElectionReportAccessGrantView {
+  Id: string;
+  ElectionId: string;
+  ActorPublicAddress: string;
+  GrantRole: ElectionReportAccessGrantRoleProto;
+  GrantedAt: GrpcTimestamp;
+  GrantedByPublicAddress: string;
+}
+
+export interface GetElectionReportAccessGrantsResponse {
+  Success: boolean;
+  ErrorMessage: string;
+  ActorPublicAddress: string;
+  CanManageGrants: boolean;
+  DeniedReason: string;
+  Grants: ElectionReportAccessGrantView[];
 }
 
 export interface ElectionEligibilitySummaryView {
