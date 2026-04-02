@@ -71,3 +71,4 @@ $RECYCLE.BIN/
 /.tmp/
 /.generated/
 .tmp-esm.wtns
+/tmp-tailwind-output.css
