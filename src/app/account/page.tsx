@@ -125,7 +125,7 @@ export default function AccountPage() {
   };
 
   const handleOpenElections = () => {
-    router.push("/account/elections");
+    router.push("/elections");
   };
 
   const handlePasswordConfirm = async (password: string) => {

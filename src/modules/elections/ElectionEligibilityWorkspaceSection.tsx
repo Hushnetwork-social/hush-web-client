@@ -1,22 +1,28 @@
 "use client";
 
-import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, FileSpreadsheet, Loader2, ShieldCheck, UserRoundCheck } from 'lucide-react';
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import {
+  CheckCircle2,
+  FileSpreadsheet,
+  Loader2,
+  ShieldCheck,
+  UserRoundCheck,
+} from "lucide-react";
 import {
   ElectionLifecycleStateProto,
   ElectionParticipationStatusProto,
   ElectionVotingRightStatusProto,
   type GetElectionEligibilityViewResponse,
   type GetElectionResponse,
-} from '@/lib/grpc';
-import { electionsService } from '@/lib/grpc/services/elections';
-import { submitTransaction } from '@/modules/blockchain/BlockchainService';
+} from "@/lib/grpc";
+import { electionsService } from "@/lib/grpc/services/elections";
+import { submitTransaction } from "@/modules/blockchain/BlockchainService";
 import {
   type ElectionRosterImportItemPayload,
   createActivateElectionRosterEntryTransaction,
   createImportElectionRosterTransaction,
-} from './transactionService';
+} from "./transactionService";
 
 type ElectionEligibilityWorkspaceSectionProps = {
   electionId: string;
@@ -25,11 +31,12 @@ type ElectionEligibilityWorkspaceSectionProps = {
   actorEncryptionPublicKey: string;
   actorEncryptionPrivateKey: string;
   actorSigningPrivateKey: string;
+  embedded?: boolean;
   onContextChanged?: () => Promise<void> | void;
 };
 
 type EligibilityFeedback = {
-  tone: 'success' | 'error';
+  tone: "success" | "error";
   message: string;
 };
 
@@ -47,7 +54,7 @@ async function waitForEligibilityViewMatch(
   actorPublicAddress: string,
   isMatch: (response: GetElectionEligibilityViewResponse) => boolean,
   maxAttempts: number = 12,
-  delayMs: number = 500
+  delayMs: number = 500,
 ): Promise<GetElectionEligibilityViewResponse | null> {
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
@@ -72,11 +79,11 @@ async function waitForEligibilityViewMatch(
 
 function parseContactType(value: string): number | null {
   const normalized = value.trim().toLowerCase();
-  if (normalized === 'email') {
+  if (normalized === "email") {
     return 0;
   }
 
-  if (normalized === 'phone' || normalized === 'sms') {
+  if (normalized === "phone" || normalized === "sms") {
     return 1;
   }
 
@@ -89,7 +96,7 @@ function parseInitiallyActive(value: string | undefined): boolean {
     return true;
   }
 
-  return !['0', 'false', 'no', 'inactive'].includes(normalized);
+  return !["0", "false", "no", "inactive"].includes(normalized);
 }
 
 function parseRosterImportText(rawText: string): ImportPreviewState {
@@ -100,25 +107,32 @@ function parseRosterImportText(rawText: string): ImportPreviewState {
   if (lines.length === 0) {
     return {
       rows: [],
-      errors: ['Paste at least one roster row before reviewing the import.'],
+      errors: ["Paste at least one roster row before reviewing the import."],
     };
   }
 
   const rows: ElectionRosterImportItemPayload[] = [];
   const errors: string[] = [];
   const seenOrganizationVoterIds = new Set<string>();
-  const hasHeader = lines[0].toLowerCase().includes('organization_voter_id');
+  const hasHeader = lines[0].toLowerCase().includes("organization_voter_id");
   const dataLines = hasHeader ? lines.slice(1) : lines;
 
   dataLines.forEach((line, index) => {
-    const parts = line.split(',').map((part) => part.trim());
+    const parts = line.split(",").map((part) => part.trim());
     const rowNumber = index + 1;
     if (parts.length < 3) {
-      errors.push(`Row ${rowNumber} must include organization_voter_id, contact_type, and contact_value.`);
+      errors.push(
+        `Row ${rowNumber} must include organization_voter_id, contact_type, and contact_value.`,
+      );
       return;
     }
 
-    const [organizationVoterId, rawContactType, contactValue, rawIsInitiallyActive] = parts;
+    const [
+      organizationVoterId,
+      rawContactType,
+      contactValue,
+      rawIsInitiallyActive,
+    ] = parts;
     if (!organizationVoterId) {
       errors.push(`Row ${rowNumber} is missing organization_voter_id.`);
       return;
@@ -126,13 +140,17 @@ function parseRosterImportText(rawText: string): ImportPreviewState {
 
     const dedupeKey = organizationVoterId.toLowerCase();
     if (seenOrganizationVoterIds.has(dedupeKey)) {
-      errors.push(`Row ${rowNumber} duplicates organization_voter_id '${organizationVoterId}'.`);
+      errors.push(
+        `Row ${rowNumber} duplicates organization_voter_id '${organizationVoterId}'.`,
+      );
       return;
     }
 
     const contactType = parseContactType(rawContactType);
     if (contactType === null) {
-      errors.push(`Row ${rowNumber} has unsupported contact_type '${rawContactType}'. Use 'email' or 'phone'.`);
+      errors.push(
+        `Row ${rowNumber} has unsupported contact_type '${rawContactType}'. Use 'email' or 'phone'.`,
+      );
       return;
     }
 
@@ -151,7 +169,7 @@ function parseRosterImportText(rawText: string): ImportPreviewState {
   });
 
   if (rows.length === 0 && errors.length === 0) {
-    errors.push('No valid roster rows were found in the pasted import.');
+    errors.push("No valid roster rows were found in the pasted import.");
   }
 
   return { rows, errors };
@@ -160,25 +178,35 @@ function parseRosterImportText(rawText: string): ImportPreviewState {
 function getParticipationStatusLabel(
   lifecycleState: ElectionLifecycleStateProto | undefined,
   participationStatus: ElectionParticipationStatusProto,
-  inCurrentDenominator: boolean
+  inCurrentDenominator: boolean,
 ): string {
-  if (participationStatus === ElectionParticipationStatusProto.ParticipationCountedAsVoted) {
-    return 'Counted as voted';
+  if (
+    participationStatus ===
+    ElectionParticipationStatusProto.ParticipationCountedAsVoted
+  ) {
+    return "Counted as voted";
   }
 
-  if (participationStatus === ElectionParticipationStatusProto.ParticipationBlank) {
-    return 'Blank';
+  if (
+    participationStatus === ElectionParticipationStatusProto.ParticipationBlank
+  ) {
+    return "Blank";
   }
 
-  if (lifecycleState === ElectionLifecycleStateProto.Open && inCurrentDenominator) {
-    return 'Not yet voted';
+  if (
+    lifecycleState === ElectionLifecycleStateProto.Open &&
+    inCurrentDenominator
+  ) {
+    return "Not yet voted";
   }
 
-  return 'Did not vote';
+  return "Did not vote";
 }
 
 function getVotingRightLabel(status: ElectionVotingRightStatusProto): string {
-  return status === ElectionVotingRightStatusProto.VotingRightActive ? 'Active' : 'Inactive';
+  return status === ElectionVotingRightStatusProto.VotingRightActive
+    ? "Active"
+    : "Inactive";
 }
 
 export function ElectionEligibilityWorkspaceSection({
@@ -188,17 +216,21 @@ export function ElectionEligibilityWorkspaceSection({
   actorEncryptionPublicKey,
   actorEncryptionPrivateKey,
   actorSigningPrivateKey,
+  embedded = false,
   onContextChanged,
 }: ElectionEligibilityWorkspaceSectionProps) {
-  const [eligibilityView, setEligibilityView] = useState<GetElectionEligibilityViewResponse | null>(null);
+  const [eligibilityView, setEligibilityView] =
+    useState<GetElectionEligibilityViewResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<EligibilityFeedback | null>(null);
   const [importText, setImportText] = useState(
-    'organization_voter_id,contact_type,contact_value,is_initially_active\n10041,email,member-10041@example.org,true'
+    "organization_voter_id,contact_type,contact_value,is_initially_active\n10041,email,member-10041@example.org,true",
   );
-  const [importPreview, setImportPreview] = useState<ImportPreviewState | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [importPreview, setImportPreview] = useState<ImportPreviewState | null>(
+    null,
+  );
+  const [searchTerm, setSearchTerm] = useState("");
 
   const lifecycleState = detail?.Election?.LifecycleState;
 
@@ -209,18 +241,21 @@ export function ElectionEligibilityWorkspaceSection({
       return rows;
     }
 
-    return rows.filter((row) =>
-      row.OrganizationVoterId.toLowerCase().includes(normalizedSearch) ||
-      row.ContactValueHint.toLowerCase().includes(normalizedSearch)
+    return rows.filter(
+      (row) =>
+        row.OrganizationVoterId.toLowerCase().includes(normalizedSearch) ||
+        row.ContactValueHint.toLowerCase().includes(normalizedSearch),
     );
   }, [eligibilityView?.RestrictedRosterEntries, searchTerm]);
 
   const activationQueueRows = useMemo(
     () =>
       restrictedRows.filter(
-        (row) => row.VotingRightStatus === ElectionVotingRightStatusProto.VotingRightInactive
+        (row) =>
+          row.VotingRightStatus ===
+          ElectionVotingRightStatusProto.VotingRightInactive,
       ),
-    [restrictedRows]
+    [restrictedRows],
   );
 
   useEffect(() => {
@@ -238,16 +273,20 @@ export function ElectionEligibilityWorkspaceSection({
           setEligibilityView(response);
           if (!response.Success) {
             setFeedback({
-              tone: 'error',
-              message: response.ErrorMessage || 'Failed to load eligibility data.',
+              tone: "error",
+              message:
+                response.ErrorMessage || "Failed to load eligibility data.",
             });
           }
         }
       } catch (error) {
         if (isActive) {
           setFeedback({
-            tone: 'error',
-            message: error instanceof Error ? error.message : 'Failed to load eligibility data.',
+            tone: "error",
+            message:
+              error instanceof Error
+                ? error.message
+                : "Failed to load eligibility data.",
           });
         }
       } finally {
@@ -266,7 +305,7 @@ export function ElectionEligibilityWorkspaceSection({
 
   async function refreshContext(
     nextView?: GetElectionEligibilityViewResponse | null,
-    nextFeedback?: EligibilityFeedback | null
+    nextFeedback?: EligibilityFeedback | null,
   ): Promise<void> {
     if (nextView) {
       setEligibilityView(nextView);
@@ -286,9 +325,27 @@ export function ElectionEligibilityWorkspaceSection({
   }
 
   async function handleConfirmImport(): Promise<void> {
-    if (!importPreview || importPreview.errors.length > 0 || importPreview.rows.length === 0) {
+    if (
+      !importPreview ||
+      importPreview.errors.length > 0 ||
+      importPreview.rows.length === 0
+    ) {
       return;
     }
+
+    const existingOrganizationVoterIds = new Set(
+      (eligibilityView?.RestrictedRosterEntries ?? []).map((row) =>
+        row.OrganizationVoterId.trim().toLowerCase(),
+      ),
+    );
+    const importedOrganizationVoterIds = importPreview.rows.map((row) =>
+      row.OrganizationVoterId.trim().toLowerCase(),
+    );
+    const newRosterRowCount = importedOrganizationVoterIds.filter(
+      (organizationVoterId) =>
+        !existingOrganizationVoterIds.has(organizationVoterId),
+    ).length;
+    const keptExistingRowCount = importPreview.rows.length - newRosterRowCount;
 
     setIsSubmitting(true);
     setFeedback(null);
@@ -299,49 +356,71 @@ export function ElectionEligibilityWorkspaceSection({
         actorEncryptionPublicKey,
         actorEncryptionPrivateKey,
         importPreview.rows,
-        actorSigningPrivateKey
+        actorSigningPrivateKey,
       );
       const submitResult = await submitTransaction(signedTransaction);
       if (!submitResult.successful) {
-        throw new Error(submitResult.message || 'Roster import submission failed.');
+        throw new Error(
+          submitResult.message || "Roster import submission failed.",
+        );
       }
 
       const awaitedView = await waitForEligibilityViewMatch(
         electionId,
         actorPublicAddress,
-        (response) => response.RestrictedRosterEntries.length === importPreview.rows.length
+        (response) =>
+          importedOrganizationVoterIds.every((organizationVoterId) =>
+            response.RestrictedRosterEntries.some(
+              (row) =>
+                row.OrganizationVoterId.trim().toLowerCase() ===
+                organizationVoterId,
+            ),
+          ),
       );
 
+      const successMessage =
+        newRosterRowCount === 0
+          ? `No new roster rows were added. Kept ${keptExistingRowCount} existing row${keptExistingRowCount === 1 ? "" : "s"}.`
+          : keptExistingRowCount === 0
+            ? `Added ${newRosterRowCount} roster row${newRosterRowCount === 1 ? "" : "s"}.`
+            : `Added ${newRosterRowCount} roster row${newRosterRowCount === 1 ? "" : "s"} and kept ${keptExistingRowCount} existing row${keptExistingRowCount === 1 ? "" : "s"}.`;
+
       await refreshContext(awaitedView, {
-        tone: 'success',
-        message: `Imported ${importPreview.rows.length} roster row${importPreview.rows.length === 1 ? '' : 's'}.`,
+        tone: "success",
+        message: successMessage,
       });
       setImportPreview(null);
     } catch (error) {
       setFeedback({
-        tone: 'error',
-        message: error instanceof Error ? error.message : 'Roster import failed.',
+        tone: "error",
+        message:
+          error instanceof Error ? error.message : "Roster import failed.",
       });
     } finally {
       setIsSubmitting(false);
     }
   }
 
-  async function handleActivateRosterEntry(organizationVoterId: string): Promise<void> {
+  async function handleActivateRosterEntry(
+    organizationVoterId: string,
+  ): Promise<void> {
     setIsSubmitting(true);
     setFeedback(null);
     try {
-      const { signedTransaction } = await createActivateElectionRosterEntryTransaction(
-        electionId,
-        actorPublicAddress,
-        actorEncryptionPublicKey,
-        actorEncryptionPrivateKey,
-        organizationVoterId,
-        actorSigningPrivateKey
-      );
+      const { signedTransaction } =
+        await createActivateElectionRosterEntryTransaction(
+          electionId,
+          actorPublicAddress,
+          actorEncryptionPublicKey,
+          actorEncryptionPrivateKey,
+          organizationVoterId,
+          actorSigningPrivateKey,
+        );
       const submitResult = await submitTransaction(signedTransaction);
       if (!submitResult.successful) {
-        throw new Error(submitResult.message || 'Activation submission failed.');
+        throw new Error(
+          submitResult.message || "Activation submission failed.",
+        );
       }
 
       const awaitedView = await waitForEligibilityViewMatch(
@@ -350,19 +429,20 @@ export function ElectionEligibilityWorkspaceSection({
         (response) =>
           response.RestrictedRosterEntries.some(
             (row) =>
-              row.OrganizationVoterId === organizationVoterId
-              && row.VotingRightStatus === ElectionVotingRightStatusProto.VotingRightActive
-          )
+              row.OrganizationVoterId === organizationVoterId &&
+              row.VotingRightStatus ===
+                ElectionVotingRightStatusProto.VotingRightActive,
+          ),
       );
 
       await refreshContext(awaitedView, {
-        tone: 'success',
+        tone: "success",
         message: `Activated voting rights for ${organizationVoterId}.`,
       });
     } catch (error) {
       setFeedback({
-        tone: 'error',
-        message: error instanceof Error ? error.message : 'Activation failed.',
+        tone: "error",
+        message: error instanceof Error ? error.message : "Activation failed.",
       });
     } finally {
       setIsSubmitting(false);
@@ -371,7 +451,13 @@ export function ElectionEligibilityWorkspaceSection({
 
   if (isLoading) {
     return (
-      <section className="rounded-2xl border border-hush-bg-light bg-hush-bg-element/95 p-5 shadow-sm shadow-black/10">
+      <section
+        className={
+          embedded
+            ? "py-1"
+            : "rounded-2xl border border-hush-bg-light bg-hush-bg-element/95 p-5 shadow-sm shadow-black/10"
+        }
+      >
         <div className="flex items-center gap-3 text-sm text-hush-text-accent">
           <Loader2 className="h-4 w-4 animate-spin" />
           <span>Loading eligibility workspace...</span>
@@ -382,32 +468,39 @@ export function ElectionEligibilityWorkspaceSection({
 
   return (
     <section
-      className="rounded-2xl border border-hush-bg-light bg-hush-bg-element/95 p-5 shadow-sm shadow-black/10"
+      className={
+        embedded
+          ? "space-y-5"
+          : "rounded-2xl border border-hush-bg-light bg-hush-bg-element/95 p-5 shadow-sm shadow-black/10"
+      }
       data-testid="election-eligibility-workspace"
     >
-      <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div>
-          <h2 className="text-lg font-semibold">Voters / Eligibility</h2>
-          <p className="mt-1 text-sm text-hush-text-accent">
-            FEAT-095 keeps roster import, claim-link semantics, denominator policy, and late activation
-            visible without collapsing the public checkoff layer into ballot identity.
-          </p>
+      {!embedded ? (
+        <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">Voters / Eligibility</h2>
+            <p className="mt-1 text-sm text-hush-text-accent">
+              Roster import, claim-link rules, denominator policy, and late
+              activation stay visible here without collapsing the public
+              checkoff layer into ballot identity.
+            </p>
+          </div>
+          <Link
+            href={`/elections/${electionId}/eligibility`}
+            className="inline-flex items-center gap-2 rounded-xl border border-hush-bg-light px-4 py-2 text-sm transition-colors hover:border-hush-purple"
+          >
+            <ShieldCheck className="h-4 w-4" />
+            <span>Open actor view</span>
+          </Link>
         </div>
-        <Link
-          href={`/account/elections/${electionId}/eligibility`}
-          className="inline-flex items-center gap-2 rounded-xl border border-hush-bg-light px-4 py-2 text-sm transition-colors hover:border-hush-purple"
-        >
-          <ShieldCheck className="h-4 w-4" />
-          <span>Open actor view</span>
-        </Link>
-      </div>
+      ) : null}
 
       {feedback ? (
         <div
           className={`mb-4 rounded-xl border px-4 py-3 text-sm ${
-            feedback.tone === 'success'
-              ? 'border-green-500/40 bg-green-500/10 text-green-100'
-              : 'border-red-500/40 bg-red-500/10 text-red-100'
+            feedback.tone === "success"
+              ? "border-green-500/40 bg-green-500/10 text-green-100"
+              : "border-red-500/40 bg-red-500/10 text-red-100"
           }`}
         >
           {feedback.message}
@@ -416,7 +509,8 @@ export function ElectionEligibilityWorkspaceSection({
 
       {!eligibilityView?.Success ? (
         <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-4 text-sm text-red-100">
-          {eligibilityView?.ErrorMessage || 'Eligibility data is currently unavailable.'}
+          {eligibilityView?.ErrorMessage ||
+            "Eligibility data is currently unavailable."}
         </div>
       ) : (
         <>
@@ -425,19 +519,25 @@ export function ElectionEligibilityWorkspaceSection({
               <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
                 Rostered
               </div>
-              <div className="mt-2 text-2xl font-semibold">{eligibilityView.Summary.RosteredCount}</div>
+              <div className="mt-2 text-2xl font-semibold">
+                {eligibilityView.Summary.RosteredCount}
+              </div>
             </div>
             <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
               <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
                 Linked
               </div>
-              <div className="mt-2 text-2xl font-semibold">{eligibilityView.Summary.LinkedCount}</div>
+              <div className="mt-2 text-2xl font-semibold">
+                {eligibilityView.Summary.LinkedCount}
+              </div>
             </div>
             <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
               <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
                 Active now
               </div>
-              <div className="mt-2 text-2xl font-semibold">{eligibilityView.Summary.ActiveCount}</div>
+              <div className="mt-2 text-2xl font-semibold">
+                {eligibilityView.Summary.ActiveCount}
+              </div>
             </div>
             <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
               <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
@@ -461,16 +561,23 @@ export function ElectionEligibilityWorkspaceSection({
             <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-sm font-semibold">Participation policy</div>
+                  <div className="text-sm font-semibold">
+                    Participation policy
+                  </div>
                   <p className="mt-2 text-sm text-hush-text-accent">
-                    Named roster visibility stays restricted to owner and accepted trustee review.
-                    The current temporary verification code is <span className="font-semibold text-hush-text-primary">{eligibilityView.TemporaryVerificationCode}</span>.
+                    Named roster visibility stays restricted to owner and
+                    accepted trustee review. The current temporary verification
+                    code is{" "}
+                    <span className="font-semibold text-hush-text-primary">
+                      {eligibilityView.TemporaryVerificationCode}
+                    </span>
+                    .
                   </p>
                 </div>
                 <div className="rounded-xl border border-hush-purple/30 bg-hush-purple/10 px-3 py-2 text-xs text-hush-text-primary">
                   {detail?.Election?.EligibilityMutationPolicy === 1
-                    ? 'Late activation for rostered voters only'
-                    : 'Frozen at open'}
+                    ? "Late activation for rostered voters only"
+                    : "Frozen at open"}
                 </div>
               </div>
             </div>
@@ -479,8 +586,14 @@ export function ElectionEligibilityWorkspaceSection({
               <div className="text-sm font-semibold">Current semantics</div>
               <div className="mt-3 space-y-2 text-sm text-hush-text-accent">
                 <div>Blank: accepted blank ballot exists.</div>
-                <div>Counted as voted: accepted ballot exists for the linked voter identity.</div>
-                <div>Did not vote: no accepted ballot exists in the current denominator.</div>
+                <div>
+                  Counted as voted: accepted ballot exists for the linked voter
+                  identity.
+                </div>
+                <div>
+                  Did not vote: no accepted ballot exists in the current
+                  denominator.
+                </div>
               </div>
             </div>
           </div>
@@ -489,19 +602,29 @@ export function ElectionEligibilityWorkspaceSection({
             <div className="mt-5 rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
               <div className="mb-3 flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-sm font-semibold">Roster import review</div>
+                  <div className="text-sm font-semibold">
+                    Roster import review
+                  </div>
                   <p className="mt-1 text-sm text-hush-text-accent">
-                    Paste `organization_voter_id, contact_type, contact_value, is_initially_active`
-                    rows. The roster is replace-in-draft only and freezes at open.
+                    Paste `organization_voter_id, contact_type, contact_value,
+                    is_initially_active` rows. New voter IDs are appended in
+                    draft, existing voter IDs are kept as-is, and the roster
+                    freezes at open.
                   </p>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setImportPreview(parseRosterImportText(importText))}
+                  onClick={() =>
+                    setImportPreview(parseRosterImportText(importText))
+                  }
                   disabled={isSubmitting}
                   className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 disabled:cursor-not-allowed disabled:bg-hush-bg-light disabled:text-hush-text-accent"
                 >
-                  {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
+                  {isSubmitting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <FileSpreadsheet className="h-4 w-4" />
+                  )}
                   <span>Review import</span>
                 </button>
               </div>
@@ -517,17 +640,20 @@ export function ElectionEligibilityWorkspaceSection({
           ) : (
             <div className="mt-5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-4 text-sm text-amber-100">
               {lifecycleState === ElectionLifecycleStateProto.Open
-                ? 'Roster membership is frozen because the election is already open.'
-                : 'Roster import is only available to the owner while the election remains in draft.'}
+                ? "Roster membership is frozen because the election is already open."
+                : "Roster import is only available to the owner while the election remains in draft."}
             </div>
           )}
 
           <div className="mt-5 rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
             <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
               <div>
-                <div className="text-sm font-semibold">Restricted participation roster</div>
+                <div className="text-sm font-semibold">
+                  Restricted participation roster
+                </div>
                 <p className="mt-1 text-sm text-hush-text-accent">
-                  This table stays on the named checkoff layer only. No ballot id, ciphertext, or vote-choice data is exposed here.
+                  This table stays on the named checkoff layer only. No ballot
+                  id, ciphertext, or vote-choice data is exposed here.
                 </p>
               </div>
               <input
@@ -557,24 +683,40 @@ export function ElectionEligibilityWorkspaceSection({
                   </thead>
                   <tbody>
                     {restrictedRows.map((row) => (
-                      <tr key={row.OrganizationVoterId} className="border-t border-hush-bg-light/70">
-                        <td className="py-3 pr-4 font-mono text-hush-text-primary">{row.OrganizationVoterId}</td>
-                        <td className="py-3 pr-4 text-hush-text-accent">{row.ContactValueHint}</td>
+                      <tr
+                        key={row.OrganizationVoterId}
+                        className="border-t border-hush-bg-light/70"
+                      >
+                        <td className="py-3 pr-4 font-mono text-hush-text-primary">
+                          {row.OrganizationVoterId}
+                        </td>
                         <td className="py-3 pr-4 text-hush-text-accent">
-                          {row.LinkStatus === 1 ? 'Linked' : 'Unlinked'}
+                          {row.ContactValueHint}
+                        </td>
+                        <td className="py-3 pr-4 text-hush-text-accent">
+                          {row.LinkStatus === 1 ? "Linked" : "Unlinked"}
                         </td>
                         <td className="py-3 pr-4 text-hush-text-accent">
                           {getVotingRightLabel(row.VotingRightStatus)}
                         </td>
                         <td className="py-3 pr-4 text-hush-text-accent">
-                          {getParticipationStatusLabel(lifecycleState, row.ParticipationStatus, row.InCurrentDenominator)}
+                          {getParticipationStatusLabel(
+                            lifecycleState,
+                            row.ParticipationStatus,
+                            row.InCurrentDenominator,
+                          )}
                         </td>
                         <td className="py-3">
-                          {eligibilityView.CanActivateRoster
-                          && row.VotingRightStatus === ElectionVotingRightStatusProto.VotingRightInactive ? (
+                          {eligibilityView.CanActivateRoster &&
+                          row.VotingRightStatus ===
+                            ElectionVotingRightStatusProto.VotingRightInactive ? (
                             <button
                               type="button"
-                              onClick={() => void handleActivateRosterEntry(row.OrganizationVoterId)}
+                              onClick={() =>
+                                void handleActivateRosterEntry(
+                                  row.OrganizationVoterId,
+                                )
+                              }
                               disabled={isSubmitting}
                               className="inline-flex items-center gap-2 rounded-xl border border-green-500/40 px-3 py-2 text-xs text-green-100 transition-colors hover:border-green-400 disabled:cursor-not-allowed disabled:opacity-50"
                               data-testid={`eligibility-activate-${row.OrganizationVoterId}`}
@@ -586,13 +728,14 @@ export function ElectionEligibilityWorkspaceSection({
                               )}
                               <span>Activate</span>
                             </button>
-                            ) : (
-                              <span className="text-xs text-hush-text-accent">
-                                {row.VotingRightStatus === ElectionVotingRightStatusProto.VotingRightActive
-                                  ? 'Already active'
-                                  : 'Read-only'}
-                              </span>
-                            )}
+                          ) : (
+                            <span className="text-xs text-hush-text-accent">
+                              {row.VotingRightStatus ===
+                              ElectionVotingRightStatusProto.VotingRightActive
+                                ? "Already active"
+                                : "Read-only"}
+                            </span>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -605,28 +748,42 @@ export function ElectionEligibilityWorkspaceSection({
           <div className="mt-5 grid gap-4 xl:grid-cols-2">
             <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
               <div className="flex items-center justify-between gap-3">
-                <div className="text-sm font-semibold">Late-activation queue</div>
+                <div className="text-sm font-semibold">
+                  Late-activation queue
+                </div>
                 <div className="text-xs text-hush-text-accent">
-                  {activationQueueRows.length} inactive row{activationQueueRows.length === 1 ? '' : 's'}
+                  {activationQueueRows.length} inactive row
+                  {activationQueueRows.length === 1 ? "" : "s"}
                 </div>
               </div>
               <div className="mt-3 space-y-3">
                 {activationQueueRows.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-hush-bg-light px-4 py-5 text-sm text-hush-text-accent">
-                    No inactive rostered voters are waiting in the current queue.
+                    No inactive rostered voters are waiting in the current
+                    queue.
                   </div>
                 ) : (
                   activationQueueRows.map((row) => (
-                    <div key={row.OrganizationVoterId} className="rounded-xl border border-hush-bg-light px-4 py-3">
+                    <div
+                      key={row.OrganizationVoterId}
+                      className="rounded-xl border border-hush-bg-light px-4 py-3"
+                    >
                       <div className="flex items-center justify-between gap-3">
                         <div>
-                          <div className="font-mono text-sm text-hush-text-primary">{row.OrganizationVoterId}</div>
+                          <div className="font-mono text-sm text-hush-text-primary">
+                            {row.OrganizationVoterId}
+                          </div>
                           <div className="mt-1 text-xs text-hush-text-accent">
-                            {row.LinkStatus === 1 ? 'Linked' : 'Must link first'} • {row.ContactValueHint}
+                            {row.LinkStatus === 1
+                              ? "Linked"
+                              : "Must link first"}{" "}
+                            • {row.ContactValueHint}
                           </div>
                         </div>
                         <div className="text-xs text-hush-text-accent">
-                          {row.InCurrentDenominator ? 'Already in denominator' : 'Outside denominator'}
+                          {row.InCurrentDenominator
+                            ? "Already in denominator"
+                            : "Outside denominator"}
                         </div>
                       </div>
                     </div>
@@ -636,7 +793,9 @@ export function ElectionEligibilityWorkspaceSection({
             </div>
 
             <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
-              <div className="text-sm font-semibold">Recent activation events</div>
+              <div className="text-sm font-semibold">
+                Recent activation events
+              </div>
               <div className="mt-3 space-y-3">
                 {(eligibilityView.ActivationEvents ?? []).length === 0 ? (
                   <div className="rounded-xl border border-dashed border-hush-bg-light px-4 py-5 text-sm text-hush-text-accent">
@@ -644,7 +803,10 @@ export function ElectionEligibilityWorkspaceSection({
                   </div>
                 ) : (
                   eligibilityView.ActivationEvents.slice(0, 6).map((event) => (
-                    <div key={event.Id} className="rounded-xl border border-hush-bg-light px-4 py-3">
+                    <div
+                      key={event.Id}
+                      className="rounded-xl border border-hush-bg-light px-4 py-3"
+                    >
                       <div className="flex items-center justify-between gap-3">
                         <div className="text-sm font-medium text-hush-text-primary">
                           {event.OrganizationVoterId}
@@ -652,15 +814,17 @@ export function ElectionEligibilityWorkspaceSection({
                         <div
                           className={`rounded-full border px-2.5 py-1 text-xs ${
                             event.Outcome === 0
-                              ? 'border-green-500/40 bg-green-500/10 text-green-100'
-                              : 'border-amber-500/40 bg-amber-500/10 text-amber-100'
+                              ? "border-green-500/40 bg-green-500/10 text-green-100"
+                              : "border-amber-500/40 bg-amber-500/10 text-amber-100"
                           }`}
                         >
-                          {event.Outcome === 0 ? 'Activated' : 'Blocked'}
+                          {event.Outcome === 0 ? "Activated" : "Blocked"}
                         </div>
                       </div>
                       <div className="mt-1 text-xs text-hush-text-accent">
-                        {new Date((event.OccurredAt.seconds ?? 0) * 1000).toLocaleString()}
+                        {new Date(
+                          (event.OccurredAt.seconds ?? 0) * 1000,
+                        ).toLocaleString()}
                       </div>
                     </div>
                   ))
@@ -676,9 +840,12 @@ export function ElectionEligibilityWorkspaceSection({
           <div className="w-full max-w-3xl rounded-2xl border border-hush-bg-light bg-hush-bg-element p-5 shadow-2xl shadow-black/40">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h3 className="text-lg font-semibold">Review imported voter roster</h3>
+                <h3 className="text-lg font-semibold">
+                  Review imported voter roster
+                </h3>
                 <p className="mt-1 text-sm text-hush-text-accent">
-                  The temporary `1111` verification flow only becomes meaningful after the imported roster exists in draft.
+                  The temporary `1111` verification flow only becomes meaningful
+                  after the imported roster exists in draft.
                 </p>
               </div>
               <button
@@ -695,19 +862,25 @@ export function ElectionEligibilityWorkspaceSection({
                 <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
                   Rows found
                 </div>
-                <div className="mt-2 text-2xl font-semibold">{importPreview.rows.length + importPreview.errors.length}</div>
+                <div className="mt-2 text-2xl font-semibold">
+                  {importPreview.rows.length + importPreview.errors.length}
+                </div>
               </div>
               <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
                 <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
                   Valid rows
                 </div>
-                <div className="mt-2 text-2xl font-semibold">{importPreview.rows.length}</div>
+                <div className="mt-2 text-2xl font-semibold">
+                  {importPreview.rows.length}
+                </div>
               </div>
               <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
                 <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
                   Needs correction
                 </div>
-                <div className="mt-2 text-2xl font-semibold">{importPreview.errors.length}</div>
+                <div className="mt-2 text-2xl font-semibold">
+                  {importPreview.errors.length}
+                </div>
               </div>
             </div>
 
@@ -736,13 +909,22 @@ export function ElectionEligibilityWorkspaceSection({
                   </thead>
                   <tbody>
                     {importPreview.rows.slice(0, 12).map((row) => (
-                      <tr key={row.OrganizationVoterId} className="border-t border-hush-bg-light/70">
-                        <td className="py-3 pr-4 font-mono text-hush-text-primary">{row.OrganizationVoterId}</td>
-                        <td className="py-3 pr-4 text-hush-text-accent">
-                          {row.ContactType === 1 ? 'Phone' : 'Email'}
+                      <tr
+                        key={row.OrganizationVoterId}
+                        className="border-t border-hush-bg-light/70"
+                      >
+                        <td className="py-3 pr-4 font-mono text-hush-text-primary">
+                          {row.OrganizationVoterId}
                         </td>
-                        <td className="py-3 pr-4 text-hush-text-accent">{row.ContactValue}</td>
-                        <td className="py-3 text-hush-text-accent">{row.IsInitiallyActive ? 'Yes' : 'No'}</td>
+                        <td className="py-3 pr-4 text-hush-text-accent">
+                          {row.ContactType === 1 ? "Phone" : "Email"}
+                        </td>
+                        <td className="py-3 pr-4 text-hush-text-accent">
+                          {row.ContactValue}
+                        </td>
+                        <td className="py-3 text-hush-text-accent">
+                          {row.IsInitiallyActive ? "Yes" : "No"}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -761,11 +943,19 @@ export function ElectionEligibilityWorkspaceSection({
               <button
                 type="button"
                 onClick={() => void handleConfirmImport()}
-                disabled={isSubmitting || importPreview.errors.length > 0 || importPreview.rows.length === 0}
+                disabled={
+                  isSubmitting ||
+                  importPreview.errors.length > 0 ||
+                  importPreview.rows.length === 0
+                }
                 className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 disabled:cursor-not-allowed disabled:bg-hush-bg-light disabled:text-hush-text-accent"
                 data-testid="eligibility-import-confirm"
               >
-                {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                {isSubmitting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="h-4 w-4" />
+                )}
                 <span>Import valid rows</span>
               </button>
             </div>

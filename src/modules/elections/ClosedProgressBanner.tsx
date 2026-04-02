@@ -16,11 +16,11 @@ export function ClosedProgressBanner({ entry }: ClosedProgressBannerProps) {
 
   return (
     <section
-      className="rounded-3xl border border-blue-500/30 bg-blue-500/10 p-5 text-blue-50"
+      className="rounded-3xl bg-blue-500/10 p-5 text-blue-50 shadow-lg shadow-black/10"
       data-testid="closed-progress-banner"
     >
       <div className="flex items-start gap-3">
-        <div className="rounded-2xl border border-blue-400/30 bg-blue-500/15 p-3">
+        <div className="rounded-2xl bg-blue-500/15 p-3">
           <Clock3 className="h-5 w-5" />
         </div>
         <div>

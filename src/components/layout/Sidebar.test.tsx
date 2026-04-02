@@ -149,7 +149,7 @@ describe('Sidebar', () => {
       render(
         <Sidebar
           {...defaultProps}
-          crossAppBadges={{ feeds: 0, social: 4 }}
+          crossAppBadges={{ feeds: 0, social: 4, voting: 0 }}
         />
       );
 
@@ -178,6 +178,21 @@ describe('Sidebar', () => {
       fireEvent.click(screen.getByText('HushVoting!'));
 
       expect(defaultProps.onNavSelect).toHaveBeenCalledWith('open-voting');
+    });
+
+    it('should render voting-app navigation with HushFeeds and HushSocial', () => {
+      render(
+        <Sidebar
+          {...defaultProps}
+          activeApp="voting"
+          selectedNav="open-voting"
+        />
+      );
+
+      expect(screen.getByText('Election Hub')).toBeInTheDocument();
+      expect(screen.getByText('HushFeeds!')).toBeInTheDocument();
+      expect(screen.getByText('HushSocial!')).toBeInTheDocument();
+      expect(screen.queryByText('Create Group')).not.toBeInTheDocument();
     });
 
     it('routes guest sidebar nav clicks through guest action', () => {

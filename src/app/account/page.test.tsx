@@ -230,7 +230,7 @@ describe('AccountPage', () => {
       const electionsButton = screen.getByTestId('account-manage-elections-button');
       fireEvent.click(electionsButton);
 
-      expect(mockPush).toHaveBeenCalledWith('/account/elections');
+      expect(mockPush).toHaveBeenCalledWith('/elections');
     });
   });
 

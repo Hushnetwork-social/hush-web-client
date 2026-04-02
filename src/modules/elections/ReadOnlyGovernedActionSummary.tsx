@@ -19,7 +19,7 @@ export function ReadOnlyGovernedActionSummary({ detail }: ReadOnlyGovernedAction
 
   return (
     <section
-      className="rounded-3xl border border-hush-bg-light bg-hush-bg-element/95 p-5 shadow-sm shadow-black/10"
+      className="rounded-3xl bg-hush-bg-element/95 p-5 shadow-lg shadow-black/10"
       data-testid="read-only-governed-action-summary"
     >
       <div className="flex flex-col gap-2">
@@ -33,7 +33,7 @@ export function ReadOnlyGovernedActionSummary({ detail }: ReadOnlyGovernedAction
       </div>
 
       {governedStates.length === 0 ? (
-        <div className="mt-4 rounded-2xl border border-hush-bg-light bg-hush-bg-dark/70 p-4 text-sm text-hush-text-accent">
+        <div className="mt-4 rounded-2xl bg-hush-bg-dark/70 p-4 text-sm text-hush-text-accent">
           No governed-action workflow is active for this election.
         </div>
       ) : (
@@ -41,7 +41,7 @@ export function ReadOnlyGovernedActionSummary({ detail }: ReadOnlyGovernedAction
           {governedStates.map((state) => (
             <article
               key={state.actionType}
-              className="rounded-2xl border border-hush-bg-light bg-hush-bg-dark/70 p-4"
+              className="rounded-2xl bg-hush-bg-dark/70 p-4 shadow-sm shadow-black/10"
             >
               <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div>
@@ -59,7 +59,7 @@ export function ReadOnlyGovernedActionSummary({ detail }: ReadOnlyGovernedAction
 
               {state.proposal ? (
                 <div className="mt-4 grid gap-3 md:grid-cols-3">
-                  <div className="rounded-xl border border-hush-bg-light bg-hush-bg-element/80 p-3">
+                  <div className="rounded-xl bg-hush-bg-element/80 p-3">
                     <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
                       Proposal
                     </div>
@@ -67,7 +67,7 @@ export function ReadOnlyGovernedActionSummary({ detail }: ReadOnlyGovernedAction
                       {state.proposal.Id}
                     </div>
                   </div>
-                  <div className="rounded-xl border border-hush-bg-light bg-hush-bg-element/80 p-3">
+                  <div className="rounded-xl bg-hush-bg-element/80 p-3">
                     <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
                       Created
                     </div>
@@ -75,7 +75,7 @@ export function ReadOnlyGovernedActionSummary({ detail }: ReadOnlyGovernedAction
                       {formatTimestamp(state.proposal.CreatedAt)}
                     </div>
                   </div>
-                  <div className="rounded-xl border border-hush-bg-light bg-hush-bg-element/80 p-3">
+                  <div className="rounded-xl bg-hush-bg-element/80 p-3">
                     <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
                       Execution
                     </div>

@@ -1,9 +1,10 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { GetElectionResponse, Identity } from '@/lib/grpc';
 import { ElectionTrusteeInvitationStatusProto } from '@/lib/grpc';
-import { Loader2, Search, ShieldCheck, UserPlus, X } from 'lucide-react';
+import { identityService } from '@/lib/grpc/services/identity';
+import { Loader2, RefreshCw, Search, ShieldCheck, UserPlus, X } from 'lucide-react';
 import { useElectionsStore } from './useElectionsStore';
 
 type DesignatedAuditorGrantManagerProps = {
@@ -12,6 +13,26 @@ type DesignatedAuditorGrantManagerProps = {
   actorEncryptionPrivateKey: string;
   actorSigningPrivateKey: string;
 };
+
+type ResolvedGrantIdentity = {
+  profileName: string;
+  associatedId: string;
+};
+
+type DisplayGrantIdentity =
+  | string
+  | {
+      profileName: string;
+      associatedId: string;
+    };
+
+function abbreviateAssociatedId(value: string): string {
+  if (value.length <= 9) {
+    return value;
+  }
+
+  return `${value.slice(0, 3)}...${value.slice(-3)}`;
+}
 
 function getCandidateRestrictionReason(
   candidate: Identity,
@@ -47,6 +68,7 @@ export function DesignatedAuditorGrantManager({
   actorSigningPrivateKey,
 }: DesignatedAuditorGrantManagerProps) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [grantIdentityLookup, setGrantIdentityLookup] = useState<Record<string, ResolvedGrantIdentity>>({});
   const {
     actorPublicAddress,
     canManageReportAccessGrants,
@@ -68,7 +90,66 @@ export function DesignatedAuditorGrantManager({
     () => new Set(reportAccessGrants.map((grant) => grant.ActorPublicAddress)),
     [reportAccessGrants]
   );
+  const grantIdentityAddresses = useMemo(() => {
+    const addresses = new Set<string>();
+
+    reportAccessGrants.forEach((grant) => {
+      if (grant.ActorPublicAddress) {
+        addresses.add(grant.ActorPublicAddress);
+      }
+
+      if (grant.GrantedByPublicAddress) {
+        addresses.add(grant.GrantedByPublicAddress);
+      }
+    });
+
+    return Array.from(addresses);
+  }, [reportAccessGrants]);
   const electionId = detail?.Election?.ElectionId;
+
+  useEffect(() => {
+    let isActive = true;
+
+    if (grantIdentityAddresses.length === 0) {
+      setGrantIdentityLookup({});
+      return () => {
+        isActive = false;
+      };
+    }
+
+    void (async () => {
+      const resolvedEntries = await Promise.all(
+        grantIdentityAddresses.map(async (address) => {
+          const identity = await identityService.getIdentity(address);
+          return { address, identity };
+        })
+      );
+
+      if (!isActive) {
+        return;
+      }
+
+      const nextLookup: Record<string, ResolvedGrantIdentity> = {};
+
+      resolvedEntries.forEach(({ address, identity }) => {
+        const profileName = identity.ProfileName.trim();
+        if (!identity.Successfull || !profileName) {
+          return;
+        }
+
+        nextLookup[address] = {
+          profileName,
+          associatedId: identity.PublicSigningAddress || address,
+        };
+      });
+
+      setGrantIdentityLookup(nextLookup);
+    })();
+
+    return () => {
+      isActive = false;
+    };
+  }, [grantIdentityAddresses]);
 
   const handleSearch = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -84,79 +165,122 @@ export function DesignatedAuditorGrantManager({
     );
   };
 
+  const formatResolvedIdentity = (address: string): DisplayGrantIdentity => {
+    const resolvedIdentity = grantIdentityLookup[address];
+    if (!resolvedIdentity) {
+      return address;
+    }
+
+    return {
+      profileName: resolvedIdentity.profileName,
+      associatedId: abbreviateAssociatedId(resolvedIdentity.associatedId),
+    };
+  };
+
   return (
     <section
-      className="rounded-3xl border border-hush-bg-light bg-hush-bg-element/95 p-5 shadow-sm shadow-black/10"
+      className="space-y-4"
       data-testid="designated-auditor-grant-manager"
     >
       <div className="flex flex-col gap-2">
-        <div className="text-xs font-semibold uppercase tracking-[0.24em] text-hush-text-accent">
+        <h2 className="text-base font-semibold uppercase tracking-[0.28em] text-hush-text-primary md:text-lg">
           Designated-auditor access
+        </h2>
+        <div className="flex items-center gap-2">
+          <h3 className="text-lg font-semibold text-hush-text-primary md:text-xl">
+            Manage auditor access
+          </h3>
+          {electionId ? (
+            <button
+              type="button"
+              onClick={() =>
+                void loadReportAccessGrants(
+                  actorPublicAddress ?? detail?.Election?.OwnerPublicAddress ?? '',
+                  electionId
+                )
+              }
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full text-hush-text-accent transition-colors hover:text-hush-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
+              aria-label="Refresh auditor grants"
+              title="Refresh auditor grants"
+            >
+              {isLoadingReportAccessGrants ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+            </button>
+          ) : null}
         </div>
-        <h3 className="text-xl font-semibold text-hush-text-primary">Manage auditor access</h3>
         <p className="text-sm text-hush-text-accent">
           Saved grants take effect on the next read and remain irreversible in v1.
         </p>
       </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <div className="rounded-2xl border border-hush-bg-light bg-hush-bg-dark/70 p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-sm font-semibold text-hush-text-primary">Current grants</div>
-              <div className="mt-1 text-xs text-hush-text-accent">
-                {isLoadingReportAccessGrants
-                  ? 'Refreshing grants...'
-                  : `${reportAccessGrants.length} designated auditor(s)`}
-              </div>
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <div className="space-y-4">
+          <div>
+            <div className="text-sm font-semibold text-hush-text-primary">Current grants</div>
+            <div className="mt-1 text-xs text-hush-text-accent">
+              {isLoadingReportAccessGrants
+                ? 'Refreshing grants...'
+                : `${reportAccessGrants.length} designated auditor(s)`}
             </div>
-            {electionId ? (
-              <button
-                type="button"
-                onClick={() =>
-                  void loadReportAccessGrants(
-                    actorPublicAddress ?? detail?.Election?.OwnerPublicAddress ?? '',
-                    electionId
-                  )
-                }
-                className="rounded-xl border border-hush-bg-light px-3 py-2 text-xs text-hush-text-primary transition-colors hover:border-hush-purple hover:text-hush-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
-              >
-                Refresh
-              </button>
-            ) : null}
           </div>
 
           {!canManageReportAccessGrants && reportAccessGrantDeniedReason ? (
-            <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
+            <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
               {reportAccessGrantDeniedReason}
             </div>
           ) : null}
 
-          <div className="mt-4 space-y-3">
+          <div className="space-y-4">
             {reportAccessGrants.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-hush-bg-light p-4 text-sm text-hush-text-accent">
+              <div className="text-sm text-hush-text-accent">
                 No designated auditors have been added yet.
               </div>
             ) : (
-              reportAccessGrants.map((grant) => (
-                <div
-                  key={grant.Id}
-                  className="rounded-2xl border border-hush-bg-light bg-hush-bg-element/80 p-4"
-                >
+              reportAccessGrants.map((grant, index) => {
+                const actorIdentity = formatResolvedIdentity(grant.ActorPublicAddress);
+                const grantedByIdentity = formatResolvedIdentity(grant.GrantedByPublicAddress);
+
+                return (
+                  <div
+                    key={grant.Id}
+                    className={index === 0 ? 'space-y-2' : 'border-t border-hush-bg-light/70 pt-4'}
+                  >
                   <div className="flex items-center gap-2 text-sm font-semibold text-hush-text-primary">
                     <ShieldCheck className="h-4 w-4 text-green-300" />
-                    <span>{grant.ActorPublicAddress}</span>
+                    <div className="min-w-0">
+                      {typeof actorIdentity === 'string' ? (
+                        <span className="break-all">{actorIdentity}</span>
+                      ) : (
+                        <div className="flex min-w-0 items-baseline gap-2">
+                          <div className="break-words">{actorIdentity.profileName}</div>
+                          <span className="shrink-0 text-xs font-normal text-hush-text-accent">
+                            ({actorIdentity.associatedId})
+                          </span>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <div className="mt-2 text-xs text-hush-text-accent">
-                    Granted by {grant.GrantedByPublicAddress}
+                  <div className="mt-2 break-all text-xs text-hush-text-accent">
+                    {typeof grantedByIdentity === 'string' ? (
+                      <>Granted by {grantedByIdentity}</>
+                    ) : (
+                      <>
+                        Granted by {grantedByIdentity.profileName}{' '}
+                        <span className="text-[11px]">({grantedByIdentity.associatedId})</span>
+                      </>
+                    )}
                   </div>
-                </div>
-              ))
+                  </div>
+                );
+              })
             )}
           </div>
         </div>
 
-        <div className="rounded-2xl border border-hush-bg-light bg-hush-bg-dark/70 p-4">
+        <div className="space-y-4">
           <form className="flex flex-col gap-3" onSubmit={handleSearch}>
             <label className="text-sm font-semibold text-hush-text-primary" htmlFor="auditor-search">
               Search Hush accounts
@@ -185,13 +309,13 @@ export function DesignatedAuditorGrantManager({
           </form>
 
           {(grantSearchError || reportAccessGrantDeniedReason) && canManageReportAccessGrants ? (
-            <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">
+            <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">
               {grantSearchError || reportAccessGrantDeniedReason}
             </div>
           ) : null}
 
           {grantSearchQuery ? (
-            <div className="mt-4 flex items-center justify-between">
+            <div className="flex items-center justify-between">
               <div className="text-xs uppercase tracking-[0.2em] text-hush-text-accent">
                 Search results for {grantSearchQuery}
               </div>
@@ -209,14 +333,14 @@ export function DesignatedAuditorGrantManager({
             </div>
           ) : null}
 
-          <div className="mt-4 space-y-3">
+          <div className="space-y-4">
             {grantSearchQuery && grantSearchResults.length === 0 && !isSearchingGrantCandidates ? (
-              <div className="rounded-2xl border border-dashed border-hush-bg-light p-4 text-sm text-hush-text-accent">
+              <div className="text-sm text-hush-text-accent">
                 No Hush identities matched this search.
               </div>
             ) : null}
 
-            {grantSearchResults.map((candidate) => {
+            {grantSearchResults.map((candidate, index) => {
               const restrictionReason = getCandidateRestrictionReason(
                 candidate,
                 detail,
@@ -226,7 +350,7 @@ export function DesignatedAuditorGrantManager({
               return (
                 <div
                   key={candidate.PublicSigningAddress}
-                  className="rounded-2xl border border-hush-bg-light bg-hush-bg-element/80 p-4"
+                  className={index === 0 ? 'space-y-3' : 'border-t border-hush-bg-light/70 pt-4'}
                 >
                   <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                     <div className="min-w-0">

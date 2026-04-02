@@ -1,7 +1,7 @@
 "use client";
 
 import Link from 'next/link';
-import { type FormEvent, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   AlertCircle,
@@ -10,7 +10,6 @@ import {
   Files,
   Loader2,
   LockKeyhole,
-  Search,
   ShieldAlert,
   ShieldCheck,
   Vote,
@@ -18,13 +17,9 @@ import {
 import type {
   ElectionGovernedProposal,
   ElectionHubEntryView,
-  ElectionSummary,
   GetElectionResponse,
-  Identity,
 } from '@/lib/grpc';
 import { ElectionLifecycleStateProto } from '@/lib/grpc';
-import { electionsService } from '@/lib/grpc/services/elections';
-import { identityService } from '@/lib/grpc/services/identity';
 import { ClosedProgressBanner } from './ClosedProgressBanner';
 import { DesignatedAuditorGrantManager } from './DesignatedAuditorGrantManager';
 import { ElectionAccessBoundaryNotice } from './ElectionAccessBoundaryNotice';
@@ -55,12 +50,7 @@ type HushVotingWorkspaceProps = {
 };
 
 const sectionClass =
-  'rounded-3xl border border-hush-bg-light bg-hush-bg-element/95 p-5 shadow-sm shadow-black/10';
-
-type ElectionDiscoveryResult = {
-  election: ElectionSummary;
-  ownerDisplayName: string;
-};
+  'rounded-3xl bg-hush-bg-element/95 p-5 shadow-lg shadow-black/10';
 
 function timestampToMillis(timestamp?: { seconds?: number; nanos?: number }): number {
   if (!timestamp) {
@@ -68,14 +58,6 @@ function timestampToMillis(timestamp?: { seconds?: number; nanos?: number }): nu
   }
 
   return (timestamp.seconds ?? 0) * 1000 + Math.floor((timestamp.nanos ?? 0) / 1_000_000);
-}
-
-function abbreviateAddress(address: string): string {
-  if (address.length <= 18) {
-    return address;
-  }
-
-  return `${address.slice(0, 10)}...${address.slice(-6)}`;
 }
 
 function getLatestProposal(detail: GetElectionResponse | null): ElectionGovernedProposal | null {
@@ -96,7 +78,7 @@ function AvailabilityCard({
   accentClass?: string;
 }) {
   return (
-    <div className="rounded-2xl border border-hush-bg-light bg-hush-bg-dark/70 p-4">
+    <div className="rounded-2xl bg-hush-bg-dark/70 p-4 shadow-sm shadow-black/10">
       <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
         {label}
       </div>
@@ -107,198 +89,27 @@ function AvailabilityCard({
   );
 }
 
-function ElectionDiscoveryPanel({
-  onOpenEligibility,
-}: {
-  onOpenEligibility: (electionId: string) => void;
-}) {
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<ElectionDiscoveryResult[]>([]);
-  const [hasSearched, setHasSearched] = useState(false);
-  const [isSearching, setIsSearching] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    const normalizedQuery = query.trim();
-    if (!normalizedQuery) {
-      setResults([]);
-      setHasSearched(false);
-      setError('Enter an election title or owner alias to search.');
-      return;
-    }
-
-    setIsSearching(true);
-    setError(null);
-
-    try {
-      const ownerLookup = new Map<string, Identity>();
-      try {
-        const identityResponse = await identityService.searchByDisplayName(normalizedQuery);
-        for (const identity of identityResponse.Identities ?? []) {
-          if (!ownerLookup.has(identity.PublicSigningAddress)) {
-            ownerLookup.set(identity.PublicSigningAddress, identity);
-          }
-        }
-      } catch {
-        // Title search should remain available even when alias lookup is unavailable.
-      }
-
-      const directoryResponse = await electionsService.searchElectionDirectory({
-        SearchTerm: normalizedQuery,
-        OwnerPublicAddresses: Array.from(ownerLookup.keys()),
-        Limit: 12,
-      });
-
-      if (!directoryResponse.Success) {
-        throw new Error(directoryResponse.ErrorMessage || 'Failed to search elections.');
-      }
-
-      const dedupedResults = new Map<string, ElectionDiscoveryResult>();
-      for (const election of directoryResponse.Elections ?? []) {
-        dedupedResults.set(election.ElectionId, {
-          election,
-          ownerDisplayName: ownerLookup.get(election.OwnerPublicAddress)?.DisplayName ?? '',
-        });
-      }
-
-      setResults(Array.from(dedupedResults.values()));
-      setHasSearched(true);
-    } catch (searchError) {
-      setResults([]);
-      setHasSearched(true);
-      setError(searchError instanceof Error ? searchError.message : 'Failed to search elections.');
-    } finally {
-      setIsSearching(false);
-    }
-  };
-
-  return (
-    <section className={sectionClass} data-testid="election-discovery-panel">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <div className="text-xs font-semibold uppercase tracking-[0.24em] text-hush-text-accent">
-            Election Discovery
-          </div>
-          <h2 className="mt-2 text-xl font-semibold text-hush-text-primary">
-            Search before claim-linking
-          </h2>
-          <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
-            The hub only lists elections already linked to this Hush account. Search by election
-            title or owner alias, then open the eligibility route to claim-link an organization
-            voter identifier with the temporary code.
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-hush-bg-light bg-hush-bg-dark/70 px-4 py-3 text-xs text-hush-text-accent">
-          Temporary code: <span className="font-mono text-hush-text-primary">1111</span>
-        </div>
-      </div>
-
-      <form className="mt-5" onSubmit={handleSubmit}>
-        <label className="block text-sm font-medium text-hush-text-primary" htmlFor="election-search-input">
-          Find an election
-        </label>
-        <div className="mt-2 flex flex-col gap-3 md:flex-row">
-          <input
-            id="election-search-input"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Election title or owner alias"
-            className="min-w-0 flex-1 rounded-2xl border border-hush-bg-light bg-hush-bg-dark/80 px-4 py-3 text-sm text-hush-text-primary outline-none transition-colors placeholder:text-hush-text-accent focus:border-hush-purple focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
-            aria-label="Search elections"
-          />
-          <button
-            type="submit"
-            disabled={isSearching}
-            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-hush-purple px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark disabled:cursor-not-allowed disabled:bg-hush-purple/60"
-          >
-            {isSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-            <span>{isSearching ? 'Searching...' : 'Search elections'}</span>
-          </button>
-        </div>
-      </form>
-
-      <div className="mt-3 text-xs text-hush-text-accent">
-        Open a result to enter the organization voter ID, confirm with <span className="font-mono text-hush-text-primary">1111</span>, and attach that election to this hub.
-      </div>
-
-      {error ? (
-        <div className="mt-4 rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-100" role="alert">
-          {error}
-        </div>
-      ) : null}
-
-      {isSearching ? (
-        <div className="mt-4 flex items-center gap-3 rounded-2xl border border-hush-bg-light bg-hush-bg-dark/70 px-4 py-3 text-sm text-hush-text-accent">
-          <Loader2 className="h-4 w-4 animate-spin text-hush-purple" />
-          <span>Searching the election directory...</span>
-        </div>
-      ) : null}
-
-      {!isSearching && results.length > 0 ? (
-        <div className="mt-4 space-y-3">
-          {results.map((result) => (
-            <button
-              key={result.election.ElectionId}
-              type="button"
-              className="flex w-full items-start justify-between gap-4 rounded-2xl border border-hush-bg-light bg-hush-bg-dark/70 px-4 py-4 text-left transition-colors hover:border-hush-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
-              onClick={() => onOpenEligibility(result.election.ElectionId)}
-            >
-              <div>
-                <div className="text-sm font-semibold text-hush-text-primary">
-                  {result.election.Title || result.election.ElectionId}
-                </div>
-                <div className="mt-1 text-xs uppercase tracking-[0.2em] text-hush-text-accent">
-                  {getLifecycleLabel(result.election.LifecycleState)}
-                </div>
-                <div className="mt-2 text-sm text-hush-text-accent">
-                  Owner:{' '}
-                  <span className="text-hush-text-primary">
-                    {result.ownerDisplayName || abbreviateAddress(result.election.OwnerPublicAddress)}
-                  </span>
-                </div>
-              </div>
-              <div className="inline-flex items-center gap-2 text-sm font-medium text-hush-purple">
-                <span>Open eligibility</span>
-                <ArrowRight className="h-4 w-4" />
-              </div>
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      {!isSearching && hasSearched && results.length === 0 && !error ? (
-        <div className="mt-4 rounded-2xl border border-hush-bg-light bg-hush-bg-dark/70 px-4 py-3 text-sm text-hush-text-accent">
-          No elections matched that title or owner alias.
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
 function VoterWorkspaceSummary({ entry }: { entry: ElectionHubEntryView }) {
   const isOpenElection = entry.Election.LifecycleState === ElectionLifecycleStateProto.Open;
   const primaryHref = entry.CanClaimIdentity
-    ? `/account/elections/${entry.Election.ElectionId}/eligibility`
-    : `/account/elections/voter/${entry.Election.ElectionId}`;
+    ? `/elections/${entry.Election.ElectionId}/eligibility`
+    : `/elections/${entry.Election.ElectionId}/voter`;
   const primaryLabel = entry.CanClaimIdentity
     ? 'Open identity and eligibility'
     : isOpenElection
       ? 'Open ballot workflow'
-      : 'Open voter detail';
+      : 'Voter Details';
 
   return (
-    <section className={sectionClass} data-testid="hush-voting-section-voter">
+    <section className="space-y-4 pt-4 md:pt-6" data-testid="hush-voting-section-voter">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <div className="text-xs font-semibold uppercase tracking-[0.24em] text-hush-text-accent">
+          <h2 className="text-base font-semibold uppercase tracking-[0.28em] text-hush-text-primary md:text-lg">
             Voter Surface
-          </div>
-          <h2 className="mt-2 text-xl font-semibold text-hush-text-primary">
-            Participation and result review
           </h2>
+          <h3 className="mt-3 text-lg font-semibold text-hush-text-accent md:text-xl">
+            Participation and result review
+          </h3>
           <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
             {entry.CanClaimIdentity
               ? 'This election still needs a voter identity or eligibility review before the ballot surface can open.'
@@ -310,14 +121,14 @@ function VoterWorkspaceSummary({ entry }: { entry: ElectionHubEntryView }) {
 
         <Link
           href={primaryHref}
-          className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
+          className="inline-flex self-start items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium whitespace-nowrap text-white transition-colors hover:bg-hush-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark lg:ml-6"
         >
           <Vote className="h-4 w-4" />
           <span>{primaryLabel}</span>
         </Link>
       </div>
 
-      <div className="mt-4 grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-3">
         <AvailabilityCard label="Lifecycle" value={getLifecycleLabel(entry.Election.LifecycleState)} />
         <AvailabilityCard
           label="Eligibility"
@@ -356,31 +167,31 @@ function OwnerAdminWorkspaceSummary({
   const latestProposal = useMemo(() => getLatestProposal(detail), [detail]);
 
   return (
-    <section className={sectionClass} data-testid="hush-voting-section-owner-admin">
+    <section className="space-y-4 pt-4 md:pt-6" data-testid="hush-voting-section-owner-admin">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <div className="text-xs font-semibold uppercase tracking-[0.24em] text-hush-text-accent">
+          <h2 className="text-base font-semibold uppercase tracking-[0.28em] text-hush-text-primary md:text-lg">
             Owner / Admin Surface
-          </div>
-          <h2 className="mt-2 text-xl font-semibold text-hush-text-primary">
-            Election lifecycle management
           </h2>
+          <h3 className="mt-3 text-lg font-semibold text-hush-text-primary md:text-xl">
+            Election lifecycle management
+          </h3>
           <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
-            The shared shell keeps the selected election in view, while the preserved owner route
-            still holds the full draft, trustee, governance, and lifecycle controls.
+            The shared shell keeps the selected election in view while the full owner lifecycle
+            workspace stays inside HushVoting!.
           </p>
         </div>
 
         <Link
-          href="/account/elections/owner"
-          className="inline-flex items-center gap-2 rounded-xl border border-hush-bg-light px-4 py-2 text-sm font-medium text-hush-text-primary transition-colors hover:border-hush-purple hover:text-hush-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
+          href="/elections/owner"
+          className="inline-flex self-start items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium whitespace-nowrap text-white transition-colors hover:bg-hush-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark lg:ml-6"
         >
           <ShieldCheck className="h-4 w-4" />
-          <span>Open detailed owner workspace</span>
+          <span>Owner Workspace</span>
         </Link>
       </div>
 
-      <div className="mt-4 grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-4">
         <AvailabilityCard label="Summary" value={getSummaryBadge(entry.Election)} />
         <AvailabilityCard
           label="Draft revision"
@@ -401,9 +212,9 @@ function OwnerAdminWorkspaceSummary({
       </div>
 
       {latestProposal ? (
-        <div className="mt-4 rounded-2xl border border-hush-bg-light bg-hush-bg-dark/70 p-4">
-          <div className="text-sm font-semibold text-hush-text-primary">Latest governed proposal</div>
-          <div className="mt-2 text-sm text-hush-text-accent">
+        <div className="space-y-2">
+          <div className="text-xs font-semibold uppercase tracking-[0.24em] text-hush-text-accent">Latest governed proposal</div>
+          <div className="text-sm text-hush-text-accent">
             {getGovernedActionLabel(latestProposal.ActionType)} proposal is{' '}
             <span className="text-hush-text-primary">
               {getGovernedProposalExecutionStatusLabel(latestProposal.ExecutionStatus)}
@@ -414,7 +225,7 @@ function OwnerAdminWorkspaceSummary({
       ) : null}
 
       {detail ? (
-        <div className="mt-4">
+        <div className="pt-4 md:pt-6">
           <DesignatedAuditorGrantManager
             detail={detail}
             actorEncryptionPublicKey={actorEncryptionPublicKey}
@@ -568,64 +379,107 @@ function ResultsWorkspaceSummary({
   entry: ElectionHubEntryView;
   detail: GetElectionResponse | null;
 }) {
+  const hasAnyResults = entry.HasUnofficialResult || entry.HasOfficialResult;
+  const canOpenResultDetail = entry.ActorRoles.IsVoter && hasAnyResults;
+  const [isExpanded, setIsExpanded] = useState(hasAnyResults);
+
+  useEffect(() => {
+    if (hasAnyResults) {
+      setIsExpanded(true);
+    }
+  }, [hasAnyResults]);
+
   return (
-    <section className={sectionClass} data-testid="hush-voting-section-results">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <section className="space-y-4 pt-4 md:pt-6" data-testid="hush-voting-section-results">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <div className="text-xs font-semibold uppercase tracking-[0.24em] text-hush-text-accent">
+          <h2 className="text-base font-semibold uppercase tracking-[0.28em] text-hush-text-primary md:text-lg">
             Results and Boundary Artifacts
-          </div>
-          <h2 className="mt-2 text-xl font-semibold text-hush-text-primary">
-            Result and package availability
           </h2>
+          <h3 className="mt-3 text-lg font-semibold text-hush-text-accent md:text-xl">
+            Result and package availability
+          </h3>
           <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
-            These indicators come directly from the actor-scoped hub response so the client does not
-            overstate result, roster, or report-package access.
+            {hasAnyResults
+              ? 'Unofficial or official result access is available for this election.'
+              : 'No unofficial or official result is available yet. Expand this section only if you need the access boundaries.'}
           </p>
         </div>
 
-        {entry.ActorRoles.IsVoter ? (
-          <Link
-            href={`/account/elections/voter/${entry.Election.ElectionId}`}
-            className="inline-flex items-center gap-2 rounded-xl border border-hush-bg-light px-4 py-2 text-sm font-medium text-hush-text-primary transition-colors hover:border-hush-purple hover:text-hush-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
-          >
-            <Vote className="h-4 w-4" />
-            <span>Open voter result detail</span>
-          </Link>
-        ) : null}
+        <button
+          type="button"
+          onClick={() => setIsExpanded((current) => !current)}
+          className="mt-1 text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
+          aria-expanded={isExpanded}
+          data-testid="hush-voting-results-toggle"
+        >
+          {isExpanded ? 'Collapse' : 'Expand'}
+        </button>
       </div>
 
-      <div className="mt-4 grid gap-4 md:grid-cols-4">
-        <AvailabilityCard
-          label="Unofficial result"
-          value={entry.HasUnofficialResult ? 'Available' : 'Pending'}
-          accentClass={entry.HasUnofficialResult ? 'text-green-100' : undefined}
-        />
-        <AvailabilityCard
-          label="Official result"
-          value={entry.HasOfficialResult ? 'Available' : 'Pending'}
-          accentClass={entry.HasOfficialResult ? 'text-green-100' : undefined}
-        />
-        <AvailabilityCard
-          label="Report package"
-          value={entry.CanViewReportPackage ? 'Allowed' : 'Not allowed'}
-          accentClass={entry.CanViewReportPackage ? 'text-green-100' : undefined}
-        />
-        <AvailabilityCard
-          label="Named participation roster"
-          value={entry.CanViewNamedParticipationRoster ? 'Allowed' : 'Not allowed'}
-          accentClass={entry.CanViewNamedParticipationRoster ? 'text-green-100' : undefined}
-        />
-      </div>
+      {isExpanded ? (
+        <div className="space-y-4">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="text-sm text-hush-text-accent">
+              These indicators come directly from the actor-scoped hub response so the client does not
+              overstate result, roster, or report-package access.
+            </div>
 
-      {detail?.ResultArtifacts?.length ? (
-        <div className="mt-4 rounded-2xl border border-hush-bg-light bg-hush-bg-dark/70 p-4">
-          <div className="text-sm font-semibold text-hush-text-primary">Persisted result artifacts</div>
-          <div className="mt-2 text-sm text-hush-text-accent">
-            {detail.ResultArtifacts.length} artifact
-            {detail.ResultArtifacts.length === 1 ? '' : 's'} currently visible on the election
-            detail record.
+            {entry.ActorRoles.IsVoter ? (
+              canOpenResultDetail ? (
+              <Link
+                href={`/elections/${entry.Election.ElectionId}/voter`}
+                className="inline-flex self-start items-center gap-2 rounded-xl border border-hush-bg-light px-4 py-2 text-sm font-medium whitespace-nowrap text-hush-text-primary transition-colors hover:border-hush-purple hover:text-hush-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark lg:ml-6"
+              >
+                <Vote className="h-4 w-4" />
+                <span>Result details</span>
+              </Link>
+              ) : (
+                <button
+                  type="button"
+                  disabled
+                  className="inline-flex self-start items-center gap-2 rounded-xl border border-hush-bg-light/70 px-4 py-2 text-sm font-medium whitespace-nowrap text-hush-text-accent/80 opacity-60 cursor-not-allowed lg:ml-6"
+                >
+                  <Vote className="h-4 w-4" />
+                  <span>Result details</span>
+                </button>
+              )
+            ) : null}
           </div>
+
+          <div className="grid gap-4 md:grid-cols-4">
+            <AvailabilityCard
+              label="Unofficial result"
+              value={entry.HasUnofficialResult ? 'Available' : 'Pending'}
+              accentClass={entry.HasUnofficialResult ? 'text-green-100' : undefined}
+            />
+            <AvailabilityCard
+              label="Official result"
+              value={entry.HasOfficialResult ? 'Available' : 'Pending'}
+              accentClass={entry.HasOfficialResult ? 'text-green-100' : undefined}
+            />
+            <AvailabilityCard
+              label="Report package"
+              value={entry.CanViewReportPackage ? 'Allowed' : 'Not allowed'}
+              accentClass={entry.CanViewReportPackage ? 'text-green-100' : undefined}
+            />
+            <AvailabilityCard
+              label="Named participation roster"
+              value={entry.CanViewNamedParticipationRoster ? 'Allowed' : 'Not allowed'}
+              accentClass={entry.CanViewNamedParticipationRoster ? 'text-green-100' : undefined}
+            />
+          </div>
+
+          {detail?.ResultArtifacts?.length ? (
+            <div className="rounded-2xl bg-hush-bg-dark/70 p-4 shadow-sm shadow-black/10">
+              <div className="text-sm font-semibold text-hush-text-primary">Persisted result artifacts</div>
+              <div className="mt-2 text-sm text-hush-text-accent">
+                {detail.ResultArtifacts.length} artifact
+                {detail.ResultArtifacts.length === 1 ? '' : 's'} currently visible on the election
+                detail record.
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </section>
@@ -720,54 +574,97 @@ export function HushVotingWorkspace({
   const requestedEntryMissing = Boolean(initialElectionId && !isLoadingHub && hubView && !requestedEntry);
   const sectionOrder = getElectionWorkspaceSectionOrder(activeEntry);
   const hasVisibleSections = sectionOrder.length > 0 || canManageReportAccessGrants;
+  const isDetailRoute = Boolean(initialElectionId);
 
   const handleSelectElection = (electionId: string) => {
-    if (initialElectionId) {
-      if (electionId !== initialElectionId) {
-        router.push(`/account/elections/${electionId}`);
-      }
-      return;
+    if (electionId !== initialElectionId) {
+      router.push(`/elections/${electionId}`);
     }
-
-    if (electionId === selectedElectionId) {
-      return;
-    }
-
-    void selectHubElection(actorPublicAddress, electionId);
   };
 
   const emptyStateReason =
     error ||
     hubView?.EmptyStateReason ||
     'This account does not currently hold any FEAT-103 election role.';
-  const handleOpenEligibility = (electionId: string) => {
-    router.push(`/account/elections/${electionId}/eligibility`);
-  };
 
-  return (
-    <div className="min-h-screen bg-hush-bg-dark text-hush-text-primary">
-      <div className="mx-auto max-w-7xl p-4 md:p-6">
-        <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+  if (!isDetailRoute) {
+    return (
+      <div className="flex-1 min-h-0 overflow-y-auto text-hush-text-primary">
+        <div className="flex w-full min-w-0 flex-col gap-5 p-4 md:p-5">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.28em] text-hush-text-accent">
               Protocol Omega
             </div>
-            <h1 className="mt-2 text-3xl font-semibold text-hush-text-primary">HushVoting Hub</h1>
-            <p className="mt-3 max-w-4xl text-sm text-hush-text-accent">
-              FEAT-103 groups elections by lifecycle, keeps the selected role surface in one place,
-              and sends deeper owner, voter, trustee, and auditor work to the preserved routes.
+            <h1 className="mt-1 text-2xl font-semibold text-hush-text-primary">HushVoting! Hub</h1>
+            <p className="mt-2 max-w-4xl text-sm text-hush-text-accent">
+              Open a linked election card to continue into its dedicated HushVoting! detail view.
             </p>
           </div>
 
-          <div className="rounded-2xl border border-hush-bg-light bg-hush-bg-element/95 px-4 py-3 text-xs text-hush-text-accent">
-            Actor address:{' '}
-            <span className="font-mono text-hush-text-primary">{actorPublicAddress}</span>
-          </div>
-        </div>
+          {feedback ? (
+            <div
+              className={`rounded-2xl border px-4 py-3 text-sm ${
+                feedback.tone === 'success'
+                  ? 'border-green-500/40 bg-green-500/10 text-green-100'
+                  : 'border-red-500/40 bg-red-500/10 text-red-100'
+              }`}
+              role="status"
+            >
+              <div className="flex items-center gap-2 font-medium">
+                {feedback.tone === 'success' ? (
+                  <CheckCircle2 className="h-4 w-4" />
+                ) : (
+                  <AlertCircle className="h-4 w-4" />
+                )}
+                <span>{feedback.message}</span>
+              </div>
+              {feedback.details.length > 0 ? (
+                <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
+                  {feedback.details.map((detail) => (
+                    <li key={detail}>{detail}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
 
+          {hubEntries.length === 0 && isLoadingHub ? (
+            <div className={`${sectionClass} flex items-center gap-3`}>
+              <Loader2 className="h-5 w-5 animate-spin text-hush-purple" />
+              <span className="text-sm text-hush-text-accent">Loading actor-scoped election hub...</span>
+            </div>
+          ) : hubEntries.length === 0 ? (
+            <ElectionAccessBoundaryNotice
+              title="No linked election surfaces available"
+              message={emptyStateReason}
+              details={[
+                'Use Search Election from the left menu to find an election before claim-linking your organization voter identifier.',
+                'Use Create Election from the left menu to start a new owner draft.',
+                'After the eligibility claim succeeds, the election will appear in this hub.',
+              ]}
+              primaryHref={null}
+              primaryLabel={null}
+            />
+          ) : (
+            <div className="pt-2 md:pt-3">
+              <ElectionHubList
+                entries={hubEntries}
+                selectedElectionId={null}
+                onSelect={handleSelectElection}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 min-h-0 overflow-y-auto text-hush-text-primary">
+      <div className="flex w-full min-w-0 flex-col gap-5 p-4 md:p-5">
         {feedback ? (
           <div
-            className={`mb-4 rounded-2xl border px-4 py-3 text-sm ${
+            className={`rounded-2xl border px-4 py-3 text-sm ${
               feedback.tone === 'success'
                 ? 'border-green-500/40 bg-green-500/10 text-green-100'
                 : 'border-red-500/40 bg-red-500/10 text-red-100'
@@ -792,151 +689,108 @@ export function HushVotingWorkspace({
           </div>
         ) : null}
 
-        {hubEntries.length === 0 && isLoadingHub ? (
+        {requestedEntryMissing ? (
+          <ElectionAccessBoundaryNotice
+            title="Requested election is not available here"
+            message={`The route for election ${initialElectionId} does not resolve to an actor-visible FEAT-103 workspace.`}
+            details={[
+              'Return to HushVoting! Hub to choose another linked election.',
+              'This route only opens elections that the current actor can access.',
+            ]}
+          />
+        ) : !activeEntry ? (
           <div className={`${sectionClass} flex items-center gap-3`}>
             <Loader2 className="h-5 w-5 animate-spin text-hush-purple" />
-            <span className="text-sm text-hush-text-accent">Loading actor-scoped election hub...</span>
-          </div>
-        ) : hubEntries.length === 0 ? (
-          <div className="space-y-5">
-            <ElectionDiscoveryPanel onOpenEligibility={handleOpenEligibility} />
-            <ElectionAccessBoundaryNotice
-              title="No linked election surfaces available"
-              message={emptyStateReason}
-              details={[
-                'Search above to find an election before claim-linking your organization voter identifier.',
-                'After the eligibility claim succeeds, the election will appear in this hub.',
-              ]}
-            />
+            <span className="text-sm text-hush-text-accent">Preparing election workspace...</span>
           </div>
         ) : (
-          <div className="grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
-            <aside className="space-y-4">
-              <ElectionDiscoveryPanel onOpenEligibility={handleOpenEligibility} />
+          <>
+            <ElectionWorkspaceHeader entry={activeEntry} />
+            <ClosedProgressBanner entry={activeEntry} />
 
-              <div className={`${sectionClass} p-4`}>
-                <div className="text-xs font-semibold uppercase tracking-[0.24em] text-hush-text-accent">
-                  Election Hub
-                </div>
-                <p className="mt-2 text-sm text-hush-text-accent">
-                  One row per linked election, grouped by lifecycle and filtered to this actor&apos;s
-                  allowed surfaces.
-                </p>
-              </div>
-
-              <ElectionHubList
-                entries={hubEntries}
-                selectedElectionId={initialElectionId ?? selectedElectionId}
-                onSelect={handleSelectElection}
+            {!hasVisibleSections ? (
+              <ElectionAccessBoundaryNotice
+                title="No FEAT-103 workspace surface is available"
+                message={
+                  activeEntry.SuggestedActionReason ||
+                  'This actor does not currently have an owner, trustee, voter, auditor, or result-review surface for the selected election.'
+                }
+                primaryLabel="Back to HushVoting! Hub"
               />
-            </aside>
+            ) : null}
 
-            <main className="space-y-5">
-              {requestedEntryMissing ? (
-                <ElectionAccessBoundaryNotice
-                  title="Requested election is not available here"
-                  message={`The route for election ${initialElectionId} does not resolve to an actor-visible FEAT-103 workspace.`}
-                  details={[
-                    'The hub still lists other elections that this actor can access.',
-                    'Use the hub selection or return to the main HushVoting route to continue.',
-                  ]}
-                />
-              ) : !activeEntry ? (
-                <div className={`${sectionClass} flex items-center gap-3`}>
-                  <Loader2 className="h-5 w-5 animate-spin text-hush-purple" />
-                  <span className="text-sm text-hush-text-accent">Preparing election workspace...</span>
-                </div>
-              ) : (
-                <>
-                  <ElectionWorkspaceHeader entry={activeEntry} />
-                  <ClosedProgressBanner entry={activeEntry} />
+            {isLoadingDetail && !activeDetail ? (
+              <div className={`${sectionClass} flex items-center gap-3`}>
+                <Loader2 className="h-5 w-5 animate-spin text-hush-purple" />
+                <span className="text-sm text-hush-text-accent">
+                  Loading detailed context for {activeEntry.Election.Title || activeEntry.Election.ElectionId}...
+                </span>
+              </div>
+            ) : null}
 
-                  {!hasVisibleSections ? (
-                    <ElectionAccessBoundaryNotice
-                      title="No FEAT-103 workspace surface is available"
-                      message={
-                        activeEntry.SuggestedActionReason ||
-                        'This actor does not currently have an owner, trustee, voter, auditor, or result-review surface for the selected election.'
-                      }
-                      primaryLabel="Back to HushVoting Hub"
-                    />
-                  ) : null}
+            {sectionOrder.includes('voter') ? <VoterWorkspaceSummary entry={activeEntry} /> : null}
 
-                  {isLoadingDetail && !activeDetail ? (
-                    <div className={`${sectionClass} flex items-center gap-3`}>
-                      <Loader2 className="h-5 w-5 animate-spin text-hush-purple" />
-                      <span className="text-sm text-hush-text-accent">
-                        Loading detailed context for {activeEntry.Election.Title || activeEntry.Election.ElectionId}...
-                      </span>
+            {sectionOrder.includes('owner-admin') ? (
+              <OwnerAdminWorkspaceSummary
+                entry={activeEntry}
+                detail={activeDetail}
+                actorEncryptionPublicKey={actorEncryptionPublicKey}
+                actorEncryptionPrivateKey={actorEncryptionPrivateKey}
+                actorSigningPrivateKey={actorSigningPrivateKey}
+              />
+            ) : null}
+
+            {sectionOrder.includes('trustee') ? (
+              <TrusteeWorkspaceSummary entry={activeEntry} detail={activeDetail} />
+            ) : null}
+
+            {sectionOrder.includes('auditor') ? (
+              <AuditorWorkspaceSummary entry={activeEntry} detail={activeDetail} />
+            ) : null}
+
+            {sectionOrder.includes('results') ? (
+              <ResultsWorkspaceSummary entry={activeEntry} detail={activeDetail} />
+            ) : null}
+
+            {activeEntry.CanViewReportPackage && !sectionOrder.includes('auditor') ? (
+              <section className={sectionClass}>
+                <div className="flex items-start gap-3">
+                  <div className="rounded-2xl bg-blue-500/10 p-3 text-blue-100">
+                    <LockKeyhole className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-semibold text-hush-text-primary">
+                      Report package visibility granted
                     </div>
-                  ) : null}
+                    <p className="mt-2 text-sm text-hush-text-accent">
+                      The server marks this actor as report-package eligible for the selected
+                      election. Phase 5 keeps that boundary visible here without inventing any
+                      package action the server did not authorize.
+                    </p>
+                  </div>
+                </div>
+              </section>
+            ) : null}
 
-                  {sectionOrder.includes('voter') ? <VoterWorkspaceSummary entry={activeEntry} /> : null}
-
-                  {sectionOrder.includes('owner-admin') ? (
-                    <OwnerAdminWorkspaceSummary
-                      entry={activeEntry}
-                      detail={activeDetail}
-                      actorEncryptionPublicKey={actorEncryptionPublicKey}
-                      actorEncryptionPrivateKey={actorEncryptionPrivateKey}
-                      actorSigningPrivateKey={actorSigningPrivateKey}
-                    />
-                  ) : null}
-
-                  {sectionOrder.includes('trustee') ? (
-                    <TrusteeWorkspaceSummary entry={activeEntry} detail={activeDetail} />
-                  ) : null}
-
-                  {sectionOrder.includes('auditor') ? (
-                    <AuditorWorkspaceSummary entry={activeEntry} detail={activeDetail} />
-                  ) : null}
-
-                  {sectionOrder.includes('results') ? (
-                    <ResultsWorkspaceSummary entry={activeEntry} detail={activeDetail} />
-                  ) : null}
-
-                  {activeEntry.CanViewReportPackage && !sectionOrder.includes('auditor') ? (
-                    <section className={sectionClass}>
-                      <div className="flex items-start gap-3">
-                        <div className="rounded-2xl border border-blue-500/30 bg-blue-500/10 p-3 text-blue-100">
-                          <LockKeyhole className="h-5 w-5" />
-                        </div>
-                        <div>
-                          <div className="text-sm font-semibold text-hush-text-primary">
-                            Report package visibility granted
-                          </div>
-                          <p className="mt-2 text-sm text-hush-text-accent">
-                            The server marks this actor as report-package eligible for the selected
-                            election. Phase 5 keeps that boundary visible here without inventing any
-                            package action the server did not authorize.
-                          </p>
-                        </div>
-                      </div>
-                    </section>
-                  ) : null}
-
-                  {!sectionOrder.includes('results') && activeEntry.HasOfficialResult ? (
-                    <section className={sectionClass}>
-                      <div className="flex items-start gap-3">
-                        <div className="rounded-2xl border border-green-500/30 bg-green-500/10 p-3 text-green-100">
-                          <ShieldAlert className="h-5 w-5" />
-                        </div>
-                        <div>
-                          <div className="text-sm font-semibold text-hush-text-primary">
-                            Official result exists
-                          </div>
-                          <p className="mt-2 text-sm text-hush-text-accent">
-                            The election record already carries an official result, but this actor
-                            does not currently have an FEAT-103 result-review surface for it.
-                          </p>
-                        </div>
-                      </div>
-                    </section>
-                  ) : null}
-                </>
-              )}
-            </main>
-          </div>
+            {!sectionOrder.includes('results') && activeEntry.HasOfficialResult ? (
+              <section className={sectionClass}>
+                <div className="flex items-start gap-3">
+                  <div className="rounded-2xl bg-green-500/10 p-3 text-green-100">
+                    <ShieldAlert className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-semibold text-hush-text-primary">
+                      Official result exists
+                    </div>
+                    <p className="mt-2 text-sm text-hush-text-accent">
+                      The election record already carries an official result, but this actor does
+                      not currently have an FEAT-103 result-review surface for it.
+                    </p>
+                  </div>
+                </div>
+              </section>
+            ) : null}
+          </>
         )}
       </div>
     </div>

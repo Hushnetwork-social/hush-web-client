@@ -30,6 +30,7 @@ function resetStore(): void {
     appContexts: {
       feeds: { ...DEFAULT_APP_CONTEXTS.feeds },
       social: { ...DEFAULT_APP_CONTEXTS.social },
+      voting: { ...DEFAULT_APP_CONTEXTS.voting },
     },
     crossAppBadges: { ...DEFAULT_CROSS_APP_BADGES },
   });
@@ -86,11 +87,14 @@ describe('app shell integration', () => {
 
     expect(getActiveAppFromPath('/social')).toBe('social');
     expect(getActiveAppFromPath('/social/post/1')).toBe('social');
+    expect(getActiveAppFromPath('/elections')).toBe('voting');
+    expect(getActiveAppFromPath('/elections/election-1')).toBe('voting');
     expect(getActiveAppFromPath('/feeds')).toBe('feeds');
-    expect(VOTING_HOME_ROUTE).toBe('/account/elections');
+    expect(VOTING_HOME_ROUTE).toBe('/elections');
 
     expect(getAppHomeRoute('social')).toBe(SOCIAL_HOME_ROUTE);
     expect(getAppHomeRoute('feeds')).toBe(FEEDS_HOME_ROUTE);
+    expect(getAppHomeRoute('voting')).toBe(VOTING_HOME_ROUTE);
     expect(getFeedNavigationRoute('feed id')).toBe('/feeds?feed=feed%20id');
   });
 });

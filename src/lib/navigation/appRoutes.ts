@@ -3,16 +3,32 @@ import type { AppId } from '@/stores/useAppStore';
 export const FEEDS_HOME_ROUTE = '/feeds';
 export const SOCIAL_HOME_ROUTE = '/social';
 export const SOCIAL_POST_ROUTE = `${SOCIAL_HOME_ROUTE}/post`;
-export const VOTING_HOME_ROUTE = '/account/elections';
+export const VOTING_HOME_ROUTE = '/elections';
 export const AUTH_ROUTE = '/auth';
 export const LEGACY_DASHBOARD_ROUTE = '/dashboard';
 
 export function getAppHomeRoute(app: AppId): string {
-  return app === 'social' ? SOCIAL_HOME_ROUTE : FEEDS_HOME_ROUTE;
+  if (app === 'social') {
+    return SOCIAL_HOME_ROUTE;
+  }
+
+  if (app === 'voting') {
+    return VOTING_HOME_ROUTE;
+  }
+
+  return FEEDS_HOME_ROUTE;
 }
 
 export function getAppDisplayName(app: AppId): string {
-  return app === 'social' ? 'HushSocial!' : 'HushFeeds!';
+  if (app === 'social') {
+    return 'HushSocial!';
+  }
+
+  if (app === 'voting') {
+    return 'HushVoting!';
+  }
+
+  return 'HushFeeds!';
 }
 
 export function getFeedNavigationRoute(feedId: string): string {
@@ -63,6 +79,14 @@ export function normalizeLegacyAppRoute(pathname: string): string {
 export function getActiveAppFromPath(pathname: string): AppId {
   if (pathname.startsWith(`${SOCIAL_HOME_ROUTE}/`) || pathname === SOCIAL_HOME_ROUTE) {
     return 'social';
+  }
+  if (
+    pathname.startsWith(`${VOTING_HOME_ROUTE}/`) ||
+    pathname === VOTING_HOME_ROUTE ||
+    pathname === '/account/elections' ||
+    pathname.startsWith('/account/elections/')
+  ) {
+    return 'voting';
   }
   return 'feeds';
 }

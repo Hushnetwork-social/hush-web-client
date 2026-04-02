@@ -64,8 +64,8 @@ export function ElectionFinalizationWorkspaceSection({
         <div>
           <h2 className="text-lg font-semibold">Counting And Finalization</h2>
           <p className="mt-1 text-sm text-hush-text-accent">
-            FEAT-101 introduces close-counting share sessions before tally readiness, while FEAT-098
-            keeps the aggregate-only release boundary for the exact target session.
+            Close-counting share sessions appear before tally readiness, while this view keeps the
+            aggregate-only release boundary for the exact target session.
           </p>
         </div>
         {session ? (

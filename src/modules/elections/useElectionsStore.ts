@@ -71,6 +71,10 @@ export interface ElectionsFeedback {
   details: string[];
 }
 
+type LoadOwnerDashboardOptions = {
+  autoSelectFirst?: boolean;
+};
+
 interface ElectionsState {
   actorPublicAddress: string | null;
   ownerPublicAddress: string | null;
@@ -109,7 +113,10 @@ interface ElectionsState {
     electionId?: string
   ) => Promise<GetElectionReportAccessGrantsResponse | null>;
   searchGrantCandidates: (query: string) => Promise<void>;
-  loadOwnerDashboard: (ownerPublicAddress: string) => Promise<void>;
+  loadOwnerDashboard: (
+    ownerPublicAddress: string,
+    options?: LoadOwnerDashboardOptions
+  ) => Promise<void>;
   loadElection: (electionId: string) => Promise<void>;
   loadCeremonyActionView: (
     actorPublicAddress: string,
@@ -600,7 +607,8 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     }
   },
 
-  loadOwnerDashboard: async (ownerPublicAddress) => {
+  loadOwnerDashboard: async (ownerPublicAddress, options) => {
+    const autoSelectFirst = options?.autoSelectFirst ?? true;
     set({
       actorPublicAddress: ownerPublicAddress,
       ownerPublicAddress,
@@ -619,7 +627,9 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
         && response.Elections.some((election) => election.ElectionId === selectedElectionId);
       const resolvedSelection = hasExistingSelection
         ? selectedElectionId
-        : response.Elections[0]?.ElectionId ?? null;
+        : autoSelectFirst
+          ? response.Elections[0]?.ElectionId ?? null
+          : null;
 
       set({
         elections: response.Elections,

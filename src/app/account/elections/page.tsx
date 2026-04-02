@@ -1,19 +1,16 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { HushVotingWorkspace } from '@/modules/elections';
 import { useAppStore } from '@/stores';
 
-export default function AccountElectionsPage() {
+export default function LegacyAccountElectionsPage() {
   const router = useRouter();
-  const { credentials, isAuthenticated } = useAppStore();
-  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const { credentials, isAuthenticated, setActiveApp, setSelectedNav } = useAppStore();
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      setIsCheckingAuth(false);
       if (
         !isAuthenticated ||
         !credentials?.signingPublicKey ||
@@ -22,7 +19,12 @@ export default function AccountElectionsPage() {
         !credentials?.encryptionPrivateKey
       ) {
         router.replace('/auth');
+        return;
       }
+
+      setActiveApp('voting');
+      setSelectedNav('open-voting');
+      router.replace('/elections');
     }, 100);
 
     return () => clearTimeout(timer);
@@ -33,29 +35,13 @@ export default function AccountElectionsPage() {
     credentials?.signingPublicKey,
     isAuthenticated,
     router,
+    setActiveApp,
+    setSelectedNav,
   ]);
 
-  if (
-    isCheckingAuth ||
-    !isAuthenticated ||
-    !credentials?.signingPublicKey ||
-    !credentials?.signingPrivateKey ||
-    !credentials?.encryptionPublicKey ||
-    !credentials?.encryptionPrivateKey
-  ) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-hush-bg-dark">
-        <Loader2 className="h-8 w-8 animate-spin text-hush-purple" />
-      </div>
-    );
-  }
-
   return (
-    <HushVotingWorkspace
-      actorPublicAddress={credentials.signingPublicKey}
-      actorEncryptionPublicKey={credentials.encryptionPublicKey}
-      actorEncryptionPrivateKey={credentials.encryptionPrivateKey}
-      actorSigningPrivateKey={credentials.signingPrivateKey}
-    />
+    <div className="flex min-h-screen items-center justify-center bg-hush-bg-dark">
+      <Loader2 className="h-8 w-8 animate-spin text-hush-purple" />
+    </div>
   );
 }

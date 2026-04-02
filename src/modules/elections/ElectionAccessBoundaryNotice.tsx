@@ -7,8 +7,8 @@ type ElectionAccessBoundaryNoticeProps = {
   title: string;
   message: string;
   details?: string[];
-  primaryHref?: string;
-  primaryLabel?: string;
+  primaryHref?: string | null;
+  primaryLabel?: string | null;
   secondaryHref?: string;
   secondaryLabel?: string;
 };
@@ -17,8 +17,8 @@ export function ElectionAccessBoundaryNotice({
   title,
   message,
   details = [],
-  primaryHref = '/account/elections',
-  primaryLabel = 'Back to HushVoting Hub',
+  primaryHref = '/elections',
+  primaryLabel = 'Back to HushVoting! Hub',
   secondaryHref,
   secondaryLabel,
 }: ElectionAccessBoundaryNoticeProps) {
@@ -45,13 +45,15 @@ export function ElectionAccessBoundaryNotice({
       </div>
 
       <div className="mt-5 flex flex-wrap gap-3">
-        <Link
-          href={primaryHref}
-          className="inline-flex items-center gap-2 rounded-xl bg-red-50 px-4 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200 focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          <span>{primaryLabel}</span>
-        </Link>
+        {primaryHref && primaryLabel ? (
+          <Link
+            href={primaryHref}
+            className="inline-flex items-center gap-2 rounded-xl bg-red-50 px-4 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200 focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            <span>{primaryLabel}</span>
+          </Link>
+        ) : null}
         {secondaryHref && secondaryLabel ? (
           <Link
             href={secondaryHref}

@@ -14,15 +14,8 @@ import {
   ElectionHubNextActionHintProto,
   ElectionLifecycleStateProto,
 } from '@/lib/grpc';
-import { electionsService } from '@/lib/grpc/services/elections';
-import { identityService } from '@/lib/grpc/services/identity';
 import { HushVotingWorkspace } from './HushVotingWorkspace';
 import { useElectionsStore } from './useElectionsStore';
-
-const { mockSearchElectionDirectory, mockSearchByDisplayName } = vi.hoisted(() => ({
-  mockSearchElectionDirectory: vi.fn(),
-  mockSearchByDisplayName: vi.fn(),
-}));
 
 const mockPush = vi.fn();
 const storeReset = useElectionsStore.getState().reset;
@@ -32,28 +25,6 @@ vi.mock('next/navigation', () => ({
     push: mockPush,
   }),
 }));
-
-vi.mock('@/lib/grpc/services/elections', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/grpc/services/elections')>('@/lib/grpc/services/elections');
-  return {
-    ...actual,
-    electionsService: {
-      ...actual.electionsService,
-      searchElectionDirectory: mockSearchElectionDirectory,
-    },
-  };
-});
-
-vi.mock('@/lib/grpc/services/identity', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/grpc/services/identity')>('@/lib/grpc/services/identity');
-  return {
-    ...actual,
-    identityService: {
-      ...actual.identityService,
-      searchByDisplayName: mockSearchByDisplayName,
-    },
-  };
-});
 
 const timestamp = { seconds: 1_711_410_000, nanos: 0 };
 
@@ -192,8 +163,6 @@ describe('HushVotingWorkspace', () => {
     cleanup();
     storeReset();
     mockPush.mockReset();
-    mockSearchElectionDirectory.mockReset();
-    mockSearchByDisplayName.mockReset();
   });
 
   afterEach(() => {
@@ -201,9 +170,8 @@ describe('HushVotingWorkspace', () => {
     storeReset();
   });
 
-  it('loads the hub shell and routes selection through the combined workspace', async () => {
+  it('loads the hub shell as linked-election cards only and routes clicks into election detail', async () => {
     const loadElectionHub = vi.fn().mockResolvedValue(undefined);
-    const selectHubElection = vi.fn().mockResolvedValue(undefined);
     const clearGrantCandidateSearch = vi.fn();
 
     const openEntry = createHubEntry(
@@ -230,7 +198,7 @@ describe('HushVotingWorkspace', () => {
 
     useElectionsStore.setState({
       loadElectionHub,
-      selectHubElection,
+      selectHubElection: vi.fn().mockResolvedValue(undefined),
       clearGrantCandidateSearch,
       reset: vi.fn(),
       hubView: createHubView([openEntry, draftEntry]),
@@ -261,24 +229,17 @@ describe('HushVotingWorkspace', () => {
       />
     );
 
-    expect(await screen.findByText('HushVoting Hub')).toBeInTheDocument();
+    expect(await screen.findByText('HushVoting! Hub')).toBeInTheDocument();
     expect(loadElectionHub).toHaveBeenCalledWith('actor-address');
     expect(screen.getByTestId('election-hub-list')).toBeInTheDocument();
-    expect(screen.getByTestId('election-hub-card-election-open')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('election-hub-card-election-open')).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByTestId('election-hub-card-election-draft')).toHaveAttribute('aria-pressed', 'false');
-    expect(screen.getByTestId('hush-voting-section-voter')).toBeInTheDocument();
-    expect(screen.getByTestId('hush-voting-section-owner-admin')).toBeInTheDocument();
+    expect(screen.queryByTestId('hush-voting-section-voter')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('hush-voting-section-owner-admin')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('election-hub-card-election-draft'));
 
-    await waitFor(() => {
-      expect(selectHubElection).toHaveBeenCalledWith('actor-address', 'election-draft');
-    });
-
-    expect(screen.getByTestId('election-hub-card-election-draft')).toHaveAttribute(
-      'aria-label',
-      'Open election Draft Policy Election'
-    );
+    expect(mockPush).toHaveBeenCalledWith('/elections/election-draft');
   });
 
   it('shows the shared no-role boundary when the actor has no election surfaces', async () => {
@@ -313,153 +274,15 @@ describe('HushVotingWorkspace', () => {
       />
     );
 
-    expect(await screen.findByTestId('election-discovery-panel')).toBeInTheDocument();
-    expect(screen.getByText('Search before claim-linking')).toBeInTheDocument();
-    expect(screen.getByText(/Temporary code:/i)).toBeInTheDocument();
+    expect(await screen.findByText('HushVoting! Hub')).toBeInTheDocument();
     expect(screen.getByText('No linked election surfaces available')).toBeInTheDocument();
     expect(screen.getByText('No election roles are assigned to this actor.')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Back to HushVoting! Hub' })).not.toBeInTheDocument();
   });
 
-  it('searches the election directory and routes results into the eligibility flow', async () => {
+  it('renders the pre-link voter section only on the dedicated election detail route', async () => {
     const loadElectionHub = vi.fn().mockResolvedValue(undefined);
-
-    mockSearchByDisplayName.mockResolvedValue({
-      Identities: [
-        {
-          DisplayName: 'Alice Owner',
-          PublicSigningAddress: 'owner-address',
-          PublicEncryptAddress: 'owner-encrypt',
-        },
-      ],
-    });
-    mockSearchElectionDirectory.mockResolvedValue({
-      Success: true,
-      ErrorMessage: '',
-      SearchTerm: 'alice',
-      Elections: [
-        createSummary(
-          'election-search',
-          ElectionLifecycleStateProto.Draft,
-          'Board Election',
-          'owner-address'
-        ),
-      ],
-    });
-
-    useElectionsStore.setState({
-      loadElectionHub,
-      clearGrantCandidateSearch: vi.fn(),
-      selectHubElection: vi.fn().mockResolvedValue(undefined),
-      reset: vi.fn(),
-      hubView: createHubView([]),
-      hubEntries: [],
-      selectedElectionId: null,
-      selectedHubEntry: null,
-      selectedElection: null,
-      canManageReportAccessGrants: false,
-      reportAccessGrantDeniedReason: '',
-      reportAccessGrants: [],
-      feedback: null,
-      error: null,
-      isLoadingHub: false,
-      isLoadingDetail: false,
-      actorPublicAddress: 'actor-address',
-    });
-
-    render(
-      <HushVotingWorkspace
-        actorPublicAddress="actor-address"
-        actorEncryptionPublicKey="actor-encrypt-address"
-        actorEncryptionPrivateKey="actor-private-encrypt-key"
-        actorSigningPrivateKey="actor-signing-private-key"
-      />
-    );
-
-    fireEvent.change(screen.getByLabelText('Search elections'), {
-      target: { value: 'alice' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Search elections' }));
-
-    await waitFor(() => {
-      expect(identityService.searchByDisplayName).toHaveBeenCalledWith('alice');
-      expect(electionsService.searchElectionDirectory).toHaveBeenCalledWith({
-        SearchTerm: 'alice',
-        OwnerPublicAddresses: ['owner-address'],
-        Limit: 12,
-      });
-    });
-
-    expect(await screen.findByText('Board Election')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /Open eligibility/i }));
-
-    expect(mockPush).toHaveBeenCalledWith('/account/elections/election-search/eligibility');
-  });
-
-  it('falls back to title-only discovery when owner alias lookup fails', async () => {
-    const loadElectionHub = vi.fn().mockResolvedValue(undefined);
-
-    mockSearchByDisplayName.mockRejectedValue(new Error('identity directory unavailable'));
-    mockSearchElectionDirectory.mockResolvedValue({
-      Success: true,
-      ErrorMessage: '',
-      SearchTerm: 'board',
-      Elections: [
-        createSummary(
-          'election-title-only',
-          ElectionLifecycleStateProto.Open,
-          'Board Election'
-        ),
-      ],
-    });
-
-    useElectionsStore.setState({
-      loadElectionHub,
-      clearGrantCandidateSearch: vi.fn(),
-      selectHubElection: vi.fn().mockResolvedValue(undefined),
-      reset: vi.fn(),
-      hubView: createHubView([]),
-      hubEntries: [],
-      selectedElectionId: null,
-      selectedHubEntry: null,
-      selectedElection: null,
-      canManageReportAccessGrants: false,
-      reportAccessGrantDeniedReason: '',
-      reportAccessGrants: [],
-      feedback: null,
-      error: null,
-      isLoadingHub: false,
-      isLoadingDetail: false,
-      actorPublicAddress: 'actor-address',
-    });
-
-    render(
-      <HushVotingWorkspace
-        actorPublicAddress="actor-address"
-        actorEncryptionPublicKey="actor-encrypt-address"
-        actorEncryptionPrivateKey="actor-private-encrypt-key"
-        actorSigningPrivateKey="actor-signing-private-key"
-      />
-    );
-
-    fireEvent.change(screen.getByLabelText('Search elections'), {
-      target: { value: 'board' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Search elections' }));
-
-    await waitFor(() => {
-      expect(electionsService.searchElectionDirectory).toHaveBeenCalledWith({
-        SearchTerm: 'board',
-        OwnerPublicAddresses: [],
-        Limit: 12,
-      });
-    });
-
-    expect(await screen.findByText('Board Election')).toBeInTheDocument();
-  });
-
-  it('renders the pre-link voter section when the hub entry only allows claim-linking', async () => {
-    const loadElectionHub = vi.fn().mockResolvedValue(undefined);
+    const selectHubElection = vi.fn().mockResolvedValue(undefined);
     const claimEntry = createHubEntry(
       'election-claim',
       ElectionLifecycleStateProto.Finalized,
@@ -484,12 +307,12 @@ describe('HushVotingWorkspace', () => {
     useElectionsStore.setState({
       loadElectionHub,
       clearGrantCandidateSearch: vi.fn(),
-      selectHubElection: vi.fn().mockResolvedValue(undefined),
+      selectHubElection,
       reset: vi.fn(),
       hubView: createHubView([claimEntry]),
       hubEntries: [claimEntry],
-      selectedElectionId: 'election-claim',
-      selectedHubEntry: claimEntry,
+      selectedElectionId: null,
+      selectedHubEntry: null,
       selectedElection: createDetail(
         'election-claim',
         ElectionLifecycleStateProto.Finalized,
@@ -511,18 +334,23 @@ describe('HushVotingWorkspace', () => {
         actorEncryptionPublicKey="actor-encrypt-address"
         actorEncryptionPrivateKey="actor-private-encrypt-key"
         actorSigningPrivateKey="actor-signing-private-key"
+        initialElectionId="election-claim"
       />
     );
 
+    await waitFor(() => {
+      expect(selectHubElection).toHaveBeenCalledWith('actor-address', 'election-claim');
+    });
     expect(await screen.findByTestId('hush-voting-section-voter')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open identity and eligibility' })).toHaveAttribute(
       'href',
-      '/account/elections/election-claim/eligibility'
+      '/elections/election-claim/eligibility'
     );
   });
 
-  it('keeps the mixed-role vertical-slice links available from the shared workspace shell', async () => {
+  it('shows the detailed mixed-role surfaces only on the election detail route', async () => {
     const loadElectionHub = vi.fn().mockResolvedValue(undefined);
+    const selectHubElection = vi.fn().mockResolvedValue(undefined);
     const mixedRoleEntry = createHubEntry(
       'election-mixed',
       ElectionLifecycleStateProto.Finalized,
@@ -545,12 +373,12 @@ describe('HushVotingWorkspace', () => {
     useElectionsStore.setState({
       loadElectionHub,
       clearGrantCandidateSearch: vi.fn(),
-      selectHubElection: vi.fn().mockResolvedValue(undefined),
+      selectHubElection,
       reset: vi.fn(),
       hubView: createHubView([mixedRoleEntry]),
       hubEntries: [mixedRoleEntry],
-      selectedElectionId: 'election-mixed',
-      selectedHubEntry: mixedRoleEntry,
+      selectedElectionId: null,
+      selectedHubEntry: null,
       selectedElection: createDetail(
         'election-mixed',
         ElectionLifecycleStateProto.Finalized,
@@ -572,28 +400,98 @@ describe('HushVotingWorkspace', () => {
         actorEncryptionPublicKey="actor-encrypt-address"
         actorEncryptionPrivateKey="actor-private-encrypt-key"
         actorSigningPrivateKey="actor-signing-private-key"
+        initialElectionId="election-mixed"
       />
     );
 
+    await waitFor(() => {
+      expect(selectHubElection).toHaveBeenCalledWith('actor-address', 'election-mixed');
+    });
     expect(await screen.findByTestId('hush-voting-section-owner-admin')).toBeInTheDocument();
     expect(screen.getByTestId('hush-voting-section-trustee')).toBeInTheDocument();
     expect(screen.getByTestId('hush-voting-section-auditor')).toBeInTheDocument();
     expect(screen.getByTestId('hush-voting-section-results')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Open detailed owner workspace' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Result details' })).toHaveAttribute(
       'href',
-      '/account/elections/owner'
+      '/elections/election-mixed/voter'
     );
-    expect(screen.getByRole('link', { name: 'Open ceremony workspace' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Owner Workspace' })).toHaveAttribute(
       'href',
-      '/account/elections/trustee/election-mixed/ceremony'
+      '/elections/owner'
     );
-    expect(screen.getByRole('link', { name: 'Open share workspace' })).toHaveAttribute(
-      'href',
-      '/account/elections/trustee/election-mixed/finalization'
+    expect(screen.getByRole('link', { name: 'Back to HushVoting! Hub' })).toHaveAttribute('href', '/elections');
+  });
+
+  it('keeps the results section collapsed by default when no unofficial or official result exists', async () => {
+    const loadElectionHub = vi.fn().mockResolvedValue(undefined);
+    const selectHubElection = vi.fn().mockResolvedValue(undefined);
+    const draftVoterEntry = createHubEntry(
+      'election-no-results',
+      ElectionLifecycleStateProto.Draft,
+      'Annual Elections 2026',
+      {
+        ActorRoles: {
+          IsOwnerAdmin: false,
+          IsTrustee: false,
+          IsVoter: true,
+          IsDesignatedAuditor: false,
+        },
+        SuggestedAction: ElectionHubNextActionHintProto.ElectionHubActionNone,
+        SuggestedActionReason: 'No immediate action is required for this election.',
+        CanViewNamedParticipationRoster: false,
+        CanViewReportPackage: false,
+        CanViewParticipantResults: true,
+        HasUnofficialResult: false,
+        HasOfficialResult: false,
+      }
     );
-    expect(screen.getByRole('link', { name: 'Open voter result detail' })).toHaveAttribute(
-      'href',
-      '/account/elections/voter/election-mixed'
+
+    useElectionsStore.setState({
+      loadElectionHub,
+      clearGrantCandidateSearch: vi.fn(),
+      selectHubElection,
+      reset: vi.fn(),
+      hubView: createHubView([draftVoterEntry]),
+      hubEntries: [draftVoterEntry],
+      selectedElectionId: null,
+      selectedHubEntry: null,
+      selectedElection: createDetail(
+        'election-no-results',
+        ElectionLifecycleStateProto.Draft,
+        'Annual Elections 2026'
+      ),
+      canManageReportAccessGrants: false,
+      reportAccessGrantDeniedReason: '',
+      reportAccessGrants: [],
+      feedback: null,
+      error: null,
+      isLoadingHub: false,
+      isLoadingDetail: false,
+      actorPublicAddress: 'actor-address',
+    });
+
+    render(
+      <HushVotingWorkspace
+        actorPublicAddress="actor-address"
+        actorEncryptionPublicKey="actor-encrypt-address"
+        actorEncryptionPrivateKey="actor-private-encrypt-key"
+        actorSigningPrivateKey="actor-signing-private-key"
+        initialElectionId="election-no-results"
+      />
     );
+
+    await waitFor(() => {
+      expect(selectHubElection).toHaveBeenCalledWith('actor-address', 'election-no-results');
+    });
+
+    const toggle = await screen.findByTestId('hush-voting-results-toggle');
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('Unofficial result')).not.toBeInTheDocument();
+
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('Unofficial result')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Result details' })).toBeDisabled();
   });
 });

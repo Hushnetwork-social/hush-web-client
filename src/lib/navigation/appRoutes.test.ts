@@ -16,17 +16,20 @@ import {
   normalizeLegacyAppRoute,
   resolveEntryRoute,
   shouldClearBadgesOnAppSwitch,
+  VOTING_HOME_ROUTE,
 } from './appRoutes';
 
 describe('appRoutes', () => {
   it('resolves app home routes by app id', () => {
     expect(getAppHomeRoute('feeds')).toBe(FEEDS_HOME_ROUTE);
     expect(getAppHomeRoute('social')).toBe(SOCIAL_HOME_ROUTE);
+    expect(getAppHomeRoute('voting')).toBe(VOTING_HOME_ROUTE);
   });
 
   it('returns exact app display names', () => {
     expect(getAppDisplayName('feeds')).toBe('HushFeeds!');
     expect(getAppDisplayName('social')).toBe('HushSocial!');
+    expect(getAppDisplayName('voting')).toBe('HushVoting!');
   });
 
   it('builds feed navigation route with encoded feed id', () => {
@@ -73,6 +76,8 @@ describe('appRoutes', () => {
   it('detects active app from route path', () => {
     expect(getActiveAppFromPath('/social')).toBe('social');
     expect(getActiveAppFromPath('/social/post/1')).toBe('social');
+    expect(getActiveAppFromPath('/elections')).toBe('voting');
+    expect(getActiveAppFromPath('/account/elections')).toBe('voting');
     expect(getActiveAppFromPath('/feeds')).toBe('feeds');
     expect(getActiveAppFromPath('/unknown')).toBe('feeds');
   });

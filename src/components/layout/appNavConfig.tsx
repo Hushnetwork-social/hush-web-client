@@ -28,6 +28,24 @@ export function getAppNavItems(activeApp: AppId, crossAppBadges: Record<AppId, n
     ];
   }
 
+  if (activeApp === "voting") {
+    return [
+      { id: "open-voting", label: "Election Hub", icon: <Vote className="w-5 h-5" /> },
+      {
+        id: "switch-feeds",
+        label: "HushFeeds!",
+        icon: <MessageSquare className="w-5 h-5" />,
+        badgeCount: crossAppBadges.feeds,
+      },
+      {
+        id: "switch-social",
+        label: "HushSocial!",
+        icon: <Globe className="w-5 h-5" />,
+        badgeCount: crossAppBadges.social,
+      },
+    ];
+  }
+
   return [
     { id: "feeds", label: "Feeds", icon: <MessageSquare className="w-5 h-5" /> },
     { id: "new-chat", label: "New Feed", icon: <PlusCircle className="w-5 h-5" /> },

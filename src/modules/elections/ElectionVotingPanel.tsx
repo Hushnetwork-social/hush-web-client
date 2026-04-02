@@ -6,6 +6,8 @@ import {
   AlertCircle,
   ArrowLeft,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   Copy,
   Download,
   Loader2,
@@ -70,6 +72,8 @@ type CastDraft = {
 
 const pendingStorageKey = (electionId: string) => `feat099:pending:${electionId}`;
 const receiptStorageKey = (electionId: string) => `feat099:receipt:${electionId}`;
+const sectionClass = 'rounded-3xl bg-hush-bg-element/90 px-6 py-5 shadow-lg shadow-black/10';
+const insetCardClass = 'rounded-2xl bg-hush-bg-dark/72 px-5 py-4 shadow-sm shadow-black/10';
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -291,6 +295,56 @@ function getCastFailureCopy(code: string, fallbackMessage: string): string {
   }
 }
 
+function SummaryValueCard({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className={`${insetCardClass} flex min-h-[128px] flex-col justify-between`}>
+      <div className="text-xs uppercase tracking-[0.2em] text-hush-text-accent">{label}</div>
+      <div className="mt-6 text-2xl font-semibold leading-tight text-hush-text-primary">{value}</div>
+    </div>
+  );
+}
+
+function getVotingIntroCopy({
+  lifecycleState,
+  associatedNumber,
+  isLinked,
+  isActiveVoter,
+}: {
+  lifecycleState?: ElectionLifecycleStateProto;
+  associatedNumber: string | null;
+  isLinked: boolean;
+  isActiveVoter: boolean;
+}): string {
+  const linkedIdentityCopy = associatedNumber
+    ? `Associated number ${associatedNumber} is linked to this Hush account.`
+    : isLinked
+      ? 'A voter identity is linked to this Hush account.'
+      : 'This Hush account is not linked to an associated number yet.';
+
+  switch (lifecycleState) {
+    case ElectionLifecycleStateProto.Draft:
+      return `${linkedIdentityCopy} This election is still being prepared, so voting is not available yet. When it opens, this screen will show the steps to cast the vote.`;
+    case ElectionLifecycleStateProto.Open:
+      if (isLinked && isActiveVoter) {
+        return `${linkedIdentityCopy} This election is open and this voter record is active. This is the screen where commitment and vote submission happen.`;
+      }
+
+      return `${linkedIdentityCopy} This election is open, but this voter record is not ready to cast a vote yet. Review the voter status below to see what is missing.`;
+    case ElectionLifecycleStateProto.Closed:
+      return `${linkedIdentityCopy} Voting is closed for this election. This screen now shows the final voter status and any information still available to this voter.`;
+    case ElectionLifecycleStateProto.Finalized:
+      return `${linkedIdentityCopy} This election is finalized. This screen now shows the final voter status and any result or receipt information available to this voter.`;
+    default:
+      return `${linkedIdentityCopy} This screen shows the current voter status for the selected election.`;
+  }
+}
+
 export function ElectionVotingPanel({
   electionId,
   actorPublicAddress,
@@ -428,6 +482,7 @@ export function ElectionVotingPanel({
   const isOpenElection = election?.LifecycleState === ElectionLifecycleStateProto.Open;
   const hasResultArtifacts = Boolean(resultView?.UnofficialResult || resultView?.OfficialResult);
   const isLinked = !!selfRosterEntry;
+  const associatedNumber = selfRosterEntry?.OrganizationVoterId?.trim() || null;
   const isActiveVoter =
     selfRosterEntry?.VotingRightStatus === ElectionVotingRightStatusProto.VotingRightActive;
   const isCommitmentRegistered = votingView?.CommitmentRegistered ?? false;
@@ -464,6 +519,29 @@ export function ElectionVotingPanel({
 
     return pendingSubmission ? 'Pending local recovery' : 'No pending submission';
   }, [isCheckingStatus, pendingSubmission, votingView?.SubmissionStatus]);
+  const shouldExpandSnapshotByDefault = isOpenElection || !!pendingSubmission || isAccepted;
+  const [isSnapshotExpanded, setIsSnapshotExpanded] = useState(shouldExpandSnapshotByDefault);
+  const hasAdvancedBoundaryContext = Boolean(
+    isOpenElection &&
+      (votingView?.OpenArtifactId || votingView?.EligibleSetHash || votingView?.TallyPublicKeyFingerprint),
+  );
+  const shouldShowAdvancedContext = hasAdvancedBoundaryContext || !!pendingSubmission;
+  const [isAdvancedContextExpanded, setIsAdvancedContextExpanded] = useState(
+    canPrepareCast || !!pendingSubmission,
+  );
+
+  useEffect(() => {
+    if (shouldExpandSnapshotByDefault) {
+      setIsSnapshotExpanded(true);
+    }
+  }, [shouldExpandSnapshotByDefault]);
+
+  useEffect(() => {
+    if (canPrepareCast || pendingSubmission) {
+      setIsAdvancedContextExpanded(true);
+    }
+  }, [canPrepareCast, pendingSubmission]);
+
   const fieldValidationErrors = useMemo(() => {
     const errors: string[] = [];
     if (!castDraft.encryptedBallotPackage.trim()) {
@@ -709,7 +787,7 @@ export function ElectionVotingPanel({
 
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-hush-bg-dark">
+      <div className="flex flex-1 items-center justify-center bg-hush-bg-dark">
         <div className="flex items-center gap-3 text-sm text-hush-text-accent">
           <Loader2 className="h-5 w-5 animate-spin" />
           <span>Loading election voting view...</span>
@@ -720,8 +798,8 @@ export function ElectionVotingPanel({
 
   if (!detail?.Success || !election) {
     return (
-      <div className="min-h-screen bg-hush-bg-dark px-4 py-8 text-hush-text-primary">
-        <div className="mx-auto max-w-5xl rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-5 text-sm text-red-100">
+      <div className="flex-1 min-h-0 overflow-y-auto bg-hush-bg-dark px-4 py-5 text-hush-text-primary md:px-5">
+        <div className="mx-auto max-w-6xl rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-5 text-sm text-red-100">
           {detail?.ErrorMessage || 'Election data is unavailable.'}
         </div>
       </div>
@@ -729,34 +807,41 @@ export function ElectionVotingPanel({
   }
 
   return (
-    <div className="min-h-screen bg-hush-bg-dark px-4 py-8 text-hush-text-primary">
-      <div className="mx-auto flex max-w-5xl flex-col gap-5">
-        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-          <div>
+    <div className="flex-1 min-h-0 overflow-y-auto bg-hush-bg-dark px-4 pb-6 pt-8 text-hush-text-primary md:px-5">
+      <div className="mx-auto flex max-w-6xl flex-col gap-8">
+        <header className="flex flex-col gap-6">
+          <div className="space-y-4">
             <Link
-              href="/account/elections"
+              href={`/elections/${electionId}`}
               className="inline-flex items-center gap-2 text-sm text-hush-text-accent transition-colors hover:text-hush-text-primary"
             >
               <ArrowLeft className="h-4 w-4" />
-              <span>Back to elections</span>
+              <span>Back to election</span>
             </Link>
-            <h1 className="mt-2 text-3xl font-semibold">
-              {election?.Title || 'Election cast acceptance'}
-            </h1>
-            <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
-              FEAT-099 keeps commitment registration, cast acceptance, pending recovery, and local
-              receipt retention explicit. FEAT-101 adds post-close unofficial and official result
-              release on the same election route.
-            </p>
+            <div className="space-y-3">
+              <h1 className="text-3xl font-semibold tracking-tight">
+                {election?.Title || 'Election cast acceptance'}
+              </h1>
+              <p className="max-w-4xl text-base leading-7 text-hush-text-accent">
+                {getVotingIntroCopy({
+                  lifecycleState: election.LifecycleState,
+                  associatedNumber,
+                  isLinked,
+                  isActiveVoter,
+                })}
+              </p>
+            </div>
           </div>
-          <Link
-            href={`/account/elections/${electionId}/eligibility`}
-            className="inline-flex items-center gap-2 rounded-xl border border-hush-bg-light px-4 py-2 text-sm transition-colors hover:border-hush-purple"
-          >
-            <ShieldCheck className="h-4 w-4" />
-            <span>Open eligibility view</span>
-          </Link>
-        </div>
+          <div className="pt-2">
+            <Link
+              href={`/elections/${electionId}/eligibility`}
+              className="mb-6 inline-flex min-h-11 items-center gap-2 rounded-xl bg-hush-purple px-4 py-3 text-sm font-semibold text-hush-bg-dark transition-colors hover:bg-hush-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
+            >
+              <ShieldCheck className="h-4 w-4" />
+              <span>Open eligibility view</span>
+            </Link>
+          </div>
+        </header>
 
         {feedback ? (
           <div
@@ -770,60 +855,108 @@ export function ElectionVotingPanel({
           </div>
         ) : null}
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-2xl border border-hush-bg-light bg-hush-bg-element/95 p-4">
-            <div className="text-xs uppercase tracking-[0.2em] text-hush-text-accent">Lifecycle</div>
-            <div className="mt-2 text-xl font-semibold">{getLifecycleLabel(election.LifecycleState)}</div>
-          </div>
-          <div className="rounded-2xl border border-hush-bg-light bg-hush-bg-element/95 p-4">
-            <div className="text-xs uppercase tracking-[0.2em] text-hush-text-accent">
-              {hasVotingAccess ? 'Identity' : 'Result access'}
+        <section>
+          <button
+            type="button"
+            onClick={() => setIsSnapshotExpanded((current) => !current)}
+            className="w-full appearance-none border-0 bg-transparent py-1 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
+            aria-expanded={isSnapshotExpanded}
+            data-testid="voting-summary-toggle"
+          >
+            <div className="w-full">
+              <div className="text-xs font-semibold uppercase tracking-[0.24em] text-hush-text-accent">
+                Voter status snapshot
+              </div>
+              <div className="mt-3 flex w-full flex-col gap-3 md:flex-row md:items-start md:justify-between md:gap-6">
+                <p className="min-w-0 max-w-2xl flex-1 text-sm leading-6 text-hush-text-accent">
+                  Review lifecycle, associated number, commitment, and participation for this voter.
+                </p>
+                <span className="inline-flex items-center gap-2 whitespace-nowrap pt-0.5 text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent md:ml-6">
+                  {isSnapshotExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  <span>{isSnapshotExpanded ? 'Collapse' : 'Expand'}</span>
+                </span>
+              </div>
             </div>
-            <div className="mt-2 text-xl font-semibold">
-              {hasVotingAccess
-                ? (isLinked ? 'Linked' : 'Unlinked')
-                : (resultView?.CanViewParticipantEncryptedResults ? 'Participant' : 'Public only')}
-            </div>
-          </div>
-          <div className="rounded-2xl border border-hush-bg-light bg-hush-bg-element/95 p-4">
-            <div className="text-xs uppercase tracking-[0.2em] text-hush-text-accent">
-              {hasVotingAccess ? 'Commitment' : 'Unofficial result'}
-            </div>
-            <div className="mt-2 text-xl font-semibold">
-              {hasVotingAccess
-                ? (isCommitmentRegistered ? 'Registered' : 'Missing')
-                : (resultView?.UnofficialResult ? 'Available' : 'Pending')}
-            </div>
-          </div>
-          <div className="rounded-2xl border border-hush-bg-light bg-hush-bg-element/95 p-4">
-            <div className="text-xs uppercase tracking-[0.2em] text-hush-text-accent">
-              {hasVotingAccess ? 'Participation' : 'Official result'}
-            </div>
-            <div className="mt-2 text-xl font-semibold">
-              {hasVotingAccess
-                ? participationLabel
-                : (resultView?.OfficialResult ? 'Available' : 'Pending')}
-            </div>
-          </div>
-        </div>
+          </button>
 
-        {hasVotingAccess ? (
-          <section className="rounded-2xl border border-hush-bg-light bg-hush-bg-element/95 p-5">
-            <div className="text-sm font-semibold">Current election boundary</div>
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
-              <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 px-4 py-3 text-sm text-hush-text-accent">
-                Open artifact: <span className="font-mono text-hush-text-primary">{truncateMiddle(votingView.OpenArtifactId)}</span>
-              </div>
-              <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 px-4 py-3 text-sm text-hush-text-accent">
-                Eligible set hash: <span className="font-mono text-hush-text-primary">{truncateMiddle(votingView.EligibleSetHash)}</span>
-              </div>
-              <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 px-4 py-3 text-sm text-hush-text-accent">
-                Ceremony: <span className="font-mono text-hush-text-primary">{truncateMiddle(votingView.CeremonyVersionId)}</span>
-              </div>
-              <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 px-4 py-3 text-sm text-hush-text-accent">
-                Tally key: <span className="font-mono text-hush-text-primary">{truncateMiddle(votingView.TallyPublicKeyFingerprint)}</span>
+          {isSnapshotExpanded ? (
+            <div className="mt-5 border-t border-white/10 pt-5">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <SummaryValueCard
+                  label="Lifecycle"
+                  value={getLifecycleLabel(election.LifecycleState)}
+                />
+                <SummaryValueCard
+                  label={hasVotingAccess ? (associatedNumber ? 'Associated number' : 'Identity') : 'Result access'}
+                  value={
+                    hasVotingAccess
+                      ? associatedNumber ?? (isLinked ? 'Linked' : 'Unlinked')
+                      : (resultView?.CanViewParticipantEncryptedResults ? 'Participant' : 'Public only')
+                  }
+                />
+                <SummaryValueCard
+                  label={hasVotingAccess ? 'Commitment' : 'Unofficial result'}
+                  value={
+                    hasVotingAccess
+                      ? (isCommitmentRegistered ? 'Registered' : 'Missing')
+                      : (resultView?.UnofficialResult ? 'Available' : 'Pending')
+                  }
+                />
+                <SummaryValueCard
+                  label={hasVotingAccess ? 'Participation' : 'Official result'}
+                  value={
+                    hasVotingAccess
+                      ? participationLabel
+                      : (resultView?.OfficialResult ? 'Available' : 'Pending')
+                  }
+                />
               </div>
             </div>
+          ) : null}
+        </section>
+
+        {hasVotingAccess && shouldShowAdvancedContext ? (
+          <section className={sectionClass}>
+            <button
+              type="button"
+              onClick={() => setIsAdvancedContextExpanded((current) => !current)}
+              className="flex w-full items-start justify-between gap-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
+              aria-expanded={isAdvancedContextExpanded}
+              data-testid="voting-advanced-context-toggle"
+            >
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-[0.24em] text-hush-text-accent">
+                  Advanced voting context
+                </div>
+                <h2 className="mt-2 text-xl font-semibold text-hush-text-primary">
+                  Technical election boundary
+                </h2>
+                <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
+                  These identifiers are only useful when troubleshooting an active voting flow.
+                </p>
+              </div>
+              <span className="mt-1 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                {isAdvancedContextExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                <span>{isAdvancedContextExpanded ? 'Collapse' : 'Expand'}</span>
+              </span>
+            </button>
+
+            {isAdvancedContextExpanded ? (
+              <div className="mt-6 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+                <SummaryValueCard
+                  label="Open artifact"
+                  value={truncateMiddle(votingView.OpenArtifactId)}
+                />
+                <SummaryValueCard
+                  label="Eligible set hash"
+                  value={truncateMiddle(votingView.EligibleSetHash)}
+                />
+                <SummaryValueCard
+                  label="Tally key"
+                  value={truncateMiddle(votingView.TallyPublicKeyFingerprint)}
+                />
+              </div>
+            ) : null}
           </section>
         ) : null}
 

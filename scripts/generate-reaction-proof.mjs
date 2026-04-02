@@ -1,10 +1,17 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import snarkjs from 'snarkjs';
+import * as snarkjs from 'snarkjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const DEBUG = process.env.HUSH_REACTION_PROOF_DEBUG === '1';
+
+function debug(message) {
+  if (DEBUG) {
+    process.stderr.write(`[generate-reaction-proof] ${message}\n`);
+  }
+}
 
 async function main() {
   const [, , inputPath, outputPath, circuitVersionArg] = process.argv;
@@ -17,28 +24,34 @@ async function main() {
   const workspaceRoot = path.resolve(__dirname, '..');
   const circuitVersion = circuitVersionArg ?? 'omega-v1.0.0';
   const inputs = JSON.parse(await fs.readFile(inputPath, 'utf8'));
+  debug(`loaded inputs from ${inputPath}`);
   const artifacts = resolveHeadlessArtifacts(workspaceRoot, circuitVersion);
   await assertFileExists(artifacts.wasmPath, 'WASM');
   await assertFileExists(artifacts.zkeyPath, 'zkey');
+  debug(`resolved artifacts for ${circuitVersion}`);
 
   const { proof, publicSignals } = await snarkjs.groth16.fullProve(
     inputs,
     artifacts.wasmPath,
     artifacts.zkeyPath
   );
+  debug(`fullProve completed with ${publicSignals.length} public signals`);
 
+  const packedProof = Buffer.from(packGroth16Proof(proof)).toString('base64');
+  debug('packed proof bytes');
   await fs.writeFile(
     outputPath,
     JSON.stringify(
       {
         circuitVersion,
         publicSignals,
-        proof: Buffer.from(packGroth16Proof(proof)).toString('base64'),
+        proof: packedProof,
       },
       null,
       2
     )
   );
+  debug(`wrote output to ${outputPath}`);
 }
 
 function resolveHeadlessArtifacts(workspaceRoot, circuitVersion) {
@@ -95,4 +108,9 @@ function bigintToBytes32(n) {
   return bytes;
 }
 
-await main();
+await main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+
+process.exit(0);

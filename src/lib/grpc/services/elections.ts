@@ -1,4 +1,4 @@
-import { getGrpcClient } from '../client';
+import { buildApiUrl } from '@/lib/api-config';
 import type {
   GetElectionCeremonyActionViewRequest,
   GetElectionCeremonyActionViewResponse,
@@ -24,24 +24,40 @@ import type {
   SearchElectionDirectoryResponse,
 } from '../types';
 
-const SERVICE_NAME = 'rpcHush.HushElections';
+const ELECTIONS_QUERY_PROXY_URL = '/api/elections/query';
+
+async function proxyElectionQuery<TRequest, TResponse>(
+  method: string,
+  request: TRequest
+): Promise<TResponse> {
+  const response = await fetch(buildApiUrl(ELECTIONS_QUERY_PROXY_URL), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ method, request }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Election query proxy failed for ${method}: ${response.status} ${text}`);
+  }
+
+  return (await response.json()) as TResponse;
+}
 
 export const electionsService = {
   async getElectionOpenReadiness(
     request: GetElectionOpenReadinessRequest
   ): Promise<GetElectionOpenReadinessResponse> {
-    const client = getGrpcClient();
-    return client.unaryCall<GetElectionOpenReadinessRequest, GetElectionOpenReadinessResponse>(
-      SERVICE_NAME,
+    return proxyElectionQuery<GetElectionOpenReadinessRequest, GetElectionOpenReadinessResponse>(
       'GetElectionOpenReadiness',
       request
     );
   },
 
   async getElection(request: GetElectionRequest): Promise<GetElectionResponse> {
-    const client = getGrpcClient();
-    return client.unaryCall<GetElectionRequest, GetElectionResponse>(
-      SERVICE_NAME,
+    return proxyElectionQuery<GetElectionRequest, GetElectionResponse>(
       'GetElection',
       request
     );
@@ -50,9 +66,7 @@ export const electionsService = {
   async searchElectionDirectory(
     request: SearchElectionDirectoryRequest
   ): Promise<SearchElectionDirectoryResponse> {
-    const client = getGrpcClient();
-    return client.unaryCall<SearchElectionDirectoryRequest, SearchElectionDirectoryResponse>(
-      SERVICE_NAME,
+    return proxyElectionQuery<SearchElectionDirectoryRequest, SearchElectionDirectoryResponse>(
       'SearchElectionDirectory',
       request
     );
@@ -61,9 +75,7 @@ export const electionsService = {
   async getElectionHubView(
     request: GetElectionHubViewRequest
   ): Promise<GetElectionHubViewResponse> {
-    const client = getGrpcClient();
-    return client.unaryCall<GetElectionHubViewRequest, GetElectionHubViewResponse>(
-      SERVICE_NAME,
+    return proxyElectionQuery<GetElectionHubViewRequest, GetElectionHubViewResponse>(
       'GetElectionHubView',
       request
     );
@@ -72,9 +84,7 @@ export const electionsService = {
   async getElectionEligibilityView(
     request: GetElectionEligibilityViewRequest
   ): Promise<GetElectionEligibilityViewResponse> {
-    const client = getGrpcClient();
-    return client.unaryCall<GetElectionEligibilityViewRequest, GetElectionEligibilityViewResponse>(
-      SERVICE_NAME,
+    return proxyElectionQuery<GetElectionEligibilityViewRequest, GetElectionEligibilityViewResponse>(
       'GetElectionEligibilityView',
       request
     );
@@ -83,9 +93,7 @@ export const electionsService = {
   async getElectionVotingView(
     request: GetElectionVotingViewRequest
   ): Promise<GetElectionVotingViewResponse> {
-    const client = getGrpcClient();
-    return client.unaryCall<GetElectionVotingViewRequest, GetElectionVotingViewResponse>(
-      SERVICE_NAME,
+    return proxyElectionQuery<GetElectionVotingViewRequest, GetElectionVotingViewResponse>(
       'GetElectionVotingView',
       request
     );
@@ -94,9 +102,7 @@ export const electionsService = {
   async getElectionEnvelopeAccess(
     request: GetElectionEnvelopeAccessRequest
   ): Promise<GetElectionEnvelopeAccessResponse> {
-    const client = getGrpcClient();
-    return client.unaryCall<GetElectionEnvelopeAccessRequest, GetElectionEnvelopeAccessResponse>(
-      SERVICE_NAME,
+    return proxyElectionQuery<GetElectionEnvelopeAccessRequest, GetElectionEnvelopeAccessResponse>(
       'GetElectionEnvelopeAccess',
       request
     );
@@ -105,9 +111,7 @@ export const electionsService = {
   async getElectionResultView(
     request: GetElectionResultViewRequest
   ): Promise<GetElectionResultViewResponse> {
-    const client = getGrpcClient();
-    return client.unaryCall<GetElectionResultViewRequest, GetElectionResultViewResponse>(
-      SERVICE_NAME,
+    return proxyElectionQuery<GetElectionResultViewRequest, GetElectionResultViewResponse>(
       'GetElectionResultView',
       request
     );
@@ -116,29 +120,25 @@ export const electionsService = {
   async getElectionReportAccessGrants(
     request: GetElectionReportAccessGrantsRequest
   ): Promise<GetElectionReportAccessGrantsResponse> {
-    const client = getGrpcClient();
-    return client.unaryCall<
+    return proxyElectionQuery<
       GetElectionReportAccessGrantsRequest,
       GetElectionReportAccessGrantsResponse
-    >(SERVICE_NAME, 'GetElectionReportAccessGrants', request);
+    >('GetElectionReportAccessGrants', request);
   },
 
   async getElectionCeremonyActionView(
     request: GetElectionCeremonyActionViewRequest
   ): Promise<GetElectionCeremonyActionViewResponse> {
-    const client = getGrpcClient();
-    return client.unaryCall<
+    return proxyElectionQuery<
       GetElectionCeremonyActionViewRequest,
       GetElectionCeremonyActionViewResponse
-    >(SERVICE_NAME, 'GetElectionCeremonyActionView', request);
+    >('GetElectionCeremonyActionView', request);
   },
 
   async getElectionsByOwner(
     request: GetElectionsByOwnerRequest
   ): Promise<GetElectionsByOwnerResponse> {
-    const client = getGrpcClient();
-    return client.unaryCall<GetElectionsByOwnerRequest, GetElectionsByOwnerResponse>(
-      SERVICE_NAME,
+    return proxyElectionQuery<GetElectionsByOwnerRequest, GetElectionsByOwnerResponse>(
       'GetElectionsByOwner',
       request
     );

@@ -21,6 +21,7 @@ function resetStore(): void {
     appContexts: {
       feeds: { ...DEFAULT_APP_CONTEXTS.feeds },
       social: { ...DEFAULT_APP_CONTEXTS.social },
+      voting: { ...DEFAULT_APP_CONTEXTS.voting },
     },
     crossAppBadges: { ...DEFAULT_CROSS_APP_BADGES },
   });
@@ -40,7 +41,8 @@ describe('useAppStore FEAT-084 app context contract', () => {
     expect(state.selectedFeedId).toBeNull();
     expect(state.appContexts.feeds.selectedNav).toBe('feeds');
     expect(state.appContexts.social.selectedNav).toBe('feed-wall');
-    expect(state.crossAppBadges).toEqual({ feeds: 0, social: 0 });
+    expect(state.appContexts.voting.selectedNav).toBe('open-voting');
+    expect(state.crossAppBadges).toEqual({ feeds: 0, social: 0, voting: 0 });
   });
 
   it('persists app-specific nav/feed state independently', () => {
@@ -100,5 +102,28 @@ describe('useAppStore FEAT-084 app context contract', () => {
     expect(persistedState.appContexts.social.selectedNav).toBe('notifications');
     expect(persistedState.appContexts.social.scrollOffset).toBe(1280);
     expect(persistedState.crossAppBadges.feeds).toBe(7);
+  });
+
+  it('backfills missing voting context when switching from legacy persisted state', () => {
+    useAppStore.setState({
+      activeApp: 'feeds',
+      selectedNav: 'feeds',
+      appContexts: {
+        feeds: { ...DEFAULT_APP_CONTEXTS.feeds },
+        social: { ...DEFAULT_APP_CONTEXTS.social },
+      } as typeof DEFAULT_APP_CONTEXTS,
+      crossAppBadges: {
+        feeds: 0,
+        social: 0,
+      } as typeof DEFAULT_CROSS_APP_BADGES,
+    });
+
+    useAppStore.getState().setActiveApp('voting');
+
+    const state = useAppStore.getState();
+    expect(state.activeApp).toBe('voting');
+    expect(state.selectedNav).toBe('open-voting');
+    expect(state.appContexts.voting.selectedNav).toBe('open-voting');
+    expect(state.crossAppBadges.voting).toBe(0);
   });
 });

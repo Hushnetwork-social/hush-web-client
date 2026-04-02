@@ -1,26 +1,23 @@
 "use client";
 
-import { use, useEffect, useState } from 'react';
+import { use, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { HushVotingWorkspace } from '@/modules/elections';
 import { useAppStore } from '@/stores';
 
-type ElectionVotingPageProps = {
+type LegacyElectionVotingPageProps = {
   params: Promise<{
     electionId: string;
   }>;
 };
 
-export default function ElectionVotingPage({ params }: ElectionVotingPageProps) {
+export default function LegacyElectionVotingPage({ params }: LegacyElectionVotingPageProps) {
   const resolvedParams = use(params);
   const router = useRouter();
-  const { credentials, isAuthenticated } = useAppStore();
-  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const { credentials, isAuthenticated, setActiveApp, setSelectedNav } = useAppStore();
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      setIsCheckingAuth(false);
       if (
         !isAuthenticated ||
         !credentials?.signingPublicKey ||
@@ -29,7 +26,12 @@ export default function ElectionVotingPage({ params }: ElectionVotingPageProps) 
         !credentials?.encryptionPrivateKey
       ) {
         router.replace('/auth');
+        return;
       }
+
+      setActiveApp('voting');
+      setSelectedNav('open-voting');
+      router.replace(`/elections/${resolvedParams.electionId}`);
     }, 100);
 
     return () => clearTimeout(timer);
@@ -39,31 +41,15 @@ export default function ElectionVotingPage({ params }: ElectionVotingPageProps) 
     credentials?.signingPrivateKey,
     credentials?.signingPublicKey,
     isAuthenticated,
+    resolvedParams.electionId,
     router,
+    setActiveApp,
+    setSelectedNav,
   ]);
 
-  if (
-    isCheckingAuth ||
-    !isAuthenticated ||
-    !credentials?.signingPublicKey ||
-    !credentials?.signingPrivateKey ||
-    !credentials?.encryptionPublicKey ||
-    !credentials?.encryptionPrivateKey
-  ) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-hush-bg-dark">
-        <Loader2 className="h-8 w-8 animate-spin text-hush-purple" />
-      </div>
-    );
-  }
-
   return (
-    <HushVotingWorkspace
-      actorPublicAddress={credentials.signingPublicKey}
-      actorEncryptionPublicKey={credentials.encryptionPublicKey}
-      actorEncryptionPrivateKey={credentials.encryptionPrivateKey}
-      actorSigningPrivateKey={credentials.signingPrivateKey}
-      initialElectionId={resolvedParams.electionId}
-    />
+    <div className="flex min-h-screen items-center justify-center bg-hush-bg-dark">
+      <Loader2 className="h-8 w-8 animate-spin text-hush-purple" />
+    </div>
   );
 }

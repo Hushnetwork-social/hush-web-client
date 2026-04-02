@@ -389,7 +389,7 @@ export function createDefaultElectionDraft(): ElectionDraftInput {
     ProtocolOmegaVersion: DEFAULT_PROTOCOL_OMEGA_VERSION,
     ReportingPolicy: ReportingPolicyProto.DefaultPhaseOnePackage,
     ReviewWindowPolicy: ReviewWindowPolicyProto.NoReviewWindow,
-    OwnerOptions: [createElectionOption(1), createElectionOption(2)],
+    OwnerOptions: [],
     AcknowledgedWarningCodes: [],
     RequiredApprovalCount: undefined,
   };
@@ -1245,10 +1245,6 @@ export function getDraftSaveValidationErrors(draft: ElectionDraftInput): string[
     (!draft.RequiredApprovalCount || draft.RequiredApprovalCount < 1)
   ) {
     errors.push('Trustee-threshold elections require a required approval count of at least 1.');
-  }
-
-  if (draft.OwnerOptions.length === 0) {
-    errors.push('At least one owner-managed option is required.');
   }
 
   const optionIds = new Set<string>();

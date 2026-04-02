@@ -341,4 +341,50 @@ describe('ElectionVotingPanel', () => {
     expect(window.sessionStorage.getItem('feat099:pending:election-1')).toBeNull();
     expect(blockchainServiceMock.submitTransaction).not.toHaveBeenCalled();
   });
+
+  it('collapses the draft voter snapshot by default and shows the associated number instead of a generic linked label', async () => {
+    electionsServiceMock.getElection.mockResolvedValue(
+      createElectionResponse({
+        Election: createElectionRecord({
+          LifecycleState: ElectionLifecycleStateProto.Draft,
+          OpenedAt: undefined,
+          OpenArtifactId: '',
+        }),
+      }),
+    );
+    electionsServiceMock.getElectionVotingView.mockResolvedValue(
+      createVotingViewResponse({
+        OpenArtifactId: '',
+        EligibleSetHash: '',
+        CeremonyVersionId: '',
+        DkgProfileId: '',
+        TallyPublicKeyFingerprint: '',
+      }),
+    );
+
+    render(
+      <ElectionVotingPanel
+        electionId="election-1"
+        actorPublicAddress="actor-public-key"
+        actorEncryptionPublicKey="actor-encryption-public-key"
+        actorEncryptionPrivateKey="actor-encryption-private-key"
+        actorSigningPrivateKey="actor-signing-private-key"
+      />,
+    );
+
+    const snapshotToggle = await screen.findByTestId('voting-summary-toggle');
+    expect(snapshotToggle).toHaveAttribute('aria-expanded', 'false');
+    expect(
+      screen.getByText(
+        'Review lifecycle, associated number, commitment, and participation for this voter.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('voting-advanced-context-toggle')).not.toBeInTheDocument();
+
+    fireEvent.click(snapshotToggle);
+
+    expect(snapshotToggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('Associated number')).toBeInTheDocument();
+    expect(screen.getByText('10042')).toBeInTheDocument();
+  });
 });

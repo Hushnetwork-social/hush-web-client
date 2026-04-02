@@ -95,7 +95,7 @@ export function TrusteeGovernedProposalPanel({
       <div className="mx-auto max-w-4xl p-4 md:p-6">
         <div className="mb-6">
           <Link
-            href="/account/elections"
+            href="/elections"
             className="mb-3 inline-flex items-center gap-2 text-sm text-hush-text-accent transition-colors hover:text-hush-purple"
           >
             <ArrowLeft className="h-4 w-4" />

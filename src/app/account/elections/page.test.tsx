@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AccountElectionsPage from './page';
 import { useAppStore } from '@/stores';
@@ -17,24 +17,6 @@ vi.mock('next/navigation', () => ({
   }),
 }));
 
-vi.mock('@/modules/elections', () => ({
-  HushVotingWorkspace: ({
-    actorPublicAddress,
-    actorEncryptionPublicKey,
-    actorEncryptionPrivateKey,
-    actorSigningPrivateKey,
-  }: {
-    actorPublicAddress: string;
-    actorEncryptionPublicKey: string;
-    actorEncryptionPrivateKey: string;
-    actorSigningPrivateKey: string;
-  }) => (
-    <div data-testid="hush-voting-workspace-stub">
-      {actorPublicAddress}:{actorEncryptionPublicKey}:{actorEncryptionPrivateKey}:{actorSigningPrivateKey}
-    </div>
-  ),
-}));
-
 describe('AccountElectionsPage', () => {
   beforeEach(async () => {
     mockReplace.mockClear();
@@ -47,6 +29,8 @@ describe('AccountElectionsPage', () => {
           encryptionPublicKey: 'owner-encryption-key',
           encryptionPrivateKey: 'private-encryption-key',
         },
+        activeApp: 'feeds',
+        selectedNav: 'feeds',
       });
     });
   });
@@ -56,6 +40,8 @@ describe('AccountElectionsPage', () => {
       useAppStore.setState({
         isAuthenticated: false,
         credentials: null,
+        activeApp: 'feeds',
+        selectedNav: 'feeds',
       });
     });
   });
@@ -76,13 +62,14 @@ describe('AccountElectionsPage', () => {
     });
   });
 
-  it('renders the elections workspace for an authenticated owner', async () => {
+  it('redirects authenticated owners to the new HushVoting! route', async () => {
     render(<AccountElectionsPage />);
     await settleAuthGate();
 
-    expect(await screen.findByTestId('hush-voting-workspace-stub')).toHaveTextContent(
-      'owner-public-key:owner-encryption-key:private-encryption-key:private-signing-key'
-    );
-    expect(mockReplace).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith('/elections');
+    });
+    expect(useAppStore.getState().activeApp).toBe('voting');
+    expect(useAppStore.getState().selectedNav).toBe('open-voting');
   });
 });

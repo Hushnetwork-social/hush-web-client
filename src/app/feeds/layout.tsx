@@ -23,6 +23,7 @@ import {
   VOTING_HOME_ROUTE,
 } from "@/lib/navigation/appRoutes";
 import { SocialMenuPanel } from "@/components/social/SocialMenuPanel";
+import { VotingMenuPanel } from "@/modules/elections/VotingMenuPanel";
 
 // Dynamic imports to prevent dev mode race condition
 const FeedList = dynamic(
@@ -55,6 +56,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const router = useRouter();
   const pathname = usePathname();
   const isSocialRoute = pathname.startsWith("/social");
+  const isVotingRoute = pathname.startsWith("/elections");
   const {
     isAuthenticated,
     balance,
@@ -164,6 +166,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     }
 
     if (id === "open-voting") {
+      setSelectedNav("open-voting");
+      setActiveApp("voting");
       router.push(VOTING_HOME_ROUTE);
       return;
     }
@@ -176,6 +180,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     if (targetApp === "social") {
       setSelectedNav("feed-wall");
       router.push(getAppHomeRoute("social"));
+      return;
+    }
+
+    if (targetApp === "voting") {
+      setSelectedNav("open-voting");
+      router.push(getAppHomeRoute("voting"));
       return;
     }
 
@@ -319,6 +329,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                   guestMode={isGuestSocialRoute}
                   onGuestAction={handleGuestSocialAction}
                 />
+              ) : activeApp === "voting" || isVotingRoute ? (
+                <VotingMenuPanel />
               ) : <FeedList />}
             </Sidebar>
 
@@ -346,7 +358,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             {children}
           </main>
           {/* Hide bottom nav when viewing a feed - use back button instead */}
-          {!selectedFeedId && (
+          {(!selectedFeedId || activeApp === "voting") && (
             <BottomNav
               selectedNav={selectedNav}
               activeApp={activeApp}

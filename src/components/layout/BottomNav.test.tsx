@@ -185,7 +185,7 @@ describe('BottomNav', () => {
       render(
         <BottomNav
           {...defaultProps}
-          crossAppBadges={{ feeds: 0, social: 2 }}
+          crossAppBadges={{ feeds: 0, social: 2, voting: 0 }}
         />
       );
 
@@ -214,6 +214,21 @@ describe('BottomNav', () => {
       fireEvent.click(screen.getByText('HushVoting!'));
 
       expect(defaultProps.onNavSelect).toHaveBeenCalledWith('open-voting');
+    });
+
+    it('should render voting-app navigation with Election Hub, HushFeeds, and HushSocial', () => {
+      render(
+        <BottomNav
+          {...defaultProps}
+          activeApp="voting"
+          selectedNav="open-voting"
+        />
+      );
+
+      expect(screen.getByText('Election Hub')).toBeInTheDocument();
+      expect(screen.getByText('HushFeeds!')).toBeInTheDocument();
+      expect(screen.getByText('HushSocial!')).toBeInTheDocument();
+      expect(screen.queryByText('Create Group')).not.toBeInTheDocument();
     });
 
     it('routes guest bottom-nav clicks through guest action', () => {
