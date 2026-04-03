@@ -1340,7 +1340,7 @@ export function ElectionVotingPanel({
   if (!detail?.Success || !election) {
     return (
       <div className="flex-1 min-h-0 overflow-y-auto bg-hush-bg-dark px-4 py-5 text-hush-text-primary md:px-5">
-        <div className="mx-auto max-w-6xl rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-5 text-sm text-red-100">
+        <div className="w-full rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-5 text-sm text-red-100">
           {detail?.ErrorMessage || 'Election data is unavailable.'}
         </div>
       </div>
@@ -1349,7 +1349,7 @@ export function ElectionVotingPanel({
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto bg-hush-bg-dark px-4 pb-6 pt-8 text-hush-text-primary md:px-5">
-      <div className="mx-auto flex max-w-6xl flex-col gap-8">
+      <div className="flex w-full min-w-0 flex-col gap-8">
         <header className="flex flex-col gap-6">
           <div className="space-y-4">
             <Link

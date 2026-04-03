@@ -26,8 +26,8 @@ type EligibilityFeedback = {
   message: string;
 };
 
-const insetCardClass = 'rounded-2xl bg-hush-bg-element/92 px-5 py-4 shadow-sm shadow-black/10';
-const valueFieldClass = 'mt-4 flex h-24 items-center rounded-2xl border border-hush-bg-light/70 bg-hush-bg-dark px-6 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]';
+const insetCardClass = 'rounded-[28px] bg-hush-bg-element/92 px-5 py-4 shadow-sm shadow-black/10';
+const valueFieldClass = 'mt-4 flex h-24 items-center rounded-2xl bg-[#151c33] px-6 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.02),0_12px_24px_rgba(0,0,0,0.14)]';
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
