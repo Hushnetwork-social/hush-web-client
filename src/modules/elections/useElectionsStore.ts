@@ -32,6 +32,7 @@ import type {
   InviteElectionTrusteeRequest,
   ResolveElectionTrusteeInvitationRequest,
 } from '@/lib/grpc';
+import { infoLog } from '@/lib/debug-logger';
 import { electionsService } from '@/lib/grpc/services/elections';
 import { identityService } from '@/lib/grpc/services/identity';
 import { submitTransaction } from '@/modules/blockchain/BlockchainService';
@@ -667,6 +668,29 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
 
     try {
       const response = await electionsService.getElection({ ElectionId: electionId });
+      const openArtifactId = response.Election?.OpenArtifactId || '';
+      const openArtifact =
+        response.BoundaryArtifacts?.find((artifact) => artifact.Id === openArtifactId) ?? null;
+      const storedProtectedTallySnapshotPresent = Boolean(openArtifact?.CeremonySnapshot);
+      const boundaryArtifactCount = response.BoundaryArtifacts?.length ?? 0;
+
+      infoLog(
+        `[ElectionBoundarySummary] source=owner-workspace-load electionId=${electionId} ` +
+          `detailLoadSucceeded=${response.Success} lifecycleState=${response.Election?.LifecycleState ?? 'null'} ` +
+          `openArtifactId=${openArtifactId || 'null'} ` +
+          `storedProtectedTallySnapshotPresent=${storedProtectedTallySnapshotPresent} ` +
+          `boundaryArtifactCount=${boundaryArtifactCount}`,
+      );
+
+      infoLog('[ElectionBoundary]', {
+        source: 'owner-workspace-load',
+        electionId,
+        detailLoadSucceeded: response.Success,
+        lifecycleState: response.Election?.LifecycleState ?? null,
+        openArtifactId: openArtifactId || null,
+        storedProtectedTallySnapshotPresent,
+        boundaryArtifactCount,
+      });
 
       if (!response.Success) {
         set({

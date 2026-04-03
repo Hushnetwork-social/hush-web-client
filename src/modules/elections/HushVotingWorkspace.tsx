@@ -1,11 +1,12 @@
 "use client";
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   AlertCircle,
   ArrowRight,
+  Circle,
   CheckCircle2,
   Files,
   Loader2,
@@ -13,23 +14,33 @@ import {
   ShieldAlert,
   ShieldCheck,
   Vote,
+  X,
 } from 'lucide-react';
 import type {
   ElectionGovernedProposal,
   ElectionHubEntryView,
   GetElectionResponse,
+  VerifyElectionReceiptResponse,
 } from '@/lib/grpc';
-import { ElectionLifecycleStateProto } from '@/lib/grpc';
+import {
+  ElectionCeremonyVersionStatusProto,
+  ElectionGovernanceModeProto,
+  ElectionLifecycleStateProto,
+  ElectionTrusteeInvitationStatusProto,
+} from '@/lib/grpc';
+import { electionsService } from '@/lib/grpc/services/elections';
 import { ClosedProgressBanner } from './ClosedProgressBanner';
-import { DesignatedAuditorGrantManager } from './DesignatedAuditorGrantManager';
 import { ElectionAccessBoundaryNotice } from './ElectionAccessBoundaryNotice';
 import { ElectionHubList } from './ElectionHubList';
 import { ElectionWorkspaceHeader } from './ElectionWorkspaceHeader';
 import { ReadOnlyGovernedActionSummary } from './ReadOnlyGovernedActionSummary';
 import {
+  createDraftFromElectionDetail,
   formatTimestamp,
   getActiveCeremonyVersion,
-  getElectionHubSuggestedActionLabel,
+  getCeremonyVersionStatusLabel,
+  getDraftOpenValidationErrors,
+  getDraftSaveValidationErrors,
   getElectionWorkspaceSectionOrder,
   getFinalizationSessionPurposeLabel,
   getFinalizationSessionStatusLabel,
@@ -89,8 +100,139 @@ function AvailabilityCard({
   );
 }
 
-function VoterWorkspaceSummary({ entry }: { entry: ElectionHubEntryView }) {
+type ParsedAcceptedBallotReceipt = {
+  electionId: string;
+  receiptId: string;
+  acceptanceId: string;
+  serverProof: string;
+};
+
+type HubReceiptVerificationFeedback = {
+  tone: 'success' | 'error';
+  title: string;
+  detail: string;
+  verifiedAt: string;
+  statusItems?: Array<{
+    label: string;
+    complete: boolean;
+  }>;
+};
+
+function parseAcceptedBallotReceipt(receiptText: string): {
+  receipt?: ParsedAcceptedBallotReceipt;
+  error?: string;
+} {
+  const normalized = receiptText.trim();
+  if (!normalized) {
+    return { error: 'Paste the receipt text or upload the downloaded receipt file first.' };
+  }
+
+  const readField = (label: string): string =>
+    normalized.match(new RegExp(`^${label}:\\s*(.+)$`, 'im'))?.[1]?.trim() ?? '';
+
+  const electionId = readField('Election ID');
+  const receiptId = readField('Receipt ID');
+  const acceptanceId = readField('Acceptance ID');
+  const serverProof = readField('Server Proof');
+
+  if (!electionId || !receiptId || !acceptanceId || !serverProof) {
+    return {
+      error:
+        'The provided text is not a complete accepted-ballot receipt. Keep the original receipt format with Election ID, Receipt ID, Acceptance ID, and Server Proof.',
+    };
+  }
+
+  return {
+    receipt: {
+      electionId,
+      receiptId,
+      acceptanceId,
+      serverProof,
+    },
+  };
+}
+
+function buildHubReceiptVerificationFeedbackFromResponse(
+  response: VerifyElectionReceiptResponse
+): HubReceiptVerificationFeedback {
+  const verifiedAt = new Date().toLocaleString();
+  const finalCountStatusItem = response.TallyVerificationAvailable
+    ? {
+        label: 'The election is closed. Final count confirmation is available as a separate step.',
+        complete: false,
+      }
+    : {
+        label: 'Final count confirmation will be available after the election closes.',
+        complete: false,
+      };
+
+  if (!response.Success) {
+    return {
+      tone: 'error',
+      title: 'Verification could not be completed',
+      detail:
+        response.ErrorMessage || 'The server could not check this receipt right now.',
+      verifiedAt,
+    };
+  }
+
+  if (!response.HasAcceptedCheckoff) {
+    return {
+      tone: 'error',
+      title: 'No recorded vote found yet',
+      detail:
+        'This voter is not currently shown as voted in this election, so the receipt cannot be confirmed yet.',
+      verifiedAt,
+      statusItems: [
+        {
+          label: 'This voter is marked as voted in this election.',
+          complete: false,
+        },
+        finalCountStatusItem,
+      ],
+    };
+  }
+
+  if (!response.ReceiptMatchesAcceptedCheckoff) {
+    return {
+      tone: 'error',
+      title: 'This receipt does not match this voter',
+      detail:
+        'The receipt you provided does not match the recorded vote for this voter in this election.',
+      verifiedAt,
+    };
+  }
+
+  return {
+    tone: 'success',
+    title: response.ParticipationCountedAsVoted
+      ? 'This voter is marked as voted'
+      : 'Receipt matches this voter',
+    detail: response.ParticipationCountedAsVoted
+      ? 'The receipt matches the current vote record for this voter in this election.'
+      : 'The receipt matches this voter, but the election is not showing the voter as marked as voted yet.',
+    verifiedAt,
+    statusItems: [
+      {
+        label: 'This voter is marked as voted in this election.',
+        complete: response.ParticipationCountedAsVoted,
+      },
+      finalCountStatusItem,
+    ],
+  };
+}
+
+function VoterWorkspaceSummary({
+  entry,
+  actorPublicAddress,
+}: {
+  entry: ElectionHubEntryView;
+  actorPublicAddress: string;
+}) {
   const isOpenElection = entry.Election.LifecycleState === ElectionLifecycleStateProto.Open;
+  const showCommitmentFieldInReceiptTemplate =
+    entry.Election.LifecycleState === ElectionLifecycleStateProto.Closed ||
+    entry.Election.LifecycleState === ElectionLifecycleStateProto.Finalized;
   const primaryHref = entry.CanClaimIdentity
     ? `/elections/${entry.Election.ElectionId}/eligibility`
     : `/elections/${entry.Election.ElectionId}/voter`;
@@ -99,11 +241,139 @@ function VoterWorkspaceSummary({ entry }: { entry: ElectionHubEntryView }) {
     : isOpenElection
       ? 'Open ballot workflow'
       : 'Voter Details';
+  const [hasAcceptedReceipt, setHasAcceptedReceipt] = useState(false);
+  const [isReceiptDialogOpen, setIsReceiptDialogOpen] = useState(false);
+  const [receiptInput, setReceiptInput] = useState('');
+  const [receiptSourceLabel, setReceiptSourceLabel] = useState('');
+  const [isVerifyingReceipt, setIsVerifyingReceipt] = useState(false);
+  const [receiptVerification, setReceiptVerification] =
+    useState<HubReceiptVerificationFeedback | null>(null);
+
+  useEffect(() => {
+    let isActive = true;
+
+    async function loadAcceptedReceiptState(): Promise<void> {
+      if (entry.CanClaimIdentity) {
+        setHasAcceptedReceipt(false);
+        return;
+      }
+
+      try {
+        const votingView = await electionsService.getElectionVotingView({
+          ElectionId: entry.Election.ElectionId,
+          ActorPublicAddress: actorPublicAddress,
+          SubmissionIdempotencyKey: '',
+        });
+
+        if (!isActive) {
+          return;
+        }
+
+        setHasAcceptedReceipt(votingView.Success && votingView.HasAcceptedAt);
+      } catch {
+        if (isActive) {
+          setHasAcceptedReceipt(false);
+        }
+      }
+    }
+
+    void loadAcceptedReceiptState();
+
+    return () => {
+      isActive = false;
+    };
+  }, [actorPublicAddress, entry.CanClaimIdentity, entry.Election.ElectionId]);
+
+  useEffect(() => {
+    if (isReceiptDialogOpen) {
+      return;
+    }
+
+    setReceiptInput('');
+    setReceiptSourceLabel('');
+    setReceiptVerification(null);
+    setIsVerifyingReceipt(false);
+  }, [isReceiptDialogOpen]);
+
+  useEffect(() => {
+    if (!isReceiptDialogOpen) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsReceiptDialogOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isReceiptDialogOpen]);
+
+  async function handleReceiptFileChange(event: ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    const text = await file.text();
+    setReceiptInput(text);
+    setReceiptSourceLabel(file.name);
+    setReceiptVerification(null);
+  }
+
+  async function handleVerifyReceipt(): Promise<void> {
+    const parsed = parseAcceptedBallotReceipt(receiptInput);
+    if (!parsed.receipt) {
+      setReceiptVerification({
+        tone: 'error',
+        title: 'Receipt could not be parsed',
+        detail: parsed.error || 'The provided receipt could not be parsed.',
+        verifiedAt: new Date().toLocaleString(),
+      });
+      return;
+    }
+
+    if (parsed.receipt.electionId !== entry.Election.ElectionId) {
+      setReceiptVerification({
+        tone: 'error',
+        title: 'Receipt belongs to a different election',
+        detail:
+          'The Election ID inside the provided receipt does not match the currently selected election in HushVoting! Hub.',
+        verifiedAt: new Date().toLocaleString(),
+      });
+      return;
+    }
+
+    setIsVerifyingReceipt(true);
+    try {
+      const verification = await electionsService.verifyElectionReceipt({
+        ElectionId: entry.Election.ElectionId,
+        ActorPublicAddress: actorPublicAddress,
+        ReceiptId: parsed.receipt.receiptId,
+        AcceptanceId: parsed.receipt.acceptanceId,
+        ServerProof: parsed.receipt.serverProof,
+      });
+      setReceiptVerification(buildHubReceiptVerificationFeedbackFromResponse(verification));
+    } catch (error) {
+      setReceiptVerification({
+        tone: 'error',
+        title: 'Verification request failed',
+        detail:
+          error instanceof Error
+            ? error.message
+            : 'The server-side receipt verification request failed.',
+        verifiedAt: new Date().toLocaleString(),
+      });
+    } finally {
+      setIsVerifyingReceipt(false);
+    }
+  }
 
   return (
     <section className="space-y-4 pt-4 md:pt-6" data-testid="hush-voting-section-voter">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
+        <div className="lg:min-w-0 lg:flex-1">
           <h2 className="text-base font-semibold uppercase tracking-[0.28em] text-hush-text-primary md:text-lg">
             Voter Surface
           </h2>
@@ -114,18 +384,32 @@ function VoterWorkspaceSummary({ entry }: { entry: ElectionHubEntryView }) {
             {entry.CanClaimIdentity
               ? 'This election still needs a voter identity or eligibility review before the ballot surface can open.'
               : isOpenElection
-                ? 'The election is open for this voter. Jump into the preserved ballot workflow to register commitment and cast.'
+                ? 'The election is open for this voter. Open the ballot screen to review options and continue with the current ballot-submission flow for this build.'
                 : 'Voting controls are no longer active, but this actor can still review the voter detail surface for election-specific context.'}
           </p>
         </div>
 
-        <Link
-          href={primaryHref}
-          className="inline-flex self-start items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium whitespace-nowrap text-white transition-colors hover:bg-hush-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark lg:ml-6"
-        >
-          <Vote className="h-4 w-4" />
-          <span>{primaryLabel}</span>
-        </Link>
+        <div className="flex shrink-0 flex-wrap items-center gap-3 sm:flex-nowrap lg:ml-6">
+          <Link
+            href={primaryHref}
+            className="inline-flex self-start items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium whitespace-nowrap text-white transition-colors hover:bg-hush-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
+          >
+            <Vote className="h-4 w-4" />
+            <span>{primaryLabel}</span>
+          </Link>
+
+          {hasAcceptedReceipt ? (
+            <button
+              type="button"
+              onClick={() => setIsReceiptDialogOpen(true)}
+              className="inline-flex self-start items-center gap-2 rounded-xl border border-green-500/30 bg-green-500/10 px-4 py-2 text-sm font-medium whitespace-nowrap text-green-100 transition-colors hover:bg-green-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-300 focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
+              data-testid="hush-voting-verify-receipt-trigger"
+            >
+              <ShieldCheck className="h-4 w-4" />
+              <span>Verify receipt</span>
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -147,6 +431,168 @@ function VoterWorkspaceSummary({ entry }: { entry: ElectionHubEntryView }) {
           accentClass={entry.HasOfficialResult || entry.HasUnofficialResult ? 'text-green-100' : undefined}
         />
       </div>
+
+      {isReceiptDialogOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center px-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="hub-receipt-verification-title"
+          data-testid="hush-voting-receipt-dialog"
+        >
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setIsReceiptDialogOpen(false)}
+            aria-hidden="true"
+          />
+          <div className="relative w-full max-w-2xl rounded-2xl border border-hush-bg-element bg-hush-bg-dark p-6 shadow-2xl">
+            <button
+              type="button"
+              onClick={() => setIsReceiptDialogOpen(false)}
+              className="absolute right-4 top-4 text-hush-text-accent transition-colors hover:text-hush-text-primary"
+              aria-label="Close receipt verification dialog"
+            >
+              <X className="h-5 w-5" />
+            </button>
+
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-green-500/15 text-green-300">
+                <ShieldCheck className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                  Receipt verification
+                </div>
+                <h3
+                  id="hub-receipt-verification-title"
+                  className="mt-2 text-xl font-semibold text-hush-text-primary"
+                >
+                  Verify vote receipt
+                </h3>
+                <p className="mt-3 text-sm leading-7 text-hush-text-accent">
+                  Paste the receipt text or upload the downloaded receipt file. This check confirms
+                  whether this voter is already marked as voted in this election. After the election
+                  closes, a separate check can confirm whether the vote was included in the final
+                  count.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 space-y-4">
+              <div className="flex flex-wrap items-center gap-3">
+                <label
+                  htmlFor="hush-voting-receipt-file"
+                  className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-hush-bg-hover bg-hush-bg-element/70 px-4 py-2.5 text-sm font-medium text-hush-text-primary transition-colors hover:bg-hush-bg-element"
+                >
+                  <Files className="h-4 w-4" />
+                  <span>Upload receipt file</span>
+                </label>
+                <input
+                  id="hush-voting-receipt-file"
+                  type="file"
+                  accept=".txt,text/plain"
+                  className="hidden"
+                  onChange={(event) => void handleReceiptFileChange(event)}
+                  data-testid="hush-voting-receipt-file"
+                />
+                {receiptSourceLabel ? (
+                  <div className="text-sm text-hush-text-accent">Loaded file: {receiptSourceLabel}</div>
+                ) : (
+                  <div className="text-sm text-hush-text-accent">
+                    Or paste the copied receipt text below.
+                  </div>
+                )}
+              </div>
+
+              <textarea
+                value={receiptInput}
+                onChange={(event) => {
+                  setReceiptInput(event.target.value);
+                  setReceiptVerification(null);
+                }}
+                rows={10}
+                className="w-full rounded-2xl border border-hush-bg-hover bg-hush-bg-element/70 px-4 py-3 text-sm leading-6 text-hush-text-primary placeholder-hush-text-accent/60 focus:outline-none focus:ring-2 focus:ring-hush-purple"
+                placeholder={
+                  showCommitmentFieldInReceiptTemplate
+                    ? `Accepted Ballot Receipt\nElection ID: ${entry.Election.ElectionId}\nReceipt ID: ...\nAcceptance ID: ...\nAccepted At: ...\nBallot Package Commitment: ...\nServer Proof: ...`
+                    : `Accepted Ballot Receipt\nElection ID: ${entry.Election.ElectionId}\nReceipt ID: ...\nAcceptance ID: ...\nAccepted At: ...\nServer Proof: ...`
+                }
+                data-testid="hush-voting-receipt-input"
+              />
+
+              {receiptVerification ? (
+                <div
+                  className={`rounded-2xl px-4 py-4 text-sm ${
+                    receiptVerification.tone === 'success'
+                      ? 'border border-green-500/30 bg-green-500/10 text-green-100'
+                      : 'border border-red-500/30 bg-red-500/10 text-red-100'
+                  }`}
+                  data-testid="hush-voting-receipt-result"
+                >
+                  <div className="font-semibold">{receiptVerification.title}</div>
+                  <div className="mt-2 leading-7">{receiptVerification.detail}</div>
+                  {receiptVerification.statusItems?.length ? (
+                    <div className="mt-4 space-y-3">
+                      {receiptVerification.statusItems.map((item) => (
+                        <div key={item.label} className="flex items-start gap-3">
+                          {item.complete ? (
+                            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                          ) : (
+                            <Circle className="mt-0.5 h-4 w-4 shrink-0 opacity-80" />
+                          )}
+                          <div className="leading-6">{item.label}</div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                  <div className="mt-3 text-xs uppercase tracking-[0.18em] opacity-80">
+                    Verified at {receiptVerification.verifiedAt}
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-2xl bg-hush-bg-element/70 px-4 py-4 text-sm text-hush-text-accent">
+                  <div className="space-y-3">
+                    <div className="flex items-start gap-3">
+                      <Circle className="mt-0.5 h-4 w-4 shrink-0 opacity-80" />
+                      <div>Confirm whether this voter is marked as voted in this election.</div>
+                    </div>
+                    {!showCommitmentFieldInReceiptTemplate ? (
+                      <div className="flex items-start gap-3">
+                        <Circle className="mt-0.5 h-4 w-4 shrink-0 opacity-80" />
+                        <div>Open-election receipts include only the fields needed for this check.</div>
+                      </div>
+                    ) : null}
+                    <div className="flex items-start gap-3">
+                      <Circle className="mt-0.5 h-4 w-4 shrink-0 opacity-80" />
+                      <div>After the election closes, confirm whether the vote was included in the final count.</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-6 flex flex-wrap justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setIsReceiptDialogOpen(false)}
+                className="rounded-xl border border-hush-bg-hover px-4 py-2.5 text-sm font-medium text-hush-text-accent transition-colors hover:bg-hush-bg-element"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleVerifyReceipt()}
+                disabled={isVerifyingReceipt}
+                className="inline-flex items-center gap-2 rounded-xl bg-green-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-green-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-300 focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark disabled:cursor-not-allowed disabled:opacity-50"
+                data-testid="hush-voting-verify-receipt-submit"
+              >
+                {isVerifyingReceipt ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                <span>Verify receipt</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -154,17 +600,117 @@ function VoterWorkspaceSummary({ entry }: { entry: ElectionHubEntryView }) {
 function OwnerAdminWorkspaceSummary({
   entry,
   detail,
-  actorEncryptionPublicKey,
-  actorEncryptionPrivateKey,
-  actorSigningPrivateKey,
 }: {
   entry: ElectionHubEntryView;
   detail: GetElectionResponse | null;
-  actorEncryptionPublicKey: string;
-  actorEncryptionPrivateKey: string;
-  actorSigningPrivateKey: string;
 }) {
   const latestProposal = useMemo(() => getLatestProposal(detail), [detail]);
+  const activeCeremonyVersion = useMemo(() => getActiveCeremonyVersion(detail), [detail]);
+  const savedDraft = useMemo(() => createDraftFromElectionDetail(detail), [detail]);
+  const saveValidationErrors = useMemo(
+    () => (detail ? getDraftSaveValidationErrors(savedDraft) : []),
+    [detail, savedDraft]
+  );
+  const openValidationErrors = useMemo(
+    () => (detail ? getDraftOpenValidationErrors(savedDraft) : []),
+    [detail, savedDraft]
+  );
+  const acceptedTrustees = useMemo(
+    () =>
+      (detail?.TrusteeInvitations ?? []).filter(
+        (invitation) => invitation.Status === ElectionTrusteeInvitationStatusProto.Accepted
+      ),
+    [detail?.TrusteeInvitations]
+  );
+  const pendingTrustees = useMemo(
+    () =>
+      (detail?.TrusteeInvitations ?? []).filter(
+        (invitation) => invitation.Status === ElectionTrusteeInvitationStatusProto.Pending
+      ),
+    [detail?.TrusteeInvitations]
+  );
+  const governanceMode = detail?.Election?.GovernanceMode ?? entry.Election.GovernanceMode;
+  const requiredApprovalCount = detail?.Election?.RequiredApprovalCount ?? 0;
+  const usesTrustees = governanceMode === ElectionGovernanceModeProto.TrusteeThreshold;
+  const hasAcceptedTrusteeRoster =
+    !usesTrustees || acceptedTrustees.length >= Math.max(1, requiredApprovalCount || 1);
+  const isCeremonyReady =
+    !usesTrustees ||
+    activeCeremonyVersion?.Status === ElectionCeremonyVersionStatusProto.CeremonyVersionReady;
+  const readinessItems = [
+    {
+      label: 'Saved draft checks',
+      isReady: detail ? saveValidationErrors.length === 0 : false,
+      detail: detail
+        ? saveValidationErrors.length === 0
+          ? 'The saved draft metadata and policy are complete enough for owner workflow.'
+          : 'The saved draft still has blocking metadata or policy issues.'
+        : 'Load the saved election detail before checking draft readiness.',
+    },
+    {
+      label: 'Open prerequisites',
+      isReady: detail ? openValidationErrors.length === 0 : false,
+      detail: detail
+        ? openValidationErrors.length === 0
+          ? 'Ballot and local pre-open checks are clear.'
+          : 'The saved draft still needs ballot or local open-preparation work.'
+        : 'Open-preparation checks appear after the election detail loads.',
+    },
+    ...(usesTrustees
+      ? [
+          {
+            label: 'Accepted trustees',
+            isReady: hasAcceptedTrusteeRoster,
+            detail: hasAcceptedTrusteeRoster
+              ? `${acceptedTrustees.length} accepted trustee(s) cover the ${Math.max(
+                  1,
+                  requiredApprovalCount || 1
+                )}-of-N threshold.`
+              : `Need at least ${Math.max(
+                  1,
+                  requiredApprovalCount || 1
+                )} accepted trustee(s) before open can proceed.`,
+          },
+          {
+            label: 'Key ceremony',
+            isReady: isCeremonyReady,
+            detail: isCeremonyReady
+              ? activeCeremonyVersion
+                ? `Version ${activeCeremonyVersion.VersionNumber} is ${getCeremonyVersionStatusLabel(
+                    activeCeremonyVersion.Status
+                  ).toLowerCase()}.`
+                : 'The trustee ceremony is ready.'
+              : activeCeremonyVersion
+                ? `Version ${activeCeremonyVersion.VersionNumber} is ${getCeremonyVersionStatusLabel(
+                    activeCeremonyVersion.Status
+                  ).toLowerCase()}.`
+                : 'No key ceremony version is ready yet.',
+          },
+        ]
+      : []),
+  ];
+  const readinessBlockerCount = readinessItems.filter((item) => !item.isReady).length;
+  const readinessBlockers = Array.from(
+    new Set([
+      ...saveValidationErrors,
+      ...openValidationErrors,
+      ...(usesTrustees && !hasAcceptedTrusteeRoster
+        ? [
+            `Accepted trustees recorded: ${acceptedTrustees.length} of ${Math.max(
+              1,
+              requiredApprovalCount || 1
+            )}.`,
+          ]
+        : []),
+      ...(usesTrustees && !isCeremonyReady
+        ? [
+            activeCeremonyVersion
+              ? `Key ceremony status is ${getCeremonyVersionStatusLabel(activeCeremonyVersion.Status)}.`
+              : 'Key ceremony has not reached Ready status yet.',
+          ]
+        : []),
+    ])
+  );
 
   return (
     <section className="space-y-4 pt-4 md:pt-6" data-testid="hush-voting-section-owner-admin">
@@ -177,8 +723,9 @@ function OwnerAdminWorkspaceSummary({
             Election lifecycle management
           </h3>
           <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
-            The shared shell keeps the selected election in view while the full owner lifecycle
-            workspace stays inside HushVoting!.
+            This shell now shows owner-facing trustee and open-readiness status only. Draft edits,
+            auditor grants, ceremony work, and the actual open action stay inside the Owner
+            Workspace.
           </p>
         </div>
 
@@ -191,7 +738,7 @@ function OwnerAdminWorkspaceSummary({
         </Link>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <AvailabilityCard label="Summary" value={getSummaryBadge(entry.Election)} />
         <AvailabilityCard
           label="Draft revision"
@@ -202,13 +749,82 @@ function OwnerAdminWorkspaceSummary({
           }
         />
         <AvailabilityCard
-          label="Suggested action"
-          value={getElectionHubSuggestedActionLabel(entry.SuggestedAction)}
+          label="Ready to open"
+          value={
+            readinessBlockerCount === 0
+              ? usesTrustees
+                ? 'Ready for open proposal'
+                : 'Ready in owner workspace'
+              : `${readinessBlockerCount} blocker(s) remaining`
+          }
+          accentClass={readinessBlockerCount === 0 ? 'text-green-100' : 'text-amber-100'}
+        />
+        <AvailabilityCard
+          label="Trustees"
+          value={
+            usesTrustees
+              ? `${acceptedTrustees.length} accepted | ${pendingTrustees.length} pending`
+              : 'Admin-only flow'
+          }
         />
         <AvailabilityCard
           label="Last updated"
           value={formatTimestamp(detail?.Election?.LastUpdatedAt ?? entry.Election.LastUpdatedAt)}
         />
+      </div>
+
+      <div className="rounded-2xl bg-hush-bg-dark/70 p-4 shadow-sm shadow-black/10">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-[0.24em] text-hush-text-accent">
+              Ready-to-open snapshot
+            </div>
+            <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
+              Use this as the quick answer to “can I open yet?”. Auditor management moved to the
+              Owner Workspace, and trustee-threshold elections also require the key ceremony there.
+            </p>
+          </div>
+          <div className="rounded-xl border border-hush-bg-light px-3 py-2 text-xs text-hush-text-accent">
+            {usesTrustees ? 'Trustee-threshold path' : 'Admin-only path'}
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          {readinessItems.map((item) => (
+            <div
+              key={item.label}
+              className={`rounded-xl border px-4 py-3 ${
+                item.isReady
+                  ? 'border-green-500/30 bg-green-500/10 text-green-100'
+                  : 'border-amber-500/30 bg-amber-500/10 text-amber-100'
+              }`}
+            >
+              <div className="flex items-center gap-2 text-sm font-medium">
+                {item.isReady ? (
+                  <CheckCircle2 className="h-4 w-4" />
+                ) : (
+                  <AlertCircle className="h-4 w-4" />
+                )}
+                <span>{item.label}</span>
+              </div>
+              <div className="mt-2 text-sm">{item.detail}</div>
+            </div>
+          ))}
+        </div>
+
+        {readinessBlockers.length > 0 ? (
+          <ul className="mt-4 list-disc space-y-1 pl-5 text-sm text-hush-text-accent">
+            {readinessBlockers.map((blocker) => (
+              <li key={blocker}>{blocker}</li>
+            ))}
+          </ul>
+        ) : (
+          <div className="mt-4 text-sm text-green-100">
+            {usesTrustees
+              ? 'The next step is to open the election from Governed Actions in the Owner Workspace.'
+              : 'The next step is to open the election from the Owner Workspace.'}
+          </div>
+        )}
       </div>
 
       {latestProposal ? (
@@ -224,16 +840,6 @@ function OwnerAdminWorkspaceSummary({
         </div>
       ) : null}
 
-      {detail ? (
-        <div className="pt-4 md:pt-6">
-          <DesignatedAuditorGrantManager
-            detail={detail}
-            actorEncryptionPublicKey={actorEncryptionPublicKey}
-            actorEncryptionPrivateKey={actorEncryptionPrivateKey}
-            actorSigningPrivateKey={actorSigningPrivateKey}
-          />
-        </div>
-      ) : null}
     </section>
   );
 }
@@ -488,14 +1094,10 @@ function ResultsWorkspaceSummary({
 
 export function HushVotingWorkspace({
   actorPublicAddress,
-  actorEncryptionPublicKey,
-  actorEncryptionPrivateKey,
-  actorSigningPrivateKey,
   initialElectionId,
 }: HushVotingWorkspaceProps) {
   const router = useRouter();
   const {
-    canManageReportAccessGrants,
     clearGrantCandidateSearch,
     feedback,
     error,
@@ -573,7 +1175,7 @@ export function HushVotingWorkspace({
 
   const requestedEntryMissing = Boolean(initialElectionId && !isLoadingHub && hubView && !requestedEntry);
   const sectionOrder = getElectionWorkspaceSectionOrder(activeEntry);
-  const hasVisibleSections = sectionOrder.length > 0 || canManageReportAccessGrants;
+  const hasVisibleSections = sectionOrder.length > 0;
   const isDetailRoute = Boolean(initialElectionId);
 
   const handleSelectElection = (electionId: string) => {
@@ -585,7 +1187,7 @@ export function HushVotingWorkspace({
   const emptyStateReason =
     error ||
     hubView?.EmptyStateReason ||
-    'This account does not currently hold any FEAT-103 election role.';
+    'This account does not currently hold any election role.';
 
   if (!isDetailRoute) {
     return (
@@ -692,7 +1294,7 @@ export function HushVotingWorkspace({
         {requestedEntryMissing ? (
           <ElectionAccessBoundaryNotice
             title="Requested election is not available here"
-            message={`The route for election ${initialElectionId} does not resolve to an actor-visible FEAT-103 workspace.`}
+            message={`The route for election ${initialElectionId} does not resolve to a visible workspace for this account.`}
             details={[
               'Return to HushVoting! Hub to choose another linked election.',
               'This route only opens elections that the current actor can access.',
@@ -710,7 +1312,7 @@ export function HushVotingWorkspace({
 
             {!hasVisibleSections ? (
               <ElectionAccessBoundaryNotice
-                title="No FEAT-103 workspace surface is available"
+                title="No workspace surface is available"
                 message={
                   activeEntry.SuggestedActionReason ||
                   'This actor does not currently have an owner, trustee, voter, auditor, or result-review surface for the selected election.'
@@ -728,15 +1330,17 @@ export function HushVotingWorkspace({
               </div>
             ) : null}
 
-            {sectionOrder.includes('voter') ? <VoterWorkspaceSummary entry={activeEntry} /> : null}
+            {sectionOrder.includes('voter') ? (
+              <VoterWorkspaceSummary
+                entry={activeEntry}
+                actorPublicAddress={actorPublicAddress}
+              />
+            ) : null}
 
             {sectionOrder.includes('owner-admin') ? (
               <OwnerAdminWorkspaceSummary
                 entry={activeEntry}
                 detail={activeDetail}
-                actorEncryptionPublicKey={actorEncryptionPublicKey}
-                actorEncryptionPrivateKey={actorEncryptionPrivateKey}
-                actorSigningPrivateKey={actorSigningPrivateKey}
               />
             ) : null}
 
@@ -784,7 +1388,7 @@ export function HushVotingWorkspace({
                     </div>
                     <p className="mt-2 text-sm text-hush-text-accent">
                       The election record already carries an official result, but this actor does
-                      not currently have an FEAT-103 result-review surface for it.
+                      not currently have a result-review surface for it.
                     </p>
                   </div>
                 </div>

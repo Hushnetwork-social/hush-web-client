@@ -315,6 +315,17 @@ export function renumberElectionOptions(options: ElectionOption[]): ElectionOpti
   }));
 }
 
+export function getOwnerManagedElectionOptions(options: ElectionOption[]): ElectionOption[] {
+  return renumberElectionOptions(
+    options
+      .filter((option) => !option.IsBlankOption)
+      .map((option) => ({
+        ...option,
+        IsBlankOption: false,
+      }))
+  );
+}
+
 export function createSingleWinnerOutcomeRule(): ElectionDraftInput['OutcomeRule'] {
   return {
     Kind: OutcomeRuleKindProto.SingleWinner,
@@ -417,11 +428,7 @@ export function createDraftFromElectionDetail(detail: GetElectionResponse | null
       ProtocolOmegaVersion: draftSnapshot.Policy.ProtocolOmegaVersion,
       ReportingPolicy: draftSnapshot.Policy.ReportingPolicy,
       ReviewWindowPolicy: draftSnapshot.Policy.ReviewWindowPolicy,
-      OwnerOptions: renumberElectionOptions(
-        draftSnapshot.Options.map((option) => ({
-          ...option,
-        }))
-      ),
+      OwnerOptions: getOwnerManagedElectionOptions(draftSnapshot.Options),
       AcknowledgedWarningCodes: [...draftSnapshot.AcknowledgedWarningCodes],
       RequiredApprovalCount: draftSnapshot.Policy.RequiredApprovalCount,
     };
@@ -448,11 +455,7 @@ export function createDraftFromElectionDetail(detail: GetElectionResponse | null
       ProtocolOmegaVersion: election.ProtocolOmegaVersion,
       ReportingPolicy: election.ReportingPolicy,
       ReviewWindowPolicy: election.ReviewWindowPolicy,
-      OwnerOptions: renumberElectionOptions(
-        election.Options.map((option) => ({
-          ...option,
-        }))
-      ),
+      OwnerOptions: getOwnerManagedElectionOptions(election.Options),
       AcknowledgedWarningCodes: [...election.AcknowledgedWarningCodes],
       RequiredApprovalCount: election.RequiredApprovalCount,
     };
@@ -479,7 +482,7 @@ export function normalizeElectionDraft(draft: ElectionDraftInput): ElectionDraft
         Version: application.Version.trim(),
       }))
       .filter((application) => application.ApplicationId.length > 0 && application.Version.length > 0),
-    OwnerOptions: renumberElectionOptions(
+    OwnerOptions: getOwnerManagedElectionOptions(
       draft.OwnerOptions.map((option) => ({
         ...option,
         DisplayLabel: option.DisplayLabel.trim(),
@@ -610,16 +613,41 @@ export function formatTimestamp(timestamp?: GrpcTimestamp): string {
   return new Date(milliseconds).toLocaleString();
 }
 
-export function formatArtifactValue(value?: string): string {
-  if (!value) {
+export function formatArtifactValue(value?: unknown): string {
+  if (value === undefined || value === null || value === '') {
     return 'Not recorded';
   }
 
-  if (value.length <= 24) {
-    return value;
+  let normalizedValue: string;
+
+  if (typeof value === 'string') {
+    normalizedValue = value;
+  } else if (
+    typeof value === 'object' &&
+    value !== null &&
+    'value' in value &&
+    typeof (value as { value?: unknown }).value === 'string'
+  ) {
+    normalizedValue = (value as { value: string }).value;
+  } else if (typeof value === 'object') {
+    try {
+      normalizedValue = JSON.stringify(value);
+    } catch {
+      normalizedValue = String(value);
+    }
+  } else {
+    normalizedValue = String(value);
   }
 
-  return `${value.slice(0, 12)}...${value.slice(-8)}`;
+  if (!normalizedValue || normalizedValue === '""') {
+    return 'Not recorded';
+  }
+
+  if (normalizedValue.length <= 24) {
+    return normalizedValue;
+  }
+
+  return `${normalizedValue.slice(0, 12)}...${normalizedValue.slice(-8)}`;
 }
 
 export function getGovernedActionLabel(actionType: ElectionGovernedActionTypeProto): string {
@@ -1188,6 +1216,7 @@ export function getUnsupportedDraftValueMessages(draft: ElectionDraftInput): str
 
 export function getDraftSaveValidationErrors(draft: ElectionDraftInput): string[] {
   const errors = [...getUnsupportedDraftValueMessages(draft)];
+  const ownerManagedOptions = getOwnerManagedElectionOptions(draft.OwnerOptions);
 
   if (!draft.Title.trim()) {
     errors.push('Election title is required.');
@@ -1250,7 +1279,7 @@ export function getDraftSaveValidationErrors(draft: ElectionDraftInput): string[
   const optionIds = new Set<string>();
   const ballotOrders = new Set<number>();
 
-  draft.OwnerOptions.forEach((option, index) => {
+  ownerManagedOptions.forEach((option, index) => {
     const trimmedId = option.OptionId.trim();
     const trimmedLabel = option.DisplayLabel.trim();
 
@@ -1275,10 +1304,6 @@ export function getDraftSaveValidationErrors(draft: ElectionDraftInput): string[
     } else {
       ballotOrders.add(option.BallotOrder);
     }
-
-    if (option.IsBlankOption) {
-      errors.push('Owner options must not mark themselves as the reserved blank vote option.');
-    }
   });
 
   return Array.from(new Set(errors));
@@ -1286,7 +1311,9 @@ export function getDraftSaveValidationErrors(draft: ElectionDraftInput): string[
 
 export function getDraftOpenValidationErrors(draft: ElectionDraftInput): string[] {
   const errors: string[] = [];
-  const nonBlankOptions = draft.OwnerOptions.filter((option) => option.DisplayLabel.trim().length > 0);
+  const nonBlankOptions = getOwnerManagedElectionOptions(draft.OwnerOptions).filter(
+    (option) => option.DisplayLabel.trim().length > 0
+  );
 
   if (nonBlankOptions.length < 2) {
     errors.push('At least two non-blank options are required before opening the election.');

@@ -11,6 +11,7 @@ import {
   getClosedProgressBannerState,
   getElectionHubSuggestedActionLabel,
   getElectionWorkspaceSectionOrder,
+  formatArtifactValue,
 } from './contracts';
 
 const timestamp = { seconds: 1_711_410_000, nanos: 0 };
@@ -97,5 +98,12 @@ describe('election hub contract helpers', () => {
         ElectionHubNextActionHintProto.ElectionHubActionAuditorReviewPackage
       )
     ).toBe('Review package');
+  });
+
+  it('formats non-string artifact values without throwing', () => {
+    expect(formatArtifactValue({ value: '1234567890abcdefghijklmnopqrstuvwxyz' })).toBe(
+      '1234567890ab...stuvwxyz'
+    );
+    expect(formatArtifactValue({ raw: [1, 2, 3], length: 32 })).toContain('{"raw":[1,2');
   });
 });

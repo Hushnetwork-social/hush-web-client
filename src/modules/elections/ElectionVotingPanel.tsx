@@ -5,16 +5,17 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
   ArrowLeft,
+  Circle,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   Copy,
   Download,
   Loader2,
-  Lock,
   RefreshCcw,
   ShieldAlert,
   ShieldCheck,
+  X,
 } from 'lucide-react';
 import { generateGuid } from '@/lib/crypto';
 import {
@@ -27,6 +28,7 @@ import {
   type GetElectionResultViewResponse,
   type GetElectionVotingViewResponse,
 } from '@/lib/grpc';
+import { infoLog } from '@/lib/debug-logger';
 import { electionsService } from '@/lib/grpc/services/elections';
 import { submitTransaction } from '@/modules/blockchain/BlockchainService';
 import {
@@ -47,6 +49,17 @@ type ElectionVotingPanelProps = {
 type VotingFeedback = {
   tone: 'success' | 'error';
   message: string;
+};
+
+type ReceiptVerificationFeedback = {
+  tone: 'success' | 'warning' | 'error';
+  title: string;
+  detail: string;
+  verifiedAt: string;
+  statusItems?: Array<{
+    label: string;
+    complete: boolean;
+  }>;
 };
 
 type PendingSubmissionState = {
@@ -77,6 +90,31 @@ const insetCardClass = 'rounded-2xl bg-hush-bg-dark/72 px-5 py-4 shadow-sm shado
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isElectionDevModeAllowed(): boolean {
+  return process.env.NEXT_PUBLIC_ELECTIONS_ALLOW_DEV_MODE === 'true';
+}
+
+function shouldIncludeReceiptCommitment(
+  lifecycleState?: ElectionLifecycleStateProto,
+): boolean {
+  return (
+    lifecycleState === ElectionLifecycleStateProto.Closed ||
+    lifecycleState === ElectionLifecycleStateProto.Finalized
+  );
+}
+
+function getForcedE2EElectionMode(): 'dev' | 'non-dev' | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const forcedMode = (window as Window & {
+    __e2e_forceElectionMode?: unknown;
+  }).__e2e_forceElectionMode;
+
+  return forcedMode === 'dev' || forcedMode === 'non-dev' ? forcedMode : null;
 }
 
 async function waitForVotingViewMatch(
@@ -165,6 +203,166 @@ async function hashText(value: string): Promise<string> {
     .slice(0, 64);
 }
 
+function getCastValidationErrors(castDraft: CastDraft, hasBoundaryContext: boolean): string[] {
+  const errors: string[] = [];
+  if (!castDraft.encryptedBallotPackage.trim()) {
+    errors.push('Encrypted ballot package is required.');
+  }
+  if (!castDraft.proofBundle.trim()) {
+    errors.push('Proof bundle is required.');
+  }
+  if (!castDraft.ballotNullifier.trim()) {
+    errors.push('Ballot nullifier is required.');
+  }
+  if (!hasBoundaryContext) {
+    errors.push('The election boundary context is incomplete.');
+  }
+
+  return errors;
+}
+
+function getMissingBoundaryFields(votingResponse: GetElectionVotingViewResponse | null): string[] {
+  const missingFields: string[] = [];
+
+  if (!votingResponse?.OpenArtifactId) {
+    missingFields.push('OpenArtifactId');
+  }
+  if (!votingResponse?.EligibleSetHash) {
+    missingFields.push('EligibleSetHash');
+  }
+  if (!votingResponse?.CeremonyVersionId) {
+    missingFields.push('CeremonyVersionId');
+  }
+  if (!votingResponse?.DkgProfileId) {
+    missingFields.push('DkgProfileId');
+  }
+  if (!votingResponse?.TallyPublicKeyFingerprint) {
+    missingFields.push('TallyPublicKeyFingerprint');
+  }
+
+  return missingFields;
+}
+
+function logVotingBoundaryContext(
+  source: 'initial-load' | 'refresh' | 'submit-blocked',
+  electionId: string,
+  detailResponse: GetElectionResponse | null,
+  votingResponse: GetElectionVotingViewResponse | null,
+): void {
+  const openArtifactId = detailResponse?.Election?.OpenArtifactId || '';
+  const openArtifact =
+    detailResponse?.BoundaryArtifacts?.find((artifact) => artifact.Id === openArtifactId) ?? null;
+  const missingFields = getMissingBoundaryFields(votingResponse);
+  const detailOpenArtifactHasStoredSnapshot = Boolean(openArtifact?.CeremonySnapshot);
+  const detailBoundaryArtifactCount = detailResponse?.BoundaryArtifacts?.length ?? 0;
+  const boundaryContextComplete = missingFields.length === 0;
+
+  infoLog(
+    `[ElectionBoundarySummary] source=${source} electionId=${electionId} ` +
+      `detailLoadSucceeded=${detailResponse?.Success ?? false} ` +
+      `detailLifecycleState=${detailResponse?.Election?.LifecycleState ?? 'null'} ` +
+      `detailOpenArtifactId=${openArtifactId || 'null'} ` +
+      `detailOpenArtifactHasStoredSnapshot=${detailOpenArtifactHasStoredSnapshot} ` +
+      `detailBoundaryArtifactCount=${detailBoundaryArtifactCount} ` +
+      `votingViewSucceeded=${votingResponse?.Success ?? false} ` +
+      `votingOpenArtifactId=${votingResponse?.OpenArtifactId || 'null'} ` +
+      `votingEligibleSetHashPresent=${Boolean(votingResponse?.EligibleSetHash)} ` +
+      `votingCeremonyVersionIdPresent=${Boolean(votingResponse?.CeremonyVersionId)} ` +
+      `votingDkgProfileIdPresent=${Boolean(votingResponse?.DkgProfileId)} ` +
+      `votingTallyPublicKeyFingerprintPresent=${Boolean(votingResponse?.TallyPublicKeyFingerprint)} ` +
+      `boundaryContextComplete=${boundaryContextComplete} ` +
+      `missingFields=${missingFields.join('|') || 'none'}`,
+  );
+
+  infoLog('[ElectionBoundary]', {
+    source,
+    electionId,
+    detailLoadSucceeded: detailResponse?.Success ?? false,
+    detailLifecycleState: detailResponse?.Election?.LifecycleState ?? null,
+    detailOpenArtifactId: openArtifactId || null,
+    detailOpenArtifactHasStoredSnapshot,
+    detailBoundaryArtifactCount,
+    votingViewSucceeded: votingResponse?.Success ?? false,
+    votingOpenArtifactId: votingResponse?.OpenArtifactId || null,
+    votingEligibleSetHashPresent: Boolean(votingResponse?.EligibleSetHash),
+    votingCeremonyVersionIdPresent: Boolean(votingResponse?.CeremonyVersionId),
+    votingDkgProfileIdPresent: Boolean(votingResponse?.DkgProfileId),
+    votingTallyPublicKeyFingerprintPresent: Boolean(votingResponse?.TallyPublicKeyFingerprint),
+    boundaryContextComplete,
+    missingFields,
+  });
+}
+
+async function buildElectionDevModeArtifacts({
+  electionId,
+  actorPublicAddress,
+  selectedOption,
+  openArtifactId,
+  eligibleSetHash,
+  ceremonyVersionId,
+  dkgProfileId,
+  tallyPublicKeyFingerprint,
+}: {
+  electionId: string;
+  actorPublicAddress: string;
+  selectedOption: {
+    OptionId: string;
+    DisplayLabel: string;
+    ShortDescription?: string;
+    BallotOrder: number;
+    IsBlankOption?: boolean;
+  };
+  openArtifactId: string;
+  eligibleSetHash: string;
+  ceremonyVersionId: string;
+  dkgProfileId: string;
+  tallyPublicKeyFingerprint: string;
+}): Promise<CastDraft & { commitmentHash: string }> {
+  const generatedAt = new Date().toISOString();
+  const commitmentHash = await hashText(
+    `election-dev-commitment:v1:${electionId}:${actorPublicAddress}`,
+  );
+  const ballotNullifier = await hashText(
+    `election-dev-nullifier:v1:${electionId}:${actorPublicAddress}`,
+  );
+  const selectionFingerprint = await hashText(
+    `election-dev-selection:v1:${electionId}:${selectedOption.OptionId}:${selectedOption.DisplayLabel}`,
+  );
+
+  return {
+    commitmentHash,
+    encryptedBallotPackage: JSON.stringify({
+      mode: 'election-dev-mode-v1',
+      packageType: 'dev-protected-ballot',
+      electionId,
+      actorPublicAddress,
+      optionId: selectedOption.OptionId,
+      optionLabel: selectedOption.DisplayLabel,
+      optionDescription: selectedOption.ShortDescription || '',
+      ballotOrder: selectedOption.BallotOrder,
+      isBlankOption: selectedOption.IsBlankOption ?? false,
+      selectionFingerprint,
+      generatedAt,
+    }),
+    proofBundle: JSON.stringify({
+      mode: 'election-dev-mode-v1',
+      proofType: 'dev-election-proof',
+      electionId,
+      actorPublicAddress,
+      optionId: selectedOption.OptionId,
+      commitmentHash,
+      ballotNullifier,
+      openArtifactId,
+      eligibleSetHash,
+      ceremonyVersionId,
+      dkgProfileId,
+      tallyPublicKeyFingerprint,
+      generatedAt,
+    }),
+    ballotNullifier,
+  };
+}
+
 function loadPendingSubmission(electionId: string): PendingSubmissionState | null {
   if (typeof window === 'undefined') {
     return null;
@@ -200,48 +398,68 @@ function loadLocalReceipt(electionId: string): LocalReceipt | null {
     return null;
   }
 
-  const rawValue = window.sessionStorage.getItem(receiptStorageKey(electionId));
+  const storageKey = receiptStorageKey(electionId);
+  const rawValue =
+    window.localStorage.getItem(storageKey) ?? window.sessionStorage.getItem(storageKey);
   if (!rawValue) {
     return null;
   }
 
   try {
-    return JSON.parse(rawValue) as LocalReceipt;
+    const parsed = JSON.parse(rawValue) as LocalReceipt;
+    window.localStorage.setItem(storageKey, JSON.stringify(parsed));
+    window.sessionStorage.removeItem(storageKey);
+    return parsed;
   } catch {
-    window.sessionStorage.removeItem(receiptStorageKey(electionId));
+    window.localStorage.removeItem(storageKey);
+    window.sessionStorage.removeItem(storageKey);
     return null;
   }
 }
 
 function saveLocalReceipt(electionId: string, receipt: LocalReceipt): void {
   if (typeof window !== 'undefined') {
-    window.sessionStorage.setItem(receiptStorageKey(electionId), JSON.stringify(receipt));
+    const storageKey = receiptStorageKey(electionId);
+    window.localStorage.setItem(storageKey, JSON.stringify(receipt));
+    window.sessionStorage.removeItem(storageKey);
   }
 }
 
-function buildReceiptText(receipt: LocalReceipt): string {
-  return [
-    'FEAT-099 Accepted Ballot Receipt',
+function buildReceiptText(
+  receipt: LocalReceipt,
+  lifecycleState?: ElectionLifecycleStateProto,
+): string {
+  const lines = [
+    'Accepted Ballot Receipt',
     `Election ID: ${receipt.electionId}`,
     `Receipt ID: ${receipt.receiptId}`,
     `Acceptance ID: ${receipt.acceptanceId}`,
     `Accepted At: ${receipt.acceptedAt}`,
-    `Ballot Package Commitment: ${receipt.ballotPackageCommitment}`,
     `Server Proof: ${receipt.serverProof}`,
-  ].join('\n');
+  ];
+
+  if (shouldIncludeReceiptCommitment(lifecycleState)) {
+    lines.splice(
+      5,
+      0,
+      `Ballot Package Commitment: ${receipt.ballotPackageCommitment || '(not retained on this device)'}`,
+    );
+  }
+
+  return lines.join('\n');
 }
 
 function createReceiptFromVotingView(
   electionId: string,
   votingView: GetElectionVotingViewResponse,
   pendingSubmission: PendingSubmissionState | null,
+  existingReceipt: LocalReceipt | null,
 ): LocalReceipt | null {
   if (
     !votingView.HasAcceptedAt ||
     !votingView.AcceptanceId ||
     !votingView.ReceiptId ||
-    !votingView.ServerProof ||
-    !pendingSubmission?.ballotPackageCommitment
+    !votingView.ServerProof
   ) {
     return null;
   }
@@ -251,8 +469,85 @@ function createReceiptFromVotingView(
     receiptId: votingView.ReceiptId,
     acceptanceId: votingView.AcceptanceId,
     acceptedAt: formatTimestamp(votingView.AcceptedAt),
-    ballotPackageCommitment: pendingSubmission.ballotPackageCommitment,
+    ballotPackageCommitment:
+      pendingSubmission?.ballotPackageCommitment ??
+      existingReceipt?.ballotPackageCommitment ??
+      '',
     serverProof: votingView.ServerProof,
+  };
+}
+
+function buildReceiptVerificationFeedback({
+  localReceipt,
+  votingView,
+  lifecycleState,
+}: {
+  localReceipt: LocalReceipt;
+  votingView: GetElectionVotingViewResponse;
+  lifecycleState?: ElectionLifecycleStateProto;
+}): ReceiptVerificationFeedback {
+  const verifiedAt = new Date().toLocaleString();
+  const receiptMatches =
+    votingView.HasAcceptedAt &&
+    votingView.ReceiptId === localReceipt.receiptId &&
+    votingView.AcceptanceId === localReceipt.acceptanceId &&
+    votingView.ServerProof === localReceipt.serverProof;
+
+  if (!receiptMatches) {
+    return {
+      tone: 'error',
+      title: 'This receipt does not match this voter',
+      detail:
+        'The stored receipt on this device does not match the current vote record for this voter.',
+      verifiedAt,
+    };
+  }
+
+  const isCounted =
+    votingView.PersonalParticipationStatus ===
+    ElectionParticipationStatusProto.ParticipationCountedAsVoted;
+  const isPostCloseState =
+    lifecycleState === ElectionLifecycleStateProto.Closed ||
+    lifecycleState === ElectionLifecycleStateProto.Finalized;
+  const finalCountStatusItem = isPostCloseState
+    ? {
+        label: 'The election is closed. Final count confirmation is available as a separate step.',
+        complete: false,
+      }
+    : {
+        label: 'Final count confirmation will be available after the election closes.',
+        complete: false,
+      };
+
+  if (isCounted) {
+    return {
+      tone: 'success',
+      title: 'This voter is marked as voted',
+      detail: 'This receipt matches the current vote record for this voter in this election.',
+      verifiedAt,
+      statusItems: [
+        {
+          label: 'This voter is marked as voted in this election.',
+          complete: true,
+        },
+        finalCountStatusItem,
+      ],
+    };
+  }
+
+  return {
+    tone: 'warning',
+    title: 'Receipt matches this voter',
+    detail:
+      'This receipt matches this voter, but the election is not showing the voter as marked as voted yet.',
+    verifiedAt,
+    statusItems: [
+      {
+        label: 'This voter is marked as voted in this election.',
+        complete: false,
+      },
+      finalCountStatusItem,
+    ],
   };
 }
 
@@ -310,6 +605,21 @@ function SummaryValueCard({
   );
 }
 
+function WorkflowStatusCard({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className={`${insetCardClass} flex min-h-[108px] flex-col justify-between`}>
+      <div className="text-xs uppercase tracking-[0.2em] text-hush-text-accent">{label}</div>
+      <div className="mt-4 text-lg font-semibold leading-snug text-hush-text-primary">{value}</div>
+    </div>
+  );
+}
+
 function getVotingIntroCopy({
   lifecycleState,
   associatedNumber,
@@ -332,7 +642,7 @@ function getVotingIntroCopy({
       return `${linkedIdentityCopy} This election is still being prepared, so voting is not available yet. When it opens, this screen will show the steps to cast the vote.`;
     case ElectionLifecycleStateProto.Open:
       if (isLinked && isActiveVoter) {
-        return `${linkedIdentityCopy} This election is open and this voter record is active. This is the screen where commitment and vote submission happen.`;
+        return `${linkedIdentityCopy} This election is open and this voter record is active. Choose your ballot option here, then continue with the protected ballot steps below.`;
       }
 
       return `${linkedIdentityCopy} This election is open, but this voter record is not ready to cast a vote yet. Review the voter status below to see what is missing.`;
@@ -360,21 +670,37 @@ export function ElectionVotingPanel({
   const [isSubmittingCast, setIsSubmittingCast] = useState(false);
   const [isCheckingStatus, setIsCheckingStatus] = useState(false);
   const [feedback, setFeedback] = useState<VotingFeedback | null>(null);
-  const [commitmentHash, setCommitmentHash] = useState('');
-  const [castDraft, setCastDraft] = useState<CastDraft>({
-    encryptedBallotPackage: '',
-    proofBundle: '',
-    ballotNullifier: '',
-  });
-  const [isReviewingCast, setIsReviewingCast] = useState(false);
   const [pendingSubmission, setPendingSubmission] = useState<PendingSubmissionState | null>(null);
   const [localReceipt, setLocalReceipt] = useState<LocalReceipt | null>(null);
+  const [receiptVerification, setReceiptVerification] =
+    useState<ReceiptVerificationFeedback | null>(null);
   const [castFailure, setCastFailure] = useState<string | null>(null);
+  const [selectedBallotOptionId, setSelectedBallotOptionId] = useState('');
+  const [isVerifyingReceipt, setIsVerifyingReceipt] = useState(false);
 
   useEffect(() => {
     setPendingSubmission(loadPendingSubmission(electionId));
     setLocalReceipt(loadLocalReceipt(electionId));
   }, [electionId]);
+
+  useEffect(() => {
+    setReceiptVerification(null);
+  }, [electionId, localReceipt?.receiptId, localReceipt?.acceptanceId, localReceipt?.serverProof]);
+
+  useEffect(() => {
+    if (!receiptVerification) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setReceiptVerification(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [receiptVerification]);
 
   async function refreshContext(submissionIdempotencyKey?: string): Promise<GetElectionVotingViewResponse> {
     const storedPending = loadPendingSubmission(electionId);
@@ -393,12 +719,15 @@ export function ElectionVotingPanel({
     setDetail(detailResponse);
     setVotingView(votingResponse);
     setResultView(resultResponse);
+    logVotingBoundaryContext('refresh', electionId, detailResponse, votingResponse);
 
     if (votingResponse.Success && votingResponse.HasAcceptedAt) {
+      const existingReceipt = loadLocalReceipt(electionId);
       const createdReceipt = createReceiptFromVotingView(
         electionId,
         votingResponse,
         storedPending ?? pendingSubmission,
+        existingReceipt,
       );
       if (createdReceipt) {
         saveLocalReceipt(electionId, createdReceipt);
@@ -438,12 +767,15 @@ export function ElectionVotingPanel({
         setDetail(detailResponse);
         setVotingView(votingResponse);
         setResultView(resultResponse);
+        logVotingBoundaryContext('initial-load', electionId, detailResponse, votingResponse);
 
         if (votingResponse.Success && votingResponse.HasAcceptedAt) {
+          const existingReceipt = loadLocalReceipt(electionId);
           const createdReceipt = createReceiptFromVotingView(
             electionId,
             votingResponse,
             storedPending,
+            existingReceipt,
           );
           if (createdReceipt) {
             saveLocalReceipt(electionId, createdReceipt);
@@ -486,12 +818,19 @@ export function ElectionVotingPanel({
   const isActiveVoter =
     selfRosterEntry?.VotingRightStatus === ElectionVotingRightStatusProto.VotingRightActive;
   const isCommitmentRegistered = votingView?.CommitmentRegistered ?? false;
-  const isAccepted =
-    votingView?.HasAcceptedAt === true &&
-    votingView.PersonalParticipationStatus ===
-      ElectionParticipationStatusProto.ParticipationCountedAsVoted;
-  const canRegisterCommitment = isOpenElection && isLinked && isActiveVoter && !isCommitmentRegistered;
-  const canPrepareCast = isOpenElection && isLinked && isActiveVoter && isCommitmentRegistered && !isAccepted;
+  const hasAcceptedReceipt = votingView?.HasAcceptedAt === true;
+  const isAccepted = hasAcceptedReceipt;
+  const actionableReceipt = useMemo(
+    () =>
+      votingView?.HasAcceptedAt
+        ? createReceiptFromVotingView(electionId, votingView, pendingSubmission, localReceipt)
+        : null,
+    [electionId, localReceipt, pendingSubmission, votingView],
+  );
+  const hasRetainedBallotCommitment = Boolean(actionableReceipt?.ballotPackageCommitment);
+  const shouldShowReceiptCommitment = shouldIncludeReceiptCommitment(
+    election?.LifecycleState,
+  );
   const hasBoundaryContext = !!(
     votingView?.OpenArtifactId &&
     votingView?.EligibleSetHash &&
@@ -499,8 +838,31 @@ export function ElectionVotingPanel({
     votingView?.DkgProfileId &&
     votingView?.TallyPublicKeyFingerprint
   );
+  const ballotOptions = useMemo(
+    () =>
+      (election?.Options ?? [])
+        .slice()
+        .sort((left, right) => left.BallotOrder - right.BallotOrder)
+        .map((option) => ({
+          ...option,
+          DisplayLabel:
+            option.DisplayLabel?.trim() ||
+            (option.IsBlankOption ? 'Blank vote' : `Option ${option.BallotOrder}`),
+          ShortDescription: option.ShortDescription?.trim() || '',
+        })),
+    [election?.Options],
+  );
+  const selectedBallotOption = useMemo(
+    () =>
+      ballotOptions.find((option) => option.OptionId === selectedBallotOptionId) ?? null,
+    [ballotOptions, selectedBallotOptionId],
+  );
+  const effectiveParticipationStatus = hasAcceptedReceipt
+    ? ElectionParticipationStatusProto.ParticipationCountedAsVoted
+    : votingView?.PersonalParticipationStatus ??
+      ElectionParticipationStatusProto.ParticipationDidNotVote;
   const participationLabel = getParticipationLabel(
-    votingView?.PersonalParticipationStatus ?? ElectionParticipationStatusProto.ParticipationDidNotVote,
+    effectiveParticipationStatus,
     isOpenElection,
     selfRosterEntry?.InCurrentDenominator ?? false,
   );
@@ -519,7 +881,8 @@ export function ElectionVotingPanel({
 
     return pendingSubmission ? 'Pending local recovery' : 'No pending submission';
   }, [isCheckingStatus, pendingSubmission, votingView?.SubmissionStatus]);
-  const shouldExpandSnapshotByDefault = isOpenElection || !!pendingSubmission || isAccepted;
+  const shouldExpandSnapshotByDefault =
+    !hasResultArtifacts && (isOpenElection || !!pendingSubmission || isAccepted);
   const [isSnapshotExpanded, setIsSnapshotExpanded] = useState(shouldExpandSnapshotByDefault);
   const hasAdvancedBoundaryContext = Boolean(
     isOpenElection &&
@@ -527,8 +890,42 @@ export function ElectionVotingPanel({
   );
   const shouldShowAdvancedContext = hasAdvancedBoundaryContext || !!pendingSubmission;
   const [isAdvancedContextExpanded, setIsAdvancedContextExpanded] = useState(
-    canPrepareCast || !!pendingSubmission,
+    !hasResultArtifacts && (isCommitmentRegistered || !!pendingSubmission),
   );
+  const isSubmissionInFlight = isSubmittingCommitment || isSubmittingCast;
+  const showBallotWorkflow =
+    hasVotingAccess &&
+    isOpenElection &&
+    isLinked &&
+    isActiveVoter &&
+    !isAccepted &&
+    !pendingSubmission &&
+    !isSubmissionInFlight;
+  const forcedElectionMode = getForcedE2EElectionMode();
+  const electionDevModeEnabled =
+    forcedElectionMode === 'dev' ||
+    (forcedElectionMode !== 'non-dev' && isElectionDevModeAllowed());
+  const commitmentStatusValue = isCommitmentRegistered
+    ? 'Registered'
+    : electionDevModeEnabled
+      ? 'Created during submit'
+      : 'Created by production circuit';
+  const finalSubmitStatusValue = pendingSubmission
+    ? 'Pending chain check'
+    : selectedBallotOption
+      ? electionDevModeEnabled
+        ? 'Ready to submit'
+        : 'Waiting for production circuit'
+      : 'Choose an option first';
+  const submitButtonDisabled =
+    !selectedBallotOption || !!pendingSubmission || isSubmittingCommitment || isSubmittingCast;
+  const shouldShowSubmissionPrivacyPanel =
+    (isSubmissionInFlight || !!pendingSubmission) && !isAccepted;
+  const submissionPrivacyStatus = isSubmittingCommitment
+    ? 'Preparing protected ballot'
+    : isSubmittingCast
+      ? 'Waiting for acceptance receipt'
+      : submissionStatusLabel;
 
   useEffect(() => {
     if (shouldExpandSnapshotByDefault) {
@@ -537,32 +934,42 @@ export function ElectionVotingPanel({
   }, [shouldExpandSnapshotByDefault]);
 
   useEffect(() => {
-    if (canPrepareCast || pendingSubmission) {
+    if ((isCommitmentRegistered || pendingSubmission) && !hasResultArtifacts) {
       setIsAdvancedContextExpanded(true);
     }
-  }, [canPrepareCast, pendingSubmission]);
+  }, [hasResultArtifacts, isCommitmentRegistered, pendingSubmission]);
 
-  const fieldValidationErrors = useMemo(() => {
-    const errors: string[] = [];
-    if (!castDraft.encryptedBallotPackage.trim()) {
-      errors.push('Encrypted ballot package is required.');
+  useEffect(() => {
+    if (hasResultArtifacts) {
+      setIsSnapshotExpanded(false);
+      setIsAdvancedContextExpanded(false);
     }
-    if (!castDraft.proofBundle.trim()) {
-      errors.push('Proof bundle is required.');
-    }
-    if (!castDraft.ballotNullifier.trim()) {
-      errors.push('Ballot nullifier is required.');
-    }
-    if (!hasBoundaryContext) {
-      errors.push('The election boundary context is incomplete.');
-    }
-    return errors;
-  }, [castDraft, hasBoundaryContext]);
+  }, [hasResultArtifacts]);
 
-  async function handleRegisterCommitment(): Promise<void> {
-    if (!commitmentHash.trim()) {
+  useEffect(() => {
+    setSelectedBallotOptionId('');
+  }, [electionId]);
+
+  useEffect(() => {
+    if (
+      selectedBallotOptionId &&
+      !ballotOptions.some((option) => option.OptionId === selectedBallotOptionId)
+    ) {
+      setSelectedBallotOptionId('');
+    }
+  }, [ballotOptions, selectedBallotOptionId]);
+
+  async function submitCommitmentHash(
+    nextCommitmentHash: string,
+    options?: {
+      showSuccessFeedback?: boolean;
+      successMessage?: string;
+    },
+  ): Promise<boolean> {
+    const normalizedCommitmentHash = nextCommitmentHash.trim();
+    if (!normalizedCommitmentHash) {
       setFeedback({ tone: 'error', message: 'Enter a commitment hash before registering.' });
-      return;
+      return false;
     }
 
     setIsSubmittingCommitment(true);
@@ -574,7 +981,7 @@ export function ElectionVotingPanel({
         actorPublicAddress,
         actorEncryptionPublicKey,
         actorEncryptionPrivateKey,
-        commitmentHash.trim(),
+        normalizedCommitmentHash,
         actorSigningPrivateKey,
       );
       const submitResult = await submitTransaction(signedTransaction);
@@ -598,27 +1005,33 @@ export function ElectionVotingPanel({
         await refreshContext();
       }
 
-      setCommitmentHash('');
-      setFeedback({
-        tone: 'success',
-        message: 'Voting commitment registered. This step does not mean you have already voted.',
-      });
+      if (options?.showSuccessFeedback !== false) {
+        setFeedback({
+          tone: 'success',
+          message:
+            options?.successMessage ||
+            'Voting commitment registered. This step does not mean you have already voted.',
+        });
+      }
+      return true;
     } catch (error) {
       setFeedback({
         tone: 'error',
         message:
           error instanceof Error ? error.message : 'Voting commitment registration failed.',
       });
+      return false;
     } finally {
       setIsSubmittingCommitment(false);
     }
   }
 
-  async function handleCastSubmit(): Promise<void> {
-    if (!votingView || fieldValidationErrors.length > 0) {
+  async function submitCastDraft(nextCastDraft: CastDraft): Promise<void> {
+    const validationErrors = getCastValidationErrors(nextCastDraft, hasBoundaryContext);
+    if (!votingView || validationErrors.length > 0) {
       setFeedback({
         tone: 'error',
-        message: fieldValidationErrors[0] || 'The election cast is not ready to submit.',
+        message: validationErrors[0] || 'The election cast is not ready to submit.',
       });
       return;
     }
@@ -626,7 +1039,7 @@ export function ElectionVotingPanel({
     const submissionIdempotencyKey = generateGuid();
     const nextPendingSubmission: PendingSubmissionState = {
       idempotencyKey: submissionIdempotencyKey,
-      ballotPackageCommitment: await hashText(castDraft.encryptedBallotPackage),
+      ballotPackageCommitment: await hashText(nextCastDraft.encryptedBallotPackage),
       submittedAt: new Date().toISOString(),
     };
 
@@ -642,9 +1055,9 @@ export function ElectionVotingPanel({
         actorEncryptionPublicKey,
         actorEncryptionPrivateKey,
         submissionIdempotencyKey,
-        castDraft.encryptedBallotPackage.trim(),
-        castDraft.proofBundle.trim(),
-        castDraft.ballotNullifier.trim(),
+        nextCastDraft.encryptedBallotPackage.trim(),
+        nextCastDraft.proofBundle.trim(),
+        nextCastDraft.ballotNullifier.trim(),
         votingView.OpenArtifactId,
         votingView.EligibleSetHash,
         votingView.CeremonyVersionId,
@@ -680,8 +1093,8 @@ export function ElectionVotingPanel({
         (response) =>
           response.HasAcceptedAt ||
           response.SubmissionStatus !== ElectionVotingSubmissionStatusProto.VotingSubmissionStatusNone,
-        14,
-        600,
+        24,
+        750,
       );
 
       if (awaitedView?.HasAcceptedAt) {
@@ -697,8 +1110,6 @@ export function ElectionVotingPanel({
         clearPendingSubmission(electionId);
         setPendingSubmission(null);
         setVotingView(awaitedView);
-        setCastDraft({ encryptedBallotPackage: '', proofBundle: '', ballotNullifier: '' });
-        setIsReviewingCast(false);
         setFeedback({
           tone: 'success',
           message: 'Ballot accepted. Keep the local receipt from this device.',
@@ -723,6 +1134,90 @@ export function ElectionVotingPanel({
       setIsSubmittingCast(false);
       setIsCheckingStatus(false);
     }
+  }
+
+  async function handleSubmitDevOnlyVote(): Promise<void> {
+    if (!electionDevModeEnabled) {
+      setFeedback({
+        tone: 'error',
+        message: 'Election dev mode is disabled for this build.',
+      });
+      return;
+    }
+
+    if (!selectedBallotOption) {
+      setFeedback({
+        tone: 'error',
+        message: 'Choose a ballot option before submitting the dev-only vote.',
+      });
+      return;
+    }
+
+    if (!votingView || !hasBoundaryContext) {
+      logVotingBoundaryContext('submit-blocked', electionId, detail, votingView);
+      setFeedback({
+        tone: 'error',
+        message: 'The election boundary context is incomplete.',
+      });
+      return;
+    }
+
+    try {
+      const devArtifacts = await buildElectionDevModeArtifacts({
+        electionId,
+        actorPublicAddress,
+        selectedOption: selectedBallotOption,
+        openArtifactId: votingView.OpenArtifactId,
+        eligibleSetHash: votingView.EligibleSetHash,
+        ceremonyVersionId: votingView.CeremonyVersionId,
+        dkgProfileId: votingView.DkgProfileId,
+        tallyPublicKeyFingerprint: votingView.TallyPublicKeyFingerprint,
+      });
+
+      if (!isCommitmentRegistered) {
+        const commitmentAccepted = await submitCommitmentHash(devArtifacts.commitmentHash, {
+          showSuccessFeedback: false,
+        });
+        if (!commitmentAccepted) {
+          return;
+        }
+      }
+
+      await submitCastDraft({
+        encryptedBallotPackage: devArtifacts.encryptedBallotPackage,
+        proofBundle: devArtifacts.proofBundle,
+        ballotNullifier: devArtifacts.ballotNullifier,
+      });
+    } catch (error) {
+      setFeedback({
+        tone: 'error',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Failed to prepare the dev-only election vote.',
+      });
+    }
+  }
+
+  async function handleSubmitVote(): Promise<void> {
+    if (!selectedBallotOption) {
+      setFeedback({
+        tone: 'error',
+        message: 'Choose a ballot option before submitting the vote.',
+      });
+      return;
+    }
+
+    if (!electionDevModeEnabled) {
+      setFeedback({
+        tone: 'error',
+        message:
+          'Real protected vote submission is not available in this build yet.',
+      });
+      return;
+    }
+
+    await handleSubmitDevOnlyVote();
   }
 
   async function handleCheckStatusAgain(): Promise<void> {
@@ -751,7 +1246,7 @@ export function ElectionVotingPanel({
   }
 
   async function handleCopyReceipt(): Promise<void> {
-    if (!localReceipt) {
+    if (!actionableReceipt) {
       return;
     }
 
@@ -759,7 +1254,9 @@ export function ElectionVotingPanel({
       if (!navigator.clipboard?.writeText) {
         throw new Error('Clipboard access is unavailable on this device.');
       }
-      await navigator.clipboard.writeText(buildReceiptText(localReceipt));
+      await navigator.clipboard.writeText(
+        buildReceiptText(actionableReceipt, detail?.Election?.LifecycleState),
+      );
       setFeedback({ tone: 'success', message: 'Receipt copied locally.' });
     } catch (error) {
       setFeedback({
@@ -771,18 +1268,62 @@ export function ElectionVotingPanel({
   }
 
   function handleDownloadReceipt(): void {
-    if (!localReceipt || typeof window === 'undefined') {
+    if (!actionableReceipt || typeof window === 'undefined') {
       return;
     }
 
-    const blob = new Blob([buildReceiptText(localReceipt)], { type: 'text/plain;charset=utf-8' });
+    const blob = new Blob(
+      [buildReceiptText(actionableReceipt, detail?.Election?.LifecycleState)],
+      { type: 'text/plain;charset=utf-8' },
+    );
     const objectUrl = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = objectUrl;
-    link.download = `feat099-receipt-${localReceipt.receiptId}.txt`;
+    link.download = `accepted-ballot-receipt-${actionableReceipt.receiptId}.txt`;
     link.click();
     window.URL.revokeObjectURL(objectUrl);
     setFeedback({ tone: 'success', message: 'Receipt downloaded locally.' });
+  }
+
+  async function handleVerifyReceipt(): Promise<void> {
+    if (!actionableReceipt) {
+      setReceiptVerification({
+        tone: 'error',
+        title: 'Verification needs a receipt',
+        detail:
+          'This device does not currently have a receipt to check.',
+        verifiedAt: new Date().toLocaleString(),
+      });
+      return;
+    }
+
+    setIsVerifyingReceipt(true);
+    try {
+      const refreshedView = await refreshContext();
+      if (!refreshedView.Success) {
+        throw new Error(refreshedView.ErrorMessage || 'Failed to refresh the current election state.');
+      }
+
+      setReceiptVerification(
+        buildReceiptVerificationFeedback({
+          localReceipt: actionableReceipt,
+          votingView: refreshedView,
+          lifecycleState: detail?.Election?.LifecycleState,
+        }),
+      );
+    } catch (error) {
+      setReceiptVerification({
+        tone: 'error',
+        title: 'Verification could not be completed',
+        detail:
+          error instanceof Error
+            ? error.message
+            : 'Failed to re-check the current election state for this receipt.',
+        verifiedAt: new Date().toLocaleString(),
+      });
+    } finally {
+      setIsVerifyingReceipt(false);
+    }
   }
 
   if (isLoading) {
@@ -832,18 +1373,9 @@ export function ElectionVotingPanel({
               </p>
             </div>
           </div>
-          <div className="pt-2">
-            <Link
-              href={`/elections/${electionId}/eligibility`}
-              className="mb-6 inline-flex min-h-11 items-center gap-2 rounded-xl bg-hush-purple px-4 py-3 text-sm font-semibold text-hush-bg-dark transition-colors hover:bg-hush-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
-            >
-              <ShieldCheck className="h-4 w-4" />
-              <span>Open eligibility view</span>
-            </Link>
-          </div>
         </header>
 
-        {feedback ? (
+        {feedback && !showBallotWorkflow ? (
           <div
             className={`rounded-xl border px-4 py-3 text-sm ${
               feedback.tone === 'success'
@@ -855,65 +1387,344 @@ export function ElectionVotingPanel({
           </div>
         ) : null}
 
-        <section>
-          <button
-            type="button"
-            onClick={() => setIsSnapshotExpanded((current) => !current)}
-            className="w-full appearance-none border-0 bg-transparent py-1 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
-            aria-expanded={isSnapshotExpanded}
-            data-testid="voting-summary-toggle"
-          >
-            <div className="w-full">
-              <div className="text-xs font-semibold uppercase tracking-[0.24em] text-hush-text-accent">
-                Voter status snapshot
-              </div>
-              <div className="mt-3 flex w-full flex-col gap-3 md:flex-row md:items-start md:justify-between md:gap-6">
-                <p className="min-w-0 max-w-2xl flex-1 text-sm leading-6 text-hush-text-accent">
-                  Review lifecycle, associated number, commitment, and participation for this voter.
-                </p>
-                <span className="inline-flex items-center gap-2 whitespace-nowrap pt-0.5 text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent md:ml-6">
-                  {isSnapshotExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                  <span>{isSnapshotExpanded ? 'Collapse' : 'Expand'}</span>
-                </span>
-              </div>
-            </div>
-          </button>
+        <ElectionResultArtifactsSection election={election} resultView={resultView} />
 
-          {isSnapshotExpanded ? (
-            <div className="mt-5 border-t border-white/10 pt-5">
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                <SummaryValueCard
-                  label="Lifecycle"
-                  value={getLifecycleLabel(election.LifecycleState)}
-                />
-                <SummaryValueCard
-                  label={hasVotingAccess ? (associatedNumber ? 'Associated number' : 'Identity') : 'Result access'}
-                  value={
-                    hasVotingAccess
-                      ? associatedNumber ?? (isLinked ? 'Linked' : 'Unlinked')
-                      : (resultView?.CanViewParticipantEncryptedResults ? 'Participant' : 'Public only')
-                  }
-                />
-                <SummaryValueCard
-                  label={hasVotingAccess ? 'Commitment' : 'Unofficial result'}
-                  value={
-                    hasVotingAccess
-                      ? (isCommitmentRegistered ? 'Registered' : 'Missing')
-                      : (resultView?.UnofficialResult ? 'Available' : 'Pending')
-                  }
-                />
-                <SummaryValueCard
-                  label={hasVotingAccess ? 'Participation' : 'Official result'}
-                  value={
-                    hasVotingAccess
-                      ? participationLabel
-                      : (resultView?.OfficialResult ? 'Available' : 'Pending')
-                  }
-                />
+        {isAccepted ? (
+          <section
+            className="rounded-2xl border border-green-500/30 bg-green-500/10 p-5 text-green-100"
+            data-testid="voting-accepted-panel"
+          >
+            <div className="grid gap-6 xl:grid-cols-3">
+              <div className="space-y-3">
+                <div className="flex items-start gap-3">
+                  <CheckCircle2 className="mt-0.5 h-5 w-5" />
+                  <div>
+                    <div className="font-semibold">Accepted ballot</div>
+                    <div className="mt-2 text-sm">
+                      Accepted at: {formatTimestamp(votingView.AcceptedAt)}
+                    </div>
+                    <div className="mt-1 text-sm">
+                      Receipt id:{' '}
+                      <span className="font-mono">{truncateMiddle(votingView.ReceiptId)}</span>
+                    </div>
+                    <div className="mt-1 text-sm">
+                      Acceptance id:{' '}
+                      <span className="font-mono">{truncateMiddle(votingView.AcceptanceId)}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3 xl:border-l xl:border-green-100/10 xl:pl-6">
+                <div className="font-semibold">Local receipt retained on this device</div>
+                {actionableReceipt ? (
+                  <div className="space-y-2 text-sm">
+                    <div>
+                      Server proof:{' '}
+                      <span className="font-mono">{truncateMiddle(actionableReceipt.serverProof)}</span>
+                    </div>
+                    {shouldShowReceiptCommitment ? (
+                      <div>
+                        Ballot commitment:{' '}
+                        <span className="font-mono">
+                          {hasRetainedBallotCommitment
+                            ? truncateMiddle(actionableReceipt.ballotPackageCommitment)
+                            : '(not retained on this device)'}
+                        </span>
+                      </div>
+                    ) : null}
+                    {shouldShowReceiptCommitment && !hasRetainedBallotCommitment ? (
+                      <div className="text-green-100/80">
+                        This device can still export and verify the receipt for this voter, even
+                        though the original local ballot commitment was not retained here.
+                      </div>
+                    ) : null}
+                    {!shouldShowReceiptCommitment ? (
+                      <div className="text-green-100/80">
+                        Open-election receipts stay compact and include only the fields used for
+                        this check. Additional receipt details appear after the election closes.
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="text-sm text-green-100/80">
+                    This device does not currently hold a usable receipt for this accepted ballot.
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-4 xl:border-l xl:border-green-100/10 xl:pl-6">
+                <div className="flex items-center gap-2 font-semibold">
+                  <ShieldCheck className="h-4 w-4" />
+                  <span>Verification</span>
+                </div>
+                <div className="space-y-2 text-sm text-green-100/85">
+                  <p>
+                    Use the receipt to confirm whether this voter is marked as voted in this
+                    election.
+                  </p>
+                  <p className="text-green-100/70">
+                    After the election closes, a separate check can confirm whether the vote was
+                    included in the final count.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleVerifyReceipt()}
+                  disabled={isVerifyingReceipt || !actionableReceipt}
+                  className="inline-flex items-center gap-2 rounded-xl bg-teal-700 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-teal-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300 focus-visible:ring-offset-2 focus-visible:ring-offset-green-950/10 disabled:cursor-not-allowed disabled:opacity-50"
+                  data-testid="voting-verify-receipt"
+                >
+                  {isVerifyingReceipt ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <ShieldCheck className="h-4 w-4" />
+                  )}
+                  <span>Verify receipt</span>
+                </button>
               </div>
             </div>
-          ) : null}
-        </section>
+
+            <div className="mt-5 flex flex-wrap gap-3 border-t border-green-100/10 pt-5">
+              <button
+                type="button"
+                onClick={() => void handleCopyReceipt()}
+                disabled={!actionableReceipt}
+                className="inline-flex items-center gap-2 rounded-xl bg-green-500 px-4 py-2.5 text-sm font-medium text-green-950 transition-colors hover:bg-green-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-200 focus-visible:ring-offset-2 focus-visible:ring-offset-green-950/10 disabled:cursor-not-allowed disabled:opacity-50"
+                data-testid="voting-copy-receipt"
+              >
+                <Copy className="h-4 w-4" />
+                <span>Copy receipt</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleDownloadReceipt}
+                disabled={!actionableReceipt}
+                className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-emerald-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 focus-visible:ring-offset-green-950/10 disabled:cursor-not-allowed disabled:opacity-50"
+                data-testid="voting-download-receipt"
+              >
+                <Download className="h-4 w-4" />
+                <span>Download receipt</span>
+              </button>
+            </div>
+          </section>
+        ) : null}
+
+        {shouldShowSubmissionPrivacyPanel ? (
+          <section className="rounded-2xl border border-blue-500/30 bg-blue-500/10 p-5 text-blue-100" data-testid="voting-pending-panel">
+            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+              <div className="space-y-2 text-sm">
+                <div className="font-semibold">
+                  {pendingSubmission ? 'Vote submitted from this device' : 'Submitting vote from this device'}
+                </div>
+                <div>Status: {submissionPrivacyStatus}</div>
+                {pendingSubmission ? (
+                  <>
+                    <div>Submitted at: {new Date(pendingSubmission.submittedAt).toLocaleString()}</div>
+                    <div>Ballot commitment: <span className="font-mono">{truncateMiddle(pendingSubmission.ballotPackageCommitment)}</span></div>
+                  </>
+                ) : null}
+                <div className="text-blue-100/90">
+                  The selected ballot option is now hidden on this screen while the acceptance receipt is reconciled.
+                </div>
+              </div>
+              {pendingSubmission && !isSubmissionInFlight ? (
+                <button
+                  type="button"
+                  onClick={() => void handleCheckStatusAgain()}
+                  disabled={isCheckingStatus}
+                  className="inline-flex items-center gap-2 rounded-xl border border-blue-200/30 px-4 py-2 text-sm font-medium text-blue-50 transition-colors hover:border-blue-200/60 disabled:cursor-not-allowed disabled:opacity-50"
+                  data-testid="voting-check-status"
+                >
+                  {isCheckingStatus ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+                  <span>Check status again</span>
+                </button>
+              ) : (
+                <div className="inline-flex items-center gap-2 rounded-xl border border-blue-200/20 px-4 py-2 text-sm font-medium text-blue-50/90">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Protecting local vote privacy</span>
+                </div>
+              )}
+            </div>
+          </section>
+        ) : null}
+
+        {castFailure ? (
+          <section className="rounded-2xl border border-red-500/30 bg-red-500/10 p-5 text-red-100">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="mt-0.5 h-5 w-5" />
+              <div>{castFailure}</div>
+            </div>
+          </section>
+        ) : null}
+
+        {showBallotWorkflow ? (
+          <section className={sectionClass} data-testid="voting-ballot-workflow">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-[0.24em] text-hush-text-accent">
+                  Ballot workflow
+                </div>
+                <h2 className="mt-3 text-2xl font-semibold text-hush-text-primary">
+                  Choose your vote
+                </h2>
+                <p className="mt-2 max-w-3xl text-sm leading-6 text-hush-text-accent">
+                  Pick the ballot option you intend to cast on this device. This workflow owns the
+                  single vote-submit action for both the current dev-only path and the later
+                  production protected-circuit path.
+                </p>
+              </div>
+              <div className="self-start rounded-full border border-hush-purple/30 bg-hush-purple/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-primary">
+                {selectedBallotOption ? 'Vote selected' : 'Choose a ballot option'}
+              </div>
+            </div>
+
+            <div className="mt-6 grid gap-4 md:grid-cols-3">
+              <WorkflowStatusCard
+                label="Ballot choice"
+                value={selectedBallotOption?.DisplayLabel || 'Choose below'}
+              />
+              <WorkflowStatusCard
+                label="Commitment"
+                value={commitmentStatusValue}
+              />
+              <WorkflowStatusCard
+                label="Final submit"
+                value={finalSubmitStatusValue}
+              />
+            </div>
+
+            <div className="mt-6">
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                Official ballot options
+              </div>
+              {ballotOptions.length > 0 ? (
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  {ballotOptions.map((option) => {
+                    const isSelected = selectedBallotOptionId === option.OptionId;
+
+                    return (
+                      <button
+                        key={option.OptionId}
+                        type="button"
+                        onClick={() => setSelectedBallotOptionId(option.OptionId)}
+                        className={`rounded-2xl border px-5 py-4 text-left transition-colors ${
+                          isSelected
+                            ? 'border-hush-purple bg-hush-purple/10 shadow-lg shadow-hush-purple/10'
+                            : 'border-hush-bg-light bg-hush-bg-dark/72 hover:border-hush-purple/40 hover:bg-hush-bg-dark'
+                        }`}
+                        data-testid={`voting-option-${option.OptionId}`}
+                        aria-pressed={isSelected}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-lg font-semibold text-hush-text-primary">
+                              {option.DisplayLabel}
+                            </div>
+                            <div className="mt-2 text-sm leading-6 text-hush-text-accent">
+                              {option.ShortDescription ||
+                                (option.IsBlankOption
+                                  ? 'Choose this if you want to cast an explicit blank vote.'
+                                  : 'Official ballot option')}
+                            </div>
+                          </div>
+                          <div className="rounded-full border border-hush-bg-light bg-hush-bg-element px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-hush-text-accent">
+                            {option.IsBlankOption ? 'Blank vote' : `Option ${option.BallotOrder}`}
+                          </div>
+                        </div>
+                        {isSelected ? (
+                          <div className="mt-4 text-xs font-semibold uppercase tracking-[0.16em] text-hush-text-primary">
+                            Selected on this device
+                          </div>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="mt-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-4 text-sm text-amber-100">
+                  Official ballot options are not available on this device yet, so the vote cannot
+                  be submitted from this surface.
+                </div>
+              )}
+            </div>
+
+            {selectedBallotOption ? (
+              <div
+                className="mt-4 rounded-2xl border border-hush-purple/30 bg-hush-purple/10 px-4 py-4 text-sm text-hush-text-primary"
+                data-testid="voting-selected-option-summary"
+              >
+                <div className="font-semibold">Local ballot preview</div>
+                <div className="mt-2">
+                  {selectedBallotOption.DisplayLabel}
+                  {selectedBallotOption.ShortDescription
+                    ? `: ${selectedBallotOption.ShortDescription}`
+                    : ''}
+                </div>
+                <div className="mt-2 text-hush-text-accent">
+                  This is only a local choice on this device. Your vote is not submitted yet.
+                </div>
+              </div>
+            ) : null}
+
+            <div className="mt-4 rounded-2xl border border-blue-500/30 bg-blue-500/10 px-4 py-4 text-sm text-blue-100">
+              <div className="font-semibold">Your vote is not submitted yet</div>
+              <div className="mt-2 leading-6 text-blue-100/90">
+                {electionDevModeEnabled
+                  ? 'Choosing a ballot option here prepares a local ballot preview. Submit vote will generate the dev-only commitment and protected ballot package automatically for this test build.'
+                  : 'Choosing a ballot option here prepares a local ballot preview. Submit vote is the correct action, but the real protected production-circuit path is not connected in this build yet.'}
+              </div>
+            </div>
+
+            <div
+              className={`mt-4 rounded-2xl border px-4 py-4 text-sm ${
+                electionDevModeEnabled
+                  ? 'border-amber-500/30 bg-amber-500/10 text-amber-100'
+                  : 'border-hush-bg-light bg-hush-bg-dark/72 text-hush-text-primary'
+              }`}
+              data-testid="voting-submit-panel"
+            >
+              <div className="font-semibold">
+                {electionDevModeEnabled
+                  ? 'Dev-only submit is enabled for this build'
+                  : 'Submit vote is reserved for the protected production path'}
+              </div>
+              <div className={`mt-2 leading-6 ${electionDevModeEnabled ? 'text-amber-100/90' : 'text-hush-text-accent'}`}>
+                {electionDevModeEnabled
+                  ? 'For automated tests and controlled demos, Submit vote will generate deterministic dev-only election artifacts from the selected option on this device. Never enable this in production.'
+                  : 'The raw manual commitment and proof fields are intentionally hidden from voters. Submit vote will connect to the protected production path in a later build.'}
+              </div>
+              <div className="mt-4 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => void handleSubmitVote()}
+                  disabled={submitButtonDisabled}
+                  className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 disabled:cursor-not-allowed disabled:bg-hush-bg-light disabled:text-hush-text-accent"
+                  data-testid="voting-submit"
+                >
+                  {isSubmittingCommitment || isSubmittingCast ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <ShieldCheck className="h-4 w-4" />
+                  )}
+                  <span>{selectedBallotOption ? 'Submit vote' : 'Choose an option first'}</span>
+                </button>
+              </div>
+              {feedback ? (
+                <div
+                  className={`mt-4 rounded-xl border px-4 py-3 text-sm ${
+                    feedback.tone === 'success'
+                      ? 'border-green-500/40 bg-green-500/10 text-green-100'
+                      : 'border-red-500/40 bg-red-500/10 text-red-100'
+                  }`}
+                  data-testid="voting-submit-feedback"
+                >
+                  {feedback.message}
+                </div>
+              ) : null}
+            </div>
+          </section>
+        ) : null}
 
         {hasVotingAccess && shouldShowAdvancedContext ? (
           <section className={sectionClass}>
@@ -960,13 +1771,69 @@ export function ElectionVotingPanel({
           </section>
         ) : null}
 
+        <section className={sectionClass} data-testid="voting-summary-section">
+          <button
+            type="button"
+            onClick={() => setIsSnapshotExpanded((current) => !current)}
+            className="flex w-full items-start justify-between gap-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
+            aria-expanded={isSnapshotExpanded}
+            data-testid="voting-summary-toggle"
+          >
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-[0.24em] text-hush-text-accent">
+                Voter status snapshot
+              </div>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-hush-text-accent">
+                Review lifecycle, associated number, commitment, and participation for this voter.
+              </p>
+            </div>
+            <span className="mt-1 inline-flex items-center gap-2 whitespace-nowrap text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+              {isSnapshotExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+              <span>{isSnapshotExpanded ? 'Collapse' : 'Expand'}</span>
+            </span>
+          </button>
+
+          {isSnapshotExpanded ? (
+            <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <SummaryValueCard
+                label="Lifecycle"
+                value={getLifecycleLabel(election.LifecycleState)}
+              />
+              <SummaryValueCard
+                label={hasVotingAccess ? (associatedNumber ? 'Associated number' : 'Identity') : 'Result access'}
+                value={
+                  hasVotingAccess
+                    ? associatedNumber ?? (isLinked ? 'Linked' : 'Unlinked')
+                    : (resultView?.CanViewParticipantEncryptedResults ? 'Participant' : 'Public only')
+                }
+              />
+              <SummaryValueCard
+                label={hasVotingAccess ? 'Commitment' : 'Unofficial result'}
+                value={
+                  hasVotingAccess
+                    ? (isCommitmentRegistered ? 'Registered' : 'Missing')
+                    : (resultView?.UnofficialResult ? 'Available' : 'Pending')
+                }
+              />
+              <SummaryValueCard
+                label={hasVotingAccess ? 'Participation' : 'Official result'}
+                value={
+                  hasVotingAccess
+                    ? participationLabel
+                    : (resultView?.OfficialResult ? 'Available' : 'Pending')
+                }
+              />
+            </div>
+          ) : null}
+        </section>
+
         {!hasVotingAccess && hasResultArtifacts ? (
           <section className="rounded-2xl border border-blue-500/30 bg-blue-500/10 p-5 text-blue-100">
             <div className="flex items-start gap-3">
               <ShieldAlert className="mt-0.5 h-5 w-5" />
               <div>
-                Vote-cast controls are not available for this actor on the current query surface, but
-                FEAT-101 result visibility is available for your election role.
+                Vote-cast controls are not available for this actor on the current query surface,
+                but result visibility is available for your election role.
               </div>
             </div>
           </section>
@@ -985,7 +1852,7 @@ export function ElectionVotingPanel({
           <section className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-5 text-amber-100">
             <div className="flex items-start gap-3">
               <ShieldAlert className="mt-0.5 h-5 w-5" />
-              <div>Link your roster identity before FEAT-099 cast acceptance.</div>
+              <div>Link your roster identity before voting.</div>
             </div>
           </section>
         ) : null}
@@ -994,192 +1861,112 @@ export function ElectionVotingPanel({
           <section className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-5 text-amber-100">
             <div className="flex items-start gap-3">
               <ShieldAlert className="mt-0.5 h-5 w-5" />
-              <div>This linked identity does not currently hold an active voting right.</div>
+              <div>This linked identity is not active for this election yet.</div>
             </div>
           </section>
         ) : null}
 
-        {canRegisterCommitment ? (
-          <section className="rounded-2xl border border-hush-bg-light bg-hush-bg-element/95 p-5">
-            <div className="mb-4 flex items-start justify-between gap-3">
-              <div>
-                <div className="text-lg font-semibold">Step 1: Register commitment</div>
-                <div className="mt-1 text-sm text-hush-text-accent">Commitment registration does not mean you already voted.</div>
-              </div>
-              <Lock className="h-5 w-5 text-hush-purple" />
-            </div>
-            <textarea
-              value={commitmentHash}
-              onChange={(event) => setCommitmentHash(event.target.value)}
-              rows={3}
-              className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-dark px-4 py-3 font-mono text-sm text-hush-text-primary outline-none transition-colors focus:border-hush-purple"
-              placeholder="Paste the opaque election commitment hash"
-              data-testid="voting-commitment-input"
+        <div className="pt-2">
+          <Link
+            href={`/elections/${electionId}/eligibility`}
+            className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-hush-bg-light bg-hush-bg-element/80 px-4 py-3 text-sm font-semibold text-hush-text-accent transition-colors hover:border-hush-purple/40 hover:text-hush-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
+          >
+            <ShieldCheck className="h-4 w-4" />
+            <span>View eligibility details</span>
+          </Link>
+        </div>
+
+        {receiptVerification ? (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center px-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="receipt-verification-title"
+            data-testid="voting-receipt-verification-dialog"
+          >
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setReceiptVerification(null)}
+              aria-hidden="true"
             />
-            <div className="mt-4 flex justify-end">
+            <div className="relative w-full max-w-xl rounded-2xl border border-hush-bg-element bg-hush-bg-dark p-6 shadow-2xl">
               <button
                 type="button"
-                onClick={() => void handleRegisterCommitment()}
-                disabled={isSubmittingCommitment}
-                className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 disabled:cursor-not-allowed disabled:bg-hush-bg-light disabled:text-hush-text-accent"
-                data-testid="voting-commitment-submit"
+                onClick={() => setReceiptVerification(null)}
+                className="absolute right-4 top-4 text-hush-text-accent transition-colors hover:text-hush-text-primary"
+                aria-label="Close verification dialog"
               >
-                {isSubmittingCommitment ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-                <span>Register commitment</span>
+                <X className="h-5 w-5" />
               </button>
-            </div>
-          </section>
-        ) : null}
 
-        {pendingSubmission ? (
-          <section className="rounded-2xl border border-blue-500/30 bg-blue-500/10 p-5 text-blue-100" data-testid="voting-pending-panel">
-            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-              <div className="space-y-2 text-sm">
-                <div className="font-semibold">Pending or uncertain submission</div>
-                <div>Status: {submissionStatusLabel}</div>
-                <div>Submitted at: {new Date(pendingSubmission.submittedAt).toLocaleString()}</div>
-                <div>Ballot commitment: <span className="font-mono">{truncateMiddle(pendingSubmission.ballotPackageCommitment)}</span></div>
-              </div>
-              <button
-                type="button"
-                onClick={() => void handleCheckStatusAgain()}
-                disabled={isCheckingStatus}
-                className="inline-flex items-center gap-2 rounded-xl border border-blue-200/30 px-4 py-2 text-sm font-medium text-blue-50 transition-colors hover:border-blue-200/60 disabled:cursor-not-allowed disabled:opacity-50"
-                data-testid="voting-check-status"
-              >
-                {isCheckingStatus ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-                <span>Check status again</span>
-              </button>
-            </div>
-          </section>
-        ) : null}
-
-        {castFailure ? (
-          <section className="rounded-2xl border border-red-500/30 bg-red-500/10 p-5 text-red-100">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="mt-0.5 h-5 w-5" />
-              <div>{castFailure}</div>
-            </div>
-          </section>
-        ) : null}
-
-        {canPrepareCast ? (
-          <section className="rounded-2xl border border-hush-bg-light bg-hush-bg-element/95 p-5">
-            <div className="mb-4 flex items-start justify-between gap-3">
-              <div>
-                <div className="text-lg font-semibold">Step 2: Final ballot cast</div>
-                <div className="mt-1 text-sm text-hush-text-accent">The server accepts one election-scoped submission identity and does not replay the receipt later.</div>
-              </div>
-              <div className="rounded-xl border border-hush-purple/30 bg-hush-purple/10 px-3 py-2 text-xs text-hush-text-primary">Hush-authenticated request</div>
-            </div>
-
-            {!isReviewingCast ? (
-              <div className="grid gap-4">
-                <textarea
-                  value={castDraft.encryptedBallotPackage}
-                  onChange={(event) => setCastDraft((current) => ({ ...current, encryptedBallotPackage: event.target.value }))}
-                  rows={4}
-                  className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-dark px-4 py-3 font-mono text-sm text-hush-text-primary outline-none transition-colors focus:border-hush-purple"
-                  placeholder="Encrypted ballot package"
-                  data-testid="voting-cast-package"
-                />
-                <textarea
-                  value={castDraft.proofBundle}
-                  onChange={(event) => setCastDraft((current) => ({ ...current, proofBundle: event.target.value }))}
-                  rows={3}
-                  className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-dark px-4 py-3 font-mono text-sm text-hush-text-primary outline-none transition-colors focus:border-hush-purple"
-                  placeholder="Proof bundle"
-                  data-testid="voting-cast-proof"
-                />
-                <input
-                  value={castDraft.ballotNullifier}
-                  onChange={(event) => setCastDraft((current) => ({ ...current, ballotNullifier: event.target.value }))}
-                  className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-dark px-4 py-3 font-mono text-sm text-hush-text-primary outline-none transition-colors focus:border-hush-purple"
-                  placeholder="Ballot nullifier"
-                  data-testid="voting-cast-nullifier"
-                />
-                {fieldValidationErrors.length > 0 ? (
-                  <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-4 text-sm text-amber-100">
-                    {fieldValidationErrors[0]}
+              <div className="flex items-start gap-3">
+                <div
+                  className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
+                    receiptVerification.tone === 'success'
+                      ? 'bg-green-500/15 text-green-300'
+                      : receiptVerification.tone === 'warning'
+                        ? 'bg-amber-500/15 text-amber-300'
+                        : 'bg-red-500/15 text-red-300'
+                  }`}
+                >
+                  {receiptVerification.tone === 'error' ? (
+                    <ShieldAlert className="h-5 w-5" />
+                  ) : (
+                    <ShieldCheck className="h-5 w-5" />
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                    Receipt verification
                   </div>
-                ) : null}
-                <div className="flex justify-end">
-                  <button
-                    type="button"
-                    onClick={() => setIsReviewingCast(true)}
-                    disabled={fieldValidationErrors.length > 0 || !!pendingSubmission}
-                    className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 disabled:cursor-not-allowed disabled:bg-hush-bg-light disabled:text-hush-text-accent"
-                    data-testid="voting-cast-review"
+                  <h3
+                    id="receipt-verification-title"
+                    className="mt-2 text-xl font-semibold text-hush-text-primary"
                   >
-                    <Lock className="h-4 w-4" />
-                    <span>Review atomic cast</span>
-                  </button>
+                    {receiptVerification.title}
+                  </h3>
+                  <p className="mt-3 text-sm leading-7 text-hush-text-accent">
+                    {receiptVerification.detail}
+                  </p>
                 </div>
               </div>
-            ) : (
-              <div className="space-y-4" data-testid="voting-cast-review-panel">
-                <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4 text-sm text-hush-text-accent">
-                  <div>Encrypted package: <span className="font-mono text-hush-text-primary">{truncateMiddle(castDraft.encryptedBallotPackage)}</span></div>
-                  <div className="mt-2">Proof bundle: <span className="font-mono text-hush-text-primary">{truncateMiddle(castDraft.proofBundle)}</span></div>
-                  <div className="mt-2">Nullifier: <span className="font-mono text-hush-text-primary">{truncateMiddle(castDraft.ballotNullifier)}</span></div>
-                </div>
-                <div className="flex justify-end gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setIsReviewingCast(false)}
-                    className="rounded-xl border border-hush-bg-light px-4 py-2 text-sm text-hush-text-accent transition-colors hover:border-hush-purple hover:text-hush-text-primary"
-                  >
-                    Edit prepared package
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleCastSubmit()}
-                    disabled={isSubmittingCast || !!pendingSubmission}
-                    className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 disabled:cursor-not-allowed disabled:bg-hush-bg-light disabled:text-hush-text-accent"
-                    data-testid="voting-cast-confirm"
-                  >
-                    {isSubmittingCast ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-                    <span>Submit atomic cast</span>
-                  </button>
+
+              <div className="mt-6 rounded-2xl bg-hush-bg-element/70 px-5 py-4 text-sm text-hush-text-accent">
+                {receiptVerification.statusItems?.length ? (
+                  <div className="space-y-3">
+                    {receiptVerification.statusItems.map((item) => (
+                      <div key={item.label} className="flex items-start gap-3">
+                        {item.complete ? (
+                          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-green-300" />
+                        ) : (
+                          <Circle className="mt-0.5 h-4 w-4 shrink-0 opacity-80" />
+                        )}
+                        <div className="leading-6">{item.label}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div>
+                    Verification compares the stored receipt on this device with the current vote
+                    record for this voter.
+                  </div>
+                )}
+                <div className="mt-3 text-xs uppercase tracking-[0.18em] text-hush-text-accent/80">
+                  Verified at {receiptVerification.verifiedAt}
                 </div>
               </div>
-            )}
-          </section>
-        ) : null}
 
-        <ElectionResultArtifactsSection election={election} resultView={resultView} />
-
-        {isAccepted ? (
-          <section className="rounded-2xl border border-green-500/30 bg-green-500/10 p-5 text-green-100" data-testid="voting-accepted-panel">
-            <div className="flex items-start gap-3">
-              <CheckCircle2 className="mt-0.5 h-5 w-5" />
-              <div>
-                <div className="font-semibold">Accepted ballot</div>
-                <div className="mt-2 text-sm">Accepted at: {formatTimestamp(votingView.AcceptedAt)}</div>
-                <div className="mt-1 text-sm">Receipt id: <span className="font-mono">{truncateMiddle(votingView.ReceiptId)}</span></div>
-                <div className="mt-1 text-sm">Acceptance id: <span className="font-mono">{truncateMiddle(votingView.AcceptanceId)}</span></div>
+              <div className="mt-5 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setReceiptVerification(null)}
+                  className="rounded-xl bg-hush-purple px-4 py-2.5 text-sm font-medium text-hush-bg-dark transition-colors hover:bg-hush-purple/90"
+                >
+                  Close
+                </button>
               </div>
             </div>
-            {localReceipt ? (
-              <div className="mt-4 rounded-xl border border-green-300/20 bg-green-950/10 p-4">
-                <div className="text-sm font-semibold">Local receipt retained on this device</div>
-                <div className="mt-3 space-y-2 text-sm">
-                  <div>Ballot commitment: <span className="font-mono">{truncateMiddle(localReceipt.ballotPackageCommitment)}</span></div>
-                  <div>Server proof: <span className="font-mono">{truncateMiddle(localReceipt.serverProof)}</span></div>
-                </div>
-                <div className="mt-4 flex gap-3">
-                  <button type="button" onClick={() => void handleCopyReceipt()} className="inline-flex items-center gap-2 rounded-xl border border-green-200/30 px-4 py-2 text-sm font-medium text-green-50 transition-colors hover:border-green-200/60" data-testid="voting-copy-receipt">
-                    <Copy className="h-4 w-4" />
-                    <span>Copy receipt</span>
-                  </button>
-                  <button type="button" onClick={handleDownloadReceipt} className="inline-flex items-center gap-2 rounded-xl border border-green-200/30 px-4 py-2 text-sm font-medium text-green-50 transition-colors hover:border-green-200/60" data-testid="voting-download-receipt">
-                    <Download className="h-4 w-4" />
-                    <span>Download receipt</span>
-                  </button>
-                </div>
-              </div>
-            ) : null}
-          </section>
+          </div>
         ) : null}
       </div>
     </div>

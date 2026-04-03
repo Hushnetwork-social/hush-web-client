@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import {
   ElectionBindingStatusProto,
+  ElectionCeremonyVersionStatusProto,
   type ElectionDraftInput,
   ElectionGovernedActionTypeProto,
   ElectionGovernanceModeProto,
@@ -43,6 +44,7 @@ import {
   createOutcomeRuleForKind,
   formatArtifactValue,
   formatTimestamp,
+  getActiveCeremonyVersion,
   getBindingLabel,
   getDisclosureModeLabel,
   getDraftOpenValidationErrors,
@@ -70,6 +72,7 @@ import {
   normalizeElectionDraft,
   renumberElectionOptions,
 } from "./contracts";
+import { DesignatedAuditorGrantManager } from "./DesignatedAuditorGrantManager";
 import { ElectionCeremonyWorkspaceSection } from "./ElectionCeremonyWorkspaceSection";
 import { ElectionEligibilityWorkspaceSection } from "./ElectionEligibilityWorkspaceSection";
 import { ElectionFinalizationWorkspaceSection } from "./ElectionFinalizationWorkspaceSection";
@@ -372,6 +375,7 @@ export function ElectionsWorkspace({
     isSubmitting,
     loadCeremonyActionView,
     loadElection,
+    loadReportAccessGrants,
     loadOpenReadiness,
     loadOwnerDashboard,
     openElection,
@@ -440,6 +444,17 @@ export function ElectionsWorkspace({
       ) ?? null,
     [governedActionStates],
   );
+  const governedOpenActionState = useMemo(
+    () =>
+      governedActionStates.find(
+        (state) => state.actionType === ElectionGovernedActionTypeProto.Open,
+      ) ?? null,
+    [governedActionStates],
+  );
+  const activeCeremonyVersion = useMemo(
+    () => getActiveCeremonyVersion(selectedElection ?? null),
+    [selectedElection],
+  );
 
   const acceptedTrusteeCount = useMemo(
     () =>
@@ -474,6 +489,14 @@ export function ElectionsWorkspace({
     () => getRequiredOpenWarningCodes(draft, acceptedTrusteeCount),
     [acceptedTrusteeCount, draft],
   );
+  const missingRequiredWarningCodes = useMemo(
+    () =>
+      requiredWarningCodes.filter(
+        (warningCode) =>
+          !draft.AcknowledgedWarningCodes.includes(warningCode),
+      ),
+    [draft.AcknowledgedWarningCodes, requiredWarningCodes],
+  );
   const requiredWarningCodeKey = requiredWarningCodes.join(",");
 
   const fixedPolicyItems = useMemo<FixedPolicyItem[]>(
@@ -505,8 +528,24 @@ export function ElectionsWorkspace({
     : "Create Election Draft";
 
   const canEditDraft = isDraftEditable(election);
+  const isReadOnlySelectedElection = !!selectedElectionId && !canEditDraft;
+  const showDraftCreationActions = !selectedElectionId || canEditDraft;
+  const usesTrusteeThreshold =
+    draft.GovernanceMode === ElectionGovernanceModeProto.TrusteeThreshold;
   const supportsDirectOpen =
     election?.GovernanceMode !== ElectionGovernanceModeProto.TrusteeThreshold;
+  const hasSavedElection = !!selectedElectionId;
+  const requiredTrusteeCountForOpen = Math.max(
+    1,
+    draft.RequiredApprovalCount || 1,
+  );
+  const hasAcceptedTrusteesForOpen =
+    !usesTrusteeThreshold ||
+    acceptedTrusteeCount >= requiredTrusteeCountForOpen;
+  const isKeyCeremonyReady =
+    !usesTrusteeThreshold ||
+    activeCeremonyVersion?.Status ===
+      ElectionCeremonyVersionStatusProto.CeremonyVersionReady;
   const canOpenSelectedElection =
     supportsDirectOpen &&
     canOpenElection(election) &&
@@ -515,6 +554,86 @@ export function ElectionsWorkspace({
     openValidationErrors.length === 0;
   const canCloseSelectedElection = canCloseElection(election);
   const canFinalizeSelectedElection = canFinalizeElection(election);
+  const readyToOpenChecklist = useMemo(
+    () => [
+      {
+        label: "Saved draft exists",
+        isReady: hasSavedElection,
+        detail: hasSavedElection
+          ? "This election already has a saved draft revision."
+          : "Save the draft first to create a persisted election record.",
+      },
+      {
+        label: "Draft save checks",
+        isReady: saveValidationErrors.length === 0,
+        detail:
+          saveValidationErrors.length === 0
+            ? "Required metadata and policy values are present."
+            : "Resolve the draft-save blockers before you continue.",
+      },
+      {
+        label: "Open checklist",
+        isReady: openValidationErrors.length === 0,
+        detail:
+          openValidationErrors.length === 0
+            ? "Ballot options and local open prerequisites are clear."
+            : "The election still needs ballot or open-preparation work.",
+      },
+      {
+        label: "Required warnings",
+        isReady: missingRequiredWarningCodes.length === 0,
+        detail:
+          missingRequiredWarningCodes.length === 0
+            ? "All warning acknowledgements required for open are selected."
+            : "Review and acknowledge the required warnings before open.",
+      },
+      ...(usesTrusteeThreshold
+        ? [
+            {
+              label: "Accepted trustee roster",
+              isReady: hasAcceptedTrusteesForOpen,
+              detail: hasAcceptedTrusteesForOpen
+                ? `${acceptedTrusteeCount} accepted trustee(s) cover the ${requiredTrusteeCountForOpen}-of-N threshold.`
+                : `Need at least ${requiredTrusteeCountForOpen} accepted trustee(s).`,
+            },
+            {
+              label: "Key ceremony",
+              isReady: isKeyCeremonyReady,
+              detail: isKeyCeremonyReady
+                ? activeCeremonyVersion
+                  ? `Ceremony version ${activeCeremonyVersion.VersionNumber} is ready.`
+                  : "The key ceremony is ready."
+                : activeCeremonyVersion
+                  ? `Ceremony version ${activeCeremonyVersion.VersionNumber} is not ready yet.`
+                  : "Start and complete the key ceremony before open can proceed.",
+            },
+          ]
+        : [
+            {
+              label: "Server open readiness",
+              isReady: !!openReadiness?.IsReadyToOpen,
+              detail: hasSavedElection
+                ? openReadiness?.IsReadyToOpen
+                  ? "Server-side open readiness confirms the election can open."
+                  : "Refresh server open readiness after the checklist is clear."
+                : "Create the saved draft first to fetch server open readiness.",
+            },
+          ]),
+    ],
+    [
+      acceptedTrusteeCount,
+      activeCeremonyVersion,
+      hasAcceptedTrusteesForOpen,
+      hasSavedElection,
+      isKeyCeremonyReady,
+      missingRequiredWarningCodes.length,
+      openReadiness?.IsReadyToOpen,
+      openValidationErrors.length,
+      requiredTrusteeCountForOpen,
+      saveValidationErrors.length,
+      usesTrusteeThreshold,
+    ],
+  );
 
   useEffect(() => {
     setOwnerPublicAddress(ownerPublicAddress);
@@ -545,6 +664,14 @@ export function ElectionsWorkspace({
     setDraft(createDraftFromElectionDetail(selectedElection ?? null));
     setSnapshotReason("Owner draft update");
   }, [selectedElection, selectedElectionId]);
+
+  useEffect(() => {
+    if (!selectedElectionId) {
+      return;
+    }
+
+    void loadReportAccessGrants(ownerPublicAddress, selectedElectionId);
+  }, [loadReportAccessGrants, ownerPublicAddress, selectedElectionId]);
 
   useEffect(() => {
     if (!selectedElectionId || !election || !canOpenSelectedElection) {
@@ -906,10 +1033,12 @@ export function ElectionsWorkspace({
             <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
               {isStartingNewDraft
                 ? "Start a brand-new election draft here. Complete the required fields, then save it to create the first saved revision."
-                : "Select a saved election on the left, edit its current draft here, and save local changes as the next draft revision while keeping policy boundaries, warning acknowledgements, and trustee-threshold limitations explicit."}
+                : isReadOnlySelectedElection
+                  ? "Review the selected election here. Draft editing is frozen after open, so this workspace now focuses on lifecycle state, warning evidence, boundary artifacts, and any remaining owner-only follow-up."
+                  : "Select a saved election on the left, edit its current draft here, and save local changes as the next draft revision while keeping policy boundaries, warning acknowledgements, and trustee-threshold limitations explicit."}
             </p>
           </div>
-          {selectedElectionId ? (
+          {selectedElectionId && canEditDraft ? (
             <button
               type="button"
               onClick={handleNewDraft}
@@ -974,7 +1103,9 @@ export function ElectionsWorkspace({
                 <p className="mt-1 text-xs text-hush-text-accent">
                   {isStartingNewDraft
                     ? "This blank draft is separate from your existing saved elections. They stay hidden until you save or leave create mode."
-                    : "Select one to continue editing it, or start a brand-new election draft below."}
+                    : isReadOnlySelectedElection
+                      ? "Select one to review it here. Open elections stay read-only in this workspace."
+                      : "Select one to continue editing it, or start a brand-new election draft below."}
                 </p>
               </div>
               {isLoadingList && (
@@ -983,26 +1114,28 @@ export function ElectionsWorkspace({
             </div>
 
             <div className="space-y-3">
-              <button
-                type="button"
-                onClick={handleNewDraft}
-                className={`w-full rounded-xl px-4 py-3 text-left shadow-sm transition-colors ${
-                  selectedElectionId
-                    ? "bg-hush-bg-dark/80 hover:bg-hush-bg-dark"
-                    : "bg-hush-purple/10 ring-1 ring-hush-purple/40"
-                }`}
-              >
-                <div className="text-sm font-medium">
-                  {isStartingNewDraft
-                    ? "Blank election draft"
-                    : "Start new election draft"}
-                </div>
-                <div className="mt-1 text-xs text-hush-text-accent">
-                  {isStartingNewDraft
-                    ? "Required fields are still empty. Save this draft to create the first saved election revision."
-                    : "Start a brand-new election draft. It becomes a saved election only after the first save."}
-                </div>
-              </button>
+              {showDraftCreationActions ? (
+                <button
+                  type="button"
+                  onClick={handleNewDraft}
+                  className={`w-full rounded-xl px-4 py-3 text-left shadow-sm transition-colors ${
+                    selectedElectionId
+                      ? "bg-hush-bg-dark/80 hover:bg-hush-bg-dark"
+                      : "bg-hush-purple/10 ring-1 ring-hush-purple/40"
+                  }`}
+                >
+                  <div className="text-sm font-medium">
+                    {isStartingNewDraft
+                      ? "Blank election draft"
+                      : "Start new election draft"}
+                  </div>
+                  <div className="mt-1 text-xs text-hush-text-accent">
+                    {isStartingNewDraft
+                      ? "Required fields are still empty. Save this draft to create the first saved election revision."
+                      : "Start a brand-new election draft. It becomes a saved election only after the first save."}
+                  </div>
+                </button>
+              ) : null}
 
               {!isStartingNewDraft &&
                 elections.map((summary) => (
@@ -1279,12 +1412,45 @@ export function ElectionsWorkspace({
             )}
 
             <OwnerOverviewSection
-              title="Open Preparation"
-              description="Draft-save checks, pre-open checks, warning evidence, and server readiness stay visible here. Warning choices can be edited separately without changing the rest of the page."
+              title="Ready to Open"
+              description={
+                usesTrusteeThreshold
+                  ? "This checklist makes the trustee-threshold path explicit. You need the saved draft, accepted trustees, a ready key ceremony, and then the governed open proposal."
+                  : "This checklist shows exactly what is still missing before the owner can open the election directly."
+              }
               actionLabel={canEditDraft ? "Edit warning choices" : undefined}
               onAction={canEditDraft ? openWarningsOverlay : undefined}
               dataTestId="elections-open-preparation-overview"
             >
+              <div
+                className="mb-5 rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4"
+                data-testid="elections-ready-to-open-checklist"
+              >
+                <div className="text-sm font-semibold">Ready-to-open checklist</div>
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  {readyToOpenChecklist.map((item) => (
+                    <div
+                      key={item.label}
+                      className={`rounded-xl border px-4 py-3 ${
+                        item.isReady
+                          ? "border-green-500/30 bg-green-500/10 text-green-100"
+                          : "border-amber-500/30 bg-amber-500/10 text-amber-100"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 text-sm font-medium">
+                        {item.isReady ? (
+                          <CheckCircle2 className="h-4 w-4" />
+                        ) : (
+                          <AlertCircle className="h-4 w-4" />
+                        )}
+                        <span>{item.label}</span>
+                      </div>
+                      <div className="mt-2 text-sm">{item.detail}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               <div className="grid gap-4 lg:grid-cols-2">
                 <div
                   className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4"
@@ -1305,7 +1471,7 @@ export function ElectionsWorkspace({
                 </div>
 
                 <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
-                  <div className="text-sm font-semibold">Open checklist</div>
+                  <div className="text-sm font-semibold">Local open checks</div>
                   {openValidationErrors.length === 0 ? (
                     <div className="mt-3 text-sm text-green-200">
                       Local open-preparation checks are clear.
@@ -1363,14 +1529,19 @@ export function ElectionsWorkspace({
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <div className="text-sm font-semibold">
-                        Server open readiness
+                        {usesTrusteeThreshold
+                          ? "Governed open path"
+                          : "Server open readiness"}
                       </div>
                       <div className="mt-1 text-xs text-hush-text-accent">
-                        This uses the current saved draft revision and the
-                        selected warning acknowledgements.
+                        {usesTrusteeThreshold
+                          ? "Direct open is disabled here. When the checklist is clear and the key ceremony is ready, start the Open proposal in Governed Actions."
+                          : "This uses the current saved draft revision and the selected warning acknowledgements."}
                       </div>
                     </div>
-                    {selectedElectionId && canOpenSelectedElection && (
+                    {!usesTrusteeThreshold &&
+                      selectedElectionId &&
+                      canOpenSelectedElection && (
                       <button
                         type="button"
                         onClick={() =>
@@ -1381,62 +1552,100 @@ export function ElectionsWorkspace({
                         <RefreshCcw className="h-4 w-4" />
                         <span>Refresh</span>
                       </button>
-                    )}
+                      )}
                   </div>
 
-                  {selectedElectionId && openReadiness ? (
+                  {!usesTrusteeThreshold ? (
+                    selectedElectionId && openReadiness ? (
+                      <div
+                        className="mt-4 space-y-3"
+                        data-testid="elections-open-readiness"
+                      >
+                        <div
+                          className={`rounded-xl border px-3 py-3 text-sm ${
+                            openReadiness.IsReadyToOpen
+                              ? "border-green-500/40 bg-green-500/10 text-green-100"
+                              : "border-amber-500/40 bg-amber-500/10 text-amber-100"
+                          }`}
+                        >
+                          {openReadiness.IsReadyToOpen
+                            ? "Ready to open."
+                            : "Not ready to open yet."}
+                        </div>
+
+                        <div className="text-xs text-hush-text-accent">
+                          Required warning codes:{" "}
+                          {openReadiness.RequiredWarningCodes.length > 0
+                            ? openReadiness.RequiredWarningCodes.map(
+                                (warningCode) => getWarningTitle(warningCode),
+                              ).join(", ")
+                            : "None"}
+                        </div>
+
+                        {openReadiness.MissingWarningAcknowledgements.length >
+                          0 && (
+                          <div className="text-xs text-hush-text-accent">
+                            Missing acknowledgements:{" "}
+                            {openReadiness.MissingWarningAcknowledgements.map(
+                              (warningCode) => getWarningTitle(warningCode),
+                            ).join(", ")}
+                          </div>
+                        )}
+
+                        {openReadiness.ValidationErrors.length > 0 && (
+                          <ul className="list-disc space-y-1 pl-5 text-sm text-amber-100">
+                            {openReadiness.ValidationErrors.map(
+                              (validationError) => (
+                                <li key={validationError}>{validationError}</li>
+                              ),
+                            )}
+                          </ul>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="mt-4 text-sm text-hush-text-accent">
+                        {selectedElectionId
+                          ? "Save a valid admin-only draft to evaluate server open readiness."
+                          : "Create the draft first to fetch server open readiness."}
+                      </div>
+                    )
+                  ) : null}
+
+                  {usesTrusteeThreshold ? (
                     <div
                       className="mt-4 space-y-3"
-                      data-testid="elections-open-readiness"
+                      data-testid="elections-governed-open-readiness"
                     >
                       <div
                         className={`rounded-xl border px-3 py-3 text-sm ${
-                          openReadiness.IsReadyToOpen
+                          hasSavedElection &&
+                          saveValidationErrors.length === 0 &&
+                          openValidationErrors.length === 0 &&
+                          missingRequiredWarningCodes.length === 0 &&
+                          hasAcceptedTrusteesForOpen &&
+                          isKeyCeremonyReady &&
+                          governedOpenActionState?.status === "available"
                             ? "border-green-500/40 bg-green-500/10 text-green-100"
                             : "border-amber-500/40 bg-amber-500/10 text-amber-100"
                         }`}
                       >
-                        {openReadiness.IsReadyToOpen
-                          ? "Ready to open."
-                          : "Not ready to open yet."}
+                        {hasSavedElection &&
+                        saveValidationErrors.length === 0 &&
+                        openValidationErrors.length === 0 &&
+                        missingRequiredWarningCodes.length === 0 &&
+                        hasAcceptedTrusteesForOpen &&
+                        isKeyCeremonyReady &&
+                        governedOpenActionState?.status === "available"
+                          ? "Ready to start the governed open proposal."
+                          : "Not ready to start the governed open proposal yet."}
                       </div>
 
                       <div className="text-xs text-hush-text-accent">
-                        Required warning codes:{" "}
-                        {openReadiness.RequiredWarningCodes.length > 0
-                          ? openReadiness.RequiredWarningCodes.map(
-                              (warningCode) => getWarningTitle(warningCode),
-                            ).join(", ")
-                          : "None"}
+                        {governedOpenActionState?.reason ||
+                          "Resolve the checklist above, then use Governed Actions to start the Open proposal."}
                       </div>
-
-                      {openReadiness.MissingWarningAcknowledgements.length >
-                        0 && (
-                        <div className="text-xs text-hush-text-accent">
-                          Missing acknowledgements:{" "}
-                          {openReadiness.MissingWarningAcknowledgements.map(
-                            (warningCode) => getWarningTitle(warningCode),
-                          ).join(", ")}
-                        </div>
-                      )}
-
-                      {openReadiness.ValidationErrors.length > 0 && (
-                        <ul className="list-disc space-y-1 pl-5 text-sm text-amber-100">
-                          {openReadiness.ValidationErrors.map(
-                            (validationError) => (
-                              <li key={validationError}>{validationError}</li>
-                            ),
-                          )}
-                        </ul>
-                      )}
                     </div>
-                  ) : (
-                    <div className="mt-4 text-sm text-hush-text-accent">
-                      {selectedElectionId
-                        ? "Save a valid admin-only draft to evaluate server open readiness."
-                        : "Create the draft first to fetch server open readiness."}
-                    </div>
-                  )}
+                  ) : null}
 
                   <div
                     className="mt-4 rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-3 text-xs text-hush-text-accent"
@@ -1510,100 +1719,113 @@ export function ElectionsWorkspace({
               </div>
             </OwnerOverviewSection>
 
-            <OwnerOverviewSection
-              title="Save Current Draft"
-              description="This panel applies only to the election selected on the left. It shows the latest saved revision, the status of local edits, and the single save action that turns those edits into the next draft revision."
-              dataTestId="elections-draft-save-overview"
-            >
-              <div className="grid gap-4 lg:grid-cols-[0.85fr_1.15fr]">
-                <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-1">
-                  <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
-                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
-                      Latest saved revision
-                    </div>
-                    <div className="mt-2 text-sm font-medium text-hush-text-primary">
-                      {draftRevisionLabel}
-                    </div>
-                  </div>
-                  <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
-                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
-                      Local working copy
-                    </div>
-                    <div className="mt-2 text-sm font-medium text-hush-text-primary">
-                      {hasPendingDraftChanges
-                        ? "Unsaved local edits"
-                        : "No unsaved local edits"}
-                    </div>
-                  </div>
-                  <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
-                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
-                      Save status
-                    </div>
-                    <div className="mt-2 text-sm font-medium text-hush-text-primary">
-                      {saveValidationErrors.length === 0
-                        ? "Ready to save"
-                        : `${saveValidationErrors.length} required item(s) missing`}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
-                  <label className="text-sm">
-                    <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
-                      Revision note
-                    </span>
-                    <input
-                      type="text"
-                      value={snapshotReason}
-                      onChange={(event) =>
-                        setSnapshotReason(event.target.value)
-                      }
-                      disabled={!canEditDraft || isSubmitting}
-                      className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-2 text-sm outline-none transition-colors focus:border-hush-purple disabled:cursor-not-allowed disabled:opacity-70"
-                    />
-                  </label>
-                  <p className="mt-2 text-xs text-hush-text-accent">
-                    This note is stored with the saved revision for the selected
-                    election.
-                  </p>
-
-                  {saveValidationErrors.length > 0 && (
-                    <div className="mt-4 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-                      <div className="font-medium">
-                        Save is blocked until these required items are completed:
-                      </div>
-                      <ul className="mt-2 list-disc space-y-1 pl-5">
-                        {saveValidationErrors.map((validationError) => (
-                          <li key={validationError}>{validationError}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
-                  <div className="mt-5">
-                    <button
-                      type="button"
-                      onClick={() => void handleSaveDraft()}
-                      disabled={
-                        !snapshotReason.trim() ||
-                        saveValidationErrors.length > 0 ||
-                        !canEditDraft ||
-                        isSubmitting
-                      }
-                      className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 disabled:cursor-not-allowed disabled:bg-hush-bg-light disabled:text-hush-text-accent"
-                      data-testid="elections-save-button"
-                    >
-                      {isSubmitting ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Save className="h-4 w-4" />
-                      )}
-                      <span>{saveButtonLabel}</span>
-                    </button>
-                  </div>
-                </div>
+            {selectedElectionId ? (
+              <div className={sectionClass} data-testid="elections-auditor-access-overview">
+                <DesignatedAuditorGrantManager
+                  detail={selectedElection}
+                  actorEncryptionPublicKey={ownerEncryptionPublicKey ?? ""}
+                  actorEncryptionPrivateKey={ownerEncryptionPrivateKey ?? ""}
+                  actorSigningPrivateKey={ownerSigningPrivateKey}
+                />
               </div>
-            </OwnerOverviewSection>
+            ) : null}
+
+            {canEditDraft ? (
+              <OwnerOverviewSection
+                title="Save Current Draft"
+                description="This panel applies only to the election selected on the left. It shows the latest saved revision, the status of local edits, and the single save action that turns those edits into the next draft revision."
+                dataTestId="elections-draft-save-overview"
+              >
+                <div className="grid gap-4 lg:grid-cols-[0.85fr_1.15fr]">
+                  <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-1">
+                    <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+                      <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                        Latest saved revision
+                      </div>
+                      <div className="mt-2 text-sm font-medium text-hush-text-primary">
+                        {draftRevisionLabel}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+                      <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                        Local working copy
+                      </div>
+                      <div className="mt-2 text-sm font-medium text-hush-text-primary">
+                        {hasPendingDraftChanges
+                          ? "Unsaved local edits"
+                          : "No unsaved local edits"}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+                      <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                        Save status
+                      </div>
+                      <div className="mt-2 text-sm font-medium text-hush-text-primary">
+                        {saveValidationErrors.length === 0
+                          ? "Ready to save"
+                          : `${saveValidationErrors.length} required item(s) missing`}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+                    <label className="text-sm">
+                      <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                        Revision note
+                      </span>
+                      <input
+                        type="text"
+                        value={snapshotReason}
+                        onChange={(event) =>
+                          setSnapshotReason(event.target.value)
+                        }
+                        disabled={!canEditDraft || isSubmitting}
+                        className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-2 text-sm outline-none transition-colors focus:border-hush-purple disabled:cursor-not-allowed disabled:opacity-70"
+                      />
+                    </label>
+                    <p className="mt-2 text-xs text-hush-text-accent">
+                      This note is stored with the saved revision for the selected
+                      election.
+                    </p>
+
+                    {saveValidationErrors.length > 0 && (
+                      <div className="mt-4 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+                        <div className="font-medium">
+                          Save is blocked until these required items are completed:
+                        </div>
+                        <ul className="mt-2 list-disc space-y-1 pl-5">
+                          {saveValidationErrors.map((validationError) => (
+                            <li key={validationError}>{validationError}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    <div className="mt-5">
+                      <button
+                        type="button"
+                        onClick={() => void handleSaveDraft()}
+                        disabled={
+                          !snapshotReason.trim() ||
+                          saveValidationErrors.length > 0 ||
+                          !canEditDraft ||
+                          isSubmitting
+                        }
+                        className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 disabled:cursor-not-allowed disabled:bg-hush-bg-light disabled:text-hush-text-accent"
+                        data-testid="elections-save-button"
+                      >
+                        {isSubmitting ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Save className="h-4 w-4" />
+                        )}
+                        <span>{saveButtonLabel}</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </OwnerOverviewSection>
+            ) : null}
 
             <OwnerOverviewSection
               title="Draft Policy"
@@ -2651,7 +2873,7 @@ export function ElectionsWorkspace({
                     optionsEditor.map((option, index) => (
                       <div
                         key={option.OptionId}
-                        className="rounded-2xl border border-hush-bg-light bg-hush-bg-dark/80 p-4"
+                        className={index === 0 ? "pb-1" : "border-t border-hush-bg-light/60 pt-5 pb-1"}
                       >
                         <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
                           <label className="text-sm">

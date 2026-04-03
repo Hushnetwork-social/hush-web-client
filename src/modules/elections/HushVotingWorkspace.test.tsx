@@ -8,14 +8,25 @@ import type {
   GetElectionResponse,
 } from '@/lib/grpc';
 import {
+  ElectionCeremonyVersionStatusProto,
   ElectionBindingStatusProto,
   ElectionClosedProgressStatusProto,
   ElectionGovernanceModeProto,
   ElectionHubNextActionHintProto,
   ElectionLifecycleStateProto,
+  ElectionParticipationStatusProto,
+  ElectionTrusteeInvitationStatusProto,
+  ReviewWindowPolicyProto,
 } from '@/lib/grpc';
 import { HushVotingWorkspace } from './HushVotingWorkspace';
 import { useElectionsStore } from './useElectionsStore';
+
+const { electionsServiceMock } = vi.hoisted(() => ({
+  electionsServiceMock: {
+    getElectionVotingView: vi.fn(),
+    verifyElectionReceipt: vi.fn(),
+  },
+}));
 
 const mockPush = vi.fn();
 const storeReset = useElectionsStore.getState().reset;
@@ -25,6 +36,20 @@ vi.mock('next/navigation', () => ({
     push: mockPush,
   }),
 }));
+
+vi.mock('@/lib/grpc/services/elections', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/grpc/services/elections')>();
+  return {
+    ...actual,
+    electionsService: {
+      ...actual.electionsService,
+      getElectionVotingView: (...args: unknown[]) =>
+        electionsServiceMock.getElectionVotingView(...args),
+      verifyElectionReceipt: (...args: unknown[]) =>
+        electionsServiceMock.verifyElectionReceipt(...args),
+    },
+  };
+});
 
 const timestamp = { seconds: 1_711_410_000, nanos: 0 };
 
@@ -76,7 +101,8 @@ function createHubEntry(
 function createElectionRecord(
   electionId: string,
   lifecycleState: ElectionLifecycleStateProto,
-  title: string
+  title: string,
+  overrides?: Partial<ElectionRecordView>
 ): ElectionRecordView {
   return {
     ElectionId: electionId,
@@ -119,13 +145,15 @@ function createElectionRecord(
     OpenArtifactId: '',
     CloseArtifactId: '',
     FinalizeArtifactId: '',
+    ...overrides,
   };
 }
 
 function createDetail(
   electionId: string,
   lifecycleState: ElectionLifecycleStateProto,
-  title: string
+  title: string,
+  overrides?: Partial<GetElectionResponse>
 ): GetElectionResponse {
   return {
     Success: true,
@@ -144,6 +172,7 @@ function createDetail(
     FinalizationShares: [],
     FinalizationReleaseEvidenceRecords: [],
     ResultArtifacts: [],
+    ...overrides,
   };
 }
 
@@ -163,6 +192,31 @@ describe('HushVotingWorkspace', () => {
     cleanup();
     storeReset();
     mockPush.mockReset();
+    electionsServiceMock.getElectionVotingView.mockReset();
+    electionsServiceMock.verifyElectionReceipt.mockReset();
+    electionsServiceMock.getElectionVotingView.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      HasAcceptedAt: false,
+      ReceiptId: '',
+      AcceptanceId: '',
+      ServerProof: '',
+      PersonalParticipationStatus: ElectionParticipationStatusProto.ParticipationDidNotVote,
+    });
+    electionsServiceMock.verifyElectionReceipt.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      ActorPublicAddress: 'actor-address',
+      ElectionId: 'election-open',
+      LifecycleState: ElectionLifecycleStateProto.Open,
+      HasAcceptedCheckoff: true,
+      ReceiptMatchesAcceptedCheckoff: true,
+      ParticipationCountedAsVoted: true,
+      TallyVerificationAvailable: false,
+      VerifiedReceiptId: 'rcpt-open-1',
+      VerifiedAcceptanceId: 'acceptance-open-1',
+      VerifiedServerProof: 'server-proof-open-1',
+    });
   });
 
   afterEach(() => {
@@ -420,6 +474,308 @@ describe('HushVotingWorkspace', () => {
       '/elections/owner'
     );
     expect(screen.getByRole('link', { name: 'Back to HushVoting! Hub' })).toHaveAttribute('href', '/elections');
+  });
+
+  it('shows the hub receipt verifier only after the voter already has an accepted checkoff record', async () => {
+    const loadElectionHub = vi.fn().mockResolvedValue(undefined);
+    const selectHubElection = vi.fn().mockResolvedValue(undefined);
+    const voterEntry = createHubEntry(
+      'election-open',
+      ElectionLifecycleStateProto.Open,
+      'Annual Elections 2026',
+      {
+        ActorRoles: {
+          IsOwnerAdmin: false,
+          IsTrustee: false,
+          IsVoter: true,
+          IsDesignatedAuditor: false,
+        },
+        SuggestedAction: ElectionHubNextActionHintProto.ElectionHubActionNone,
+        SuggestedActionReason: 'No immediate action is required for this election.',
+        CanViewNamedParticipationRoster: false,
+        CanViewReportPackage: false,
+        CanViewParticipantResults: true,
+        HasUnofficialResult: false,
+        HasOfficialResult: false,
+      }
+    );
+
+    electionsServiceMock.getElectionVotingView.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      HasAcceptedAt: true,
+      ReceiptId: 'rcpt-open-1',
+      AcceptanceId: 'acceptance-open-1',
+      ServerProof: 'server-proof-open-1',
+      PersonalParticipationStatus: ElectionParticipationStatusProto.ParticipationCountedAsVoted,
+    });
+
+    useElectionsStore.setState({
+      loadElectionHub,
+      clearGrantCandidateSearch: vi.fn(),
+      selectHubElection,
+      reset: vi.fn(),
+      hubView: createHubView([voterEntry]),
+      hubEntries: [voterEntry],
+      selectedElectionId: null,
+      selectedHubEntry: null,
+      selectedElection: createDetail(
+        'election-open',
+        ElectionLifecycleStateProto.Open,
+        'Annual Elections 2026'
+      ),
+      canManageReportAccessGrants: false,
+      reportAccessGrantDeniedReason: '',
+      reportAccessGrants: [],
+      feedback: null,
+      error: null,
+      isLoadingHub: false,
+      isLoadingDetail: false,
+      actorPublicAddress: 'actor-address',
+    });
+
+    render(
+      <HushVotingWorkspace
+        actorPublicAddress="actor-address"
+        actorEncryptionPublicKey="actor-encrypt-address"
+        actorEncryptionPrivateKey="actor-private-encrypt-key"
+        actorSigningPrivateKey="actor-signing-private-key"
+        initialElectionId="election-open"
+      />
+    );
+
+    await waitFor(() => {
+      expect(selectHubElection).toHaveBeenCalledWith('actor-address', 'election-open');
+    });
+    expect(await screen.findByTestId('hush-voting-verify-receipt-trigger')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('hush-voting-verify-receipt-trigger'));
+    expect(screen.getByTestId('hush-voting-receipt-input')).not.toHaveAttribute(
+      'placeholder',
+      expect.stringContaining('Ballot Package Commitment'),
+    );
+    fireEvent.change(screen.getByTestId('hush-voting-receipt-input'), {
+      target: {
+        value: [
+          'Accepted Ballot Receipt',
+          'Election ID: election-open',
+          'Receipt ID: rcpt-open-1',
+          'Acceptance ID: acceptance-open-1',
+          'Accepted At: 03/04/2026, 14:25:12',
+          'Server Proof: server-proof-open-1',
+        ].join('\n'),
+      },
+    });
+    fireEvent.click(screen.getByTestId('hush-voting-verify-receipt-submit'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('hush-voting-receipt-result')).toHaveTextContent(
+        'This voter is marked as voted'
+      );
+    });
+    expect(electionsServiceMock.verifyElectionReceipt).toHaveBeenCalledWith({
+      ElectionId: 'election-open',
+      ActorPublicAddress: 'actor-address',
+      ReceiptId: 'rcpt-open-1',
+      AcceptanceId: 'acceptance-open-1',
+      ServerProof: 'server-proof-open-1',
+    });
+  });
+
+  it('keeps the hub receipt verifier hidden when no accepted checkoff record exists yet', async () => {
+    const loadElectionHub = vi.fn().mockResolvedValue(undefined);
+    const selectHubElection = vi.fn().mockResolvedValue(undefined);
+    const voterEntry = createHubEntry(
+      'election-open',
+      ElectionLifecycleStateProto.Open,
+      'Annual Elections 2026',
+      {
+        ActorRoles: {
+          IsOwnerAdmin: false,
+          IsTrustee: false,
+          IsVoter: true,
+          IsDesignatedAuditor: false,
+        },
+        SuggestedAction: ElectionHubNextActionHintProto.ElectionHubActionNone,
+        SuggestedActionReason: 'No immediate action is required for this election.',
+        CanViewNamedParticipationRoster: false,
+        CanViewReportPackage: false,
+        CanViewParticipantResults: true,
+        HasUnofficialResult: false,
+        HasOfficialResult: false,
+      }
+    );
+
+    useElectionsStore.setState({
+      loadElectionHub,
+      clearGrantCandidateSearch: vi.fn(),
+      selectHubElection,
+      reset: vi.fn(),
+      hubView: createHubView([voterEntry]),
+      hubEntries: [voterEntry],
+      selectedElectionId: null,
+      selectedHubEntry: null,
+      selectedElection: createDetail(
+        'election-open',
+        ElectionLifecycleStateProto.Open,
+        'Annual Elections 2026'
+      ),
+      canManageReportAccessGrants: false,
+      reportAccessGrantDeniedReason: '',
+      reportAccessGrants: [],
+      feedback: null,
+      error: null,
+      isLoadingHub: false,
+      isLoadingDetail: false,
+      actorPublicAddress: 'actor-address',
+    });
+
+    render(
+      <HushVotingWorkspace
+        actorPublicAddress="actor-address"
+        actorEncryptionPublicKey="actor-encrypt-address"
+        actorEncryptionPrivateKey="actor-private-encrypt-key"
+        actorSigningPrivateKey="actor-signing-private-key"
+        initialElectionId="election-open"
+      />
+    );
+
+    await waitFor(() => {
+      expect(selectHubElection).toHaveBeenCalledWith('actor-address', 'election-open');
+    });
+
+    await screen.findByText('Participation and result review');
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId('hush-voting-verify-receipt-trigger')
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it('shows trustee and open-readiness status in the owner/admin shell instead of auditor controls', async () => {
+    const loadElectionHub = vi.fn().mockResolvedValue(undefined);
+    const selectHubElection = vi.fn().mockResolvedValue(undefined);
+    const ownerEntry = createHubEntry(
+      'election-owner',
+      ElectionLifecycleStateProto.Draft,
+      'Trustee Threshold Election',
+      {
+        ActorRoles: {
+          IsOwnerAdmin: true,
+          IsTrustee: false,
+          IsVoter: false,
+          IsDesignatedAuditor: false,
+        },
+        Election: createSummary(
+          'election-owner',
+          ElectionLifecycleStateProto.Draft,
+          'Trustee Threshold Election',
+          'actor-address'
+        ),
+      }
+    );
+    ownerEntry.Election.GovernanceMode = ElectionGovernanceModeProto.TrusteeThreshold;
+
+    useElectionsStore.setState({
+      loadElectionHub,
+      clearGrantCandidateSearch: vi.fn(),
+      selectHubElection,
+      reset: vi.fn(),
+      hubView: createHubView([ownerEntry]),
+      hubEntries: [ownerEntry],
+      selectedElectionId: null,
+      selectedHubEntry: null,
+      selectedElection: createDetail(
+        'election-owner',
+        ElectionLifecycleStateProto.Draft,
+        'Trustee Threshold Election',
+        {
+          Election: createElectionRecord(
+            'election-owner',
+            ElectionLifecycleStateProto.Draft,
+            'Trustee Threshold Election',
+            {
+              GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+              ReviewWindowPolicy: ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+              RequiredApprovalCount: 1,
+            }
+          ),
+          TrusteeInvitations: [
+            {
+              Id: 'invite-1',
+              ElectionId: 'election-owner',
+              TrusteeUserAddress: 'trustee-a',
+              TrusteeDisplayName: 'Alice Trustee',
+              InvitedByPublicAddress: 'actor-address',
+              LinkedMessageId: 'msg-1',
+              Status: ElectionTrusteeInvitationStatusProto.Accepted,
+              SentAtDraftRevision: 2,
+              SentAt: timestamp,
+            },
+            {
+              Id: 'invite-2',
+              ElectionId: 'election-owner',
+              TrusteeUserAddress: 'trustee-b',
+              TrusteeDisplayName: 'Bob Trustee',
+              InvitedByPublicAddress: 'actor-address',
+              LinkedMessageId: 'msg-2',
+              Status: ElectionTrusteeInvitationStatusProto.Pending,
+              SentAtDraftRevision: 2,
+              SentAt: timestamp,
+            },
+          ],
+          CeremonyVersions: [
+            {
+              Id: 'ceremony-1',
+              ElectionId: 'election-owner',
+              VersionNumber: 1,
+              ProfileId: 'prod-2of3-v1',
+              TrusteeCount: 2,
+              RequiredApprovalCount: 2,
+              Status: ElectionCeremonyVersionStatusProto.CeremonyVersionInProgress,
+              StartedAt: timestamp,
+              StartedByPublicAddress: 'actor-address',
+              TallyPublicKeyFingerprint: 'fingerprint-1',
+            },
+          ],
+        }
+      ),
+      canManageReportAccessGrants: false,
+      reportAccessGrantDeniedReason: '',
+      reportAccessGrants: [],
+      feedback: null,
+      error: null,
+      isLoadingHub: false,
+      isLoadingDetail: false,
+      actorPublicAddress: 'actor-address',
+    });
+
+    render(
+      <HushVotingWorkspace
+        actorPublicAddress="actor-address"
+        actorEncryptionPublicKey="actor-encrypt-address"
+        actorEncryptionPrivateKey="actor-private-encrypt-key"
+        actorSigningPrivateKey="actor-signing-private-key"
+        initialElectionId="election-owner"
+      />
+    );
+
+    await waitFor(() => {
+      expect(selectHubElection).toHaveBeenCalledWith('actor-address', 'election-owner');
+    });
+
+    expect(await screen.findByTestId('hush-voting-section-owner-admin')).toBeInTheDocument();
+    expect(screen.getByTestId('hush-voting-section-owner-admin')).toHaveTextContent(
+      'Ready-to-open snapshot'
+    );
+    expect(screen.getByTestId('hush-voting-section-owner-admin')).toHaveTextContent(
+      'Accepted trustees'
+    );
+    expect(screen.getByTestId('hush-voting-section-owner-admin')).toHaveTextContent('Key ceremony');
+    expect(screen.getByTestId('hush-voting-section-owner-admin')).toHaveTextContent(
+      '1 accepted | 1 pending'
+    );
+    expect(screen.queryByText('Manage auditor access')).not.toBeInTheDocument();
   });
 
   it('keeps the results section collapsed by default when no unofficial or official result exists', async () => {

@@ -10,6 +10,8 @@ import type {
   GetElectionReportAccessGrantsResponse,
   GetElectionResultViewRequest,
   GetElectionResultViewResponse,
+  VerifyElectionReceiptRequest,
+  VerifyElectionReceiptResponse,
   GetElectionVotingViewRequest,
   GetElectionVotingViewResponse,
   GetElectionOpenReadinessRequest,
@@ -95,6 +97,15 @@ export const electionsService = {
   ): Promise<GetElectionVotingViewResponse> {
     return proxyElectionQuery<GetElectionVotingViewRequest, GetElectionVotingViewResponse>(
       'GetElectionVotingView',
+      request
+    );
+  },
+
+  async verifyElectionReceipt(
+    request: VerifyElectionReceiptRequest
+  ): Promise<VerifyElectionReceiptResponse> {
+    return proxyElectionQuery<VerifyElectionReceiptRequest, VerifyElectionReceiptResponse>(
+      'VerifyElectionReceipt',
       request
     );
   },

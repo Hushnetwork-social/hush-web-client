@@ -13,6 +13,7 @@ const ALLOWED_METHODS = new Set([
   'GetElectionHubView',
   'GetElectionEligibilityView',
   'GetElectionVotingView',
+  'VerifyElectionReceipt',
   'GetElectionEnvelopeAccess',
   'GetElectionResultView',
   'GetElectionReportAccessGrants',

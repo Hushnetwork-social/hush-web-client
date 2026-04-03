@@ -1746,6 +1746,29 @@ export interface GetElectionVotingViewRequest {
   SubmissionIdempotencyKey: string;
 }
 
+export interface VerifyElectionReceiptRequest {
+  ElectionId: string;
+  ActorPublicAddress: string;
+  ReceiptId: string;
+  AcceptanceId: string;
+  ServerProof: string;
+}
+
+export interface VerifyElectionReceiptResponse {
+  Success: boolean;
+  ErrorMessage: string;
+  ActorPublicAddress: string;
+  ElectionId: string;
+  LifecycleState: ElectionLifecycleStateProto;
+  HasAcceptedCheckoff: boolean;
+  ReceiptMatchesAcceptedCheckoff: boolean;
+  ParticipationCountedAsVoted: boolean;
+  TallyVerificationAvailable: boolean;
+  VerifiedReceiptId: string;
+  VerifiedAcceptanceId: string;
+  VerifiedServerProof: string;
+}
+
 export interface GetElectionEnvelopeAccessRequest {
   ElectionId: string;
   ActorPublicAddress: string;

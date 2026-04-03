@@ -60,6 +60,7 @@ const { electionsServiceMock, blockchainServiceMock, transactionServiceMock } =
       getElection: vi.fn(),
       getElectionCeremonyActionView: vi.fn(),
       getElectionOpenReadiness: vi.fn(),
+      getElectionReportAccessGrants: vi.fn(),
       getElectionsByOwner: vi.fn(),
       inviteElectionTrustee: vi.fn(),
       openElection: vi.fn(),
@@ -77,6 +78,7 @@ const { electionsServiceMock, blockchainServiceMock, transactionServiceMock } =
       createApproveElectionGovernedProposalTransaction: vi.fn(),
       createCloseElectionTransaction: vi.fn(),
       createElectionDraftTransaction: vi.fn(),
+      createElectionReportAccessGrantTransaction: vi.fn(),
       createElectionTrusteeInvitationTransaction: vi.fn(),
       createFinalizeElectionTransaction: vi.fn(),
       createOpenElectionTransaction: vi.fn(),
@@ -108,6 +110,8 @@ vi.mock("./transactionService", () => ({
     transactionServiceMock.createCloseElectionTransaction(...args),
   createElectionDraftTransaction: (...args: unknown[]) =>
     transactionServiceMock.createElectionDraftTransaction(...args),
+  createElectionReportAccessGrantTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createElectionReportAccessGrantTransaction(...args),
   createElectionTrusteeInvitationTransaction: (...args: unknown[]) =>
     transactionServiceMock.createElectionTrusteeInvitationTransaction(...args),
   createFinalizeElectionTransaction: (...args: unknown[]) =>
@@ -521,6 +525,13 @@ describe("ElectionsWorkspace", () => {
     electionsServiceMock.getElectionOpenReadiness.mockResolvedValue(
       createReadinessResponse(),
     );
+    electionsServiceMock.getElectionReportAccessGrants.mockResolvedValue({
+      Success: true,
+      ErrorMessage: "",
+      Grants: [],
+      CanManageGrants: true,
+      DeniedReason: "",
+    });
     electionsServiceMock.createElectionDraft.mockResolvedValue(
       createCommandResponse(),
     );
@@ -562,6 +573,11 @@ describe("ElectionsWorkspace", () => {
       signedTransaction: "signed-election-transaction",
       electionId: "election-1",
     });
+    transactionServiceMock.createElectionReportAccessGrantTransaction.mockResolvedValue(
+      {
+        signedTransaction: "signed-grant-transaction",
+      },
+    );
     transactionServiceMock.createStartElectionGovernedProposalTransaction.mockResolvedValue(
       {
         signedTransaction: "signed-start-governed-proposal-transaction",
@@ -1030,6 +1046,84 @@ describe("ElectionsWorkspace", () => {
     ).toBeInTheDocument();
   });
 
+  it("allows saving a governance change even when the persisted election includes the reserved blank option", async () => {
+    const reservedBlankOption = {
+      OptionId: "reserved-blank",
+      DisplayLabel: "Blank vote",
+      ShortDescription: "",
+      BallotOrder: 3,
+      IsBlankOption: true,
+    };
+    const baselineElection = createElectionRecord(
+      ElectionLifecycleStateProto.Draft,
+      {
+        Title: "Board Election",
+        CurrentDraftRevision: 1,
+        Options: [...createDraftInput().OwnerOptions, reservedBlankOption],
+      },
+    );
+
+    electionsServiceMock.getElectionsByOwner.mockResolvedValueOnce({
+      Elections: [createElectionSummary(ElectionLifecycleStateProto.Draft)],
+    });
+    electionsServiceMock.getElection.mockResolvedValueOnce(
+      createElectionResponse({
+        Election: baselineElection,
+        LatestDraftSnapshot: createDraftSnapshot({
+          Options: [...createDraftInput().OwnerOptions, reservedBlankOption],
+        }),
+      }),
+    );
+
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Edit draft policy" }),
+    );
+    fireEvent.change(screen.getByLabelText("Governance mode"), {
+      target: { value: `${ElectionGovernanceModeProto.TrusteeThreshold}` },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Apply policy changes" }),
+    );
+
+    expect(
+      screen.queryByText(
+        "Owner options must not mark themselves as the reserved blank vote option.",
+      ),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("elections-save-button")).toBeEnabled();
+
+    fireEvent.click(screen.getByTestId("elections-save-button"));
+
+    await waitFor(() => {
+      expect(
+        transactionServiceMock.createUpdateElectionDraftTransaction,
+      ).toHaveBeenCalled();
+    });
+
+    const submittedDraft =
+      transactionServiceMock.createUpdateElectionDraftTransaction.mock.calls[0]?.[5];
+
+    expect(submittedDraft).toBeDefined();
+    expect(submittedDraft.GovernanceMode).toBe(
+      ElectionGovernanceModeProto.TrusteeThreshold,
+    );
+    expect(submittedDraft.OwnerOptions).toHaveLength(2);
+    expect(
+      submittedDraft.OwnerOptions.some(
+        (option: { IsBlankOption: boolean }) => option.IsBlankOption,
+      ),
+    ).toBe(false);
+  });
+
   it("invites a trustee through blockchain submission and waits for indexed readback", async () => {
     const thresholdElection = createElectionRecord(
       ElectionLifecycleStateProto.Draft,
@@ -1483,6 +1577,18 @@ describe("ElectionsWorkspace", () => {
     expect(
       await screen.findByTestId("elections-trustee-blocked-panel"),
     ).toHaveTextContent("Proposal approval is active");
+    expect(
+      screen.getByTestId("elections-ready-to-open-checklist"),
+    ).toHaveTextContent("Accepted trustee roster");
+    expect(
+      screen.getByTestId("elections-ready-to-open-checklist"),
+    ).toHaveTextContent("Key ceremony");
+    expect(
+      screen.getByTestId("elections-governed-open-readiness"),
+    ).toHaveTextContent("Not ready to start the governed open proposal yet.");
+    expect(
+      screen.getByTestId("elections-auditor-access-overview"),
+    ).toHaveTextContent("Manage auditor access");
     expect(screen.queryByText(/FEAT-/)).not.toBeInTheDocument();
     expect(
       screen.queryByTestId("elections-open-button"),
@@ -1639,6 +1745,14 @@ describe("ElectionsWorkspace", () => {
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Edit metadata" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "New Election Draft" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Start new election draft")).not.toBeInTheDocument();
+    expect(screen.queryByText("Save Current Draft")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("elections-draft-save-overview"),
     ).not.toBeInTheDocument();
     expect(screen.getByTestId("elections-frozen-policy")).toHaveTextContent(
       "Protocol Omega version",
