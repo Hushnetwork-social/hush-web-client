@@ -813,6 +813,387 @@ describe('HushVotingWorkspace', () => {
     });
   });
 
+  it('confirms the finalized counted set for a verified voter receipt once the official result is sealed', async () => {
+    const loadElectionHub = vi.fn().mockResolvedValue(undefined);
+    const selectHubElection = vi.fn().mockResolvedValue(undefined);
+    const voterEntry = createHubEntry(
+      'election-final',
+      ElectionLifecycleStateProto.Finalized,
+      'Annual Elections 2026',
+      {
+        ActorRoles: {
+          IsOwnerAdmin: false,
+          IsTrustee: false,
+          IsVoter: true,
+          IsDesignatedAuditor: false,
+        },
+        SuggestedAction: ElectionHubNextActionHintProto.ElectionHubActionVoterReviewResult,
+        SuggestedActionReason: 'The official result is ready for review.',
+        CanViewNamedParticipationRoster: false,
+        CanViewReportPackage: false,
+        CanViewParticipantResults: true,
+        HasUnofficialResult: true,
+        HasOfficialResult: true,
+      }
+    );
+
+    electionsServiceMock.getElectionResultView.mockResolvedValue(
+      createResultView({
+        CanViewParticipantEncryptedResults: true,
+        OfficialResult: createResultArtifact(),
+      }),
+    );
+    electionsServiceMock.getElectionVotingView.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      HasAcceptedAt: true,
+      ReceiptId: 'rcpt-final-1',
+      AcceptanceId: 'acceptance-final-1',
+      ServerProof: 'server-proof-final-1',
+      PersonalParticipationStatus: ElectionParticipationStatusProto.ParticipationCountedAsVoted,
+    });
+    electionsServiceMock.verifyElectionReceipt.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      ActorPublicAddress: 'actor-address',
+      ElectionId: 'election-final',
+      LifecycleState: ElectionLifecycleStateProto.Finalized,
+      HasAcceptedCheckoff: true,
+      ReceiptMatchesAcceptedCheckoff: true,
+      ParticipationCountedAsVoted: true,
+      TallyVerificationAvailable: true,
+      VerifiedReceiptId: 'rcpt-final-1',
+      VerifiedAcceptanceId: 'acceptance-final-1',
+      VerifiedServerProof: 'server-proof-final-1',
+    });
+    window.localStorage.setItem(
+      'feat099:receipt:election-final',
+      JSON.stringify({
+        electionId: 'election-final',
+        receiptId: 'rcpt-final-1',
+        acceptanceId: 'acceptance-final-1',
+        acceptedAt: '2026-04-04 14:25:12',
+        ballotPackageCommitment: '85b033d06e016b1d9d392e47ff983ea3d9297da04fad13c5d32f11e7ce474e94',
+        serverProof: 'server-proof-final-1',
+      }),
+    );
+
+    useElectionsStore.setState({
+      loadElectionHub,
+      clearGrantCandidateSearch: vi.fn(),
+      selectHubElection,
+      reset: vi.fn(),
+      hubView: createHubView([voterEntry]),
+      hubEntries: [voterEntry],
+      selectedElectionId: null,
+      selectedHubEntry: null,
+      selectedElection: createDetail(
+        'election-final',
+        ElectionLifecycleStateProto.Finalized,
+        'Annual Elections 2026'
+      ),
+      canManageReportAccessGrants: false,
+      reportAccessGrantDeniedReason: '',
+      reportAccessGrants: [],
+      feedback: null,
+      error: null,
+      isLoadingHub: false,
+      isLoadingDetail: false,
+      actorPublicAddress: 'actor-address',
+    });
+
+    render(
+      <HushVotingWorkspace
+        actorPublicAddress="actor-address"
+        actorEncryptionPublicKey="actor-encrypt-address"
+        actorEncryptionPrivateKey="actor-private-encrypt-key"
+        actorSigningPrivateKey="actor-signing-private-key"
+        initialElectionId="election-final"
+      />
+    );
+
+    await waitFor(() => {
+      expect(selectHubElection).toHaveBeenCalledWith('actor-address', 'election-final');
+    });
+    fireEvent.click(await screen.findByTestId('hush-voting-verify-receipt-trigger'));
+    fireEvent.change(screen.getByTestId('hush-voting-receipt-input'), {
+      target: {
+        value: [
+          'Accepted Ballot Receipt',
+          'Election ID: election-final',
+          'Receipt ID: rcpt-final-1',
+          'Acceptance ID: acceptance-final-1',
+          'Accepted At: 04/04/2026, 14:25:12',
+          'Ballot Package Commitment: 85b033d06e016b1d9d392e47ff983ea3d9297da04fad13c5d32f11e7ce474e94',
+          'Server Proof: server-proof-final-1',
+        ].join('\n'),
+      },
+    });
+    fireEvent.click(screen.getByTestId('hush-voting-verify-receipt-submit'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('hush-voting-receipt-result')).toHaveTextContent(
+        'included in the finalized counted set'
+      );
+    });
+    expect(screen.getByTestId('hush-voting-receipt-result')).toHaveTextContent(
+      'This accepted vote is included in the finalized counted set used for the official result.'
+    );
+    expect(screen.getByTestId('hush-voting-receipt-result')).toHaveTextContent(
+      'The ballot commitment line is independently confirmed on this device.'
+    );
+  });
+
+  it('shows a warning instead of full success when a finalized receipt cannot confirm the commitment line', async () => {
+    const loadElectionHub = vi.fn().mockResolvedValue(undefined);
+    const selectHubElection = vi.fn().mockResolvedValue(undefined);
+    const voterEntry = createHubEntry(
+      'election-final',
+      ElectionLifecycleStateProto.Finalized,
+      'Annual Elections 2026',
+      {
+        ActorRoles: {
+          IsOwnerAdmin: false,
+          IsTrustee: false,
+          IsVoter: true,
+          IsDesignatedAuditor: false,
+        },
+        SuggestedAction: ElectionHubNextActionHintProto.ElectionHubActionVoterReviewResult,
+        SuggestedActionReason: 'The official result is ready for review.',
+        CanViewNamedParticipationRoster: false,
+        CanViewReportPackage: false,
+        CanViewParticipantResults: true,
+        HasUnofficialResult: true,
+        HasOfficialResult: true,
+      }
+    );
+
+    electionsServiceMock.getElectionResultView.mockResolvedValue(
+      createResultView({
+        CanViewParticipantEncryptedResults: true,
+        OfficialResult: createResultArtifact(),
+      }),
+    );
+    electionsServiceMock.getElectionVotingView.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      HasAcceptedAt: true,
+      ReceiptId: 'rcpt-final-1',
+      AcceptanceId: 'acceptance-final-1',
+      ServerProof: 'server-proof-final-1',
+      PersonalParticipationStatus: ElectionParticipationStatusProto.ParticipationCountedAsVoted,
+    });
+    electionsServiceMock.verifyElectionReceipt.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      ActorPublicAddress: 'actor-address',
+      ElectionId: 'election-final',
+      LifecycleState: ElectionLifecycleStateProto.Finalized,
+      HasAcceptedCheckoff: true,
+      ReceiptMatchesAcceptedCheckoff: true,
+      ParticipationCountedAsVoted: true,
+      TallyVerificationAvailable: true,
+      VerifiedReceiptId: 'rcpt-final-1',
+      VerifiedAcceptanceId: 'acceptance-final-1',
+      VerifiedServerProof: 'server-proof-final-1',
+    });
+
+    useElectionsStore.setState({
+      loadElectionHub,
+      clearGrantCandidateSearch: vi.fn(),
+      selectHubElection,
+      reset: vi.fn(),
+      hubView: createHubView([voterEntry]),
+      hubEntries: [voterEntry],
+      selectedElectionId: null,
+      selectedHubEntry: null,
+      selectedElection: createDetail(
+        'election-final',
+        ElectionLifecycleStateProto.Finalized,
+        'Annual Elections 2026'
+      ),
+      canManageReportAccessGrants: false,
+      reportAccessGrantDeniedReason: '',
+      reportAccessGrants: [],
+      feedback: null,
+      error: null,
+      isLoadingHub: false,
+      isLoadingDetail: false,
+      actorPublicAddress: 'actor-address',
+    });
+
+    render(
+      <HushVotingWorkspace
+        actorPublicAddress="actor-address"
+        actorEncryptionPublicKey="actor-encrypt-address"
+        actorEncryptionPrivateKey="actor-private-encrypt-key"
+        actorSigningPrivateKey="actor-signing-private-key"
+        initialElectionId="election-final"
+      />
+    );
+
+    await waitFor(() => {
+      expect(selectHubElection).toHaveBeenCalledWith('actor-address', 'election-final');
+    });
+    fireEvent.click(await screen.findByTestId('hush-voting-verify-receipt-trigger'));
+    fireEvent.change(screen.getByTestId('hush-voting-receipt-input'), {
+      target: {
+        value: [
+          'Accepted Ballot Receipt',
+          'Election ID: election-final',
+          'Receipt ID: rcpt-final-1',
+          'Acceptance ID: acceptance-final-1',
+          'Accepted At: 04/04/2026, 14:25:12',
+          'Server Proof: server-proof-final-1',
+        ].join('\n'),
+      },
+    });
+    fireEvent.click(screen.getByTestId('hush-voting-verify-receipt-submit'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('hush-voting-receipt-result')).toHaveTextContent(
+        'Receipt verified with incomplete commitment confirmation'
+      );
+    });
+    expect(screen.getByTestId('hush-voting-receipt-result')).toHaveTextContent(
+      'The pasted receipt text does not include a confirmable Ballot Package Commitment line.'
+    );
+    expect(screen.getByTestId('hush-voting-receipt-result')).toHaveTextContent(
+      'The ballot commitment line is independently confirmed on this device.'
+    );
+  });
+
+  it('rejects a pasted finalized receipt when the ballot commitment does not match the retained device receipt', async () => {
+    const loadElectionHub = vi.fn().mockResolvedValue(undefined);
+    const selectHubElection = vi.fn().mockResolvedValue(undefined);
+    const voterEntry = createHubEntry(
+      'election-final',
+      ElectionLifecycleStateProto.Finalized,
+      'Annual Elections 2026',
+      {
+        ActorRoles: {
+          IsOwnerAdmin: false,
+          IsTrustee: false,
+          IsVoter: true,
+          IsDesignatedAuditor: false,
+        },
+        SuggestedAction: ElectionHubNextActionHintProto.ElectionHubActionVoterReviewResult,
+        SuggestedActionReason: 'The official result is ready for review.',
+        CanViewNamedParticipationRoster: false,
+        CanViewReportPackage: false,
+        CanViewParticipantResults: true,
+        HasUnofficialResult: true,
+        HasOfficialResult: true,
+      }
+    );
+
+    electionsServiceMock.getElectionResultView.mockResolvedValue(
+      createResultView({
+        CanViewParticipantEncryptedResults: true,
+        OfficialResult: createResultArtifact(),
+      }),
+    );
+    electionsServiceMock.getElectionVotingView.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      HasAcceptedAt: true,
+      ReceiptId: 'rcpt-final-1',
+      AcceptanceId: 'acceptance-final-1',
+      ServerProof: 'server-proof-final-1',
+      PersonalParticipationStatus: ElectionParticipationStatusProto.ParticipationCountedAsVoted,
+    });
+    electionsServiceMock.verifyElectionReceipt.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      ActorPublicAddress: 'actor-address',
+      ElectionId: 'election-final',
+      LifecycleState: ElectionLifecycleStateProto.Finalized,
+      HasAcceptedCheckoff: true,
+      ReceiptMatchesAcceptedCheckoff: true,
+      ParticipationCountedAsVoted: true,
+      TallyVerificationAvailable: true,
+      VerifiedReceiptId: 'rcpt-final-1',
+      VerifiedAcceptanceId: 'acceptance-final-1',
+      VerifiedServerProof: 'server-proof-final-1',
+    });
+    window.localStorage.setItem(
+      'feat099:receipt:election-final',
+      JSON.stringify({
+        electionId: 'election-final',
+        receiptId: 'rcpt-final-1',
+        acceptanceId: 'acceptance-final-1',
+        acceptedAt: '2026-04-04 14:25:12',
+        ballotPackageCommitment: 'expected-commitment',
+        serverProof: 'server-proof-final-1',
+      }),
+    );
+
+    useElectionsStore.setState({
+      loadElectionHub,
+      clearGrantCandidateSearch: vi.fn(),
+      selectHubElection,
+      reset: vi.fn(),
+      hubView: createHubView([voterEntry]),
+      hubEntries: [voterEntry],
+      selectedElectionId: null,
+      selectedHubEntry: null,
+      selectedElection: createDetail(
+        'election-final',
+        ElectionLifecycleStateProto.Finalized,
+        'Annual Elections 2026'
+      ),
+      canManageReportAccessGrants: false,
+      reportAccessGrantDeniedReason: '',
+      reportAccessGrants: [],
+      feedback: null,
+      error: null,
+      isLoadingHub: false,
+      isLoadingDetail: false,
+      actorPublicAddress: 'actor-address',
+    });
+
+    render(
+      <HushVotingWorkspace
+        actorPublicAddress="actor-address"
+        actorEncryptionPublicKey="actor-encrypt-address"
+        actorEncryptionPrivateKey="actor-private-encrypt-key"
+        actorSigningPrivateKey="actor-signing-private-key"
+        initialElectionId="election-final"
+      />
+    );
+
+    await waitFor(() => {
+      expect(selectHubElection).toHaveBeenCalledWith('actor-address', 'election-final');
+    });
+    fireEvent.click(await screen.findByTestId('hush-voting-verify-receipt-trigger'));
+    fireEvent.change(screen.getByTestId('hush-voting-receipt-input'), {
+      target: {
+        value: [
+          'Accepted Ballot Receipt',
+          'Election ID: election-final',
+          'Receipt ID: rcpt-final-1',
+          'Acceptance ID: acceptance-final-1',
+          'Accepted At: 04/04/2026, 14:25:12',
+          'Ballot Package Commitment: tampered-commitment',
+          'Server Proof: server-proof-final-1',
+        ].join('\n'),
+      },
+    });
+    fireEvent.click(screen.getByTestId('hush-voting-verify-receipt-submit'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('hush-voting-receipt-result')).toHaveTextContent(
+        'Receipt commitment does not match this device record'
+      );
+    });
+    expect(screen.getByTestId('hush-voting-receipt-result')).toHaveTextContent(
+      'The pasted Ballot Package Commitment does not match the receipt retained on this device'
+    );
+    expect(screen.getByTestId('hush-voting-receipt-result')).toHaveTextContent(
+      'The ballot commitment line is independently confirmed on this device.'
+    );
+  });
+
   it('keeps the hub receipt verifier hidden when no accepted checkoff record exists yet', async () => {
     const loadElectionHub = vi.fn().mockResolvedValue(undefined);
     const selectHubElection = vi.fn().mockResolvedValue(undefined);

@@ -121,10 +121,11 @@ type ParsedAcceptedBallotReceipt = {
   receiptId: string;
   acceptanceId: string;
   serverProof: string;
+  ballotPackageCommitment?: string;
 };
 
 type HubReceiptVerificationFeedback = {
-  tone: 'success' | 'error';
+  tone: 'success' | 'warning' | 'error';
   title: string;
   detail: string;
   verifiedAt: string;
@@ -149,6 +150,7 @@ function parseAcceptedBallotReceipt(receiptText: string): {
   const electionId = readField('Election ID');
   const receiptId = readField('Receipt ID');
   const acceptanceId = readField('Acceptance ID');
+  const ballotPackageCommitment = readField('Ballot Package Commitment');
   const serverProof = readField('Server Proof');
 
   if (!electionId || !receiptId || !acceptanceId || !serverProof) {
@@ -164,23 +166,99 @@ function parseAcceptedBallotReceipt(receiptText: string): {
       receiptId,
       acceptanceId,
       serverProof,
+      ballotPackageCommitment:
+        ballotPackageCommitment &&
+        ballotPackageCommitment !== '(not retained on this device)'
+          ? ballotPackageCommitment
+          : undefined,
     },
   };
 }
 
+function loadRetainedReceiptCommitment(electionId: string): string {
+  if (typeof window === 'undefined') {
+    return '';
+  }
+
+  const storageKey = `feat099:receipt:${electionId}`;
+  const rawValue =
+    window.localStorage.getItem(storageKey) ?? window.sessionStorage.getItem(storageKey);
+  if (!rawValue) {
+    return '';
+  }
+
+  try {
+    const parsed = JSON.parse(rawValue) as { ballotPackageCommitment?: string };
+    return parsed.ballotPackageCommitment?.trim() ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function buildCountedSetStatusItem({
+  lifecycleState,
+  hasOfficialResult,
+  isCounted,
+}: {
+  lifecycleState?: ElectionLifecycleStateProto;
+  hasOfficialResult: boolean;
+  isCounted: boolean;
+}): {
+  label: string;
+  complete: boolean;
+} {
+  if (lifecycleState === ElectionLifecycleStateProto.Finalized && hasOfficialResult) {
+    return {
+      label: 'This accepted vote is included in the finalized counted set used for the official result.',
+      complete: isCounted,
+    };
+  }
+
+  if (
+    lifecycleState === ElectionLifecycleStateProto.Closed ||
+    lifecycleState === ElectionLifecycleStateProto.Finalized
+  ) {
+    return {
+      label: 'Counted-set confirmation will appear once the official result is sealed for this election.',
+      complete: false,
+    };
+  }
+
+  return {
+    label: 'Counted-set confirmation will be available after the election is finalized.',
+    complete: false,
+  };
+}
+
 function buildHubReceiptVerificationFeedbackFromResponse(
-  response: VerifyElectionReceiptResponse
+  response: VerifyElectionReceiptResponse,
+  resultView: GetElectionResultViewResponse | null,
+  ballotPackageCommitment?: string,
+  retainedBallotPackageCommitment?: string
 ): HubReceiptVerificationFeedback {
   const verifiedAt = new Date().toLocaleString();
-  const finalCountStatusItem = response.TallyVerificationAvailable
+  const finalCountStatusItem = buildCountedSetStatusItem({
+    lifecycleState: response.LifecycleState,
+    hasOfficialResult: Boolean(resultView?.OfficialResult),
+    isCounted: response.ParticipationCountedAsVoted,
+  });
+  const hasProvidedCommitment = Boolean(ballotPackageCommitment);
+  const hasRetainedCommitment = Boolean(retainedBallotPackageCommitment);
+  const isPostCloseReceipt =
+    response.LifecycleState === ElectionLifecycleStateProto.Closed ||
+    response.LifecycleState === ElectionLifecycleStateProto.Finalized;
+  const requiresCommitmentConfirmation =
+    isPostCloseReceipt || hasProvidedCommitment || hasRetainedCommitment;
+  const commitmentMatchesRetainedRecord =
+    hasProvidedCommitment &&
+    hasRetainedCommitment &&
+    ballotPackageCommitment === retainedBallotPackageCommitment;
+  const commitmentStatusItem = requiresCommitmentConfirmation
     ? {
-        label: 'The election is closed. Final count confirmation is available as a separate step.',
-        complete: false,
+        label: 'The ballot commitment line is independently confirmed on this device.',
+        complete: commitmentMatchesRetainedRecord,
       }
-    : {
-        label: 'Final count confirmation will be available after the election closes.',
-        complete: false,
-      };
+    : null;
 
   if (!response.Success) {
     return {
@@ -219,13 +297,64 @@ function buildHubReceiptVerificationFeedbackFromResponse(
     };
   }
 
+  if (hasProvidedCommitment && hasRetainedCommitment && !commitmentMatchesRetainedRecord) {
+    return {
+      tone: 'error',
+      title: 'Receipt commitment does not match this device record',
+      detail:
+        'The pasted Ballot Package Commitment does not match the receipt retained on this device for this accepted vote. The receipt text may have been changed.',
+      verifiedAt,
+      statusItems: [
+        {
+          label: 'This voter is marked as voted in this election.',
+          complete: response.ParticipationCountedAsVoted,
+        },
+        finalCountStatusItem,
+        ...(commitmentStatusItem ? [commitmentStatusItem] : []),
+      ],
+    };
+  }
+
+  if (requiresCommitmentConfirmation && !commitmentMatchesRetainedRecord) {
+    const warningDetail = response.ParticipationCountedAsVoted
+      ? hasProvidedCommitment && !hasRetainedCommitment
+        ? 'The core receipt fields match the current vote record for this voter, and that accepted vote is included in the finalized counted set. This device could not independently confirm the Ballot Package Commitment line from the pasted receipt.'
+        : !hasProvidedCommitment && hasRetainedCommitment
+          ? 'The core receipt fields match the current vote record for this voter, and that accepted vote is included in the finalized counted set. This device retains a Ballot Package Commitment for this accepted vote, but the pasted receipt text does not include that line.'
+          : 'The core receipt fields match the current vote record for this voter, and that accepted vote is included in the finalized counted set. The pasted receipt text does not include a confirmable Ballot Package Commitment line.'
+      : hasProvidedCommitment && !hasRetainedCommitment
+        ? 'The receipt matches this voter, but this device could not independently confirm the Ballot Package Commitment line from the pasted receipt.'
+        : !hasProvidedCommitment && hasRetainedCommitment
+          ? 'The receipt matches this voter, but the pasted receipt text does not include the Ballot Package Commitment retained on this device.'
+          : 'The receipt matches this voter, but the pasted receipt text does not include a confirmable Ballot Package Commitment line.';
+
+    return {
+      tone: 'warning',
+      title: response.ParticipationCountedAsVoted
+        ? 'Receipt verified with incomplete commitment confirmation'
+        : 'Receipt matches this voter, but commitment confirmation is incomplete',
+      detail: warningDetail,
+      verifiedAt,
+      statusItems: [
+        {
+          label: 'This voter is marked as voted in this election.',
+          complete: response.ParticipationCountedAsVoted,
+        },
+        finalCountStatusItem,
+        ...(commitmentStatusItem ? [commitmentStatusItem] : []),
+      ],
+    };
+  }
+
   return {
     tone: 'success',
     title: response.ParticipationCountedAsVoted
       ? 'This voter is marked as voted'
       : 'Receipt matches this voter',
     detail: response.ParticipationCountedAsVoted
-      ? 'The receipt matches the current vote record for this voter in this election.'
+      ? finalCountStatusItem.complete
+        ? 'The receipt matches the current vote record for this voter, and that accepted vote is included in the finalized counted set for this election.'
+        : 'The receipt matches the current vote record for this voter in this election.'
       : 'The receipt matches this voter, but the election is not showing the voter as marked as voted yet.',
     verifiedAt,
     statusItems: [
@@ -234,6 +363,14 @@ function buildHubReceiptVerificationFeedbackFromResponse(
         complete: response.ParticipationCountedAsVoted,
       },
       finalCountStatusItem,
+      ...(commitmentStatusItem
+        ? [
+            {
+              ...commitmentStatusItem,
+              complete: true,
+            },
+          ]
+        : []),
     ],
   };
 }
@@ -241,9 +378,11 @@ function buildHubReceiptVerificationFeedbackFromResponse(
 function VoterWorkspaceSummary({
   entry,
   actorPublicAddress,
+  resultView,
 }: {
   entry: ElectionHubEntryView;
   actorPublicAddress: string;
+  resultView: GetElectionResultViewResponse | null;
 }) {
   const isOpenElection = entry.Election.LifecycleState === ElectionLifecycleStateProto.Open;
   const showCommitmentFieldInReceiptTemplate =
@@ -363,6 +502,7 @@ function VoterWorkspaceSummary({
 
     setIsVerifyingReceipt(true);
     try {
+      const retainedBallotPackageCommitment = loadRetainedReceiptCommitment(entry.Election.ElectionId);
       const verification = await electionsService.verifyElectionReceipt({
         ElectionId: entry.Election.ElectionId,
         ActorPublicAddress: actorPublicAddress,
@@ -370,7 +510,14 @@ function VoterWorkspaceSummary({
         AcceptanceId: parsed.receipt.acceptanceId,
         ServerProof: parsed.receipt.serverProof,
       });
-      setReceiptVerification(buildHubReceiptVerificationFeedbackFromResponse(verification));
+      setReceiptVerification(
+        buildHubReceiptVerificationFeedbackFromResponse(
+          verification,
+          resultView,
+          parsed.receipt.ballotPackageCommitment,
+          retainedBallotPackageCommitment,
+        ),
+      );
     } catch (error) {
       setReceiptVerification({
         tone: 'error',
@@ -487,9 +634,10 @@ function VoterWorkspaceSummary({
                 </h3>
                 <p className="mt-3 text-sm leading-7 text-hush-text-accent">
                   Paste the receipt text or upload the downloaded receipt file. This check confirms
-                  whether this voter is already marked as voted in this election. After the election
-                  closes, a separate check can confirm whether the vote was included in the final
-                  count.
+                  whether this voter is already marked as voted in this election. After finalization,
+                  it can confirm whether the accepted vote is included in the counted set used for
+                  the official result. If this device retained the original receipt, it also checks
+                  the ballot commitment line locally.
                 </p>
               </div>
             </div>
@@ -541,6 +689,8 @@ function VoterWorkspaceSummary({
                   className={`rounded-2xl px-4 py-4 text-sm ${
                     receiptVerification.tone === 'success'
                       ? 'border border-green-500/30 bg-green-500/10 text-green-100'
+                      : receiptVerification.tone === 'warning'
+                        ? 'border border-amber-500/30 bg-amber-500/10 text-amber-100'
                       : 'border border-red-500/30 bg-red-500/10 text-red-100'
                   }`}
                   data-testid="hush-voting-receipt-result"
@@ -578,9 +728,21 @@ function VoterWorkspaceSummary({
                         <div>Open-election receipts include only the fields needed for this check.</div>
                       </div>
                     ) : null}
+                    {showCommitmentFieldInReceiptTemplate ? (
+                      <div className="flex items-start gap-3">
+                        <Circle className="mt-0.5 h-4 w-4 shrink-0 opacity-80" />
+                        <div>
+                          If this device retained the original receipt, the ballot commitment line is
+                          checked locally as well.
+                        </div>
+                      </div>
+                    ) : null}
                     <div className="flex items-start gap-3">
                       <Circle className="mt-0.5 h-4 w-4 shrink-0 opacity-80" />
-                      <div>After the election closes, confirm whether the vote was included in the final count.</div>
+                      <div>
+                        After finalization, confirm whether the accepted vote is included in the
+                        counted set used for the official result.
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1481,6 +1643,7 @@ export function HushVotingWorkspace({
               <VoterWorkspaceSummary
                 entry={activeEntry}
                 actorPublicAddress={actorPublicAddress}
+                resultView={resultView}
               />
             ) : null}
 

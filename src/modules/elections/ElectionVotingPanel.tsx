@@ -477,14 +477,51 @@ function createReceiptFromVotingView(
   };
 }
 
+function buildCountedSetStatusItem({
+  lifecycleState,
+  hasOfficialResult,
+  isCounted,
+}: {
+  lifecycleState?: ElectionLifecycleStateProto;
+  hasOfficialResult: boolean;
+  isCounted: boolean;
+}): {
+  label: string;
+  complete: boolean;
+} {
+  if (lifecycleState === ElectionLifecycleStateProto.Finalized && hasOfficialResult) {
+    return {
+      label: 'This accepted vote is included in the finalized counted set used for the official result.',
+      complete: isCounted,
+    };
+  }
+
+  if (
+    lifecycleState === ElectionLifecycleStateProto.Closed ||
+    lifecycleState === ElectionLifecycleStateProto.Finalized
+  ) {
+    return {
+      label: 'Counted-set confirmation will appear once the official result is sealed for this election.',
+      complete: false,
+    };
+  }
+
+  return {
+    label: 'Counted-set confirmation will be available after the election is finalized.',
+    complete: false,
+  };
+}
+
 function buildReceiptVerificationFeedback({
   localReceipt,
   votingView,
   lifecycleState,
+  resultView,
 }: {
   localReceipt: LocalReceipt;
   votingView: GetElectionVotingViewResponse;
   lifecycleState?: ElectionLifecycleStateProto;
+  resultView: GetElectionResultViewResponse | null;
 }): ReceiptVerificationFeedback {
   const verifiedAt = new Date().toLocaleString();
   const receiptMatches =
@@ -506,24 +543,19 @@ function buildReceiptVerificationFeedback({
   const isCounted =
     votingView.PersonalParticipationStatus ===
     ElectionParticipationStatusProto.ParticipationCountedAsVoted;
-  const isPostCloseState =
-    lifecycleState === ElectionLifecycleStateProto.Closed ||
-    lifecycleState === ElectionLifecycleStateProto.Finalized;
-  const finalCountStatusItem = isPostCloseState
-    ? {
-        label: 'The election is closed. Final count confirmation is available as a separate step.',
-        complete: false,
-      }
-    : {
-        label: 'Final count confirmation will be available after the election closes.',
-        complete: false,
-      };
+  const finalCountStatusItem = buildCountedSetStatusItem({
+    lifecycleState,
+    hasOfficialResult: Boolean(resultView?.OfficialResult),
+    isCounted,
+  });
 
   if (isCounted) {
     return {
       tone: 'success',
       title: 'This voter is marked as voted',
-      detail: 'This receipt matches the current vote record for this voter in this election.',
+      detail: finalCountStatusItem.complete
+        ? 'This receipt matches the current vote record for this voter, and that accepted vote is included in the finalized counted set for this election.'
+        : 'This receipt matches the current vote record for this voter in this election.',
       verifiedAt,
       statusItems: [
         {
@@ -1309,6 +1341,7 @@ export function ElectionVotingPanel({
           localReceipt: actionableReceipt,
           votingView: refreshedView,
           lifecycleState: detail?.Election?.LifecycleState,
+          resultView,
         }),
       );
     } catch (error) {

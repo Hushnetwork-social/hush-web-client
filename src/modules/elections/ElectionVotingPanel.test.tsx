@@ -601,6 +601,64 @@ describe('ElectionVotingPanel', () => {
     expect(screen.getByText('View eligibility details')).toBeInTheDocument();
   });
 
+  it('confirms finalized counted-set inclusion when the verified receipt belongs to a finalized election', async () => {
+    window.localStorage.setItem(
+      'feat099:receipt:election-1',
+      JSON.stringify({
+        electionId: 'election-1',
+        receiptId: 'receipt-final-1',
+        acceptanceId: 'acceptance-final-1',
+        acceptedAt: '2026-04-04 13:00:00',
+        ballotPackageCommitment: 'ballot-commitment-final-1',
+        serverProof: 'server-proof-final-1',
+      }),
+    );
+    electionsServiceMock.getElection.mockResolvedValue(
+      createElectionResponse({
+        Election: createElectionRecord({
+          LifecycleState: ElectionLifecycleStateProto.Finalized,
+        }),
+      }),
+    );
+    electionsServiceMock.getElectionVotingView.mockResolvedValue(
+      createVotingViewResponse({
+        HasAcceptedAt: true,
+        AcceptedAt: timestamp,
+        PersonalParticipationStatus:
+          ElectionParticipationStatusProto.ParticipationCountedAsVoted,
+        ReceiptId: 'receipt-final-1',
+        AcceptanceId: 'acceptance-final-1',
+        ServerProof: 'server-proof-final-1',
+      }),
+    );
+    electionsServiceMock.getElectionResultView.mockResolvedValue(
+      createResultView({
+        OfficialResult: createResultArtifact(),
+      }),
+    );
+
+    render(
+      <ElectionVotingPanel
+        electionId="election-1"
+        actorPublicAddress="actor-public-key"
+        actorEncryptionPublicKey="actor-encryption-public-key"
+        actorEncryptionPrivateKey="actor-encryption-private-key"
+        actorSigningPrivateKey="actor-signing-private-key"
+      />
+    );
+
+    fireEvent.click(await screen.findByTestId('voting-verify-receipt'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('voting-receipt-verification-dialog')).toHaveTextContent(
+        'included in the finalized counted set'
+      );
+    });
+    expect(screen.getByTestId('voting-receipt-verification-dialog')).toHaveTextContent(
+      'This accepted vote is included in the finalized counted set used for the official result.'
+    );
+  });
+
   it('does not persist pending recovery state when dev vote transaction creation fails locally', async () => {
     process.env.NEXT_PUBLIC_ELECTIONS_ALLOW_DEV_MODE = 'true';
     electionsServiceMock.getElectionVotingView
