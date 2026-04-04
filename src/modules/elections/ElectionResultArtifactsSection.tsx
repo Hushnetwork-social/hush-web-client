@@ -401,7 +401,11 @@ export function ElectionResultArtifactsSection({
   return (
     <div className="space-y-5" data-testid="election-results-section">
       {hasReportPackage && latestReportPackage ? (
-        <section className={`${sectionClass} space-y-4`} data-testid="report-package-summary">
+        <section
+          id="hush-voting-report-package"
+          className={`${sectionClass} space-y-4 scroll-mt-24`}
+          data-testid="report-package-summary"
+        >
           <div
             className={`rounded-2xl p-4 text-sm ${reportPackageStatusCopy?.className ?? ''}`}
           >
@@ -517,7 +521,11 @@ export function ElectionResultArtifactsSection({
       ) : null}
 
       {unofficialResult ? (
-        <div data-testid="election-unofficial-result">
+        <div
+          id="hush-voting-unofficial-result"
+          className="scroll-mt-24"
+          data-testid="election-unofficial-result"
+        >
           <ResultArtifactCard
             artifact={unofficialResult}
             label="Unofficial result"
@@ -527,7 +535,11 @@ export function ElectionResultArtifactsSection({
       ) : null}
 
       {officialResult ? (
-        <div data-testid="election-official-result" className="space-y-4">
+        <div
+          id="hush-voting-official-result"
+          data-testid="election-official-result"
+          className="space-y-4 scroll-mt-24"
+        >
           <section className="rounded-2xl bg-green-500/12 p-4 text-sm text-green-100">
             <div className="flex items-start gap-3">
               <Eye className="mt-0.5 h-5 w-5" />

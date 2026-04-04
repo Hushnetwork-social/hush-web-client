@@ -3,9 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   ElectionHubEntryView,
   ElectionRecordView,
+  ElectionReportArtifactView,
+  ElectionReportPackageSummaryView,
+  ElectionResultArtifact,
   ElectionSummary,
   GetElectionHubViewResponse,
   GetElectionResponse,
+  GetElectionResultViewResponse,
 } from '@/lib/grpc';
 import {
   ElectionCeremonyVersionStatusProto,
@@ -15,6 +19,13 @@ import {
   ElectionHubNextActionHintProto,
   ElectionLifecycleStateProto,
   ElectionParticipationStatusProto,
+  ElectionReportArtifactAccessScopeProto,
+  ElectionReportArtifactFormatProto,
+  ElectionReportArtifactKindProto,
+  ElectionReportPackageStatusProto,
+  ElectionResultArtifactKindProto,
+  ElectionResultArtifactVisibilityProto,
+  OfficialResultVisibilityPolicyProto,
   ElectionTrusteeInvitationStatusProto,
   ReviewWindowPolicyProto,
 } from '@/lib/grpc';
@@ -23,6 +34,7 @@ import { useElectionsStore } from './useElectionsStore';
 
 const { electionsServiceMock } = vi.hoisted(() => ({
   electionsServiceMock: {
+    getElectionResultView: vi.fn(),
     getElectionVotingView: vi.fn(),
     verifyElectionReceipt: vi.fn(),
   },
@@ -43,6 +55,8 @@ vi.mock('@/lib/grpc/services/elections', async (importOriginal) => {
     ...actual,
     electionsService: {
       ...actual.electionsService,
+      getElectionResultView: (...args: unknown[]) =>
+        electionsServiceMock.getElectionResultView(...args),
       getElectionVotingView: (...args: unknown[]) =>
         electionsServiceMock.getElectionVotingView(...args),
       verifyElectionReceipt: (...args: unknown[]) =>
@@ -187,13 +201,121 @@ function createHubView(entries: ElectionHubEntryView[]): GetElectionHubViewRespo
   };
 }
 
+function createResultArtifact(overrides?: Partial<ElectionResultArtifact>): ElectionResultArtifact {
+  return {
+    Id: 'official-result-1',
+    ElectionId: 'election-1',
+    ArtifactKind: ElectionResultArtifactKindProto.ElectionResultArtifactOfficial,
+    Visibility: ElectionResultArtifactVisibilityProto.ElectionResultArtifactPublicPlaintext,
+    Title: 'Official result',
+    NamedOptionResults: [
+      {
+        OptionId: 'candidate-1',
+        DisplayLabel: 'Alice',
+        ShortDescription: 'Board candidate',
+        BallotOrder: 1,
+        Rank: 1,
+        VoteCount: 12,
+      },
+    ],
+    BlankCount: 1,
+    TotalVotedCount: 13,
+    EligibleToVoteCount: 18,
+    DidNotVoteCount: 5,
+    DenominatorEvidence: {
+      SnapshotType: 0,
+      EligibilitySnapshotId: 'eligibility-close-1',
+      BoundaryArtifactId: 'close-artifact-1',
+      ActiveDenominatorSetHash: 'active-denominator-1',
+    },
+    TallyReadyArtifactId: 'tally-ready-1',
+    SourceResultArtifactId: 'source-result-1',
+    EncryptedPayload: '',
+    PublicPayload: '{"winner":"Alice"}',
+    RecordedAt: timestamp,
+    RecordedByPublicAddress: 'actor-address',
+    ...overrides,
+  };
+}
+
+function createReportPackage(
+  overrides?: Partial<ElectionReportPackageSummaryView>
+): ElectionReportPackageSummaryView {
+  return {
+    Id: 'report-package-1',
+    Status: ElectionReportPackageStatusProto.ReportPackageSealed,
+    AttemptNumber: 1,
+    PreviousAttemptId: '',
+    FinalizationSessionId: 'finalization-session-1',
+    TallyReadyArtifactId: 'tally-ready-1',
+    UnofficialResultArtifactId: 'unofficial-result-1',
+    OfficialResultArtifactId: 'official-result-1',
+    FinalizeArtifactId: 'finalize-artifact-1',
+    CloseBoundaryArtifactId: 'close-artifact-1',
+    CloseEligibilitySnapshotId: 'eligibility-close-1',
+    FinalizationReleaseEvidenceId: 'release-evidence-1',
+    FrozenEvidenceHash: new Uint8Array([1, 2, 3, 4]),
+    FrozenEvidenceFingerprint: 'close=close-artifact-1|tally=tally-ready-1',
+    PackageHash: new Uint8Array([4, 3, 2, 1]),
+    ArtifactCount: 1,
+    FailureCode: '',
+    FailureReason: '',
+    AttemptedAt: timestamp,
+    SealedAt: timestamp,
+    HasSealedAt: true,
+    AttemptedByPublicAddress: 'actor-address',
+    ...overrides,
+  };
+}
+
+function createReportArtifact(
+  overrides?: Partial<ElectionReportArtifactView>
+): ElectionReportArtifactView {
+  return {
+    Id: 'report-artifact-1',
+    ReportPackageId: 'report-package-1',
+    ElectionId: 'election-1',
+    ArtifactKind: ElectionReportArtifactKindProto.ReportArtifactHumanManifest,
+    Format: ElectionReportArtifactFormatProto.ReportArtifactMarkdown,
+    AccessScope: ElectionReportArtifactAccessScopeProto.ReportArtifactOwnerAuditorOnly,
+    SortOrder: 1,
+    Title: 'Final manifest',
+    FileName: 'manifest.md',
+    MediaType: 'text/markdown;charset=utf-8',
+    ContentHash: new Uint8Array([9, 8, 7, 6]),
+    Content: '# Final manifest',
+    PairedArtifactId: '',
+    RecordedAt: timestamp,
+    ...overrides,
+  };
+}
+
+function createResultView(
+  overrides?: Partial<GetElectionResultViewResponse>
+): GetElectionResultViewResponse {
+  return {
+    Success: true,
+    ErrorMessage: '',
+    ActorPublicAddress: 'actor-address',
+    CanViewParticipantEncryptedResults: false,
+    OfficialResultVisibilityPolicy: OfficialResultVisibilityPolicyProto.PublicPlaintext,
+    ClosedProgressStatus: ElectionClosedProgressStatusProto.ClosedProgressNone,
+    CanViewReportPackage: false,
+    CanRetryFailedPackageFinalization: false,
+    VisibleReportArtifacts: [],
+    ...overrides,
+  };
+}
+
 describe('HushVotingWorkspace', () => {
   beforeEach(() => {
     cleanup();
     storeReset();
     mockPush.mockReset();
+    electionsServiceMock.getElectionResultView.mockReset();
     electionsServiceMock.getElectionVotingView.mockReset();
     electionsServiceMock.verifyElectionReceipt.mockReset();
+    electionsServiceMock.getElectionResultView.mockResolvedValue(createResultView());
     electionsServiceMock.getElectionVotingView.mockResolvedValue({
       Success: true,
       ErrorMessage: '',
@@ -424,6 +546,15 @@ describe('HushVotingWorkspace', () => {
       }
     );
 
+    electionsServiceMock.getElectionResultView.mockResolvedValue(
+      createResultView({
+        CanViewReportPackage: true,
+        LatestReportPackage: createReportPackage(),
+        OfficialResult: createResultArtifact(),
+        VisibleReportArtifacts: [createReportArtifact()],
+      })
+    );
+
     useElectionsStore.setState({
       loadElectionHub,
       clearGrantCandidateSearch: vi.fn(),
@@ -465,6 +596,15 @@ describe('HushVotingWorkspace', () => {
     expect(screen.getByTestId('hush-voting-section-trustee')).toBeInTheDocument();
     expect(screen.getByTestId('hush-voting-section-auditor')).toBeInTheDocument();
     expect(screen.getByTestId('hush-voting-section-results')).toBeInTheDocument();
+    expect(await screen.findByTestId('report-package-summary')).toBeInTheDocument();
+    expect(screen.getByTestId('hush-voting-open-report-package')).toHaveAttribute(
+      'href',
+      '#hush-voting-report-package'
+    );
+    expect(screen.getByTestId('hush-voting-open-auditor-result')).toHaveAttribute(
+      'href',
+      '#hush-voting-official-result'
+    );
     expect(screen.getByRole('link', { name: 'Result details' })).toHaveAttribute(
       'href',
       '/elections/election-mixed/voter'
@@ -474,6 +614,97 @@ describe('HushVotingWorkspace', () => {
       '/elections/owner'
     );
     expect(screen.getByRole('link', { name: 'Back to HushVoting! Hub' })).toHaveAttribute('href', '/elections');
+  });
+
+  it('lets an auditor-only actor open the report package and official result from the hub workspace', async () => {
+    const loadElectionHub = vi.fn().mockResolvedValue(undefined);
+    const selectHubElection = vi.fn().mockResolvedValue(undefined);
+    const auditorEntry = createHubEntry(
+      'election-auditor',
+      ElectionLifecycleStateProto.Finalized,
+      'Auditor Review Election',
+      {
+        ActorRoles: {
+          IsOwnerAdmin: false,
+          IsTrustee: false,
+          IsVoter: false,
+          IsDesignatedAuditor: true,
+        },
+        SuggestedAction: ElectionHubNextActionHintProto.ElectionHubActionAuditorReviewPackage,
+        CanViewNamedParticipationRoster: true,
+        CanViewReportPackage: true,
+        CanViewParticipantResults: true,
+        HasUnofficialResult: true,
+        HasOfficialResult: true,
+      }
+    );
+
+    electionsServiceMock.getElectionResultView.mockResolvedValue(
+      createResultView({
+        CanViewReportPackage: true,
+        LatestReportPackage: createReportPackage(),
+        OfficialResult: createResultArtifact(),
+        VisibleReportArtifacts: [createReportArtifact()],
+      })
+    );
+
+    useElectionsStore.setState({
+      loadElectionHub,
+      clearGrantCandidateSearch: vi.fn(),
+      selectHubElection,
+      reset: vi.fn(),
+      hubView: createHubView([auditorEntry]),
+      hubEntries: [auditorEntry],
+      selectedElectionId: null,
+      selectedHubEntry: null,
+      selectedElection: createDetail(
+        'election-auditor',
+        ElectionLifecycleStateProto.Finalized,
+        'Auditor Review Election'
+      ),
+      canManageReportAccessGrants: false,
+      reportAccessGrantDeniedReason: '',
+      reportAccessGrants: [],
+      feedback: null,
+      error: null,
+      isLoadingHub: false,
+      isLoadingDetail: false,
+      actorPublicAddress: 'actor-address',
+    });
+
+    render(
+      <HushVotingWorkspace
+        actorPublicAddress="actor-address"
+        actorEncryptionPublicKey="actor-encrypt-address"
+        actorEncryptionPrivateKey="actor-private-encrypt-key"
+        actorSigningPrivateKey="actor-signing-private-key"
+        initialElectionId="election-auditor"
+      />
+    );
+
+    await waitFor(() => {
+      expect(selectHubElection).toHaveBeenCalledWith('actor-address', 'election-auditor');
+    });
+
+    expect(await screen.findByTestId('hush-voting-section-auditor')).toBeInTheDocument();
+    expect(await screen.findByTestId('report-package-summary')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Result details' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('hush-voting-open-report-package')).toHaveAttribute(
+      'href',
+      '#hush-voting-report-package'
+    );
+    expect(screen.getByTestId('hush-voting-open-auditor-result')).toHaveAttribute(
+      'href',
+      '#hush-voting-official-result'
+    );
+    expect(screen.getByTestId('hush-voting-results-open-report-package')).toHaveAttribute(
+      'href',
+      '#hush-voting-report-package'
+    );
+    expect(screen.getByTestId('hush-voting-results-open-result')).toHaveAttribute(
+      'href',
+      '#hush-voting-official-result'
+    );
   });
 
   it('shows the hub receipt verifier only after the voter already has an accepted checkoff record', async () => {

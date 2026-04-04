@@ -20,6 +20,7 @@ import type {
   ElectionGovernedProposal,
   ElectionHubEntryView,
   GetElectionResponse,
+  GetElectionResultViewResponse,
   VerifyElectionReceiptResponse,
 } from '@/lib/grpc';
 import {
@@ -32,6 +33,7 @@ import { electionsService } from '@/lib/grpc/services/elections';
 import { ClosedProgressBanner } from './ClosedProgressBanner';
 import { ElectionAccessBoundaryNotice } from './ElectionAccessBoundaryNotice';
 import { ElectionHubList } from './ElectionHubList';
+import { ElectionResultArtifactsSection } from './ElectionResultArtifactsSection';
 import { ElectionWorkspaceHeader } from './ElectionWorkspaceHeader';
 import { ReadOnlyGovernedActionSummary } from './ReadOnlyGovernedActionSummary';
 import {
@@ -62,6 +64,20 @@ type HushVotingWorkspaceProps = {
 
 const sectionClass =
   'rounded-3xl bg-hush-bg-element/95 p-5 shadow-lg shadow-black/10';
+
+async function loadElectionResultViewSafely(
+  electionId: string,
+  actorPublicAddress: string,
+): Promise<GetElectionResultViewResponse | null> {
+  try {
+    return await electionsService.getElectionResultView({
+      ElectionId: electionId,
+      ActorPublicAddress: actorPublicAddress,
+    });
+  } catch {
+    return null;
+  }
+}
 
 function timestampToMillis(timestamp?: { seconds?: number; nanos?: number }): number {
   if (!timestamp) {
@@ -934,24 +950,37 @@ function TrusteeWorkspaceSummary({
 function AuditorWorkspaceSummary({
   entry,
   detail,
+  resultView,
+  isLoadingResultView,
 }: {
   entry: ElectionHubEntryView;
   detail: GetElectionResponse | null;
+  resultView: GetElectionResultViewResponse | null;
+  isLoadingResultView: boolean;
 }) {
-  return (
-    <section className={sectionClass} data-testid="hush-voting-section-auditor">
-      <div className="text-xs font-semibold uppercase tracking-[0.24em] text-hush-text-accent">
-        Auditor Surface
-      </div>
-      <h2 className="mt-2 text-xl font-semibold text-hush-text-primary">
-        Read-only governance and package access
-      </h2>
-      <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
-        Designated-auditor access stays read-only here. The shell only mirrors server-approved
-        package and governance visibility for the selected election.
-      </p>
+  const hasReportPackage = Boolean(resultView?.CanViewReportPackage && resultView?.LatestReportPackage);
+  const resultTargetId = resultView?.OfficialResult
+    ? 'hush-voting-official-result'
+    : resultView?.UnofficialResult
+      ? 'hush-voting-unofficial-result'
+      : null;
 
-      <div className="mt-4 grid gap-4 md:grid-cols-3">
+  return (
+    <section className="space-y-5 pt-4 md:pt-6" data-testid="hush-voting-section-auditor">
+      <div>
+        <div className="text-xs font-semibold uppercase tracking-[0.24em] text-hush-text-accent">
+          Auditor Surface
+        </div>
+        <h2 className="mt-2 text-xl font-semibold text-hush-text-primary">
+          Read-only governance and package access
+        </h2>
+        <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
+          Designated-auditor access stays read-only here. The shell mirrors server-approved
+          package and governance visibility without introducing any auditor-only mutation path.
+        </p>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-3">
         <AvailabilityCard
           label="Report package"
           value={entry.CanViewReportPackage ? 'Granted' : 'Not granted'}
@@ -969,10 +998,37 @@ function AuditorWorkspaceSummary({
         />
       </div>
 
-      {detail ? (
-        <div className="mt-4">
-          <ReadOnlyGovernedActionSummary detail={detail} />
+      {isLoadingResultView ? (
+        <div className="rounded-2xl bg-hush-bg-dark/60 px-4 py-3 text-sm text-hush-text-accent">
+          Loading the auditor-visible package and result surfaces for this election.
         </div>
+      ) : hasReportPackage || resultTargetId ? (
+        <div className="flex flex-wrap gap-3">
+          {hasReportPackage ? (
+            <a
+              href="#hush-voting-report-package"
+              className="inline-flex items-center gap-2 rounded-full bg-[#1b2544] px-4 py-2 text-sm font-medium text-hush-text-primary transition-colors hover:bg-[#243158]"
+              data-testid="hush-voting-open-report-package"
+            >
+              <Files className="h-4 w-4" />
+              <span>Open report package</span>
+            </a>
+          ) : null}
+          {resultTargetId ? (
+            <a
+              href={`#${resultTargetId}`}
+              className="inline-flex items-center gap-2 rounded-full bg-[#1b2544] px-4 py-2 text-sm font-medium text-hush-text-primary transition-colors hover:bg-[#243158]"
+              data-testid="hush-voting-open-auditor-result"
+            >
+              <Vote className="h-4 w-4" />
+              <span>{resultView?.OfficialResult ? 'Open official result' : 'Open unofficial result'}</span>
+            </a>
+          ) : null}
+        </div>
+      ) : null}
+
+      {detail ? (
+        <ReadOnlyGovernedActionSummary detail={detail} />
       ) : null}
     </section>
   );
@@ -981,19 +1037,32 @@ function AuditorWorkspaceSummary({
 function ResultsWorkspaceSummary({
   entry,
   detail,
+  resultView,
+  isLoadingResultView,
 }: {
   entry: ElectionHubEntryView;
   detail: GetElectionResponse | null;
+  resultView: GetElectionResultViewResponse | null;
+  isLoadingResultView: boolean;
 }) {
-  const hasAnyResults = entry.HasUnofficialResult || entry.HasOfficialResult;
+  const hasAnyResults =
+    entry.HasUnofficialResult ||
+    entry.HasOfficialResult ||
+    Boolean(resultView?.UnofficialResult || resultView?.OfficialResult);
+  const hasReportPackage = Boolean(resultView?.CanViewReportPackage && resultView?.LatestReportPackage);
   const canOpenResultDetail = entry.ActorRoles.IsVoter && hasAnyResults;
-  const [isExpanded, setIsExpanded] = useState(hasAnyResults);
+  const resultTargetId = resultView?.OfficialResult
+    ? '#hush-voting-official-result'
+    : resultView?.UnofficialResult
+      ? '#hush-voting-unofficial-result'
+      : null;
+  const [isExpanded, setIsExpanded] = useState(hasAnyResults || hasReportPackage);
 
   useEffect(() => {
-    if (hasAnyResults) {
+    if (hasAnyResults || hasReportPackage) {
       setIsExpanded(true);
     }
-  }, [hasAnyResults]);
+  }, [hasAnyResults, hasReportPackage]);
 
   return (
     <section className="space-y-4 pt-4 md:pt-6" data-testid="hush-voting-section-results">
@@ -1006,9 +1075,9 @@ function ResultsWorkspaceSummary({
             Result and package availability
           </h3>
           <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
-            {hasAnyResults
-              ? 'Unofficial or official result access is available for this election.'
-              : 'No unofficial or official result is available yet. Expand this section only if you need the access boundaries.'}
+            {hasAnyResults || hasReportPackage
+              ? 'Result or report-package access is available for this election.'
+              : 'No unofficial result, official result, or report package is available yet. Expand this section only if you need the access boundaries.'}
           </p>
         </div>
 
@@ -1031,26 +1100,50 @@ function ResultsWorkspaceSummary({
               overstate result, roster, or report-package access.
             </div>
 
-            {entry.ActorRoles.IsVoter ? (
-              canOpenResultDetail ? (
-              <Link
-                href={`/elections/${entry.Election.ElectionId}/voter`}
-                className="inline-flex self-start items-center gap-2 rounded-xl border border-hush-bg-light px-4 py-2 text-sm font-medium whitespace-nowrap text-hush-text-primary transition-colors hover:border-hush-purple hover:text-hush-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark lg:ml-6"
-              >
-                <Vote className="h-4 w-4" />
-                <span>Result details</span>
-              </Link>
-              ) : (
-                <button
-                  type="button"
-                  disabled
-                  className="inline-flex self-start items-center gap-2 rounded-xl border border-hush-bg-light/70 px-4 py-2 text-sm font-medium whitespace-nowrap text-hush-text-accent/80 opacity-60 cursor-not-allowed lg:ml-6"
+            <div className="flex flex-wrap gap-3 lg:ml-6">
+              {entry.ActorRoles.IsVoter ? (
+                canOpenResultDetail ? (
+                  <Link
+                    href={`/elections/${entry.Election.ElectionId}/voter`}
+                    className="inline-flex self-start items-center gap-2 rounded-full bg-[#1b2544] px-4 py-2 text-sm font-medium whitespace-nowrap text-hush-text-primary transition-colors hover:bg-[#243158] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
+                  >
+                    <Vote className="h-4 w-4" />
+                    <span>Result details</span>
+                  </Link>
+                ) : (
+                  <button
+                    type="button"
+                    disabled
+                    className="inline-flex self-start items-center gap-2 rounded-full bg-[#1b2544]/70 px-4 py-2 text-sm font-medium whitespace-nowrap text-hush-text-accent/80 opacity-60 cursor-not-allowed"
+                  >
+                    <Vote className="h-4 w-4" />
+                    <span>Result details</span>
+                  </button>
+                )
+              ) : null}
+
+              {hasReportPackage ? (
+                <a
+                  href="#hush-voting-report-package"
+                  className="inline-flex self-start items-center gap-2 rounded-full bg-[#1b2544] px-4 py-2 text-sm font-medium whitespace-nowrap text-hush-text-primary transition-colors hover:bg-[#243158] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
+                  data-testid="hush-voting-results-open-report-package"
+                >
+                  <Files className="h-4 w-4" />
+                  <span>Open report package</span>
+                </a>
+              ) : null}
+
+              {resultTargetId ? (
+                <a
+                  href={resultTargetId}
+                  className="inline-flex self-start items-center gap-2 rounded-full bg-[#1b2544] px-4 py-2 text-sm font-medium whitespace-nowrap text-hush-text-primary transition-colors hover:bg-[#243158] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
+                  data-testid="hush-voting-results-open-result"
                 >
                   <Vote className="h-4 w-4" />
-                  <span>Result details</span>
-                </button>
-              )
-            ) : null}
+                  <span>{resultView?.OfficialResult ? 'Open official result' : 'Open unofficial result'}</span>
+                </a>
+              ) : null}
+            </div>
           </div>
 
           <div className="grid gap-4 md:grid-cols-4">
@@ -1086,6 +1179,16 @@ function ResultsWorkspaceSummary({
               </div>
             </div>
           ) : null}
+
+          {isLoadingResultView ? (
+            <div className="rounded-2xl bg-hush-bg-dark/60 px-4 py-3 text-sm text-hush-text-accent">
+              Loading result and report-package details for this actor.
+            </div>
+          ) : null}
+
+          {detail?.Election ? (
+            <ElectionResultArtifactsSection election={detail.Election} resultView={resultView} />
+          ) : null}
         </div>
       ) : null}
     </section>
@@ -1097,6 +1200,8 @@ export function HushVotingWorkspace({
   initialElectionId,
 }: HushVotingWorkspaceProps) {
   const router = useRouter();
+  const [resultView, setResultView] = useState<GetElectionResultViewResponse | null>(null);
+  const [isLoadingResultView, setIsLoadingResultView] = useState(false);
   const {
     clearGrantCandidateSearch,
     feedback,
@@ -1177,6 +1282,48 @@ export function HushVotingWorkspace({
   const sectionOrder = getElectionWorkspaceSectionOrder(activeEntry);
   const hasVisibleSections = sectionOrder.length > 0;
   const isDetailRoute = Boolean(initialElectionId);
+
+  useEffect(() => {
+    if (!isDetailRoute || !activeEntry) {
+      setResultView(null);
+      setIsLoadingResultView(false);
+      return;
+    }
+
+    const shouldLoadResultView =
+      activeEntry.CanViewParticipantResults ||
+      activeEntry.CanViewReportPackage ||
+      activeEntry.HasUnofficialResult ||
+      activeEntry.HasOfficialResult;
+
+    if (!shouldLoadResultView) {
+      setResultView(null);
+      setIsLoadingResultView(false);
+      return;
+    }
+
+    let isCancelled = false;
+    setIsLoadingResultView(true);
+
+    void loadElectionResultViewSafely(activeEntry.Election.ElectionId, actorPublicAddress).then(
+      (response) => {
+        if (isCancelled) {
+          return;
+        }
+
+        setResultView(response?.Success ? response : null);
+        setIsLoadingResultView(false);
+      }
+    );
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [
+    activeEntry,
+    actorPublicAddress,
+    isDetailRoute,
+  ]);
 
   const handleSelectElection = (electionId: string) => {
     if (electionId !== initialElectionId) {
@@ -1349,11 +1496,21 @@ export function HushVotingWorkspace({
             ) : null}
 
             {sectionOrder.includes('auditor') ? (
-              <AuditorWorkspaceSummary entry={activeEntry} detail={activeDetail} />
+              <AuditorWorkspaceSummary
+                entry={activeEntry}
+                detail={activeDetail}
+                resultView={resultView}
+                isLoadingResultView={isLoadingResultView}
+              />
             ) : null}
 
             {sectionOrder.includes('results') ? (
-              <ResultsWorkspaceSummary entry={activeEntry} detail={activeDetail} />
+              <ResultsWorkspaceSummary
+                entry={activeEntry}
+                detail={activeDetail}
+                resultView={resultView}
+                isLoadingResultView={isLoadingResultView}
+              />
             ) : null}
 
             {activeEntry.CanViewReportPackage && !sectionOrder.includes('auditor') ? (
