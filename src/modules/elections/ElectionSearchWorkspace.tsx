@@ -3,15 +3,55 @@
 import { type FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowRight, Loader2, Search } from 'lucide-react';
-import type { ElectionSummary, Identity } from '@/lib/grpc';
+import {
+  ElectionLifecycleStateProto,
+  type ElectionApplicationRoleFlagsView,
+  type ElectionSummary,
+  type Identity,
+  type SearchElectionDirectoryEntryView,
+} from '@/lib/grpc';
 import { electionsService } from '@/lib/grpc/services/elections';
 import { identityService } from '@/lib/grpc/services/identity';
+import { useAppStore } from '@/stores/useAppStore';
 import { getLifecycleLabel } from './contracts';
 
 type ElectionDiscoveryResult = {
   election: ElectionSummary;
   ownerDisplayName: string;
+  actorRoles: ElectionApplicationRoleFlagsView;
+  canOpenEligibility: boolean;
+  eligibilityDisabledReason: string;
 };
+
+const EMPTY_ROLE_FLAGS: ElectionApplicationRoleFlagsView = {
+  IsOwnerAdmin: false,
+  IsTrustee: false,
+  IsVoter: false,
+  IsDesignatedAuditor: false,
+};
+
+const SEARCH_ROLE_BADGES = [
+  {
+    key: 'IsOwnerAdmin',
+    label: 'ElectionOwner',
+    className: 'border-hush-purple/40 bg-hush-purple/10 text-hush-purple',
+  },
+  {
+    key: 'IsTrustee',
+    label: 'Trustee',
+    className: 'border-blue-500/40 bg-blue-500/10 text-blue-100',
+  },
+  {
+    key: 'IsVoter',
+    label: 'Voter',
+    className: 'border-green-500/40 bg-green-500/10 text-green-100',
+  },
+  {
+    key: 'IsDesignatedAuditor',
+    label: 'Auditor',
+    className: 'border-amber-500/40 bg-amber-500/10 text-amber-100',
+  },
+] as const;
 
 function abbreviateAddress(address: string): string {
   if (address.length <= 18) {
@@ -21,8 +61,13 @@ function abbreviateAddress(address: string): string {
   return `${address.slice(0, 10)}...${address.slice(-6)}`;
 }
 
+function getRoleBadges(roles: ElectionApplicationRoleFlagsView) {
+  return SEARCH_ROLE_BADGES.filter((badge) => roles[badge.key]);
+}
+
 export function ElectionSearchWorkspace() {
   const router = useRouter();
+  const actorPublicAddress = useAppStore((state) => state.credentials?.signingPublicKey ?? '');
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<ElectionDiscoveryResult[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
@@ -37,6 +82,13 @@ export function ElectionSearchWorkspace() {
       setResults([]);
       setHasSearched(false);
       setError('Enter an election title or owner alias to search.');
+      return;
+    }
+
+    if (!actorPublicAddress) {
+      setResults([]);
+      setHasSearched(false);
+      setError('Sign in to search elections.');
       return;
     }
 
@@ -60,6 +112,7 @@ export function ElectionSearchWorkspace() {
         SearchTerm: normalizedQuery,
         OwnerPublicAddresses: Array.from(ownerLookup.keys()),
         Limit: 12,
+        ActorPublicAddress: actorPublicAddress,
       });
 
       if (!directoryResponse.Success) {
@@ -67,10 +120,31 @@ export function ElectionSearchWorkspace() {
       }
 
       const dedupedResults = new Map<string, ElectionDiscoveryResult>();
-      for (const election of directoryResponse.Elections ?? []) {
+      const entryResults =
+        directoryResponse.Entries && directoryResponse.Entries.length > 0
+          ? directoryResponse.Entries
+          : (directoryResponse.Elections ?? []).map(
+              (election): SearchElectionDirectoryEntryView => ({
+                Election: election,
+                ActorRoles: EMPTY_ROLE_FLAGS,
+                CanOpenEligibility:
+                  election.LifecycleState !== ElectionLifecycleStateProto.Finalized &&
+                  Boolean(actorPublicAddress),
+                EligibilityDisabledReason:
+                  election.LifecycleState === ElectionLifecycleStateProto.Finalized
+                    ? 'Claim-link discovery is unavailable after finalization.'
+                    : '',
+              })
+            );
+
+      for (const entry of entryResults) {
+        const election = entry.Election;
         dedupedResults.set(election.ElectionId, {
           election,
           ownerDisplayName: ownerLookup.get(election.OwnerPublicAddress)?.DisplayName ?? '',
+          actorRoles: entry.ActorRoles ?? EMPTY_ROLE_FLAGS,
+          canOpenEligibility: entry.CanOpenEligibility,
+          eligibilityDisabledReason: entry.EligibilityDisabledReason ?? '',
         });
       }
 
@@ -151,9 +225,10 @@ export function ElectionSearchWorkspace() {
           </form>
 
           <div className="text-xs text-hush-text-accent">
-            Open a result to enter the organization voter ID, confirm with{' '}
-            <span className="font-mono text-hush-text-primary">1111</span>, and attach that
-            election to your HushVoting! Hub.
+            Claimable results can open eligibility so you can enter the organization voter ID,
+            confirm with <span className="font-mono text-hush-text-primary">1111</span>, and
+            attach that election to your HushVoting! Hub. Already linked or finalized elections
+            stay visible here as read-only references.
           </div>
 
           {error ? (
@@ -172,31 +247,85 @@ export function ElectionSearchWorkspace() {
           {!isSearching && results.length > 0 ? (
             <div className="space-y-3">
               {results.map((result) => (
-                <button
-                  key={result.election.ElectionId}
-                  type="button"
-                  className="flex w-full items-start justify-between gap-4 rounded-2xl border border-hush-bg-light bg-hush-bg-dark/70 px-4 py-4 text-left transition-colors hover:border-hush-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
-                  onClick={() => router.push(`/elections/${result.election.ElectionId}/eligibility`)}
-                >
-                  <div>
-                    <div className="text-sm font-semibold text-hush-text-primary">
-                      {result.election.Title || result.election.ElectionId}
+                result.canOpenEligibility ? (
+                  <button
+                    key={result.election.ElectionId}
+                    type="button"
+                    className="flex w-full items-start justify-between gap-4 rounded-2xl border border-hush-bg-light bg-hush-bg-dark/70 px-4 py-4 text-left transition-colors hover:border-hush-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
+                    onClick={() => router.push(`/elections/${result.election.ElectionId}/eligibility`)}
+                  >
+                    <div>
+                      <div className="text-sm font-semibold text-hush-text-primary">
+                        {result.election.Title || result.election.ElectionId}
+                      </div>
+                      <div className="mt-1 text-xs uppercase tracking-[0.2em] text-hush-text-accent">
+                        {getLifecycleLabel(result.election.LifecycleState)}
+                      </div>
+                      {getRoleBadges(result.actorRoles).length > 0 ? (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {getRoleBadges(result.actorRoles).map((badge) => (
+                            <span
+                              key={badge.key}
+                              className={`rounded-full border px-3 py-1 text-xs font-medium ${badge.className}`}
+                            >
+                              {badge.label}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                      <div className="mt-2 text-sm text-hush-text-accent">
+                        Owner:{' '}
+                        <span className="text-hush-text-primary">
+                          {result.ownerDisplayName || abbreviateAddress(result.election.OwnerPublicAddress)}
+                        </span>
+                      </div>
                     </div>
-                    <div className="mt-1 text-xs uppercase tracking-[0.2em] text-hush-text-accent">
-                      {getLifecycleLabel(result.election.LifecycleState)}
+                    <div className="inline-flex items-center gap-2 text-sm font-medium text-hush-purple">
+                      <span>Open eligibility</span>
+                      <ArrowRight className="h-4 w-4" />
                     </div>
-                    <div className="mt-2 text-sm text-hush-text-accent">
-                      Owner:{' '}
-                      <span className="text-hush-text-primary">
-                        {result.ownerDisplayName || abbreviateAddress(result.election.OwnerPublicAddress)}
-                      </span>
+                  </button>
+                ) : (
+                  <div
+                    key={result.election.ElectionId}
+                    className="flex w-full items-start justify-between gap-4 rounded-2xl border border-hush-bg-light bg-hush-bg-dark/70 px-4 py-4 text-left"
+                  >
+                    <div>
+                      <div className="text-sm font-semibold text-hush-text-primary">
+                        {result.election.Title || result.election.ElectionId}
+                      </div>
+                      <div className="mt-1 text-xs uppercase tracking-[0.2em] text-hush-text-accent">
+                        {getLifecycleLabel(result.election.LifecycleState)}
+                      </div>
+                      {getRoleBadges(result.actorRoles).length > 0 ? (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {getRoleBadges(result.actorRoles).map((badge) => (
+                            <span
+                              key={badge.key}
+                              className={`rounded-full border px-3 py-1 text-xs font-medium ${badge.className}`}
+                            >
+                              {badge.label}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                      <div className="mt-2 text-sm text-hush-text-accent">
+                        Owner:{' '}
+                        <span className="text-hush-text-primary">
+                          {result.ownerDisplayName || abbreviateAddress(result.election.OwnerPublicAddress)}
+                        </span>
+                      </div>
+                      {result.eligibilityDisabledReason ? (
+                        <div className="mt-3 text-sm text-hush-text-accent">
+                          {result.eligibilityDisabledReason}
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="inline-flex items-center gap-2 text-sm font-medium text-hush-text-accent/80">
+                      <span>Eligibility unavailable</span>
                     </div>
                   </div>
-                  <div className="inline-flex items-center gap-2 text-sm font-medium text-hush-purple">
-                    <span>Open eligibility</span>
-                    <ArrowRight className="h-4 w-4" />
-                  </div>
-                </button>
+                )
               ))}
             </div>
           ) : null}

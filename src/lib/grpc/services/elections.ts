@@ -1,4 +1,5 @@
 import { buildApiUrl } from '@/lib/api-config';
+import { useAppStore } from '@/stores/useAppStore';
 import type {
   GetElectionCeremonyActionViewRequest,
   GetElectionCeremonyActionViewResponse,
@@ -25,6 +26,10 @@ import type {
   SearchElectionDirectoryRequest,
   SearchElectionDirectoryResponse,
 } from '../types';
+import {
+  createElectionQueryAuthHeaders,
+  isSignedElectionQueryMethod,
+} from '../electionQueryAuth';
 
 const ELECTIONS_QUERY_PROXY_URL = '/api/elections/query';
 
@@ -32,11 +37,29 @@ async function proxyElectionQuery<TRequest, TResponse>(
   method: string,
   request: TRequest
 ): Promise<TResponse> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  if (isSignedElectionQueryMethod(method)) {
+    const credentials = useAppStore.getState().credentials;
+    if (!credentials) {
+      throw new Error(`Election query ${method} requires the authenticated actor credentials.`);
+    }
+
+    Object.assign(
+      headers,
+      await createElectionQueryAuthHeaders(
+        method,
+        (request ?? {}) as Record<string, unknown>,
+        credentials
+      )
+    );
+  }
+
   const response = await fetch(buildApiUrl(ELECTIONS_QUERY_PROXY_URL), {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers,
     body: JSON.stringify({ method, request }),
   });
 

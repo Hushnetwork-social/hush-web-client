@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { electionsService } from '@/lib/grpc/services/elections';
 import { identityService } from '@/lib/grpc/services/identity';
 import { ElectionBindingStatusProto, ElectionGovernanceModeProto, ElectionLifecycleStateProto } from '@/lib/grpc';
+import { useAppStore } from '@/stores/useAppStore';
 import { ElectionSearchWorkspace } from './ElectionSearchWorkspace';
 
 const { mockSearchElectionDirectory, mockSearchByDisplayName } = vi.hoisted(() => ({
@@ -11,6 +12,12 @@ const { mockSearchElectionDirectory, mockSearchByDisplayName } = vi.hoisted(() =
 }));
 
 const mockPush = vi.fn();
+const TEST_CREDENTIALS = {
+  signingPublicKey: 'actor-address',
+  signingPrivateKey: 'signing-private-key',
+  encryptionPublicKey: 'encryption-public-key',
+  encryptionPrivateKey: 'encryption-private-key',
+};
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({
@@ -63,9 +70,10 @@ describe('ElectionSearchWorkspace', () => {
     mockPush.mockReset();
     mockSearchElectionDirectory.mockReset();
     mockSearchByDisplayName.mockReset();
+    useAppStore.setState({ credentials: TEST_CREDENTIALS });
   });
 
-  it('searches the election directory and routes results into the eligibility flow', async () => {
+  it('searches the election directory and routes claimable results into the eligibility flow', async () => {
     mockSearchByDisplayName.mockResolvedValue({
       Identities: [
         {
@@ -79,13 +87,25 @@ describe('ElectionSearchWorkspace', () => {
       Success: true,
       ErrorMessage: '',
       SearchTerm: 'alice',
-      Elections: [
-        createSummary(
-          'election-search',
-          ElectionLifecycleStateProto.Draft,
-          'Board Election',
-          'owner-address'
-        ),
+      ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+      Elections: [],
+      Entries: [
+        {
+          Election: createSummary(
+            'election-search',
+            ElectionLifecycleStateProto.Draft,
+            'Board Election',
+            'owner-address'
+          ),
+          ActorRoles: {
+            IsOwnerAdmin: false,
+            IsTrustee: false,
+            IsVoter: false,
+            IsDesignatedAuditor: false,
+          },
+          CanOpenEligibility: true,
+          EligibilityDisabledReason: '',
+        },
       ],
     });
 
@@ -102,6 +122,7 @@ describe('ElectionSearchWorkspace', () => {
         SearchTerm: 'alice',
         OwnerPublicAddresses: ['owner-address'],
         Limit: 12,
+        ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
       });
     });
 
@@ -118,12 +139,24 @@ describe('ElectionSearchWorkspace', () => {
       Success: true,
       ErrorMessage: '',
       SearchTerm: 'board',
-      Elections: [
-        createSummary(
-          'election-title-only',
-          ElectionLifecycleStateProto.Open,
-          'Board Election'
-        ),
+      ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+      Elections: [],
+      Entries: [
+        {
+          Election: createSummary(
+            'election-title-only',
+            ElectionLifecycleStateProto.Open,
+            'Board Election'
+          ),
+          ActorRoles: {
+            IsOwnerAdmin: false,
+            IsTrustee: false,
+            IsVoter: false,
+            IsDesignatedAuditor: false,
+          },
+          CanOpenEligibility: true,
+          EligibilityDisabledReason: '',
+        },
       ],
     });
 
@@ -139,9 +172,108 @@ describe('ElectionSearchWorkspace', () => {
         SearchTerm: 'board',
         OwnerPublicAddresses: [],
         Limit: 12,
+        ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
       });
     });
 
     expect(await screen.findByText('Board Election')).toBeInTheDocument();
+  });
+
+  it('keeps finalized elections visible but disables the eligibility action', async () => {
+    mockSearchByDisplayName.mockResolvedValue({ Identities: [] });
+    mockSearchElectionDirectory.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      SearchTerm: 'admin',
+      ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+      Elections: [],
+      Entries: [
+        {
+          Election: createSummary(
+            'election-finalized',
+            ElectionLifecycleStateProto.Finalized,
+            'AdminOnly Election I'
+          ),
+          ActorRoles: {
+            IsOwnerAdmin: false,
+            IsTrustee: false,
+            IsVoter: false,
+            IsDesignatedAuditor: false,
+          },
+          CanOpenEligibility: false,
+          EligibilityDisabledReason: 'Claim-link discovery is unavailable after finalization.',
+        },
+      ],
+    });
+
+    render(<ElectionSearchWorkspace />);
+
+    fireEvent.change(screen.getByLabelText('Search elections'), {
+      target: { value: 'admin' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Search elections' }));
+
+    expect(await screen.findByText('AdminOnly Election I')).toBeInTheDocument();
+    expect(screen.getByText('Claim-link discovery is unavailable after finalization.')).toBeInTheDocument();
+    expect(screen.getByText('Eligibility unavailable')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Open eligibility/i })).not.toBeInTheDocument();
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('shows actor role badges and blocks elections already linked to this account', async () => {
+    mockSearchByDisplayName.mockResolvedValue({ Identities: [] });
+    mockSearchElectionDirectory.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      SearchTerm: 'admin',
+      ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+      Elections: [],
+      Entries: [
+        {
+          Election: createSummary(
+            'election-owner-claimable',
+            ElectionLifecycleStateProto.Draft,
+            'AdminOnly Election III'
+          ),
+          ActorRoles: {
+            IsOwnerAdmin: true,
+            IsTrustee: false,
+            IsVoter: false,
+            IsDesignatedAuditor: false,
+          },
+          CanOpenEligibility: true,
+          EligibilityDisabledReason: '',
+        },
+        {
+          Election: createSummary(
+            'election-owner',
+            ElectionLifecycleStateProto.Open,
+            'AdminOnly Election II'
+          ),
+          ActorRoles: {
+            IsOwnerAdmin: true,
+            IsTrustee: false,
+            IsVoter: false,
+            IsDesignatedAuditor: true,
+          },
+          CanOpenEligibility: false,
+          EligibilityDisabledReason: 'This election is already linked to this Hush account.',
+        },
+      ],
+    });
+
+    render(<ElectionSearchWorkspace />);
+
+    fireEvent.change(screen.getByLabelText('Search elections'), {
+      target: { value: 'admin' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Search elections' }));
+
+    expect(await screen.findByText('AdminOnly Election III')).toBeInTheDocument();
+    expect(screen.getAllByText('ElectionOwner')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: /Open eligibility/i })).toBeInTheDocument();
+    expect(await screen.findByText('AdminOnly Election II')).toBeInTheDocument();
+    expect(screen.getByText('Auditor')).toBeInTheDocument();
+    expect(screen.getByText('This election is already linked to this Hush account.')).toBeInTheDocument();
   });
 });

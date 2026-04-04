@@ -4,7 +4,6 @@ import {
   BarChart3,
   Clock3,
   Download,
-  Eye,
   FileDigit,
   KeyRound,
   ShieldAlert,
@@ -29,12 +28,13 @@ import {
   formatArtifactValue,
   formatTimestamp,
   getClosedProgressStatusLabel,
-  getOfficialResultVisibilityLabel,
 } from './contracts';
 
 type ElectionResultArtifactsSectionProps = {
   election?: ElectionRecordView;
   resultView: GetElectionResultViewResponse | null;
+  showReportPackage?: boolean;
+  showResults?: boolean;
 };
 
 const sectionClass =
@@ -65,9 +65,9 @@ function renderProgressCopy(
       };
     default:
       return {
-        title: 'Result publication pending',
+        title: 'Close result recovery pending',
         body:
-          'The election is closed, but the unofficial result artifact is not available yet.',
+          'Voting is already locked. The server is still preparing or recovering the unofficial result artifact for this closed election.',
       };
   }
 }
@@ -373,17 +373,23 @@ function ReportArtifactCatalogCard({ artifact }: { artifact: ElectionReportArtif
 export function ElectionResultArtifactsSection({
   election,
   resultView,
+  showReportPackage = true,
+  showResults = true,
 }: ElectionResultArtifactsSectionProps) {
   if (!election) {
     return null;
   }
 
-  const unofficialResult = resultView?.UnofficialResult;
-  const officialResult = resultView?.OfficialResult;
+  const officialResult = showResults ? resultView?.OfficialResult : null;
+  const unofficialResult = showResults && !officialResult ? resultView?.UnofficialResult : null;
   const latestReportPackage = resultView?.LatestReportPackage;
   const visibleReportArtifacts = resultView?.VisibleReportArtifacts ?? [];
-  const hasArtifacts = Boolean(unofficialResult || officialResult);
-  const hasReportPackage = Boolean(resultView?.CanViewReportPackage && latestReportPackage);
+  const closedProgressStatus =
+    resultView?.ClosedProgressStatus ?? election.ClosedProgressStatus;
+  const hasResultArtifacts = Boolean(unofficialResult || officialResult);
+  const hasReportPackage = Boolean(
+    showReportPackage && resultView?.CanViewReportPackage && latestReportPackage
+  );
   const reportPackageStatusCopy = latestReportPackage
     ? getPackageStatusCopy(latestReportPackage.Status)
     : null;
@@ -392,9 +398,11 @@ export function ElectionResultArtifactsSection({
       ? ShieldCheck
       : ShieldAlert;
   const shouldShowClosedProgress =
-    election.LifecycleState === ElectionLifecycleStateProto.Closed && !unofficialResult;
+    showResults &&
+    election.LifecycleState === ElectionLifecycleStateProto.Closed &&
+    !unofficialResult;
 
-  if (!hasArtifacts && !shouldShowClosedProgress && !hasReportPackage) {
+  if (!hasResultArtifacts && !shouldShowClosedProgress && !hasReportPackage) {
     return null;
   }
 
@@ -452,8 +460,11 @@ export function ElectionResultArtifactsSection({
               <div className="mt-2 font-mono text-sm text-hush-text-primary">
                 {formatHash(latestReportPackage.FrozenEvidenceHash)}
               </div>
-              <div className="mt-2 text-xs text-hush-text-accent">
-                {latestReportPackage.FrozenEvidenceFingerprint}
+              <div
+                className="mt-2 text-xs text-hush-text-accent"
+                title={latestReportPackage.FrozenEvidenceFingerprint}
+              >
+                {formatArtifactValue(latestReportPackage.FrozenEvidenceFingerprint)}
               </div>
             </div>
             <div className="rounded-2xl bg-amber-500/12 p-4">
@@ -497,23 +508,21 @@ export function ElectionResultArtifactsSection({
             <div>
               <div className="font-semibold">
                 {renderProgressCopy(
-                  resultView?.ClosedProgressStatus ??
-                    ElectionClosedProgressStatusProto.ClosedProgressNone
+                  closedProgressStatus
                 ).title}
               </div>
               <div className="mt-2 text-sm">
                 {
                   renderProgressCopy(
-                    resultView?.ClosedProgressStatus ??
-                      ElectionClosedProgressStatusProto.ClosedProgressNone
+                    closedProgressStatus
                   ).body
                 }
               </div>
               <div className="mt-3 text-xs uppercase tracking-[0.2em] text-blue-100/80">
-                {getClosedProgressStatusLabel(
-                  resultView?.ClosedProgressStatus ??
-                    ElectionClosedProgressStatusProto.ClosedProgressNone
-                )}
+                {closedProgressStatus ===
+                ElectionClosedProgressStatusProto.ClosedProgressNone
+                  ? 'Close recovery pending'
+                  : getClosedProgressStatusLabel(closedProgressStatus)}
               </div>
             </div>
           </div>
@@ -538,22 +547,8 @@ export function ElectionResultArtifactsSection({
         <div
           id="hush-voting-official-result"
           data-testid="election-official-result"
-          className="space-y-4 scroll-mt-24"
+          className="scroll-mt-24"
         >
-          <section className="rounded-2xl bg-green-500/12 p-4 text-sm text-green-100">
-            <div className="flex items-start gap-3">
-              <Eye className="mt-0.5 h-5 w-5" />
-              <div>
-                <div className="font-semibold">Official result visibility</div>
-                <div className="mt-2">
-                  {getOfficialResultVisibilityLabel(
-                    resultView?.OfficialResultVisibilityPolicy ??
-                      election.OfficialResultVisibilityPolicy
-                  )}
-                </div>
-              </div>
-            </div>
-          </section>
           <ResultArtifactCard
             artifact={officialResult}
             label="Official result"
@@ -562,7 +557,7 @@ export function ElectionResultArtifactsSection({
         </div>
       ) : null}
 
-      {resultView?.CanViewParticipantEncryptedResults ? (
+      {showResults && resultView?.CanViewParticipantEncryptedResults ? (
         <section className="rounded-2xl bg-hush-purple/10 p-4 text-sm text-hush-text-accent">
           <div className="flex items-start gap-3">
             <KeyRound className="mt-0.5 h-5 w-5 text-hush-purple" />

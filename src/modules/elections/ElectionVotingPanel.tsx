@@ -295,7 +295,6 @@ function logVotingBoundaryContext(
 
 async function buildElectionDevModeArtifacts({
   electionId,
-  actorPublicAddress,
   selectedOption,
   openArtifactId,
   eligibleSetHash,
@@ -304,7 +303,6 @@ async function buildElectionDevModeArtifacts({
   tallyPublicKeyFingerprint,
 }: {
   electionId: string;
-  actorPublicAddress: string;
   selectedOption: {
     OptionId: string;
     DisplayLabel: string;
@@ -318,46 +316,43 @@ async function buildElectionDevModeArtifacts({
   dkgProfileId: string;
   tallyPublicKeyFingerprint: string;
 }): Promise<CastDraft & { commitmentHash: string }> {
-  const generatedAt = new Date().toISOString();
+  const devArtifactSeed = generateGuid();
   const commitmentHash = await hashText(
-    `election-dev-commitment:v1:${electionId}:${actorPublicAddress}`,
+    `election-dev-commitment:v2:${electionId}:${devArtifactSeed}:commitment`,
   );
   const ballotNullifier = await hashText(
-    `election-dev-nullifier:v1:${electionId}:${actorPublicAddress}`,
+    `election-dev-nullifier:v2:${electionId}:${devArtifactSeed}:nullifier`,
   );
   const selectionFingerprint = await hashText(
     `election-dev-selection:v1:${electionId}:${selectedOption.OptionId}:${selectedOption.DisplayLabel}`,
   );
+  const ballotPackage = JSON.stringify({
+    mode: 'election-dev-mode-v1',
+    packageType: 'dev-protected-ballot',
+    electionId,
+    optionId: selectedOption.OptionId,
+    optionLabel: selectedOption.DisplayLabel,
+    optionDescription: selectedOption.ShortDescription || '',
+    ballotOrder: selectedOption.BallotOrder,
+    isBlankOption: selectedOption.IsBlankOption ?? false,
+    selectionFingerprint,
+  });
+  const ballotPackageHash = await hashText(ballotPackage);
 
   return {
     commitmentHash,
-    encryptedBallotPackage: JSON.stringify({
-      mode: 'election-dev-mode-v1',
-      packageType: 'dev-protected-ballot',
-      electionId,
-      actorPublicAddress,
-      optionId: selectedOption.OptionId,
-      optionLabel: selectedOption.DisplayLabel,
-      optionDescription: selectedOption.ShortDescription || '',
-      ballotOrder: selectedOption.BallotOrder,
-      isBlankOption: selectedOption.IsBlankOption ?? false,
-      selectionFingerprint,
-      generatedAt,
-    }),
+    encryptedBallotPackage: ballotPackage,
     proofBundle: JSON.stringify({
       mode: 'election-dev-mode-v1',
       proofType: 'dev-election-proof',
       electionId,
-      actorPublicAddress,
       optionId: selectedOption.OptionId,
-      commitmentHash,
-      ballotNullifier,
+      ballotPackageHash,
       openArtifactId,
       eligibleSetHash,
       ceremonyVersionId,
       dkgProfileId,
       tallyPublicKeyFingerprint,
-      generatedAt,
     }),
     ballotNullifier,
   };
@@ -916,6 +911,12 @@ export function ElectionVotingPanel({
   const shouldExpandSnapshotByDefault =
     !hasResultArtifacts && (isOpenElection || !!pendingSubmission || isAccepted);
   const [isSnapshotExpanded, setIsSnapshotExpanded] = useState(shouldExpandSnapshotByDefault);
+  const shouldExpandAcceptedPanelByDefault = isAccepted && !hasResultArtifacts;
+  const [acceptedPanelExpansionOverride, setAcceptedPanelExpansionOverride] = useState<
+    boolean | null
+  >(null);
+  const isAcceptedPanelExpanded =
+    acceptedPanelExpansionOverride ?? shouldExpandAcceptedPanelByDefault;
   const hasAdvancedBoundaryContext = Boolean(
     isOpenElection &&
       (votingView?.OpenArtifactId || votingView?.EligibleSetHash || votingView?.TallyPublicKeyFingerprint),
@@ -973,6 +974,7 @@ export function ElectionVotingPanel({
 
   useEffect(() => {
     if (hasResultArtifacts) {
+      setAcceptedPanelExpansionOverride(false);
       setIsSnapshotExpanded(false);
       setIsAdvancedContextExpanded(false);
     }
@@ -980,7 +982,14 @@ export function ElectionVotingPanel({
 
   useEffect(() => {
     setSelectedBallotOptionId('');
+    setAcceptedPanelExpansionOverride(null);
   }, [electionId]);
+
+  useEffect(() => {
+    if (!isAccepted) {
+      setAcceptedPanelExpansionOverride(null);
+    }
+  }, [isAccepted]);
 
   useEffect(() => {
     if (
@@ -1197,7 +1206,6 @@ export function ElectionVotingPanel({
     try {
       const devArtifacts = await buildElectionDevModeArtifacts({
         electionId,
-        actorPublicAddress,
         selectedOption: selectedBallotOption,
         openArtifactId: votingView.OpenArtifactId,
         eligibleSetHash: votingView.EligibleSetHash,
@@ -1420,126 +1428,168 @@ export function ElectionVotingPanel({
           </div>
         ) : null}
 
-        <ElectionResultArtifactsSection election={election} resultView={resultView} />
+        <ElectionResultArtifactsSection
+          election={election}
+          resultView={resultView}
+          showReportPackage={false}
+        />
 
         {isAccepted ? (
           <section
             className="rounded-2xl border border-green-500/30 bg-green-500/10 p-5 text-green-100"
             data-testid="voting-accepted-panel"
           >
-            <div className="grid gap-6 xl:grid-cols-3">
-              <div className="space-y-3">
-                <div className="flex items-start gap-3">
-                  <CheckCircle2 className="mt-0.5 h-5 w-5" />
-                  <div>
-                    <div className="font-semibold">Accepted ballot</div>
-                    <div className="mt-2 text-sm">
-                      Accepted at: {formatTimestamp(votingView.AcceptedAt)}
+            <button
+              type="button"
+              onClick={() =>
+                setAcceptedPanelExpansionOverride((current) => {
+                  const expanded = current ?? shouldExpandAcceptedPanelByDefault;
+                  return !expanded;
+                })
+              }
+              className="flex w-full items-start justify-between gap-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-200 focus-visible:ring-offset-2 focus-visible:ring-offset-green-950/10"
+              aria-expanded={isAcceptedPanelExpanded}
+              data-testid="voting-accepted-panel-toggle"
+            >
+              <div className="flex items-start gap-3">
+                <CheckCircle2 className="mt-0.5 h-5 w-5" />
+                <div>
+                  <div className="font-semibold">Accepted ballot</div>
+                  <div className="mt-2 text-sm text-green-100/85">
+                    Accepted at: {formatTimestamp(votingView.AcceptedAt)}
+                  </div>
+                  {!isAcceptedPanelExpanded ? (
+                    <div className="mt-2 space-y-1 text-sm text-green-100/75">
+                      <div>
+                        Receipt id:{' '}
+                        <span className="font-mono">{truncateMiddle(votingView.ReceiptId)}</span>
+                      </div>
+                      <div>
+                        Acceptance id:{' '}
+                        <span className="font-mono">{truncateMiddle(votingView.AcceptanceId)}</span>
+                      </div>
                     </div>
-                    <div className="mt-1 text-sm">
+                  ) : null}
+                </div>
+              </div>
+              <span className="mt-1 inline-flex items-center gap-2 whitespace-nowrap text-xs font-semibold uppercase tracking-[0.2em] text-green-100/80">
+                {isAcceptedPanelExpanded ? (
+                  <ChevronDown className="h-4 w-4" />
+                ) : (
+                  <ChevronRight className="h-4 w-4" />
+                )}
+                <span>{isAcceptedPanelExpanded ? 'Collapse' : 'Expand'}</span>
+              </span>
+            </button>
+
+            {isAcceptedPanelExpanded ? (
+              <>
+                <div className="mt-6 grid gap-6 xl:grid-cols-3">
+                  <div className="space-y-3">
+                    <div className="text-sm">
                       Receipt id:{' '}
                       <span className="font-mono">{truncateMiddle(votingView.ReceiptId)}</span>
                     </div>
-                    <div className="mt-1 text-sm">
+                    <div className="text-sm">
                       Acceptance id:{' '}
                       <span className="font-mono">{truncateMiddle(votingView.AcceptanceId)}</span>
                     </div>
                   </div>
-                </div>
-              </div>
 
-              <div className="space-y-3 xl:border-l xl:border-green-100/10 xl:pl-6">
-                <div className="font-semibold">Local receipt retained on this device</div>
-                {actionableReceipt ? (
-                  <div className="space-y-2 text-sm">
-                    <div>
-                      Server proof:{' '}
-                      <span className="font-mono">{truncateMiddle(actionableReceipt.serverProof)}</span>
+                  <div className="space-y-3 xl:border-l xl:border-green-100/10 xl:pl-6">
+                    <div className="font-semibold">Local receipt retained on this device</div>
+                    {actionableReceipt ? (
+                      <div className="space-y-2 text-sm">
+                        <div>
+                          Server proof:{' '}
+                          <span className="font-mono">{truncateMiddle(actionableReceipt.serverProof)}</span>
+                        </div>
+                        {shouldShowReceiptCommitment ? (
+                          <div>
+                            Ballot commitment:{' '}
+                            <span className="font-mono">
+                              {hasRetainedBallotCommitment
+                                ? truncateMiddle(actionableReceipt.ballotPackageCommitment)
+                                : '(not retained on this device)'}
+                            </span>
+                          </div>
+                        ) : null}
+                        {shouldShowReceiptCommitment && !hasRetainedBallotCommitment ? (
+                          <div className="text-green-100/80">
+                            This device can still export and verify the receipt for this voter, even
+                            though the original local ballot commitment was not retained here.
+                          </div>
+                        ) : null}
+                        {!shouldShowReceiptCommitment ? (
+                          <div className="text-green-100/80">
+                            Open-election receipts stay compact and include only the fields used for
+                            this check. Additional receipt details appear after the election closes.
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-green-100/80">
+                        This device does not currently hold a usable receipt for this accepted ballot.
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-4 xl:border-l xl:border-green-100/10 xl:pl-6">
+                    <div className="flex items-center gap-2 font-semibold">
+                      <ShieldCheck className="h-4 w-4" />
+                      <span>Verification</span>
                     </div>
-                    {shouldShowReceiptCommitment ? (
-                      <div>
-                        Ballot commitment:{' '}
-                        <span className="font-mono">
-                          {hasRetainedBallotCommitment
-                            ? truncateMiddle(actionableReceipt.ballotPackageCommitment)
-                            : '(not retained on this device)'}
-                        </span>
-                      </div>
-                    ) : null}
-                    {shouldShowReceiptCommitment && !hasRetainedBallotCommitment ? (
-                      <div className="text-green-100/80">
-                        This device can still export and verify the receipt for this voter, even
-                        though the original local ballot commitment was not retained here.
-                      </div>
-                    ) : null}
-                    {!shouldShowReceiptCommitment ? (
-                      <div className="text-green-100/80">
-                        Open-election receipts stay compact and include only the fields used for
-                        this check. Additional receipt details appear after the election closes.
-                      </div>
-                    ) : null}
+                    <div className="space-y-2 text-sm text-green-100/85">
+                      <p>
+                        Use the receipt to confirm whether this voter is marked as voted in this
+                        election.
+                      </p>
+                      <p className="text-green-100/70">
+                        After the election closes, a separate check can confirm whether the vote was
+                        included in the final count.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void handleVerifyReceipt()}
+                      disabled={isVerifyingReceipt || !actionableReceipt}
+                      className="inline-flex items-center gap-2 rounded-xl bg-teal-700 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-teal-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300 focus-visible:ring-offset-2 focus-visible:ring-offset-green-950/10 disabled:cursor-not-allowed disabled:opacity-50"
+                      data-testid="voting-verify-receipt"
+                    >
+                      {isVerifyingReceipt ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <ShieldCheck className="h-4 w-4" />
+                      )}
+                      <span>Verify receipt</span>
+                    </button>
                   </div>
-                ) : (
-                  <div className="text-sm text-green-100/80">
-                    This device does not currently hold a usable receipt for this accepted ballot.
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-4 xl:border-l xl:border-green-100/10 xl:pl-6">
-                <div className="flex items-center gap-2 font-semibold">
-                  <ShieldCheck className="h-4 w-4" />
-                  <span>Verification</span>
                 </div>
-                <div className="space-y-2 text-sm text-green-100/85">
-                  <p>
-                    Use the receipt to confirm whether this voter is marked as voted in this
-                    election.
-                  </p>
-                  <p className="text-green-100/70">
-                    After the election closes, a separate check can confirm whether the vote was
-                    included in the final count.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void handleVerifyReceipt()}
-                  disabled={isVerifyingReceipt || !actionableReceipt}
-                  className="inline-flex items-center gap-2 rounded-xl bg-teal-700 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-teal-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300 focus-visible:ring-offset-2 focus-visible:ring-offset-green-950/10 disabled:cursor-not-allowed disabled:opacity-50"
-                  data-testid="voting-verify-receipt"
-                >
-                  {isVerifyingReceipt ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <ShieldCheck className="h-4 w-4" />
-                  )}
-                  <span>Verify receipt</span>
-                </button>
-              </div>
-            </div>
 
-            <div className="mt-5 flex flex-wrap gap-3 border-t border-green-100/10 pt-5">
-              <button
-                type="button"
-                onClick={() => void handleCopyReceipt()}
-                disabled={!actionableReceipt}
-                className="inline-flex items-center gap-2 rounded-xl bg-green-500 px-4 py-2.5 text-sm font-medium text-green-950 transition-colors hover:bg-green-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-200 focus-visible:ring-offset-2 focus-visible:ring-offset-green-950/10 disabled:cursor-not-allowed disabled:opacity-50"
-                data-testid="voting-copy-receipt"
-              >
-                <Copy className="h-4 w-4" />
-                <span>Copy receipt</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleDownloadReceipt}
-                disabled={!actionableReceipt}
-                className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-emerald-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 focus-visible:ring-offset-green-950/10 disabled:cursor-not-allowed disabled:opacity-50"
-                data-testid="voting-download-receipt"
-              >
-                <Download className="h-4 w-4" />
-                <span>Download receipt</span>
-              </button>
-            </div>
+                <div className="mt-5 flex flex-wrap gap-3 border-t border-green-100/10 pt-5">
+                  <button
+                    type="button"
+                    onClick={() => void handleCopyReceipt()}
+                    disabled={!actionableReceipt}
+                    className="inline-flex items-center gap-2 rounded-xl bg-green-500 px-4 py-2.5 text-sm font-medium text-green-950 transition-colors hover:bg-green-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-200 focus-visible:ring-offset-2 focus-visible:ring-offset-green-950/10 disabled:cursor-not-allowed disabled:opacity-50"
+                    data-testid="voting-copy-receipt"
+                  >
+                    <Copy className="h-4 w-4" />
+                    <span>Copy receipt</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDownloadReceipt}
+                    disabled={!actionableReceipt}
+                    className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-emerald-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 focus-visible:ring-offset-green-950/10 disabled:cursor-not-allowed disabled:opacity-50"
+                    data-testid="voting-download-receipt"
+                  >
+                    <Download className="h-4 w-4" />
+                    <span>Download receipt</span>
+                  </button>
+                </div>
+              </>
+            ) : null}
           </section>
         ) : null}
 

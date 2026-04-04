@@ -1442,6 +1442,12 @@ export function getElectionWorkspaceSectionOrder(
   const canOpenVoterSurface = entry.ActorRoles.IsVoter || entry.CanClaimIdentity;
   const isOpenVoter =
     canOpenVoterSurface && entry.Election.LifecycleState === ElectionLifecycleStateProto.Open;
+  const shouldKeepResultReviewInsideVoterDetails = canOpenVoterSurface;
+  const hasWorkspaceResultSurface =
+    !shouldKeepResultReviewInsideVoterDetails &&
+    (entry.CanViewParticipantResults || entry.HasUnofficialResult || entry.HasOfficialResult);
+  const hasWorkspaceArtifactSurface =
+    entry.CanViewReportPackage || entry.CanViewNamedParticipationRoster;
 
   if (isOpenVoter) {
     sections.push('voter');
@@ -1463,7 +1469,7 @@ export function getElectionWorkspaceSectionOrder(
     sections.push('voter');
   }
 
-  if (entry.CanViewParticipantResults || entry.CanViewReportPackage) {
+  if (hasWorkspaceResultSurface || hasWorkspaceArtifactSurface) {
     sections.push('results');
   }
 

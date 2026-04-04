@@ -1212,34 +1212,50 @@ function ResultsWorkspaceSummary({
     entry.HasOfficialResult ||
     Boolean(resultView?.UnofficialResult || resultView?.OfficialResult);
   const hasReportPackage = Boolean(resultView?.CanViewReportPackage && resultView?.LatestReportPackage);
+  const keepsResultsInsideVoterDetails = entry.ActorRoles.IsVoter || entry.CanClaimIdentity;
+  const showsWorkspaceResults = !keepsResultsInsideVoterDetails;
+  const hasWorkspaceResults = showsWorkspaceResults && hasAnyResults;
+  const hasWorkspaceArtifacts =
+    entry.CanViewReportPackage || entry.CanViewNamedParticipationRoster || hasReportPackage;
   const canOpenResultDetail = entry.ActorRoles.IsVoter && hasAnyResults;
+  const usesAuditorPrimaryActions = entry.ActorRoles.IsDesignatedAuditor;
   const resultTargetId = resultView?.OfficialResult
     ? '#hush-voting-official-result'
     : resultView?.UnofficialResult
       ? '#hush-voting-unofficial-result'
       : null;
-  const [isExpanded, setIsExpanded] = useState(hasAnyResults || hasReportPackage);
+  const [isExpanded, setIsExpanded] = useState(hasWorkspaceResults || hasWorkspaceArtifacts);
 
   useEffect(() => {
-    if (hasAnyResults || hasReportPackage) {
+    if (hasWorkspaceResults || hasWorkspaceArtifacts) {
       setIsExpanded(true);
     }
-  }, [hasAnyResults, hasReportPackage]);
+  }, [hasWorkspaceArtifacts, hasWorkspaceResults]);
+
+  const sectionTitle = showsWorkspaceResults ? 'Results and Boundary Artifacts' : 'Boundary Artifacts';
+  const sectionSubtitle = showsWorkspaceResults
+    ? 'Result and package availability'
+    : 'Artifact and package availability';
+  const sectionDescription = showsWorkspaceResults
+    ? hasWorkspaceResults || hasReportPackage
+      ? 'Result or report-package access is available for this election.'
+      : 'No unofficial result, official result, or report package is available yet. Expand this section only if you need the access boundaries.'
+    : hasWorkspaceArtifacts
+      ? 'Admin or auditor-only boundary artifacts remain available in this workspace.'
+      : 'No owner or auditor artifact package is available yet.';
 
   return (
     <section className="space-y-4 pt-4 md:pt-6" data-testid="hush-voting-section-results">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-base font-semibold uppercase tracking-[0.28em] text-hush-text-primary md:text-lg">
-            Results and Boundary Artifacts
+            {sectionTitle}
           </h2>
           <h3 className="mt-3 text-lg font-semibold text-hush-text-accent md:text-xl">
-            Result and package availability
+            {sectionSubtitle}
           </h3>
           <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
-            {hasAnyResults || hasReportPackage
-              ? 'Result or report-package access is available for this election.'
-              : 'No unofficial result, official result, or report package is available yet. Expand this section only if you need the access boundaries.'}
+            {sectionDescription}
           </p>
         </div>
 
@@ -1258,12 +1274,13 @@ function ResultsWorkspaceSummary({
         <div className="space-y-4">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div className="text-sm text-hush-text-accent">
-              These indicators come directly from the actor-scoped hub response so the client does not
-              overstate result, roster, or report-package access.
+              {showsWorkspaceResults
+                ? 'These indicators come directly from the actor-scoped hub response so the client does not overstate result, roster, or report-package access.'
+                : 'These artifact indicators stay in the workspace so admin and auditor-only package boundaries remain visible without duplicating the voter result surface.'}
             </div>
 
             <div className="flex flex-wrap gap-3 lg:ml-6">
-              {entry.ActorRoles.IsVoter ? (
+              {showsWorkspaceResults && entry.ActorRoles.IsVoter ? (
                 canOpenResultDetail ? (
                   <Link
                     href={`/elections/${entry.Election.ElectionId}/voter`}
@@ -1284,7 +1301,7 @@ function ResultsWorkspaceSummary({
                 )
               ) : null}
 
-              {hasReportPackage ? (
+              {hasReportPackage && !usesAuditorPrimaryActions ? (
                 <a
                   href="#hush-voting-report-package"
                   className="inline-flex self-start items-center gap-2 rounded-full bg-[#1b2544] px-4 py-2 text-sm font-medium whitespace-nowrap text-hush-text-primary transition-colors hover:bg-[#243158] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
@@ -1295,7 +1312,7 @@ function ResultsWorkspaceSummary({
                 </a>
               ) : null}
 
-              {resultTargetId ? (
+              {showsWorkspaceResults && resultTargetId && !usesAuditorPrimaryActions ? (
                 <a
                   href={resultTargetId}
                   className="inline-flex self-start items-center gap-2 rounded-full bg-[#1b2544] px-4 py-2 text-sm font-medium whitespace-nowrap text-hush-text-primary transition-colors hover:bg-[#243158] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
@@ -1308,30 +1325,45 @@ function ResultsWorkspaceSummary({
             </div>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-4">
-            <AvailabilityCard
-              label="Unofficial result"
-              value={entry.HasUnofficialResult ? 'Available' : 'Pending'}
-              accentClass={entry.HasUnofficialResult ? 'text-green-100' : undefined}
-            />
-            <AvailabilityCard
-              label="Official result"
-              value={entry.HasOfficialResult ? 'Available' : 'Pending'}
-              accentClass={entry.HasOfficialResult ? 'text-green-100' : undefined}
-            />
-            <AvailabilityCard
-              label="Report package"
-              value={entry.CanViewReportPackage ? 'Allowed' : 'Not allowed'}
-              accentClass={entry.CanViewReportPackage ? 'text-green-100' : undefined}
-            />
-            <AvailabilityCard
-              label="Named participation roster"
-              value={entry.CanViewNamedParticipationRoster ? 'Allowed' : 'Not allowed'}
-              accentClass={entry.CanViewNamedParticipationRoster ? 'text-green-100' : undefined}
-            />
-          </div>
+          {showsWorkspaceResults ? (
+            <div className="grid gap-4 md:grid-cols-4">
+              <AvailabilityCard
+                label="Unofficial result"
+                value={entry.HasUnofficialResult ? 'Available' : 'Pending'}
+                accentClass={entry.HasUnofficialResult ? 'text-green-100' : undefined}
+              />
+              <AvailabilityCard
+                label="Official result"
+                value={entry.HasOfficialResult ? 'Available' : 'Pending'}
+                accentClass={entry.HasOfficialResult ? 'text-green-100' : undefined}
+              />
+              <AvailabilityCard
+                label="Report package"
+                value={entry.CanViewReportPackage ? 'Allowed' : 'Not allowed'}
+                accentClass={entry.CanViewReportPackage ? 'text-green-100' : undefined}
+              />
+              <AvailabilityCard
+                label="Named participation roster"
+                value={entry.CanViewNamedParticipationRoster ? 'Allowed' : 'Not allowed'}
+                accentClass={entry.CanViewNamedParticipationRoster ? 'text-green-100' : undefined}
+              />
+            </div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2">
+              <AvailabilityCard
+                label="Report package"
+                value={entry.CanViewReportPackage ? 'Allowed' : 'Not allowed'}
+                accentClass={entry.CanViewReportPackage ? 'text-green-100' : undefined}
+              />
+              <AvailabilityCard
+                label="Named participation roster"
+                value={entry.CanViewNamedParticipationRoster ? 'Allowed' : 'Not allowed'}
+                accentClass={entry.CanViewNamedParticipationRoster ? 'text-green-100' : undefined}
+              />
+            </div>
+          )}
 
-          {detail?.ResultArtifacts?.length ? (
+          {showsWorkspaceResults && detail?.ResultArtifacts?.length ? (
             <div className="rounded-2xl bg-hush-bg-dark/70 p-4 shadow-sm shadow-black/10">
               <div className="text-sm font-semibold text-hush-text-primary">Persisted result artifacts</div>
               <div className="mt-2 text-sm text-hush-text-accent">
@@ -1344,12 +1376,18 @@ function ResultsWorkspaceSummary({
 
           {isLoadingResultView ? (
             <div className="rounded-2xl bg-hush-bg-dark/60 px-4 py-3 text-sm text-hush-text-accent">
-              Loading result and report-package details for this actor.
+              {showsWorkspaceResults
+                ? 'Loading result and report-package details for this actor.'
+                : 'Loading report-package details for this actor.'}
             </div>
           ) : null}
 
           {detail?.Election ? (
-            <ElectionResultArtifactsSection election={detail.Election} resultView={resultView} />
+            <ElectionResultArtifactsSection
+              election={detail.Election}
+              resultView={resultView}
+              showResults={showsWorkspaceResults}
+            />
           ) : null}
         </div>
       ) : null}

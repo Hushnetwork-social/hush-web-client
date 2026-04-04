@@ -3,6 +3,10 @@ import protobuf from 'protobufjs';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { parseGrpcResponse } from '@/lib/grpc/grpc-web-helper';
+import {
+  ELECTION_QUERY_AUTH_HEADERS,
+  validateElectionQueryAuth,
+} from '@/lib/grpc/electionQueryAuth';
 
 const SERVICE_NAME = 'rpcHush.HushElections';
 const PACKAGE_NAME = 'rpcHush';
@@ -52,7 +56,8 @@ function getGrpcUrlCandidates(): string[] {
 async function grpcCallWithFallback(
   service: string,
   method: string,
-  requestBytes: Uint8Array
+  requestBytes: Uint8Array,
+  forwardedHeaders: Record<string, string>
 ): Promise<{ responseBytes: Uint8Array; grpcUrl: string }> {
   const frame = createGrpcFrame(requestBytes);
   const grpcUrls = getGrpcUrlCandidates();
@@ -68,6 +73,7 @@ async function grpcCallWithFallback(
           'Content-Type': 'application/grpc-web+proto',
           'Accept': 'application/grpc-web+proto, application/grpc-web',
           'X-Grpc-Web': '1',
+          ...forwardedHeaders,
         },
         body: Buffer.from(frame),
       });
@@ -93,6 +99,18 @@ async function grpcCallWithFallback(
   }
 
   throw lastError ?? new Error(`No gRPC endpoints were available for ${service}/${method}`);
+}
+
+function getForwardedElectionQueryHeaders(headers: Headers): Record<string, string> {
+  const forwarded: Record<string, string> = {};
+  for (const headerName of Object.values(ELECTION_QUERY_AUTH_HEADERS)) {
+    const value = headers.get(headerName)?.trim();
+    if (value) {
+      forwarded[headerName] = value;
+    }
+  }
+
+  return forwarded;
 }
 
 function getProtoPaths() {
@@ -159,16 +177,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const authFailure = await validateElectionQueryAuth(method, body.request ?? {}, request.headers);
+    if (authFailure) {
+      return NextResponse.json(
+        { success: false, message: authFailure.message },
+        { status: authFailure.status }
+      );
+    }
+
     const root = await getElectionsRoot();
     const requestType = root.lookupType(getRequestTypeName(method));
     const responseType = root.lookupType(getResponseTypeName(method));
 
     const requestMessage = requestType.fromObject(body.request ?? {});
     const requestBytes = requestType.encode(requestMessage).finish();
+    const forwardedHeaders = getForwardedElectionQueryHeaders(request.headers);
     const { responseBytes, grpcUrl } = await grpcCallWithFallback(
       SERVICE_NAME,
       method,
-      requestBytes
+      requestBytes,
+      forwardedHeaders
     );
     const messageBytes = parseGrpcResponse(responseBytes);
 

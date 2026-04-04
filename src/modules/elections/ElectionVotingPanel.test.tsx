@@ -368,7 +368,14 @@ describe('ElectionVotingPanel', () => {
 
     expect(submittedBallotPackage).toContain('"mode":"election-dev-mode-v1"');
     expect(submittedBallotPackage).toContain('"optionId":"option-a"');
+    expect(submittedBallotPackage).not.toContain('"actorPublicAddress"');
+    expect(submittedBallotPackage).not.toContain('"generatedAt"');
     expect(submittedProofBundle).toContain('"proofType":"dev-election-proof"');
+    expect(submittedProofBundle).toContain('"ballotPackageHash"');
+    expect(submittedProofBundle).not.toContain('"actorPublicAddress"');
+    expect(submittedProofBundle).not.toContain('"commitmentHash"');
+    expect(submittedProofBundle).not.toContain('"ballotNullifier"');
+    expect(submittedProofBundle).not.toContain('"generatedAt"');
     expect(submittedNullifier).toMatch(/^[a-f0-9]{64}$/);
     expect(blockchainServiceMock.submitTransaction).toHaveBeenCalledTimes(2);
     expect(await screen.findByTestId('voting-accepted-panel')).toBeInTheDocument();
@@ -396,6 +403,10 @@ describe('ElectionVotingPanel', () => {
     );
 
     expect(await screen.findByTestId('voting-accepted-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('voting-accepted-panel-toggle')).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
     expect(screen.queryByTestId('voting-ballot-workflow')).not.toBeInTheDocument();
     expect(screen.getByTestId('voting-summary-section')).toBeInTheDocument();
   });
@@ -588,6 +599,7 @@ describe('ElectionVotingPanel', () => {
 
     const resultsSection = await screen.findByTestId('election-results-section');
     const acceptedPanel = screen.getByTestId('voting-accepted-panel');
+    const acceptedToggle = screen.getByTestId('voting-accepted-panel-toggle');
     const snapshotToggle = screen.getByTestId('voting-summary-toggle');
 
     expect(
@@ -596,7 +608,9 @@ describe('ElectionVotingPanel', () => {
     expect(
       resultsSection.compareDocumentPosition(snapshotToggle) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+    expect(acceptedToggle).toHaveAttribute('aria-expanded', 'false');
     expect(snapshotToggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('Local receipt retained on this device')).not.toBeInTheDocument();
     expect(screen.queryByTestId('voting-advanced-context-toggle')).not.toBeInTheDocument();
     expect(screen.getByText('View eligibility details')).toBeInTheDocument();
   });
@@ -647,6 +661,7 @@ describe('ElectionVotingPanel', () => {
       />
     );
 
+    fireEvent.click(await screen.findByTestId('voting-accepted-panel-toggle'));
     fireEvent.click(await screen.findByTestId('voting-verify-receipt'));
 
     await waitFor(() => {

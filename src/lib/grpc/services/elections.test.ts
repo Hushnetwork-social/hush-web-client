@@ -1,13 +1,31 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as secp256k1 from '@noble/secp256k1';
+import { bytesToHex, hexToBytes } from '@/lib/crypto';
+import { useAppStore } from '@/stores/useAppStore';
 
 import { electionsService } from './elections';
+
+const TEST_SIGNING_PRIVATE_KEY =
+  '1111111111111111111111111111111111111111111111111111111111111111';
+const TEST_ENCRYPTION_PRIVATE_KEY =
+  '2222222222222222222222222222222222222222222222222222222222222222';
+const TEST_CREDENTIALS = {
+  signingPublicKey: bytesToHex(secp256k1.getPublicKey(hexToBytes(TEST_SIGNING_PRIVATE_KEY), true)),
+  signingPrivateKey: TEST_SIGNING_PRIVATE_KEY,
+  encryptionPublicKey: bytesToHex(
+    secp256k1.getPublicKey(hexToBytes(TEST_ENCRYPTION_PRIVATE_KEY), true)
+  ),
+  encryptionPrivateKey: TEST_ENCRYPTION_PRIVATE_KEY,
+};
 
 describe('electionsService query proxy', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn());
+    useAppStore.setState({ credentials: TEST_CREDENTIALS });
   });
 
   afterEach(() => {
+    useAppStore.setState({ credentials: null });
     vi.unstubAllGlobals();
   });
 
@@ -18,7 +36,7 @@ describe('electionsService query proxy', () => {
         JSON.stringify({
           Success: true,
           ErrorMessage: '',
-          ActorPublicAddress: 'actor-address',
+          ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
           Elections: [],
           HasAnyElectionRoles: false,
           EmptyStateReason: 'No election roles were found for this actor.',
@@ -33,23 +51,76 @@ describe('electionsService query proxy', () => {
     );
 
     const response = await electionsService.getElectionHubView({
-      ActorPublicAddress: 'actor-address',
+      ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
     });
 
     expect(fetchMock).toHaveBeenCalledWith('/api/elections/query', {
       method: 'POST',
-      headers: {
+      headers: expect.objectContaining({
         'Content-Type': 'application/json',
-      },
+        'x-hush-election-query-signatory': TEST_CREDENTIALS.signingPublicKey,
+        'x-hush-election-query-signed-at': expect.any(String),
+        'x-hush-election-query-signature': expect.any(String),
+      }),
       body: JSON.stringify({
         method: 'GetElectionHubView',
         request: {
-          ActorPublicAddress: 'actor-address',
+          ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
         },
       }),
     });
     expect(response.Success).toBe(true);
-    expect(response.ActorPublicAddress).toBe('actor-address');
+    expect(response.ActorPublicAddress).toBe(TEST_CREDENTIALS.signingPublicKey);
+  });
+
+  it('posts actor-bound election directory searches to the server-side proxy', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          Success: true,
+          ErrorMessage: '',
+          SearchTerm: 'admin',
+          ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+          Elections: [],
+          Entries: [],
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+    );
+
+    const response = await electionsService.searchElectionDirectory({
+      SearchTerm: 'admin',
+      OwnerPublicAddresses: ['owner-address'],
+      Limit: 12,
+      ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/elections/query', {
+      method: 'POST',
+      headers: expect.objectContaining({
+        'Content-Type': 'application/json',
+        'x-hush-election-query-signatory': TEST_CREDENTIALS.signingPublicKey,
+        'x-hush-election-query-signed-at': expect.any(String),
+        'x-hush-election-query-signature': expect.any(String),
+      }),
+      body: JSON.stringify({
+        method: 'SearchElectionDirectory',
+        request: {
+          SearchTerm: 'admin',
+          OwnerPublicAddresses: ['owner-address'],
+          Limit: 12,
+          ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+        },
+      }),
+    });
+    expect(response.Success).toBe(true);
+    expect(response.ActorPublicAddress).toBe(TEST_CREDENTIALS.signingPublicKey);
   });
 
   it('includes upstream response details when the proxy returns an error', async () => {
@@ -62,7 +133,7 @@ describe('electionsService query proxy', () => {
 
     await expect(
       electionsService.getElectionHubView({
-        ActorPublicAddress: 'actor-address',
+        ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
       })
     ).rejects.toThrow(
       'Election query proxy failed for GetElectionHubView: 502 upstream unavailable'
@@ -76,7 +147,7 @@ describe('electionsService query proxy', () => {
         JSON.stringify({
           Success: true,
           ErrorMessage: '',
-          ActorPublicAddress: 'actor-address',
+          ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
           ElectionId: 'election-open',
           LifecycleState: 1,
           HasAcceptedCheckoff: true,
@@ -98,7 +169,7 @@ describe('electionsService query proxy', () => {
 
     const response = await electionsService.verifyElectionReceipt({
       ElectionId: 'election-open',
-      ActorPublicAddress: 'actor-address',
+      ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
       ReceiptId: 'receipt-1',
       AcceptanceId: 'acceptance-1',
       ServerProof: 'proof-1',
@@ -106,14 +177,17 @@ describe('electionsService query proxy', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('/api/elections/query', {
       method: 'POST',
-      headers: {
+      headers: expect.objectContaining({
         'Content-Type': 'application/json',
-      },
+        'x-hush-election-query-signatory': TEST_CREDENTIALS.signingPublicKey,
+        'x-hush-election-query-signed-at': expect.any(String),
+        'x-hush-election-query-signature': expect.any(String),
+      }),
       body: JSON.stringify({
         method: 'VerifyElectionReceipt',
         request: {
           ElectionId: 'election-open',
-          ActorPublicAddress: 'actor-address',
+          ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
           ReceiptId: 'receipt-1',
           AcceptanceId: 'acceptance-1',
           ServerProof: 'proof-1',
@@ -122,5 +196,41 @@ describe('electionsService query proxy', () => {
     });
     expect(response.Success).toBe(true);
     expect(response.ReceiptMatchesAcceptedCheckoff).toBe(true);
+  });
+
+  it('does not require actor-bound auth headers for public election reads', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          Success: true,
+          ErrorMessage: '',
+          Election: null,
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+    );
+
+    await electionsService.getElection({
+      ElectionId: 'election-public-1',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/elections/query', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        method: 'GetElection',
+        request: {
+          ElectionId: 'election-public-1',
+        },
+      }),
+    });
   });
 });

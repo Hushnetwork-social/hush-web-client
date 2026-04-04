@@ -291,6 +291,13 @@ describe('ElectionResultArtifactsSection', () => {
       <ElectionResultArtifactsSection
         election={createElectionRecord()}
         resultView={createResultView({
+          UnofficialResult: createResultArtifact({
+            Id: 'unofficial-result-1',
+            ArtifactKind: ElectionResultArtifactKindProto.ElectionResultArtifactUnofficial,
+            Title: 'Unofficial result',
+            TallyReadyArtifactId: 'tally-ready-artifact-1',
+            SourceResultArtifactId: '',
+          }),
           OfficialResult: createResultArtifact(),
           LatestReportPackage: createReportPackage(),
           VisibleReportArtifacts: [
@@ -307,7 +314,69 @@ describe('ElectionResultArtifactsSection', () => {
     );
 
     expect(screen.getByTestId('election-official-result')).toHaveTextContent('Official result');
+    expect(screen.queryByText('Official result visibility')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('election-unofficial-result')).not.toBeInTheDocument();
     expect(screen.queryByTestId('report-package-summary')).not.toBeInTheDocument();
     expect(screen.queryByText('Named roster')).not.toBeInTheDocument();
+  });
+
+  it('can suppress the report package while still rendering result artifacts', () => {
+    render(
+      <ElectionResultArtifactsSection
+        election={createElectionRecord()}
+        resultView={createResultView({
+          OfficialResult: createResultArtifact(),
+          CanViewReportPackage: true,
+          LatestReportPackage: createReportPackage(),
+        })}
+        showReportPackage={false}
+      />
+    );
+
+    expect(screen.getByTestId('election-official-result')).toBeInTheDocument();
+    expect(screen.queryByTestId('report-package-summary')).not.toBeInTheDocument();
+  });
+
+  it('shortens the frozen-evidence fingerprint in the package summary while keeping the full value on hover', () => {
+    const longFingerprint =
+      'ee0a9b7d10737e2dd1ce70e9998d9c3361e2a0ffb798e429c8a83b6d858041cb';
+
+    render(
+      <ElectionResultArtifactsSection
+        election={createElectionRecord()}
+        resultView={createResultView({
+          CanViewReportPackage: true,
+          LatestReportPackage: createReportPackage({
+            FrozenEvidenceFingerprint: longFingerprint,
+          }),
+        })}
+      />
+    );
+
+    expect(screen.getByTitle(longFingerprint)).toHaveTextContent('ee0a9b7d1073...858041cb');
+    expect(screen.queryByText(longFingerprint)).not.toBeInTheDocument();
+  });
+
+  it('falls back to the persisted election closed-progress status when result view is unavailable', () => {
+    render(
+      <ElectionResultArtifactsSection
+        election={createElectionRecord({
+          LifecycleState: ElectionLifecycleStateProto.Closed,
+          ClosedProgressStatus:
+            ElectionClosedProgressStatusProto.ClosedProgressTallyCalculationInProgress,
+          TallyReadyAt: undefined,
+          UnofficialResultArtifactId: '',
+          OfficialResultArtifactId: '',
+        })}
+        resultView={null}
+      />
+    );
+
+    expect(screen.getByTestId('election-results-progress')).toHaveTextContent(
+      'Tally calculation in progress'
+    );
+    expect(screen.getByTestId('election-results-progress')).toHaveTextContent(
+      'The election is closed and the result workflow is running.'
+    );
   });
 });

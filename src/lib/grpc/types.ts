@@ -1729,6 +1729,7 @@ export interface SearchElectionDirectoryRequest {
   SearchTerm: string;
   OwnerPublicAddresses: string[];
   Limit: number;
+  ActorPublicAddress: string;
 }
 
 export interface GetElectionHubViewRequest {
@@ -1837,6 +1838,13 @@ export interface ElectionApplicationRoleFlagsView {
   IsTrustee: boolean;
   IsVoter: boolean;
   IsDesignatedAuditor: boolean;
+}
+
+export interface SearchElectionDirectoryEntryView {
+  Election: ElectionSummary;
+  ActorRoles: ElectionApplicationRoleFlagsView;
+  CanOpenEligibility: boolean;
+  EligibilityDisabledReason: string;
 }
 
 export interface ElectionHubEntryView {
@@ -1994,6 +2002,8 @@ export interface SearchElectionDirectoryResponse {
   ErrorMessage: string;
   SearchTerm: string;
   Elections: ElectionSummary[];
+  ActorPublicAddress: string;
+  Entries: SearchElectionDirectoryEntryView[];
 }
 
 export interface GetElectionCeremonyActionViewResponse {

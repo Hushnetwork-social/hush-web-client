@@ -61,7 +61,7 @@ function createHubEntry(
 }
 
 describe('election hub contract helpers', () => {
-  it('puts the voter section first for open mixed-role entries', () => {
+  it('keeps result review inside voter details for open mixed-role entries', () => {
     const entry = createHubEntry('election-1', ElectionLifecycleStateProto.Open, {
       ActorRoles: {
         IsOwnerAdmin: true,
@@ -75,6 +75,24 @@ describe('election hub contract helpers', () => {
     expect(getElectionWorkspaceSectionOrder(entry)).toEqual([
       'voter',
       'owner-admin',
+    ]);
+  });
+
+  it('keeps a workspace artifact section for mixed-role voters when a report package is available', () => {
+    const entry = createHubEntry('election-3', ElectionLifecycleStateProto.Finalized, {
+      ActorRoles: {
+        IsOwnerAdmin: true,
+        IsTrustee: false,
+        IsVoter: true,
+        IsDesignatedAuditor: false,
+      },
+      CanViewParticipantResults: true,
+      CanViewReportPackage: true,
+    });
+
+    expect(getElectionWorkspaceSectionOrder(entry)).toEqual([
+      'owner-admin',
+      'voter',
       'results',
     ]);
   });

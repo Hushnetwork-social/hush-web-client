@@ -605,10 +605,12 @@ describe('HushVotingWorkspace', () => {
       'href',
       '#hush-voting-official-result'
     );
-    expect(screen.getByRole('link', { name: 'Result details' })).toHaveAttribute(
-      'href',
-      '/elections/election-mixed/voter'
+    expect(screen.getByTestId('hush-voting-section-results')).toHaveTextContent(
+      'Boundary Artifacts'
     );
+    expect(screen.queryByRole('link', { name: 'Result details' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('hush-voting-results-open-result')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('hush-voting-results-open-report-package')).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Owner Workspace' })).toHaveAttribute(
       'href',
       '/elections/owner'
@@ -697,14 +699,8 @@ describe('HushVotingWorkspace', () => {
       'href',
       '#hush-voting-official-result'
     );
-    expect(screen.getByTestId('hush-voting-results-open-report-package')).toHaveAttribute(
-      'href',
-      '#hush-voting-report-package'
-    );
-    expect(screen.getByTestId('hush-voting-results-open-result')).toHaveAttribute(
-      'href',
-      '#hush-voting-official-result'
-    );
+    expect(screen.queryByTestId('hush-voting-results-open-report-package')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('hush-voting-results-open-result')).not.toBeInTheDocument();
   });
 
   it('shows the hub receipt verifier only after the voter already has an accepted checkoff record', async () => {
@@ -1390,7 +1386,7 @@ describe('HushVotingWorkspace', () => {
     expect(screen.queryByText('Manage auditor access')).not.toBeInTheDocument();
   });
 
-  it('keeps the results section collapsed by default when no unofficial or official result exists', async () => {
+  it('keeps voter-only workspaces focused on voter details when no artifact package is available', async () => {
     const loadElectionHub = vi.fn().mockResolvedValue(undefined);
     const selectHubElection = vi.fn().mockResolvedValue(undefined);
     const draftVoterEntry = createHubEntry(
@@ -1452,14 +1448,8 @@ describe('HushVotingWorkspace', () => {
       expect(selectHubElection).toHaveBeenCalledWith('actor-address', 'election-no-results');
     });
 
-    const toggle = await screen.findByTestId('hush-voting-results-toggle');
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByText('Unofficial result')).not.toBeInTheDocument();
-
-    fireEvent.click(toggle);
-
-    expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByText('Unofficial result')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Result details' })).toBeDisabled();
+    expect(await screen.findByTestId('hush-voting-section-voter')).toBeInTheDocument();
+    expect(screen.queryByTestId('hush-voting-section-results')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Result details' })).not.toBeInTheDocument();
   });
 });
