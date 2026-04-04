@@ -1,0 +1,4 @@
+[build]
+# Keep Rust build output outside hush-web-client so long-running Next dev sessions
+# do not recurse into the Cargo target tree.
+target-dir = "../../../.tauri-target/hush-web-client"
