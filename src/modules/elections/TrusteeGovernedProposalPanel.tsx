@@ -25,7 +25,7 @@ type TrusteeGovernedProposalPanelProps = {
 };
 
 const sectionClass =
-  'rounded-2xl border border-hush-bg-light bg-hush-bg-element/95 p-5 shadow-sm shadow-black/10';
+  'rounded-3xl bg-hush-bg-element/95 p-5 shadow-lg shadow-black/10';
 
 export function TrusteeGovernedProposalPanel({
   electionId,
@@ -91,15 +91,15 @@ export function TrusteeGovernedProposalPanel({
   };
 
   return (
-    <div className="min-h-screen bg-hush-bg-dark text-hush-text-primary">
-      <div className="mx-auto max-w-4xl p-4 md:p-6">
+    <div className="flex-1 min-h-0 overflow-y-auto bg-hush-bg-dark text-hush-text-primary">
+      <div className="mx-auto flex w-full max-w-4xl min-w-0 flex-col p-4 md:p-6">
         <div className="mb-6">
           <Link
-            href="/elections"
+            href={`/elections/${electionId}`}
             className="mb-3 inline-flex items-center gap-2 text-sm text-hush-text-accent transition-colors hover:text-hush-purple"
           >
             <ArrowLeft className="h-4 w-4" />
-            <span>Back to elections</span>
+            <span>Back to election</span>
           </Link>
           <h1 className="text-2xl font-semibold">Trustee Proposal Approval</h1>
           <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
@@ -231,7 +231,7 @@ export function TrusteeGovernedProposalPanel({
                       : 'This proposal can authorize one exact finalization workflow. The follow-up page shows the bound session and aggregate-only share action once execution succeeds.'}
                   </p>
                   <Link
-                    href={`/account/elections/trustee/${electionId}/finalization`}
+                    href={`/elections/${electionId}/trustee/finalization`}
                     className="mt-3 inline-flex items-center gap-2 rounded-xl border border-hush-bg-light px-4 py-2 text-sm transition-colors hover:border-hush-purple"
                     data-testid="trustee-proposal-finalization-link"
                   >

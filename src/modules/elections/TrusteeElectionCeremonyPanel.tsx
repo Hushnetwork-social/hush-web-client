@@ -30,7 +30,14 @@ type TrusteeElectionCeremonyPanelProps = {
 };
 
 const sectionClass =
-  'rounded-2xl border border-hush-bg-light bg-hush-bg-element/95 p-5 shadow-sm shadow-black/10';
+  'rounded-3xl bg-hush-bg-element/95 p-5 shadow-lg shadow-black/10';
+const insetSurfaceClass = 'rounded-[24px] bg-[#18203a] p-4 shadow-inner shadow-black/10';
+const valueWellClass =
+  'rounded-2xl bg-[#151c33] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.02),0_12px_24px_rgba(0,0,0,0.14)]';
+const fieldClass =
+  'w-full rounded-xl bg-hush-bg-element/70 px-3 py-3 text-sm outline-none ring-1 ring-inset ring-white/10 transition focus:ring-2 focus:ring-hush-purple/60';
+const secondaryButtonClass =
+  'inline-flex items-center gap-2 rounded-xl bg-hush-bg-element/70 px-4 py-2 text-sm text-hush-text-primary shadow-sm shadow-black/10 ring-1 ring-inset ring-white/10 transition hover:bg-hush-bg-element/80 hover:ring-hush-purple/40 disabled:cursor-not-allowed disabled:bg-hush-bg-element/45 disabled:text-hush-text-accent disabled:ring-white/5';
 
 export function TrusteeElectionCeremonyPanel({
   electionId,
@@ -189,15 +196,15 @@ export function TrusteeElectionCeremonyPanel({
   };
 
   return (
-    <div className="min-h-screen bg-hush-bg-dark text-hush-text-primary">
-      <div className="mx-auto max-w-5xl p-4 md:p-6">
+    <div className="flex-1 min-h-0 overflow-y-auto bg-hush-bg-dark text-hush-text-primary">
+      <div className="mx-auto flex w-full max-w-5xl min-w-0 flex-col p-4 md:p-6">
         <div className="mb-6">
           <Link
-            href="/elections"
+            href={`/elections/${electionId}`}
             className="mb-3 inline-flex items-center gap-2 text-sm text-hush-text-accent transition-colors hover:text-hush-purple"
           >
             <ArrowLeft className="h-4 w-4" />
-            <span>Back to elections</span>
+            <span>Back to election</span>
           </Link>
           <h1 className="text-2xl font-semibold">Trustee Key Ceremony</h1>
           <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
@@ -267,19 +274,19 @@ export function TrusteeElectionCeremonyPanel({
                       : 'No active version'}
                   </div>
                 </div>
-                <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-2 text-xs text-hush-text-accent">
+                <div className="rounded-xl bg-[#151c33] px-3 py-2 text-xs text-hush-text-accent shadow-[inset_0_1px_0_rgba(255,255,255,0.02),0_10px_20px_rgba(0,0,0,0.12)]">
                   Incoming ceremony messages: {ceremonyActionView?.PendingIncomingMessageCount ?? 0}
                 </div>
               </div>
 
               <div className="mt-5 grid gap-4 md:grid-cols-3">
-                <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+                <div className={valueWellClass}>
                   <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
                     Profile
                   </div>
                   <div className="mt-2 text-sm">{activeVersion?.ProfileId || 'Not started'}</div>
                 </div>
-                <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+                <div className={valueWellClass}>
                   <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
                     Threshold
                   </div>
@@ -289,7 +296,7 @@ export function TrusteeElectionCeremonyPanel({
                       : 'Not recorded'}
                   </div>
                 </div>
-                <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+                <div className={valueWellClass}>
                   <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
                     Your state
                   </div>
@@ -329,14 +336,17 @@ export function TrusteeElectionCeremonyPanel({
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">
-                <div className="rounded-2xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+                <div
+                  className={insetSurfaceClass}
+                  data-testid="trustee-ceremony-step-list"
+                >
                   <div className="space-y-3">
                     {[publishAction, joinAction, selfTestAction, submitAction, exportAction]
                       .filter(Boolean)
                       .map((action, index) => (
                         <div
                           key={action!.actionType}
-                          className="rounded-xl border border-hush-bg-light/70 bg-hush-bg-element/60 px-4 py-3"
+                          className="rounded-2xl bg-[#1f2848] px-4 py-3 shadow-sm shadow-black/10"
                         >
                           <div className="flex items-center justify-between gap-3">
                             <div>
@@ -348,12 +358,12 @@ export function TrusteeElectionCeremonyPanel({
                               </div>
                             </div>
                             <span
-                              className={`rounded-full border px-3 py-1 text-xs ${
+                              className={`rounded-full px-3 py-1 text-xs ring-1 ring-inset ${
                                 action!.status === 'completed'
-                                  ? 'border-green-500/40 bg-green-500/10 text-green-100'
+                                  ? 'bg-green-500/10 text-green-100 ring-green-500/35'
                                   : action!.status === 'available'
-                                    ? 'border-hush-purple/40 bg-hush-purple/10 text-hush-purple'
-                                    : 'border-hush-bg-light bg-hush-bg-dark text-hush-text-accent'
+                                    ? 'bg-hush-purple/10 text-hush-purple ring-hush-purple/35'
+                                    : 'bg-hush-bg-dark/80 text-hush-text-accent ring-white/10'
                               }`}
                             >
                               {action!.status}
@@ -365,13 +375,16 @@ export function TrusteeElectionCeremonyPanel({
                   </div>
                 </div>
 
-                <div className="space-y-4">
-                  <div className="rounded-2xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+                <div
+                  className="space-y-4"
+                  data-testid="trustee-ceremony-step-workspace"
+                >
+                  <div className={insetSurfaceClass}>
                     <div className="text-sm font-semibold">Step 1: Publish transport key</div>
                     <input
                       value={transportPublicKeyFingerprint}
                       onChange={(event) => setTransportPublicKeyFingerprint(event.target.value)}
-                      className="mt-3 w-full rounded-xl border border-hush-bg-light bg-hush-bg-element/70 px-3 py-3 text-sm outline-none transition-colors focus:border-hush-purple"
+                      className={`mt-3 ${fieldClass}`}
                       placeholder="Transport key fingerprint"
                     />
                     <button
@@ -385,14 +398,14 @@ export function TrusteeElectionCeremonyPanel({
                     </button>
                   </div>
 
-                  <div className="rounded-2xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+                  <div className={insetSurfaceClass}>
                     <div className="text-sm font-semibold">Step 2: Join and self-test</div>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"
                         onClick={() => void handleJoin()}
                         disabled={isSubmitting || !activeVersion || joinAction?.status !== 'available'}
-                        className="inline-flex items-center gap-2 rounded-xl border border-hush-bg-light px-4 py-2 text-sm transition-colors hover:border-hush-purple disabled:cursor-not-allowed disabled:text-hush-text-accent"
+                        className={secondaryButtonClass}
                       >
                         <span>Join version</span>
                       </button>
@@ -400,7 +413,7 @@ export function TrusteeElectionCeremonyPanel({
                         type="button"
                         onClick={() => void handleSelfTest()}
                         disabled={isSubmitting || !activeVersion || selfTestAction?.status !== 'available'}
-                        className="inline-flex items-center gap-2 rounded-xl border border-hush-bg-light px-4 py-2 text-sm transition-colors hover:border-hush-purple disabled:cursor-not-allowed disabled:text-hush-text-accent"
+                        className={secondaryButtonClass}
                       >
                         <span>Run self-test</span>
                       </button>
@@ -413,13 +426,13 @@ export function TrusteeElectionCeremonyPanel({
                     </div>
                   </div>
 
-                  <div className="rounded-2xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+                  <div className={insetSurfaceClass}>
                     <div className="text-sm font-semibold">Step 3: Submit and complete</div>
                     <div className="mt-3 grid gap-3">
                       <select
                         value={recipientTrusteeUserAddress}
                         onChange={(event) => setRecipientTrusteeUserAddress(event.target.value)}
-                        className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-element/70 px-3 py-3 text-sm outline-none transition-colors focus:border-hush-purple"
+                        className={fieldClass}
                       >
                         {recipientOptions.map((trustee) => (
                           <option key={trustee.TrusteeUserAddress} value={trustee.TrusteeUserAddress}>
@@ -430,37 +443,37 @@ export function TrusteeElectionCeremonyPanel({
                       <input
                         value={messageType}
                         onChange={(event) => setMessageType(event.target.value)}
-                        className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-element/70 px-3 py-3 text-sm outline-none transition-colors focus:border-hush-purple"
+                        className={fieldClass}
                         placeholder="Message type"
                       />
                       <input
                         value={payloadVersion}
                         onChange={(event) => setPayloadVersion(event.target.value)}
-                        className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-element/70 px-3 py-3 text-sm outline-none transition-colors focus:border-hush-purple"
+                        className={fieldClass}
                         placeholder="Payload version"
                       />
                       <textarea
                         value={encryptedPayload}
                         onChange={(event) => setEncryptedPayload(event.target.value)}
-                        className="min-h-24 w-full rounded-xl border border-hush-bg-light bg-hush-bg-element/70 px-3 py-3 text-sm outline-none transition-colors focus:border-hush-purple"
+                        className={`min-h-24 ${fieldClass}`}
                         placeholder="Encrypted payload"
                       />
                       <input
                         value={payloadFingerprint}
                         onChange={(event) => setPayloadFingerprint(event.target.value)}
-                        className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-element/70 px-3 py-3 text-sm outline-none transition-colors focus:border-hush-purple"
+                        className={fieldClass}
                         placeholder="Payload fingerprint"
                       />
                       <input
                         value={shareVersion}
                         onChange={(event) => setShareVersion(event.target.value)}
-                        className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-element/70 px-3 py-3 text-sm outline-none transition-colors focus:border-hush-purple"
+                        className={fieldClass}
                         placeholder="Share version"
                       />
                       <input
                         value={tallyPublicKeyFingerprint}
                         onChange={(event) => setTallyPublicKeyFingerprint(event.target.value)}
-                        className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-element/70 px-3 py-3 text-sm outline-none transition-colors focus:border-hush-purple"
+                        className={fieldClass}
                         placeholder="Tally public key fingerprint"
                       />
                     </div>
@@ -476,12 +489,12 @@ export function TrusteeElectionCeremonyPanel({
                     </button>
                   </div>
 
-                  <div className="rounded-2xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+                  <div className={insetSurfaceClass}>
                     <div className="text-sm font-semibold">Step 4: Export encrypted share backup</div>
                     <div className="mt-3 text-sm text-hush-text-accent">
                       Share custody status:{' '}
                       {shareCustody
-                        ? `${getCeremonyShareCustodyStatusLabel(shareCustody.Status)} • last export ${formatTimestamp(shareCustody.LastExportedAt)}`
+                        ? `${getCeremonyShareCustodyStatusLabel(shareCustody.Status)} | last export ${formatTimestamp(shareCustody.LastExportedAt)}`
                         : 'No share custody record yet'}
                     </div>
                     <div className="mt-2 text-sm text-hush-text-accent">
@@ -491,7 +504,7 @@ export function TrusteeElectionCeremonyPanel({
                       type="button"
                       onClick={() => void handleExport()}
                       disabled={isSubmitting || !activeVersion || exportAction?.status !== 'available'}
-                      className="mt-3 inline-flex items-center gap-2 rounded-xl border border-hush-bg-light px-4 py-2 text-sm transition-colors hover:border-hush-purple disabled:cursor-not-allowed disabled:text-hush-text-accent"
+                      className={`mt-3 ${secondaryButtonClass}`}
                       data-testid="trustee-ceremony-export-button"
                     >
                       {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}

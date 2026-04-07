@@ -382,6 +382,18 @@ describe('TrusteeElectionCeremonyPanel', () => {
     expect(await screen.findByTestId('trustee-ceremony-summary')).toHaveTextContent(
       'Governed Referendum'
     );
+    expect(screen.getByTestId('trustee-ceremony-summary').className).not.toContain(
+      'border-hush-bg-light'
+    );
+    expect(screen.getByTestId('trustee-ceremony-steps').className).not.toContain(
+      'border-hush-bg-light'
+    );
+    expect(screen.getByTestId('trustee-ceremony-step-list').className).not.toContain(
+      'border-hush-bg-light'
+    );
+    expect(screen.getByTestId('trustee-ceremony-step-workspace').className).not.toContain(
+      'border-hush-bg-light'
+    );
     expect(screen.getByTestId('trustee-ceremony-steps')).toHaveTextContent('Publish transport key');
     expect(screen.getByTestId('trustee-ceremony-steps')).toHaveTextContent('Join version');
     expect(screen.getByTestId('trustee-ceremony-steps')).toHaveTextContent('Run self-test');
@@ -409,6 +421,9 @@ describe('TrusteeElectionCeremonyPanel', () => {
     expect(screen.getByText('Authority boundary')).toBeInTheDocument();
     expect(screen.getByTestId('ceremony-transcript-panel')).toHaveTextContent(
       'Secret payloads stay outside this view.'
+    );
+    expect(screen.getByTestId('ceremony-transcript-panel').className).not.toContain(
+      'border-hush-bg-light'
     );
     expect(screen.queryByTestId('elections-ceremony-start-button')).not.toBeInTheDocument();
     expect(screen.queryByTestId('elections-ceremony-restart-button')).not.toBeInTheDocument();

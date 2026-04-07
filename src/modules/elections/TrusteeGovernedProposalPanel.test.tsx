@@ -241,7 +241,7 @@ describe('TrusteeGovernedProposalPanel', () => {
     const followUpLink = await screen.findByTestId('trustee-proposal-finalization-link');
     expect(followUpLink).toHaveAttribute(
       'href',
-      '/account/elections/trustee/election-1/finalization'
+      '/elections/election-1/trustee/finalization'
     );
     expect(followUpLink).toHaveTextContent('Open finalization page');
   });

@@ -26,6 +26,7 @@ type ElectionCeremonyWorkspaceSectionProps = {
   ownerPublicAddress: string;
   isSubmitting: boolean;
   isLoadingCeremonyActionView: boolean;
+  pendingSaveAlignmentMessage?: string | null;
   onStart: (profileId: string) => Promise<boolean>;
   onRestart: (profileId: string, restartReason: string) => Promise<boolean>;
 };
@@ -38,6 +39,7 @@ export function ElectionCeremonyWorkspaceSection({
   ownerPublicAddress,
   isSubmitting,
   isLoadingCeremonyActionView,
+  pendingSaveAlignmentMessage = null,
   onStart,
   onRestart,
 }: ElectionCeremonyWorkspaceSectionProps) {
@@ -74,6 +76,17 @@ export function ElectionCeremonyWorkspaceSection({
   const restartAction = ownerActions.find(
     (action) => action.actionType === ElectionCeremonyActionTypeProto.CeremonyActionRestartVersion
   );
+  const effectiveBlockedReasons = pendingSaveAlignmentMessage ? [] : actionView?.BlockedReasons ?? [];
+  const effectiveStartReason =
+    pendingSaveAlignmentMessage && startAction?.status !== 'available'
+      ? pendingSaveAlignmentMessage
+      : startAction?.reason;
+  const effectiveRestartReason =
+    pendingSaveAlignmentMessage && !activeVersion
+      ? 'No active ceremony version exists yet.'
+      : pendingSaveAlignmentMessage && restartAction?.status !== 'available'
+        ? pendingSaveAlignmentMessage
+      : restartAction?.reason;
 
   const isCeremonyReady =
     activeVersion?.Status === ElectionCeremonyVersionStatusProto.CeremonyVersionReady;
@@ -100,7 +113,7 @@ export function ElectionCeremonyWorkspaceSection({
 
   return (
     <section
-      className="rounded-2xl border border-hush-bg-light bg-hush-bg-element/95 p-5 shadow-sm shadow-black/10"
+      className="rounded-2xl bg-hush-bg-element/95 p-5 shadow-lg shadow-black/10"
       data-testid="elections-ceremony-section"
     >
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -142,9 +155,9 @@ export function ElectionCeremonyWorkspaceSection({
               </div>
             </div>
 
-            {actionView?.BlockedReasons?.length ? (
+            {effectiveBlockedReasons.length ? (
               <ul className="mt-4 space-y-2 text-sm text-hush-text-accent">
-                {actionView.BlockedReasons.map((reason) => (
+                {effectiveBlockedReasons.map((reason) => (
                   <li
                     key={reason}
                     className="rounded-xl border border-hush-bg-light/70 bg-hush-bg-element/60 px-3 py-2"
@@ -193,6 +206,7 @@ export function ElectionCeremonyWorkspaceSection({
                 disabled={
                   isSubmitting ||
                   isLoadingCeremonyActionView ||
+                  !!pendingSaveAlignmentMessage ||
                   !selectedProfileId ||
                   startAction?.status !== 'available'
                 }
@@ -208,6 +222,7 @@ export function ElectionCeremonyWorkspaceSection({
                 disabled={
                   isSubmitting ||
                   isLoadingCeremonyActionView ||
+                  !!pendingSaveAlignmentMessage ||
                   !selectedProfileId ||
                   restartAction?.status !== 'available'
                 }
@@ -220,7 +235,16 @@ export function ElectionCeremonyWorkspaceSection({
             </div>
 
             <div className="mt-4 grid gap-3 md:grid-cols-2">
-              {[startAction, restartAction].filter(Boolean).map((action) => (
+              {[
+                startAction
+                  ? { ...startAction, reason: effectiveStartReason ?? startAction.reason }
+                  : null,
+                restartAction
+                  ? { ...restartAction, reason: effectiveRestartReason ?? restartAction.reason }
+                  : null,
+              ]
+                .filter(Boolean)
+                .map((action) => (
                 <div
                   key={action!.actionType}
                   className="rounded-xl border border-hush-bg-light/70 bg-hush-bg-element/60 px-3 py-3 text-sm"

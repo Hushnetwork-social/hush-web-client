@@ -456,6 +456,109 @@ describe('HushVotingWorkspace', () => {
     expect(screen.queryByRole('link', { name: 'Back to HushVoting! Hub' })).not.toBeInTheDocument();
   });
 
+  it('shows a pending trustee invitation surface and lets the invited trustee accept it', async () => {
+    const loadElectionHub = vi.fn().mockResolvedValue(undefined);
+    const selectHubElection = vi.fn().mockResolvedValue(undefined);
+    const acceptTrusteeInvitation = vi.fn().mockResolvedValue(true);
+    const rejectTrusteeInvitation = vi.fn().mockResolvedValue(true);
+    const pendingTrusteeEntry = createHubEntry(
+      'election-pending-trustee',
+      ElectionLifecycleStateProto.Draft,
+      'Pending Trustee Election',
+      {
+        ActorRoles: {
+          IsOwnerAdmin: false,
+          IsTrustee: false,
+          IsVoter: false,
+          IsDesignatedAuditor: false,
+        },
+        SuggestedAction: ElectionHubNextActionHintProto.ElectionHubActionNone,
+        SuggestedActionReason: 'A trustee invitation is waiting for your response.',
+        CanViewNamedParticipationRoster: false,
+        CanViewReportPackage: false,
+        CanViewParticipantResults: false,
+        HasUnofficialResult: false,
+        HasOfficialResult: false,
+      }
+    );
+
+    useElectionsStore.setState({
+      acceptTrusteeInvitation,
+      rejectTrusteeInvitation,
+      loadElectionHub,
+      clearGrantCandidateSearch: vi.fn(),
+      selectHubElection,
+      reset: vi.fn(),
+      hubView: createHubView([pendingTrusteeEntry]),
+      hubEntries: [pendingTrusteeEntry],
+      selectedElectionId: null,
+      selectedHubEntry: null,
+      selectedElection: createDetail(
+        'election-pending-trustee',
+        ElectionLifecycleStateProto.Draft,
+        'Pending Trustee Election',
+        {
+          TrusteeInvitations: [
+            {
+              Id: 'invite-pending-1',
+              ElectionId: 'election-pending-trustee',
+              TrusteeUserAddress: 'actor-address',
+              TrusteeDisplayName: 'Trustee Three',
+              InvitedByPublicAddress: 'owner-address',
+              LinkedMessageId: 'message-1',
+              Status: ElectionTrusteeInvitationStatusProto.Pending,
+              SentAtDraftRevision: 2,
+              SentAt: timestamp,
+            },
+          ],
+        }
+      ),
+      canManageReportAccessGrants: false,
+      reportAccessGrantDeniedReason: '',
+      reportAccessGrants: [],
+      feedback: null,
+      error: null,
+      isLoadingHub: false,
+      isLoadingDetail: false,
+      isSubmitting: false,
+      actorPublicAddress: 'actor-address',
+    });
+
+    render(
+      <HushVotingWorkspace
+        actorPublicAddress="actor-address"
+        actorEncryptionPublicKey="actor-encrypt-address"
+        actorEncryptionPrivateKey="actor-private-encrypt-key"
+        actorSigningPrivateKey="actor-signing-private-key"
+        initialElectionId="election-pending-trustee"
+      />
+    );
+
+    await waitFor(() => {
+      expect(selectHubElection).toHaveBeenCalledWith('actor-address', 'election-pending-trustee');
+    });
+
+    expect(await screen.findByTestId('hush-voting-pending-trustee-invitation')).toBeInTheDocument();
+    expect(screen.getByText('Respond before trustee work unlocks')).toBeInTheDocument();
+    expect(screen.queryByText('No workspace surface is available')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Accept invitation' }));
+
+    await waitFor(() => {
+      expect(acceptTrusteeInvitation).toHaveBeenCalledWith(
+        {
+          ElectionId: 'election-pending-trustee',
+          InvitationId: 'invite-pending-1',
+          ActorPublicAddress: 'actor-address',
+        },
+        'actor-encrypt-address',
+        'actor-private-encrypt-key',
+        'actor-signing-private-key'
+      );
+    });
+    expect(loadElectionHub).toHaveBeenCalledTimes(2);
+  });
+
   it('renders the pre-link voter section only on the dedicated election detail route', async () => {
     const loadElectionHub = vi.fn().mockResolvedValue(undefined);
     const selectHubElection = vi.fn().mockResolvedValue(undefined);
@@ -596,6 +699,20 @@ describe('HushVotingWorkspace', () => {
     expect(screen.getByTestId('hush-voting-section-trustee')).toBeInTheDocument();
     expect(screen.getByTestId('hush-voting-section-auditor')).toBeInTheDocument();
     expect(screen.getByTestId('hush-voting-section-results')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Ceremony workspace' })).toHaveAttribute(
+      'href',
+      '/elections/election-mixed/trustee/ceremony'
+    );
+    expect(screen.getByRole('link', { name: 'Ceremony workspace' }).className).toContain(
+      'bg-hush-purple'
+    );
+    expect(screen.getByRole('link', { name: 'Share workspace' })).toHaveAttribute(
+      'href',
+      '/elections/election-mixed/trustee/finalization'
+    );
+    expect(screen.getByRole('link', { name: 'Share workspace' }).className).toContain(
+      'bg-hush-purple'
+    );
     expect(await screen.findByTestId('report-package-summary')).toBeInTheDocument();
     expect(screen.getByTestId('hush-voting-open-report-package')).toHaveAttribute(
       'href',
@@ -613,7 +730,7 @@ describe('HushVotingWorkspace', () => {
     expect(screen.queryByTestId('hush-voting-results-open-report-package')).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Owner Workspace' })).toHaveAttribute(
       'href',
-      '/elections/owner'
+      '/elections/owner?electionId=election-mixed'
     );
     expect(screen.getByRole('link', { name: 'Back to HushVoting! Hub' })).toHaveAttribute('href', '/elections');
   });

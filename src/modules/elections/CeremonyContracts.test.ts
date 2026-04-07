@@ -8,6 +8,7 @@ import {
   type GetElectionResponse,
 } from '@/lib/grpc';
 import {
+  getFixedCeremonyProfileShape,
   getAllowedCeremonyProfiles,
   getCeremonyActionViewStates,
   getCeremonyActorRoleLabel,
@@ -87,6 +88,10 @@ describe('ceremony contract helpers', () => {
     };
 
     expect(getAllowedCeremonyProfiles(detail)).toHaveLength(1);
+    expect(getFixedCeremonyProfileShape(detail)).toEqual({
+      trusteeCount: 5,
+      requiredApprovalCount: 3,
+    });
     expect(getCeremonyVersionStatusLabel(ElectionCeremonyVersionStatusProto.CeremonyVersionReady)).toBe('Ready');
     expect(getTrusteeCeremonyStateLabel(ElectionTrusteeCeremonyStateProto.CeremonyStateValidationFailed)).toBe('Validation failed');
     expect(getCeremonyActorRoleLabel(ElectionCeremonyActorRoleProto.CeremonyActorTrustee)).toBe('Trustee');

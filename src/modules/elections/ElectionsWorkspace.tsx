@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import type { ReactNode } from "react";
+import type { FormEvent, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
@@ -14,6 +14,7 @@ import {
   Plus,
   RefreshCcw,
   Save,
+  Search,
   ShieldAlert,
   Square,
   X,
@@ -24,11 +25,13 @@ import {
   type ElectionDraftInput,
   ElectionGovernedActionTypeProto,
   ElectionGovernanceModeProto,
+  type Identity,
   type ResolveElectionTrusteeInvitationRequest,
   ElectionTrusteeInvitationStatusProto,
   ElectionWarningCodeProto,
   OutcomeRuleKindProto,
 } from "@/lib/grpc";
+import { identityService } from "@/lib/grpc/services/identity";
 import {
   BINDING_OPTIONS,
   GOVERNANCE_OPTIONS,
@@ -46,6 +49,7 @@ import {
   formatTimestamp,
   getActiveCeremonyVersion,
   getBindingLabel,
+  getFixedCeremonyProfileShape,
   getDisclosureModeLabel,
   getDraftOpenValidationErrors,
   getDraftRevisionLabel,
@@ -84,6 +88,7 @@ type ElectionsWorkspaceProps = {
   ownerEncryptionPrivateKey?: string;
   ownerSigningPrivateKey: string;
   startInNewDraftMode?: boolean;
+  initialElectionId?: string;
 };
 
 type FixedPolicyItem = {
@@ -357,6 +362,7 @@ export function ElectionsWorkspace({
   ownerEncryptionPrivateKey,
   ownerSigningPrivateKey,
   startInNewDraftMode = false,
+  initialElectionId,
 }: ElectionsWorkspaceProps) {
   const {
     beginNewElection,
@@ -370,7 +376,6 @@ export function ElectionsWorkspace({
     finalizeElection,
     inviteTrustee,
     isLoadingCeremonyActionView,
-    isLoadingDetail,
     isLoadingList,
     isSubmitting,
     loadCeremonyActionView,
@@ -398,6 +403,12 @@ export function ElectionsWorkspace({
   const [snapshotReason, setSnapshotReason] = useState("Initial draft");
   const [trusteeUserAddress, setTrusteeUserAddress] = useState("");
   const [trusteeDisplayName, setTrusteeDisplayName] = useState("");
+  const [trusteeSearchQuery, setTrusteeSearchQuery] = useState("");
+  const [trusteeSearchResults, setTrusteeSearchResults] = useState<Identity[]>(
+    [],
+  );
+  const [isSearchingTrustees, setIsSearchingTrustees] = useState(false);
+  const [hasSearchedTrustees, setHasSearchedTrustees] = useState(false);
   const [activeOverlay, setActiveOverlay] =
     useState<OwnerEditorOverlayId>(null);
   const [metadataEditor, setMetadataEditor] = useState<MetadataEditorState>({
@@ -455,6 +466,18 @@ export function ElectionsWorkspace({
     () => getActiveCeremonyVersion(selectedElection ?? null),
     [selectedElection],
   );
+  const fixedCeremonyProfileShape = useMemo(
+    () => getFixedCeremonyProfileShape(selectedElection ?? null),
+    [selectedElection],
+  );
+  const fixedTrusteeApprovalCount =
+    fixedCeremonyProfileShape?.requiredApprovalCount ?? null;
+  const fixedCeremonyTrusteeCount =
+    fixedCeremonyProfileShape?.trusteeCount ?? null;
+  const persistedRequiredApprovalCount =
+    latestDraftSnapshot?.Policy.RequiredApprovalCount ??
+    election?.RequiredApprovalCount ??
+    null;
 
   const acceptedTrusteeCount = useMemo(
     () =>
@@ -470,6 +493,32 @@ export function ElectionsWorkspace({
         (invitation) =>
           invitation.Status === ElectionTrusteeInvitationStatusProto.Pending,
       ).length,
+    [trusteeInvitations],
+  );
+  const acceptedTrusteeAddresses = useMemo(
+    () =>
+      new Set(
+        trusteeInvitations
+          .filter(
+            (invitation) =>
+              invitation.Status ===
+              ElectionTrusteeInvitationStatusProto.Accepted,
+          )
+          .map((invitation) => invitation.TrusteeUserAddress),
+      ),
+    [trusteeInvitations],
+  );
+  const pendingTrusteeAddresses = useMemo(
+    () =>
+      new Set(
+        trusteeInvitations
+          .filter(
+            (invitation) =>
+              invitation.Status ===
+              ElectionTrusteeInvitationStatusProto.Pending,
+          )
+          .map((invitation) => invitation.TrusteeUserAddress),
+      ),
     [trusteeInvitations],
   );
 
@@ -521,6 +570,7 @@ export function ElectionsWorkspace({
     latestDraftSnapshot,
     election,
   );
+  const isScopedElectionWorkspace = !!initialElectionId;
   const isStartingNewDraft = startInNewDraftMode && !selectedElectionId;
   const titleMissing = !draft.Title.trim();
   const saveButtonLabel = selectedElectionId
@@ -530,8 +580,19 @@ export function ElectionsWorkspace({
   const canEditDraft = isDraftEditable(election);
   const isReadOnlySelectedElection = !!selectedElectionId && !canEditDraft;
   const showDraftCreationActions = !selectedElectionId || canEditDraft;
+  const visibleElections = useMemo(
+    () =>
+      isScopedElectionWorkspace
+        ? elections.filter((summary) => summary.ElectionId === initialElectionId)
+        : elections,
+    [elections, initialElectionId, isScopedElectionWorkspace],
+  );
   const usesTrusteeThreshold =
     draft.GovernanceMode === ElectionGovernanceModeProto.TrusteeThreshold;
+  const trusteeThresholdNeedsSaveAlignment =
+    usesTrusteeThreshold &&
+    !!fixedTrusteeApprovalCount &&
+    persistedRequiredApprovalCount !== fixedTrusteeApprovalCount;
   const supportsDirectOpen =
     election?.GovernanceMode !== ElectionGovernanceModeProto.TrusteeThreshold;
   const hasSavedElection = !!selectedElectionId;
@@ -641,11 +702,21 @@ export function ElectionsWorkspace({
       beginNewElection();
     }
 
-    void loadOwnerDashboard(ownerPublicAddress, {
-      autoSelectFirst: !startInNewDraftMode,
-    });
+    const loadWorkspace = async () => {
+      await loadOwnerDashboard(ownerPublicAddress, {
+        autoSelectFirst: !startInNewDraftMode && !initialElectionId,
+      });
+
+      if (initialElectionId) {
+        await loadElection(initialElectionId);
+      }
+    };
+
+    void loadWorkspace();
   }, [
     beginNewElection,
+    initialElectionId,
+    loadElection,
     loadOwnerDashboard,
     ownerPublicAddress,
     setOwnerPublicAddress,
@@ -664,6 +735,34 @@ export function ElectionsWorkspace({
     setDraft(createDraftFromElectionDetail(selectedElection ?? null));
     setSnapshotReason("Owner draft update");
   }, [selectedElection, selectedElectionId]);
+
+  useEffect(() => {
+    if (
+      draft.GovernanceMode !== ElectionGovernanceModeProto.TrusteeThreshold ||
+      !fixedTrusteeApprovalCount ||
+      draft.RequiredApprovalCount === fixedTrusteeApprovalCount
+    ) {
+      return;
+    }
+
+    setDraft((current) => {
+      if (
+        current.GovernanceMode !== ElectionGovernanceModeProto.TrusteeThreshold ||
+        current.RequiredApprovalCount === fixedTrusteeApprovalCount
+      ) {
+        return current;
+      }
+
+      return {
+        ...current,
+        RequiredApprovalCount: fixedTrusteeApprovalCount,
+      };
+    });
+  }, [
+    draft.GovernanceMode,
+    draft.RequiredApprovalCount,
+    fixedTrusteeApprovalCount,
+  ]);
 
   useEffect(() => {
     if (!selectedElectionId) {
@@ -822,14 +921,24 @@ export function ElectionsWorkspace({
   };
 
   const openTrusteeOverlay = () => {
-    setTrusteeApprovalEditor(draft.RequiredApprovalCount ?? 1);
+    setTrusteeApprovalEditor(
+      fixedTrusteeApprovalCount ?? draft.RequiredApprovalCount ?? 1,
+    );
+    setTrusteeUserAddress("");
+    setTrusteeDisplayName("");
+    setTrusteeSearchQuery("");
+    setTrusteeSearchResults([]);
+    setHasSearchedTrustees(false);
     setActiveOverlay("trustees");
   };
 
   const applyTrusteeDraftChanges = () => {
     setDraft((current) => ({
       ...current,
-      RequiredApprovalCount: Math.max(1, trusteeApprovalEditor || 1),
+      RequiredApprovalCount: Math.max(
+        1,
+        fixedTrusteeApprovalCount ?? trusteeApprovalEditor ?? 1,
+      ),
     }));
     setActiveOverlay(null);
   };
@@ -838,21 +947,24 @@ export function ElectionsWorkspace({
     setActiveOverlay("roster");
   };
 
-  const handleInviteTrustee = async () => {
+  const inviteTrusteeCandidate = async (
+    trusteeAddress: string,
+    trusteeName: string,
+  ) => {
     if (
       !selectedElectionId ||
-      !trusteeUserAddress.trim() ||
-      !trusteeDisplayName.trim()
+      !trusteeAddress.trim() ||
+      !trusteeName.trim()
     ) {
-      return;
+      return false;
     }
 
     const didInvite = await inviteTrustee(
       {
         ElectionId: selectedElectionId,
         ActorPublicAddress: ownerPublicAddress,
-        TrusteeUserAddress: trusteeUserAddress.trim(),
-        TrusteeDisplayName: trusteeDisplayName.trim(),
+        TrusteeUserAddress: trusteeAddress.trim(),
+        TrusteeDisplayName: trusteeName.trim(),
       },
       ownerEncryptionPublicKey ?? "",
       ownerEncryptionPrivateKey ?? "",
@@ -862,7 +974,78 @@ export function ElectionsWorkspace({
     if (didInvite) {
       setTrusteeUserAddress("");
       setTrusteeDisplayName("");
+      setTrusteeSearchQuery("");
+      setTrusteeSearchResults([]);
+      setHasSearchedTrustees(false);
     }
+    return didInvite;
+  };
+
+  const handleInviteTrustee = async () => {
+    await inviteTrusteeCandidate(trusteeUserAddress, trusteeDisplayName);
+  };
+
+  const handleSearchTrusteeCandidates = async (
+    event: FormEvent<HTMLFormElement>,
+  ) => {
+    event.preventDefault();
+
+    const normalizedQuery = trusteeSearchQuery.trim();
+    if (!normalizedQuery) {
+      setTrusteeSearchResults([]);
+      setHasSearchedTrustees(false);
+      return;
+    }
+
+    setIsSearchingTrustees(true);
+    setHasSearchedTrustees(true);
+
+    try {
+      const response = await identityService.searchByDisplayName(
+        normalizedQuery,
+      );
+      setTrusteeSearchResults(response.Identities ?? []);
+    } finally {
+      setIsSearchingTrustees(false);
+    }
+  };
+
+  const clearTrusteeCandidateSearch = () => {
+    setTrusteeSearchQuery("");
+    setTrusteeSearchResults([]);
+    setHasSearchedTrustees(false);
+  };
+
+  const getTrusteeCandidateRestrictionReason = (candidate: Identity) => {
+    if (candidate.PublicSigningAddress === ownerPublicAddress) {
+      return "Owner/admin accounts cannot invite themselves as trustees.";
+    }
+
+    if (!candidate.PublicEncryptAddress.trim()) {
+      return "This account cannot be invited because it has no public encryption key.";
+    }
+
+    if (acceptedTrusteeAddresses.has(candidate.PublicSigningAddress)) {
+      return "This account is already an accepted trustee on this election.";
+    }
+
+    if (pendingTrusteeAddresses.has(candidate.PublicSigningAddress)) {
+      return "This account already has a pending trustee invitation.";
+    }
+
+    return null;
+  };
+
+  const handleInviteTrusteeFromSearch = async (candidate: Identity) => {
+    const restrictionReason = getTrusteeCandidateRestrictionReason(candidate);
+    if (restrictionReason) {
+      return;
+    }
+
+    await inviteTrusteeCandidate(
+      candidate.PublicSigningAddress,
+      candidate.DisplayName.trim() || candidate.PublicSigningAddress,
+    );
   };
 
   const handleRevokeInvitation = async (invitationId: string) => {
@@ -1033,12 +1216,14 @@ export function ElectionsWorkspace({
             <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
               {isStartingNewDraft
                 ? "Start a brand-new election draft here. Complete the required fields, then save it to create the first saved revision."
+                : isScopedElectionWorkspace
+                  ? "This owner workspace is scoped to the election you opened from the hub. Review or edit this election's current draft here without mixing it with your other saved elections."
                 : isReadOnlySelectedElection
                   ? "Review the selected election here. Draft editing is frozen after open, so this workspace now focuses on lifecycle state, warning evidence, boundary artifacts, and any remaining owner-only follow-up."
                   : "Select a saved election on the left, edit its current draft here, and save local changes as the next draft revision while keeping policy boundaries, warning acknowledgements, and trustee-threshold limitations explicit."}
             </p>
           </div>
-          {selectedElectionId && canEditDraft ? (
+          {selectedElectionId && canEditDraft && !isScopedElectionWorkspace ? (
             <button
               type="button"
               onClick={handleNewDraft}
@@ -1091,18 +1276,28 @@ export function ElectionsWorkspace({
             <div className="mb-4 flex items-center justify-between">
               <div>
                 <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
-                  {isStartingNewDraft ? "New Election Draft" : "Saved Elections"}
+                  {isStartingNewDraft
+                    ? "New Election Draft"
+                    : isScopedElectionWorkspace
+                      ? "Current Election"
+                      : "Saved Elections"}
                 </h2>
                 <p className="mt-1 text-xs text-hush-text-accent">
                   {isStartingNewDraft
                     ? "Creation mode"
                     : isLoadingList
-                      ? "Refreshing saved elections..."
-                      : `${elections.length} saved election(s)`}
+                      ? isScopedElectionWorkspace
+                        ? "Loading current election..."
+                        : "Refreshing saved elections..."
+                      : isScopedElectionWorkspace
+                        ? `${visibleElections.length} selected election`
+                        : `${elections.length} saved election(s)`}
                 </p>
                 <p className="mt-1 text-xs text-hush-text-accent">
                   {isStartingNewDraft
                     ? "This blank draft is separate from your existing saved elections. They stay hidden until you save or leave create mode."
+                    : isScopedElectionWorkspace
+                      ? "This workspace stays focused on the election you opened from the hub."
                     : isReadOnlySelectedElection
                       ? "Select one to review it here. Open elections stay read-only in this workspace."
                       : "Select one to continue editing it, or start a brand-new election draft below."}
@@ -1114,7 +1309,7 @@ export function ElectionsWorkspace({
             </div>
 
             <div className="space-y-3">
-              {showDraftCreationActions ? (
+              {showDraftCreationActions && !isScopedElectionWorkspace ? (
                 <button
                   type="button"
                   onClick={handleNewDraft}
@@ -1138,7 +1333,7 @@ export function ElectionsWorkspace({
               ) : null}
 
               {!isStartingNewDraft &&
-                elections.map((summary) => (
+                visibleElections.map((summary) => (
                   <button
                     key={summary.ElectionId}
                     type="button"
@@ -1345,7 +1540,11 @@ export function ElectionsWorkspace({
                       {draft.RequiredApprovalCount ?? 1}
                     </div>
                     <div className="mt-2 text-xs text-hush-text-accent">
-                      This threshold is saved with the next draft revision.
+                      {fixedTrusteeApprovalCount && fixedCeremonyTrusteeCount
+                        ? trusteeThresholdNeedsSaveAlignment
+                          ? `Aligned locally to the current ${fixedTrusteeApprovalCount}-of-${fixedCeremonyTrusteeCount} trustee rollout. Save the next draft revision to persist it.`
+                          : `Fixed by the current ${fixedTrusteeApprovalCount}-of-${fixedCeremonyTrusteeCount} trustee rollout.`
+                        : "This threshold is saved with the next draft revision."}
                     </div>
                   </div>
 
@@ -2306,6 +2505,13 @@ export function ElectionsWorkspace({
                 ownerPublicAddress={ownerPublicAddress}
                 isSubmitting={isSubmitting}
                 isLoadingCeremonyActionView={isLoadingCeremonyActionView}
+                pendingSaveAlignmentMessage={
+                  trusteeThresholdNeedsSaveAlignment &&
+                  fixedTrusteeApprovalCount &&
+                  fixedCeremonyTrusteeCount
+                    ? `Save the next draft revision to persist the aligned ${fixedTrusteeApprovalCount}-of-${fixedCeremonyTrusteeCount} threshold before the ceremony can start.`
+                    : null
+                }
                 onStart={handleStartCeremony}
                 onRestart={handleRestartCeremony}
               />
@@ -2483,7 +2689,7 @@ export function ElectionsWorkspace({
 
                             {state.proposal && (
                               <Link
-                                href={`/account/elections/trustee/${state.proposal.ElectionId}/proposal/${state.proposal.Id}`}
+                                href={`/elections/${state.proposal.ElectionId}/trustee/proposal/${state.proposal.Id}`}
                                 className="inline-flex items-center gap-2 rounded-xl border border-hush-bg-light px-4 py-2 text-sm transition-colors hover:border-hush-purple"
                               >
                                 <span>Open trustee approval page</span>
@@ -3044,63 +3250,222 @@ export function ElectionsWorkspace({
                           Math.max(1, Number(event.target.value) || 1),
                         )
                       }
-                      className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-2 text-sm outline-none transition-colors focus:border-hush-purple"
+                      readOnly={!!fixedTrusteeApprovalCount}
+                      className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-2 text-sm outline-none transition-colors focus:border-hush-purple read-only:cursor-default read-only:opacity-80"
                     />
+                    <span className="mt-2 block text-xs text-hush-text-accent">
+                      {fixedTrusteeApprovalCount && fixedCeremonyTrusteeCount
+                        ? `The current ceremony rollout is fixed to ${fixedTrusteeApprovalCount}-of-${fixedCeremonyTrusteeCount}, so this threshold stays aligned with the allowed trustee model.`
+                        : "Choose how many accepted trustees are required for the trustee-threshold path."}
+                    </span>
                   </label>
 
                   {selectedElectionId ? (
                     <>
-                      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-                        <label className="text-sm">
-                          <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
-                            Trustee user address
-                          </span>
-                          <input
-                            type="text"
-                            value={trusteeUserAddress}
-                            onChange={(event) =>
-                              setTrusteeUserAddress(event.target.value)
-                            }
-                            disabled={!canEditDraft || isSubmitting}
-                            data-testid="elections-trustee-user-address-input"
-                            className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-2 text-sm outline-none transition-colors focus:border-hush-purple disabled:cursor-not-allowed disabled:opacity-70"
-                          />
-                        </label>
-                        <label className="text-sm">
-                          <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
-                            Trustee display name
-                          </span>
-                          <input
-                            type="text"
-                            value={trusteeDisplayName}
-                            onChange={(event) =>
-                              setTrusteeDisplayName(event.target.value)
-                            }
-                            disabled={!canEditDraft || isSubmitting}
-                            data-testid="elections-trustee-display-name-input"
-                            className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-2 text-sm outline-none transition-colors focus:border-hush-purple disabled:cursor-not-allowed disabled:opacity-70"
-                          />
-                        </label>
-                        <div className="flex items-end">
-                          <button
-                            type="button"
-                            onClick={() => void handleInviteTrustee()}
-                            disabled={
-                              !canEditDraft ||
-                              isSubmitting ||
-                              !trusteeUserAddress.trim() ||
-                              !trusteeDisplayName.trim()
-                            }
-                            data-testid="elections-invite-trustee-button"
-                            className="inline-flex h-11 items-center gap-2 rounded-xl border border-hush-bg-light px-4 text-sm transition-colors hover:border-hush-purple disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {isSubmitting ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Plus className="h-4 w-4" />
+                      <div className="space-y-4 rounded-2xl bg-hush-bg-dark/40 p-4">
+                        <div>
+                          <div className="text-sm font-semibold text-hush-text-primary">
+                            Search Hush accounts
+                          </div>
+                          <div className="mt-1 text-xs text-hush-text-accent">
+                            Search by profile name and invite the trustee
+                            directly from the matching account.
+                          </div>
+                        </div>
+
+                        <form
+                          className="flex flex-col gap-3 lg:flex-row"
+                          onSubmit={(event) =>
+                            void handleSearchTrusteeCandidates(event)
+                          }
+                        >
+                          <label className="min-w-0 flex-1 text-sm">
+                            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                              Trustee search
+                            </span>
+                            <input
+                              type="text"
+                              value={trusteeSearchQuery}
+                              onChange={(event) =>
+                                setTrusteeSearchQuery(event.target.value)
+                              }
+                              disabled={!canEditDraft || isSubmitting}
+                              data-testid="elections-trustee-search-input"
+                              placeholder="Profile or display name"
+                              className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-2 text-sm outline-none transition-colors focus:border-hush-purple disabled:cursor-not-allowed disabled:opacity-70"
+                            />
+                          </label>
+                          <div className="flex items-end gap-2">
+                            <button
+                              type="submit"
+                              disabled={
+                                !canEditDraft ||
+                                isSubmitting ||
+                                isSearchingTrustees ||
+                                !trusteeSearchQuery.trim()
+                              }
+                              data-testid="elections-search-trustees-button"
+                              className="inline-flex h-11 items-center gap-2 rounded-xl bg-hush-purple px-4 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 disabled:cursor-not-allowed disabled:bg-hush-bg-light disabled:text-hush-text-accent"
+                            >
+                              {isSearchingTrustees ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Search className="h-4 w-4" />
+                              )}
+                              <span>Search</span>
+                            </button>
+                            {(trusteeSearchQuery ||
+                              trusteeSearchResults.length > 0 ||
+                              hasSearchedTrustees) && (
+                              <button
+                                type="button"
+                                onClick={clearTrusteeCandidateSearch}
+                                disabled={isSubmitting || isSearchingTrustees}
+                                data-testid="elections-clear-trustee-search-button"
+                                className="inline-flex h-11 items-center gap-2 rounded-xl border border-hush-bg-light px-4 text-sm text-hush-text-accent transition-colors hover:border-hush-purple disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                <X className="h-4 w-4" />
+                                <span>Clear</span>
+                              </button>
                             )}
-                            <span>Invite trustee</span>
-                          </button>
+                          </div>
+                        </form>
+
+                        {hasSearchedTrustees &&
+                        trusteeSearchResults.length === 0 &&
+                        !isSearchingTrustees ? (
+                          <div className="rounded-xl border border-dashed border-hush-bg-light bg-hush-bg-element/60 px-4 py-4 text-sm text-hush-text-accent">
+                            No Hush accounts matched this search.
+                          </div>
+                        ) : null}
+
+                        {trusteeSearchResults.length > 0 ? (
+                          <div className="space-y-3">
+                            {trusteeSearchResults.map((candidate) => {
+                              const candidateLabel =
+                                candidate.DisplayName.trim() ||
+                                candidate.PublicSigningAddress;
+                              const restrictionReason =
+                                getTrusteeCandidateRestrictionReason(candidate);
+
+                              return (
+                                <div
+                                  key={candidate.PublicSigningAddress}
+                                  className="rounded-xl border border-hush-bg-light bg-hush-bg-element/60 px-4 py-4"
+                                >
+                                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                                    <div className="min-w-0">
+                                      <div className="text-sm font-semibold text-hush-text-primary">
+                                        {candidateLabel}
+                                      </div>
+                                      <div className="mt-1 break-all text-xs text-hush-text-accent">
+                                        {candidate.PublicSigningAddress}
+                                      </div>
+                                      <div className="mt-2 text-xs text-hush-text-accent">
+                                        Encrypt address:{" "}
+                                        {candidate.PublicEncryptAddress ||
+                                          "Not published"}
+                                      </div>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        void handleInviteTrusteeFromSearch(
+                                          candidate,
+                                        )
+                                      }
+                                      disabled={
+                                        !canEditDraft ||
+                                        isSubmitting ||
+                                        Boolean(restrictionReason)
+                                      }
+                                      aria-label={`Invite trustee ${candidateLabel}`}
+                                      className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 disabled:cursor-not-allowed disabled:bg-hush-bg-light disabled:text-hush-text-accent"
+                                    >
+                                      {isSubmitting ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                      ) : (
+                                        <Plus className="h-4 w-4" />
+                                      )}
+                                      <span>Invite trustee</span>
+                                    </button>
+                                  </div>
+
+                                  {restrictionReason ? (
+                                    <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                                      {restrictionReason}
+                                    </div>
+                                  ) : null}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <div className="space-y-4 rounded-2xl bg-hush-bg-dark/40 p-4">
+                        <div>
+                          <div className="text-sm font-semibold text-hush-text-primary">
+                            Manual invite fallback
+                          </div>
+                          <div className="mt-1 text-xs text-hush-text-accent">
+                            Use direct address entry only if the trustee cannot
+                            be found in search.
+                          </div>
+                        </div>
+
+                        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                          <label className="text-sm">
+                            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                              Trustee user address
+                            </span>
+                            <input
+                              type="text"
+                              value={trusteeUserAddress}
+                              onChange={(event) =>
+                                setTrusteeUserAddress(event.target.value)
+                              }
+                              disabled={!canEditDraft || isSubmitting}
+                              data-testid="elections-trustee-user-address-input"
+                              className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-2 text-sm outline-none transition-colors focus:border-hush-purple disabled:cursor-not-allowed disabled:opacity-70"
+                            />
+                          </label>
+                          <label className="text-sm">
+                            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                              Trustee display name
+                            </span>
+                            <input
+                              type="text"
+                              value={trusteeDisplayName}
+                              onChange={(event) =>
+                                setTrusteeDisplayName(event.target.value)
+                              }
+                              disabled={!canEditDraft || isSubmitting}
+                              data-testid="elections-trustee-display-name-input"
+                              className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-2 text-sm outline-none transition-colors focus:border-hush-purple disabled:cursor-not-allowed disabled:opacity-70"
+                            />
+                          </label>
+                          <div className="flex items-end">
+                            <button
+                              type="button"
+                              onClick={() => void handleInviteTrustee()}
+                              disabled={
+                                !canEditDraft ||
+                                isSubmitting ||
+                                !trusteeUserAddress.trim() ||
+                                !trusteeDisplayName.trim()
+                              }
+                              data-testid="elections-invite-trustee-button"
+                              className="inline-flex h-11 items-center gap-2 rounded-xl border border-hush-bg-light px-4 text-sm transition-colors hover:border-hush-purple disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {isSubmitting ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Plus className="h-4 w-4" />
+                              )}
+                              <span>Invite trustee</span>
+                            </button>
+                          </div>
                         </div>
                       </div>
 

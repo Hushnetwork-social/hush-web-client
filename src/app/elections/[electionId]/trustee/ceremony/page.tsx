@@ -1,18 +1,22 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { use, useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { ElectionsWorkspace } from '@/modules/elections';
+import { useRouter } from 'next/navigation';
+import { TrusteeElectionCeremonyPanel } from '@/modules/elections/TrusteeElectionCeremonyPanel';
 import { useAppStore } from '@/stores';
 
-export default function OwnerElectionsWorkspacePage() {
+type TrusteeCeremonyPageProps = {
+  params: Promise<{
+    electionId: string;
+  }>;
+};
+
+export default function ElectionTrusteeCeremonyPage({ params }: TrusteeCeremonyPageProps) {
+  const resolvedParams = use(params);
   const router = useRouter();
-  const searchParams = useSearchParams();
   const { credentials, isAuthenticated, setActiveApp, setSelectedNav } = useAppStore();
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
-  const startInNewDraftMode = searchParams.get('mode') === 'new';
-  const initialElectionId = searchParams.get('electionId') ?? undefined;
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -34,8 +38,8 @@ export default function OwnerElectionsWorkspacePage() {
 
     return () => clearTimeout(timer);
   }, [
-    credentials?.encryptionPublicKey,
     credentials?.encryptionPrivateKey,
+    credentials?.encryptionPublicKey,
     credentials?.signingPrivateKey,
     credentials?.signingPublicKey,
     isAuthenticated,
@@ -60,13 +64,12 @@ export default function OwnerElectionsWorkspacePage() {
   }
 
   return (
-    <ElectionsWorkspace
-      ownerPublicAddress={credentials.signingPublicKey}
-      ownerEncryptionPublicKey={credentials.encryptionPublicKey}
-      ownerEncryptionPrivateKey={credentials.encryptionPrivateKey}
-      ownerSigningPrivateKey={credentials.signingPrivateKey}
-      startInNewDraftMode={startInNewDraftMode}
-      initialElectionId={initialElectionId}
+    <TrusteeElectionCeremonyPanel
+      electionId={resolvedParams.electionId}
+      actorPublicAddress={credentials.signingPublicKey}
+      actorEncryptionPublicKey={credentials.encryptionPublicKey}
+      actorEncryptionPrivateKey={credentials.encryptionPrivateKey}
+      actorSigningPrivateKey={credentials.signingPrivateKey}
     />
   );
 }

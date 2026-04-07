@@ -289,6 +289,21 @@ describe('TrusteeElectionFinalizationPanel', () => {
     expect(await screen.findByTestId('trustee-finalization-summary')).toHaveTextContent(
       'Governed Referendum'
     );
+    expect(screen.getByTestId('trustee-finalization-summary').className).not.toContain(
+      'border-hush-bg-light'
+    );
+    expect(screen.getByTestId('trustee-finalization-panel').className).not.toContain(
+      'border-hush-bg-light'
+    );
+    expect(screen.getByText('Session purpose').parentElement?.className).not.toContain(
+      'border-hush-bg-light'
+    );
+    expect(screen.getByText('Target tally id').parentElement?.className).not.toContain(
+      'border-hush-bg-light'
+    );
+    expect(screen.getByTestId('trustee-finalization-share-version').className).not.toContain(
+      'border-hush-bg-light'
+    );
     expect(screen.getByTestId('trustee-finalization-panel')).toHaveTextContent('Share index 1');
 
     fireEvent.change(screen.getByTestId('trustee-finalization-share-version'), {
@@ -353,6 +368,9 @@ describe('TrusteeElectionFinalizationPanel', () => {
 
     expect(await screen.findByTestId('trustee-finalization-blocked')).toHaveTextContent(
       'Finalize remains unavailable until tally readiness is recorded.'
+    );
+    expect(screen.getByTestId('trustee-finalization-blocked').className).not.toContain(
+      'border-hush-bg-light'
     );
     expect(screen.queryByTestId('trustee-finalization-submit-button')).not.toBeInTheDocument();
   });

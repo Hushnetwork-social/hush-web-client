@@ -1055,6 +1055,40 @@ export function getAllowedCeremonyProfiles(detail: GetElectionResponse | null): 
   return detail?.CeremonyProfiles ?? [];
 }
 
+export function getFixedCeremonyProfileShape(detail: GetElectionResponse | null): {
+  trusteeCount: number;
+  requiredApprovalCount: number;
+} | null {
+  const profiles = detail?.CeremonyProfiles ?? [];
+  if (profiles.length === 0) {
+    return null;
+  }
+
+  const trusteeCounts = Array.from(
+    new Set(
+      profiles
+        .map((profile) => profile.TrusteeCount)
+        .filter((trusteeCount) => trusteeCount > 0)
+    )
+  );
+  const requiredApprovalCounts = Array.from(
+    new Set(
+      profiles
+        .map((profile) => profile.RequiredApprovalCount)
+        .filter((requiredApprovalCount) => requiredApprovalCount > 0)
+    )
+  );
+
+  if (trusteeCounts.length !== 1 || requiredApprovalCounts.length !== 1) {
+    return null;
+  }
+
+  return {
+    trusteeCount: trusteeCounts[0],
+    requiredApprovalCount: requiredApprovalCounts[0],
+  };
+}
+
 export function getActiveCeremonyVersion(detail: GetElectionResponse | null) {
   const versions = (detail?.CeremonyVersions ?? [])
     .filter((version) => version.Status !== ElectionCeremonyVersionStatusProto.CeremonyVersionSuperseded)

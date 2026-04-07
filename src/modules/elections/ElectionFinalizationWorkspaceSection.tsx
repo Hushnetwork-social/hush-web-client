@@ -24,7 +24,7 @@ type ElectionFinalizationWorkspaceSectionProps = {
 };
 
 const sectionClass =
-  'rounded-2xl border border-hush-bg-light bg-hush-bg-element/95 p-5 shadow-sm shadow-black/10';
+  'rounded-2xl bg-hush-bg-element/95 p-5 shadow-lg shadow-black/10';
 
 export function ElectionFinalizationWorkspaceSection({
   detail,

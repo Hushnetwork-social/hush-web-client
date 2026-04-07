@@ -50,8 +50,12 @@ import { ElectionsWorkspace } from "./ElectionsWorkspace";
 import { createDefaultElectionDraft } from "./contracts";
 import { useElectionsStore } from "./useElectionsStore";
 
-const { electionsServiceMock, blockchainServiceMock, transactionServiceMock } =
-  vi.hoisted(() => ({
+const {
+  electionsServiceMock,
+  blockchainServiceMock,
+  transactionServiceMock,
+  identityServiceMock,
+} = vi.hoisted(() => ({
     electionsServiceMock: {
       approveElectionGovernedProposal: vi.fn(),
       closeElection: vi.fn(),
@@ -90,6 +94,10 @@ const { electionsServiceMock, blockchainServiceMock, transactionServiceMock } =
       createSubmitElectionFinalizationShareTransaction: vi.fn(),
       createUpdateElectionDraftTransaction: vi.fn(),
     },
+    identityServiceMock: {
+      getIdentity: vi.fn(),
+      searchByDisplayName: vi.fn(),
+    },
   }));
 
 vi.mock("@/lib/grpc/services/elections", () => ({
@@ -99,6 +107,10 @@ vi.mock("@/lib/grpc/services/elections", () => ({
 vi.mock("@/modules/blockchain/BlockchainService", () => ({
   submitTransaction: (...args: unknown[]) =>
     blockchainServiceMock.submitTransaction(...args),
+}));
+
+vi.mock("@/lib/grpc/services/identity", () => ({
+  identityService: identityServiceMock,
 }));
 
 vi.mock("./transactionService", () => ({
@@ -565,6 +577,17 @@ describe("ElectionsWorkspace", () => {
     electionsServiceMock.restartElectionCeremony.mockResolvedValue(
       createCommandResponse(),
     );
+    identityServiceMock.getIdentity.mockResolvedValue({
+      Successfull: false,
+      Message: "",
+      ProfileName: "",
+      PublicSigningAddress: "",
+      PublicEncryptAddress: "",
+      IsPublic: false,
+    });
+    identityServiceMock.searchByDisplayName.mockResolvedValue({
+      Identities: [],
+    });
     blockchainServiceMock.submitTransaction.mockResolvedValue({
       successful: true,
       message: "Accepted",
@@ -661,6 +684,54 @@ describe("ElectionsWorkspace", () => {
     expect(
       screen.getByRole("button", { name: "Create Election Draft" }),
     ).toBeInTheDocument();
+  });
+
+  it("scopes the owner workspace to the requested election when opened from the hub", async () => {
+    electionsServiceMock.getElectionsByOwner.mockResolvedValueOnce({
+      Elections: [
+        createElectionSummary(ElectionLifecycleStateProto.Draft, {
+          ElectionId: "election-1",
+          Title: "AdminOnly Election I",
+        }),
+        createElectionSummary(ElectionLifecycleStateProto.Draft, {
+          ElectionId: "election-2",
+          Title: "Election with Trustees I",
+          GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+        }),
+      ],
+    });
+    electionsServiceMock.getElection.mockResolvedValueOnce(
+      createElectionResponse({
+        Election: createElectionRecord(ElectionLifecycleStateProto.Draft, {
+          ElectionId: "election-2",
+          Title: "Election with Trustees I",
+          GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+        }),
+      }),
+    );
+
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
+        ownerSigningPrivateKey="owner-private-key"
+        initialElectionId="election-2"
+      />,
+    );
+
+    expect(await screen.findByText("Current Election")).toBeInTheDocument();
+    expect(screen.getByTestId("election-summary-election-2")).toBeInTheDocument();
+    expect(screen.queryByTestId("election-summary-election-1")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /This workspace stays focused on the election you opened from the hub\./i,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Start new election draft")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "New Election Draft" }),
+    ).not.toBeInTheDocument();
   });
 
   it("creates a valid draft and shows save feedback", async () => {
@@ -1381,6 +1452,142 @@ describe("ElectionsWorkspace", () => {
     ).toBeGreaterThan(0);
   });
 
+  it("searches Hush accounts and invites a trustee directly from the result", async () => {
+    const thresholdElection = createElectionRecord(
+      ElectionLifecycleStateProto.Draft,
+      {
+        GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+        ReviewWindowPolicy:
+          ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+        RequiredApprovalCount: 3,
+      },
+    );
+    const thresholdPolicy = {
+      ElectionClass: ElectionClassProto.OrganizationalRemoteVoting,
+      BindingStatus: ElectionBindingStatusProto.Binding,
+      GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+      DisclosureMode: ElectionDisclosureModeProto.FinalResultsOnly,
+      ParticipationPrivacyMode:
+        ParticipationPrivacyModeProto.PublicCheckoffAnonymousBallotPrivateChoice,
+      VoteUpdatePolicy: VoteUpdatePolicyProto.SingleSubmissionOnly,
+      EligibilitySourceType:
+        EligibilitySourceTypeProto.OrganizationImportedRoster,
+      EligibilityMutationPolicy: EligibilityMutationPolicyProto.FrozenAtOpen,
+      OutcomeRule: thresholdElection.OutcomeRule,
+      ApprovedClientApplications: [
+        { ApplicationId: "hushsocial", Version: "1.0.0" },
+      ],
+      ProtocolOmegaVersion: "omega-v1.0.0",
+      ReportingPolicy: ReportingPolicyProto.DefaultPhaseOnePackage,
+      ReviewWindowPolicy: ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+      RequiredApprovalCount: 3,
+    };
+    const indexedInvitations = [
+      {
+        Id: "invite-1",
+        ElectionId: "election-1",
+        TrusteeUserAddress: "trustee-zoe",
+        TrusteeDisplayName: "Zoe Trustee",
+        InvitedByPublicAddress: "owner-public-key",
+        LinkedMessageId: "message-zoe",
+        Status: ElectionTrusteeInvitationStatusProto.Pending,
+        SentAtDraftRevision: 1,
+        SentAt: timestamp,
+      },
+    ];
+
+    electionsServiceMock.getElectionsByOwner.mockResolvedValueOnce({
+      Elections: [
+        createElectionSummary(ElectionLifecycleStateProto.Draft, {
+          GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+        }),
+      ],
+    });
+    electionsServiceMock.getElection
+      .mockResolvedValueOnce(
+        createElectionResponse({
+          Election: thresholdElection,
+          LatestDraftSnapshot: createDraftSnapshot({ Policy: thresholdPolicy }),
+          TrusteeInvitations: [],
+          CeremonyProfiles: [],
+        }),
+      )
+      .mockResolvedValueOnce(
+        createElectionResponse({
+          Election: thresholdElection,
+          LatestDraftSnapshot: createDraftSnapshot({ Policy: thresholdPolicy }),
+          TrusteeInvitations: indexedInvitations,
+          CeremonyProfiles: [],
+        }),
+      )
+      .mockResolvedValue(
+        createElectionResponse({
+          Election: thresholdElection,
+          LatestDraftSnapshot: createDraftSnapshot({ Policy: thresholdPolicy }),
+          TrusteeInvitations: indexedInvitations,
+          CeremonyProfiles: [],
+        }),
+      );
+    identityServiceMock.searchByDisplayName.mockResolvedValueOnce({
+      Identities: [
+        {
+          DisplayName: "Zoe Trustee",
+          PublicSigningAddress: "trustee-zoe",
+          PublicEncryptAddress: "encrypt-zoe",
+        },
+      ],
+    });
+
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Edit trustee setup" }),
+    );
+
+    fireEvent.change(screen.getByTestId("elections-trustee-search-input"), {
+      target: { value: "Zoe" },
+    });
+    fireEvent.click(screen.getByTestId("elections-search-trustees-button"));
+
+    await waitFor(() => {
+      expect(identityServiceMock.searchByDisplayName).toHaveBeenCalledWith(
+        "Zoe",
+      );
+    });
+
+    expect(await screen.findByText("Zoe Trustee")).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Invite trustee Zoe Trustee" }),
+    );
+
+    await waitFor(() => {
+      expect(
+        transactionServiceMock.createElectionTrusteeInvitationTransaction,
+      ).toHaveBeenCalledWith(
+        "election-1",
+        "owner-public-key",
+        "owner-encryption-key",
+        "owner-encryption-private-key",
+        "trustee-zoe",
+        "Zoe Trustee",
+        "owner-private-key",
+      );
+    });
+    expect(blockchainServiceMock.submitTransaction).toHaveBeenCalledWith(
+      "signed-trustee-invite-transaction",
+    );
+    expect(
+      await screen.findByText("Trustee invitation created."),
+    ).toBeInTheDocument();
+  });
+
   it("keeps the busy state while the trustee invitation waits for indexing", async () => {
     const thresholdElection = createElectionRecord(
       ElectionLifecycleStateProto.Draft,
@@ -1491,6 +1698,131 @@ describe("ElectionsWorkspace", () => {
 
     expect(
       screen.getByText("Trustee invitation submitted."),
+    ).toBeInTheDocument();
+  });
+
+  it("aligns the trustee approval count with the fixed ceremony rollout shape", async () => {
+    const thresholdElection = createElectionRecord(
+      ElectionLifecycleStateProto.Draft,
+      {
+        GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+        ReviewWindowPolicy:
+          ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+        RequiredApprovalCount: 1,
+      },
+    );
+    const thresholdPolicy = {
+      ElectionClass: ElectionClassProto.OrganizationalRemoteVoting,
+      BindingStatus: ElectionBindingStatusProto.Binding,
+      GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+      DisclosureMode: ElectionDisclosureModeProto.FinalResultsOnly,
+      ParticipationPrivacyMode:
+        ParticipationPrivacyModeProto.PublicCheckoffAnonymousBallotPrivateChoice,
+      VoteUpdatePolicy: VoteUpdatePolicyProto.SingleSubmissionOnly,
+      EligibilitySourceType:
+        EligibilitySourceTypeProto.OrganizationImportedRoster,
+      EligibilityMutationPolicy: EligibilityMutationPolicyProto.FrozenAtOpen,
+      OutcomeRule: thresholdElection.OutcomeRule,
+      ApprovedClientApplications: [
+        { ApplicationId: "hushsocial", Version: "1.0.0" },
+      ],
+      ProtocolOmegaVersion: "omega-v1.0.0",
+      ReportingPolicy: ReportingPolicyProto.DefaultPhaseOnePackage,
+      ReviewWindowPolicy: ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+      RequiredApprovalCount: 1,
+    };
+
+    electionsServiceMock.getElectionsByOwner.mockResolvedValueOnce({
+      Elections: [
+        createElectionSummary(ElectionLifecycleStateProto.Draft, {
+          GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+          RequiredApprovalCount: 1,
+        }),
+      ],
+    });
+    electionsServiceMock.getElectionCeremonyActionView.mockResolvedValueOnce(
+      createCeremonyActionViewResponse({
+        OwnerActions: [
+          {
+            ActionType:
+              ElectionCeremonyActionTypeProto.CeremonyActionStartVersion,
+            IsAvailable: false,
+            IsCompleted: false,
+            Reason:
+              "No allowed ceremony profile matches the current accepted trustee roster and threshold.",
+          },
+          {
+            ActionType:
+              ElectionCeremonyActionTypeProto.CeremonyActionRestartVersion,
+            IsAvailable: false,
+            IsCompleted: false,
+            Reason:
+              "No allowed ceremony profile matches the current accepted trustee roster and threshold.",
+          },
+        ],
+        BlockedReasons: [
+          "No allowed ceremony profile matches the current accepted trustee roster and threshold.",
+        ],
+      }),
+    );
+    electionsServiceMock.getElection.mockResolvedValueOnce(
+      createElectionResponse({
+        Election: thresholdElection,
+        LatestDraftSnapshot: createDraftSnapshot({ Policy: thresholdPolicy }),
+        CeremonyProfiles: [
+          {
+            ProfileId: "prod-3of5-v1",
+            DisplayName: "Production-Like 3 of 5",
+            Description:
+              "Production-like manifest-backed ceremony profile for the initial 3-of-5 trustee rollout over 5 trustees.",
+            ProviderKey: "provider-a",
+            ProfileVersion: "v1",
+            TrusteeCount: 5,
+            RequiredApprovalCount: 3,
+            DevOnly: false,
+            RegisteredAt: timestamp,
+            LastUpdatedAt: timestamp,
+          },
+        ],
+      }),
+    );
+
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />,
+    );
+
+    expect(
+      await screen.findByText(
+        /Aligned locally to the current 3-of-5 trustee rollout\./i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /Save the next draft revision to persist the aligned 3-of-5 threshold before the ceremony can start\./i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        /No allowed ceremony profile matches the current accepted trustee roster and threshold\./i,
+      ),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByTestId("elections-ceremony-start-button"),
+    ).toBeDisabled();
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Edit trustee setup" }),
+    );
+
+    const thresholdInput = screen.getByDisplayValue("3");
+    expect(thresholdInput).toHaveAttribute("readonly");
+    expect(
+      screen.getByText(/The current ceremony rollout is fixed to 3-of-5/i),
     ).toBeInTheDocument();
   });
 
@@ -2382,9 +2714,11 @@ describe("ElectionsWorkspace", () => {
       />,
     );
 
-    expect(
-      await screen.findByTestId("elections-ceremony-section"),
-    ).toBeInTheDocument();
+    const ceremonySection = await screen.findByTestId(
+      "elections-ceremony-section",
+    );
+    expect(ceremonySection).toBeInTheDocument();
+    expect(ceremonySection.className).not.toContain("border-hush-bg-light");
     fireEvent.click(screen.getByTestId("elections-ceremony-start-button"));
     expect(
       await screen.findByTestId("elections-ceremony-confirm-button"),
@@ -2588,6 +2922,7 @@ describe("ElectionsWorkspace", () => {
       "elections-finalization-section",
     );
     expect(finalizationSection).toHaveTextContent("Counting And Finalization");
+    expect(finalizationSection.className).not.toContain("border-hush-bg-light");
     expect(finalizationSection).toHaveTextContent("Finalize");
     expect(
       screen.getByTestId("elections-finalization-session"),

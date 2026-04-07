@@ -1,6 +1,7 @@
 "use client";
 
 import type { ElectionHubEntryView } from '@/lib/grpc';
+import { ElectionHubNextActionHintProto } from '@/lib/grpc';
 import { ArrowRight, CheckCircle2, LockKeyhole, Vote } from 'lucide-react';
 import {
   formatTimestamp,
@@ -29,6 +30,17 @@ function getResultCopy(entry: ElectionHubEntryView): string | null {
   }
 
   return null;
+}
+
+function getActionLabel(entry: ElectionHubEntryView): string {
+  if (
+    entry.SuggestedAction === ElectionHubNextActionHintProto.ElectionHubActionNone &&
+    entry.SuggestedActionReason?.toLowerCase().includes('trustee invitation')
+  ) {
+    return 'Respond to invitation';
+  }
+
+  return getElectionHubSuggestedActionLabel(entry.SuggestedAction);
 }
 
 export function ElectionHubCard({ entry, isSelected, onSelect }: ElectionHubCardProps) {
@@ -77,7 +89,7 @@ export function ElectionHubCard({ entry, isSelected, onSelect }: ElectionHubCard
       <div className="mt-4 flex flex-wrap gap-2">
         <span className="inline-flex items-center gap-2 rounded-full border border-hush-bg-light bg-hush-bg-element px-3 py-1 text-xs text-hush-text-primary">
           <Vote className="h-3.5 w-3.5 text-hush-purple" />
-          <span>{getElectionHubSuggestedActionLabel(entry.SuggestedAction)}</span>
+          <span>{getActionLabel(entry)}</span>
         </span>
         {resultCopy ? (
           <span className="inline-flex items-center gap-2 rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs text-green-100">

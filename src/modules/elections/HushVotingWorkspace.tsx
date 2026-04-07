@@ -19,6 +19,7 @@ import {
 import type {
   ElectionGovernedProposal,
   ElectionHubEntryView,
+  ElectionTrusteeInvitation,
   GetElectionResponse,
   GetElectionResultViewResponse,
   VerifyElectionReceiptResponse,
@@ -95,21 +96,48 @@ function getLatestProposal(detail: GetElectionResponse | null): ElectionGoverned
   return proposals[0] ?? null;
 }
 
+function isSameActorAddress(left?: string, right?: string): boolean {
+  const normalizedLeft = left?.trim().toLowerCase() ?? '';
+  const normalizedRight = right?.trim().toLowerCase() ?? '';
+
+  return normalizedLeft.length > 0 && normalizedLeft === normalizedRight;
+}
+
+function getPendingSelfTrusteeInvitation(
+  detail: GetElectionResponse | null,
+  actorPublicAddress: string
+): ElectionTrusteeInvitation | null {
+  return (
+    (detail?.TrusteeInvitations ?? [])
+      .filter(
+        (invitation) =>
+          invitation.Status === ElectionTrusteeInvitationStatusProto.Pending &&
+          isSameActorAddress(invitation.TrusteeUserAddress, actorPublicAddress)
+      )
+      .sort((left, right) => timestampToMillis(right.SentAt) - timestampToMillis(left.SentAt))[0] ??
+    null
+  );
+}
+
 function AvailabilityCard({
   label,
   value,
   accentClass,
+  valueClassName,
 }: {
   label: string;
   value: string;
   accentClass?: string;
+  valueClassName?: string;
 }) {
   return (
     <div className="rounded-2xl bg-hush-bg-dark/70 p-4 shadow-sm shadow-black/10">
       <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
         {label}
       </div>
-      <div className={`mt-2 text-sm font-medium ${accentClass ?? 'text-hush-text-primary'}`}>
+      <div
+        className={`mt-2 text-sm font-medium ${accentClass ?? 'text-hush-text-primary'} ${valueClassName ?? ''}`}
+      >
         {value}
       </div>
     </div>
@@ -908,7 +936,7 @@ function OwnerAdminWorkspaceSummary({
         </div>
 
         <Link
-          href="/elections/owner"
+          href={`/elections/owner?electionId=${entry.Election.ElectionId}`}
           className="inline-flex self-start items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium whitespace-nowrap text-white transition-colors hover:bg-hush-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark lg:ml-6"
         >
           <ShieldCheck className="h-4 w-4" />
@@ -1022,6 +1050,79 @@ function OwnerAdminWorkspaceSummary({
   );
 }
 
+function PendingTrusteeInvitationSummary({
+  electionTitle,
+  invitation,
+  isSubmitting,
+  onAccept,
+  onReject,
+}: {
+  electionTitle: string;
+  invitation: ElectionTrusteeInvitation;
+  isSubmitting: boolean;
+  onAccept: () => void;
+  onReject: () => void;
+}) {
+  const trusteeLabel = invitation.TrusteeDisplayName || invitation.TrusteeUserAddress;
+
+  return (
+    <section className={`${sectionClass} space-y-4`} data-testid="hush-voting-pending-trustee-invitation">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-[0.24em] text-hush-text-accent">
+            Trustee Invitation
+          </div>
+          <h2 className="mt-2 text-xl font-semibold text-hush-text-primary">
+            Respond before trustee work unlocks
+          </h2>
+          <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
+            {trusteeLabel} has been invited to join <span className="text-hush-text-primary">{electionTitle}</span>{' '}
+            as a trustee. Accept to unlock the ceremony, governed proposal, and share workflows
+            for this election.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap gap-3 lg:ml-6">
+          <button
+            type="button"
+            onClick={onAccept}
+            disabled={isSubmitting}
+            className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+            <span>Accept invitation</span>
+          </button>
+          <button
+            type="button"
+            onClick={onReject}
+            disabled={isSubmitting}
+            className="inline-flex items-center gap-2 rounded-xl bg-hush-bg-dark/80 px-4 py-2 text-sm font-medium text-hush-text-primary transition-colors hover:bg-hush-bg-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
+            <span>Decline invitation</span>
+          </button>
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-4">
+        <AvailabilityCard label="Status" value="Pending your response" accentClass="text-amber-100" />
+        <AvailabilityCard label="Invited as" value={trusteeLabel} />
+        <AvailabilityCard
+          label="Invited by"
+          value={invitation.InvitedByPublicAddress || 'Owner not recorded'}
+          valueClassName="break-all font-mono text-xs leading-relaxed"
+        />
+        <AvailabilityCard label="Draft revision" value={`${invitation.SentAtDraftRevision}`} />
+      </div>
+
+      <div className="rounded-2xl bg-hush-bg-dark/70 px-4 py-3 text-sm text-hush-text-accent">
+        Sent {formatTimestamp(invitation.SentAt)}. Declining removes this election from the
+        trustee hub until a new invitation is issued.
+      </div>
+    </section>
+  );
+}
+
 function TrusteeWorkspaceSummary({
   entry,
   detail,
@@ -1051,18 +1152,18 @@ function TrusteeWorkspaceSummary({
 
         <div className="flex flex-wrap gap-3">
           <Link
-            href={`/account/elections/trustee/${entry.Election.ElectionId}/ceremony`}
-            className="inline-flex items-center gap-2 rounded-xl border border-hush-bg-light px-4 py-2 text-sm font-medium text-hush-text-primary transition-colors hover:border-hush-purple hover:text-hush-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
+            href={`/elections/${entry.Election.ElectionId}/trustee/ceremony`}
+            className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
           >
             <ShieldCheck className="h-4 w-4" />
-            <span>Open ceremony workspace</span>
+            <span>Ceremony workspace</span>
           </Link>
           <Link
-            href={`/account/elections/trustee/${entry.Election.ElectionId}/finalization`}
-            className="inline-flex items-center gap-2 rounded-xl border border-hush-bg-light px-4 py-2 text-sm font-medium text-hush-text-primary transition-colors hover:border-hush-purple hover:text-hush-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
+            href={`/elections/${entry.Election.ElectionId}/trustee/finalization`}
+            className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
           >
             <Files className="h-4 w-4" />
-            <span>Open share workspace</span>
+            <span>Share workspace</span>
           </Link>
         </div>
       </div>
@@ -1097,7 +1198,7 @@ function TrusteeWorkspaceSummary({
       {latestProposal ? (
         <div className="mt-4">
           <Link
-            href={`/account/elections/trustee/${entry.Election.ElectionId}/proposal/${latestProposal.Id}`}
+            href={`/elections/${entry.Election.ElectionId}/trustee/proposal/${latestProposal.Id}`}
             className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
           >
             <ArrowRight className="h-4 w-4" />
@@ -1397,12 +1498,16 @@ function ResultsWorkspaceSummary({
 
 export function HushVotingWorkspace({
   actorPublicAddress,
+  actorEncryptionPublicKey,
+  actorEncryptionPrivateKey,
+  actorSigningPrivateKey,
   initialElectionId,
 }: HushVotingWorkspaceProps) {
   const router = useRouter();
   const [resultView, setResultView] = useState<GetElectionResultViewResponse | null>(null);
   const [isLoadingResultView, setIsLoadingResultView] = useState(false);
   const {
+    acceptTrusteeInvitation,
     clearGrantCandidateSearch,
     feedback,
     error,
@@ -1410,7 +1515,9 @@ export function HushVotingWorkspace({
     hubView,
     isLoadingDetail,
     isLoadingHub,
+    isSubmitting,
     loadElectionHub,
+    rejectTrusteeInvitation,
     reset,
     selectedElection,
     selectedElectionId,
@@ -1477,11 +1584,22 @@ export function HushVotingWorkspace({
         : null,
     [activeEntry, selectedElection]
   );
+  const pendingSelfTrusteeInvitation = useMemo(
+    () => getPendingSelfTrusteeInvitation(activeDetail, actorPublicAddress),
+    [activeDetail, actorPublicAddress]
+  );
+  const hasPendingInvitationSurface = Boolean(pendingSelfTrusteeInvitation);
 
   const requestedEntryMissing = Boolean(initialElectionId && !isLoadingHub && hubView && !requestedEntry);
   const sectionOrder = getElectionWorkspaceSectionOrder(activeEntry);
   const hasVisibleSections = sectionOrder.length > 0;
   const isDetailRoute = Boolean(initialElectionId);
+  const isWaitingForPendingInvitationDetail =
+    isDetailRoute &&
+    !hasVisibleSections &&
+    !hasPendingInvitationSurface &&
+    !activeDetail &&
+    isLoadingDetail;
 
   useEffect(() => {
     if (!isDetailRoute || !activeEntry) {
@@ -1529,6 +1647,67 @@ export function HushVotingWorkspace({
     if (electionId !== initialElectionId) {
       router.push(`/elections/${electionId}`);
     }
+  };
+
+  const handleAcceptPendingTrusteeInvitation = async () => {
+    if (!pendingSelfTrusteeInvitation) {
+      return;
+    }
+
+    const accepted = await acceptTrusteeInvitation(
+      {
+        ElectionId: pendingSelfTrusteeInvitation.ElectionId,
+        InvitationId: pendingSelfTrusteeInvitation.Id,
+        ActorPublicAddress: actorPublicAddress,
+      },
+      actorEncryptionPublicKey,
+      actorEncryptionPrivateKey,
+      actorSigningPrivateKey
+    );
+
+    if (!accepted) {
+      return;
+    }
+
+    await loadElectionHub(actorPublicAddress);
+    useElectionsStore.setState({
+      feedback: {
+        tone: 'success',
+        message: 'Trustee invitation accepted.',
+        details: [],
+      },
+    });
+  };
+
+  const handleRejectPendingTrusteeInvitation = async () => {
+    if (!pendingSelfTrusteeInvitation) {
+      return;
+    }
+
+    const rejected = await rejectTrusteeInvitation(
+      {
+        ElectionId: pendingSelfTrusteeInvitation.ElectionId,
+        InvitationId: pendingSelfTrusteeInvitation.Id,
+        ActorPublicAddress: actorPublicAddress,
+      },
+      actorEncryptionPublicKey,
+      actorEncryptionPrivateKey,
+      actorSigningPrivateKey
+    );
+
+    if (!rejected) {
+      return;
+    }
+
+    await loadElectionHub(actorPublicAddress);
+    useElectionsStore.setState({
+      feedback: {
+        tone: 'success',
+        message: 'Trustee invitation rejected.',
+        details: [],
+      },
+    });
+    router.push('/elections');
   };
 
   const emptyStateReason =
@@ -1657,7 +1836,17 @@ export function HushVotingWorkspace({
             <ElectionWorkspaceHeader entry={activeEntry} />
             <ClosedProgressBanner entry={activeEntry} />
 
-            {!hasVisibleSections ? (
+            {hasPendingInvitationSurface && pendingSelfTrusteeInvitation ? (
+              <PendingTrusteeInvitationSummary
+                electionTitle={activeEntry.Election.Title || activeEntry.Election.ElectionId}
+                invitation={pendingSelfTrusteeInvitation}
+                isSubmitting={isSubmitting}
+                onAccept={() => void handleAcceptPendingTrusteeInvitation()}
+                onReject={() => void handleRejectPendingTrusteeInvitation()}
+              />
+            ) : null}
+
+            {!hasVisibleSections && !hasPendingInvitationSurface && !isWaitingForPendingInvitationDetail ? (
               <ElectionAccessBoundaryNotice
                 title="No workspace surface is available"
                 message={

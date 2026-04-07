@@ -35,7 +35,11 @@ type TrusteeElectionFinalizationPanelProps = {
 };
 
 const sectionClass =
-  'rounded-2xl border border-hush-bg-light bg-hush-bg-element/95 p-5 shadow-sm shadow-black/10';
+  'rounded-3xl bg-hush-bg-element/95 p-5 shadow-lg shadow-black/10';
+const valueWellClass =
+  'rounded-2xl bg-[#151c33] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.02),0_12px_24px_rgba(0,0,0,0.14)]';
+const fieldClass =
+  'w-full rounded-xl bg-hush-bg-element/70 px-3 py-3 text-sm outline-none ring-1 ring-inset ring-white/10 transition focus:ring-2 focus:ring-hush-purple/60';
 
 export function TrusteeElectionFinalizationPanel({
   electionId,
@@ -149,15 +153,15 @@ export function TrusteeElectionFinalizationPanel({
   };
 
   return (
-    <div className="min-h-screen bg-hush-bg-dark text-hush-text-primary">
-      <div className="mx-auto max-w-5xl p-4 md:p-6">
+    <div className="flex-1 min-h-0 overflow-y-auto bg-hush-bg-dark text-hush-text-primary">
+      <div className="mx-auto flex w-full max-w-5xl min-w-0 flex-col p-4 md:p-6">
         <div className="mb-6">
           <Link
-            href="/elections"
+            href={`/elections/${electionId}`}
             className="mb-3 inline-flex items-center gap-2 text-sm text-hush-text-accent transition-colors hover:text-hush-purple"
           >
             <ArrowLeft className="h-4 w-4" />
-            <span>Back to elections</span>
+            <span>Back to election</span>
           </Link>
           <h1 className="text-2xl font-semibold">
             {isCloseCountingSession ? 'Trustee Close Counting Share' : 'Trustee Finalization Share'}
@@ -226,7 +230,7 @@ export function TrusteeElectionFinalizationPanel({
                     Lifecycle state: {getLifecycleLabel(election.LifecycleState)}
                   </div>
                 </div>
-                <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-2 text-xs text-hush-text-accent">
+                <div className="rounded-xl bg-[#151c33] px-3 py-2 text-xs text-hush-text-accent shadow-[inset_0_1px_0_rgba(255,255,255,0.02),0_10px_20px_rgba(0,0,0,0.12)]">
                   {session
                     ? `${getFinalizationSessionPurposeLabel(session.SessionPurpose)} | ${getFinalizationSessionStatusLabel(session.Status)}`
                     : finalizeActionState?.reason || 'No active share session'}
@@ -234,7 +238,7 @@ export function TrusteeElectionFinalizationPanel({
               </div>
 
               <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-                <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+                <div className={valueWellClass}>
                   <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
                     Session purpose
                   </div>
@@ -242,7 +246,7 @@ export function TrusteeElectionFinalizationPanel({
                     {session ? getFinalizationSessionPurposeLabel(session.SessionPurpose) : 'Not available'}
                   </div>
                 </div>
-                <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+                <div className={valueWellClass}>
                   <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
                     Session id
                   </div>
@@ -250,7 +254,7 @@ export function TrusteeElectionFinalizationPanel({
                     {session ? formatArtifactValue(session.Id) : 'Not available'}
                   </div>
                 </div>
-                <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+                <div className={valueWellClass}>
                   <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
                     Close target
                   </div>
@@ -258,7 +262,7 @@ export function TrusteeElectionFinalizationPanel({
                     {session ? formatArtifactValue(session.CloseArtifactId) : 'Not available'}
                   </div>
                 </div>
-                <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+                <div className={valueWellClass}>
                   <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
                     Aggregate progress
                   </div>
@@ -266,7 +270,7 @@ export function TrusteeElectionFinalizationPanel({
                     {session ? `${acceptedShareCount} of ${session.RequiredShareCount}` : 'Not available'}
                   </div>
                 </div>
-                <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+                <div className={valueWellClass}>
                   <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
                     Ceremony version
                   </div>
@@ -321,7 +325,7 @@ export function TrusteeElectionFinalizationPanel({
 
               {!session ? (
                 <div
-                  className="rounded-xl border border-hush-bg-light bg-hush-bg-dark px-4 py-3 text-sm text-hush-text-accent"
+                  className="rounded-2xl bg-hush-bg-dark/75 px-4 py-3 text-sm text-hush-text-accent shadow-inner shadow-black/15"
                   data-testid="trustee-finalization-blocked"
                 >
                   {finalizeActionState?.reason ||
@@ -341,8 +345,8 @@ export function TrusteeElectionFinalizationPanel({
                 </div>
               ) : (
                 <>
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+                  <div className="grid gap-4 md:grid-cols-2" data-testid="trustee-finalization-target-grid">
+                    <div className={valueWellClass}>
                       <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
                         Target tally id
                       </div>
@@ -350,7 +354,7 @@ export function TrusteeElectionFinalizationPanel({
                         {formatArtifactValue(session.TargetTallyId)}
                       </div>
                     </div>
-                    <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+                    <div className={valueWellClass}>
                       <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
                         Trustee slot
                       </div>
@@ -368,7 +372,7 @@ export function TrusteeElectionFinalizationPanel({
                       id="trustee-finalization-share-version"
                       value={shareVersion}
                       onChange={(event) => setShareVersion(event.target.value)}
-                      className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-3 text-sm outline-none transition-colors focus:border-hush-purple"
+                      className={fieldClass}
                       data-testid="trustee-finalization-share-version"
                     />
                   </label>
@@ -381,7 +385,7 @@ export function TrusteeElectionFinalizationPanel({
                       id="trustee-finalization-share-material"
                       value={shareMaterial}
                       onChange={(event) => setShareMaterial(event.target.value)}
-                      className="min-h-28 w-full rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-3 text-sm outline-none transition-colors focus:border-hush-purple"
+                      className={`min-h-28 ${fieldClass}`}
                       data-testid="trustee-finalization-share-material"
                     />
                   </label>

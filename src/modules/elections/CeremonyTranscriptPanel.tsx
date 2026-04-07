@@ -37,7 +37,7 @@ export function CeremonyTranscriptPanel({
 
   return (
     <section
-      className={`rounded-2xl border border-hush-bg-light bg-hush-bg-dark/80 p-4 ${className}`.trim()}
+      className={`rounded-3xl bg-hush-bg-element/95 p-4 shadow-lg shadow-black/10 ${className}`.trim()}
       data-testid="ceremony-transcript-panel"
     >
       <div className="flex items-start justify-between gap-3">
@@ -48,7 +48,7 @@ export function CeremonyTranscriptPanel({
             stay outside this view.
           </p>
         </div>
-        <div className="rounded-xl border border-hush-bg-light bg-hush-bg-element/60 px-3 py-2 text-xs text-hush-text-accent">
+        <div className="rounded-xl bg-[#151c33] px-3 py-2 text-xs text-hush-text-accent shadow-[inset_0_1px_0_rgba(255,255,255,0.02),0_10px_20px_rgba(0,0,0,0.12)]">
           <div className="font-semibold uppercase tracking-[0.2em]">Active fingerprint</div>
           <div className="mt-1 text-hush-text-primary">
             {formatArtifactValue(activeVersion?.TallyPublicKeyFingerprint)}
@@ -57,13 +57,13 @@ export function CeremonyTranscriptPanel({
       </div>
 
       {!activeVersion && supersededVersions.length === 0 ? (
-        <div className="mt-4 rounded-xl border border-dashed border-hush-bg-light px-4 py-5 text-sm text-hush-text-accent">
+        <div className="mt-4 rounded-2xl bg-hush-bg-dark/75 px-4 py-5 text-sm text-hush-text-accent shadow-inner shadow-black/15">
           No ceremony history recorded yet.
         </div>
       ) : (
         <div className="mt-4 space-y-4">
           {activeVersion ? (
-            <div className="rounded-xl border border-hush-purple/30 bg-hush-purple/5 px-4 py-4">
+            <div className="rounded-[24px] bg-[#18203a] px-4 py-4 shadow-inner shadow-black/10">
               <div className="flex flex-wrap items-center gap-3 text-sm">
                 <span className="font-semibold text-hush-text-primary">
                   Active version KC-{String(activeVersion.VersionNumber).padStart(3, '0')}
@@ -78,7 +78,7 @@ export function CeremonyTranscriptPanel({
                   activeEvents.map((event) => (
                     <div
                       key={event.Id}
-                      className="rounded-xl border border-hush-bg-light/70 bg-hush-bg-dark/80 px-3 py-3 text-sm"
+                      className="rounded-2xl bg-[#1f2848] px-3 py-3 text-sm shadow-sm shadow-black/10"
                     >
                       <div className="flex flex-wrap items-center gap-2 text-xs text-hush-text-accent">
                         <History className="h-3.5 w-3.5" />
@@ -91,7 +91,7 @@ export function CeremonyTranscriptPanel({
                     </div>
                   ))
                 ) : (
-                  <div className="rounded-xl border border-dashed border-hush-bg-light px-3 py-3 text-sm text-hush-text-accent">
+                  <div className="rounded-2xl bg-hush-bg-dark/75 px-3 py-3 text-sm text-hush-text-accent shadow-inner shadow-black/15">
                     No transcript events recorded for the active version yet.
                   </div>
                 )}
@@ -111,7 +111,7 @@ export function CeremonyTranscriptPanel({
                 return (
                   <div
                     key={version.Id}
-                    className="rounded-xl border border-hush-bg-light bg-hush-bg-dark px-4 py-3"
+                    className="rounded-[24px] bg-[#18203a] px-4 py-3 shadow-sm shadow-black/10"
                   >
                     <button
                       type="button"
@@ -124,7 +124,7 @@ export function CeremonyTranscriptPanel({
                           KC-{String(version.VersionNumber).padStart(3, '0')}
                         </div>
                         <div className="mt-1 text-xs text-hush-text-accent">
-                          {version.SupersededReason || 'Superseded version'} •{' '}
+                          {version.SupersededReason || 'Superseded version'} |{' '}
                           {formatTimestamp(version.SupersededAt ?? version.StartedAt)}
                         </div>
                       </div>
@@ -141,7 +141,7 @@ export function CeremonyTranscriptPanel({
                           events.map((event) => (
                             <div
                               key={event.Id}
-                              className="rounded-xl border border-hush-bg-light/70 bg-hush-bg-element/70 px-3 py-3 text-sm"
+                              className="rounded-2xl bg-[#1f2848] px-3 py-3 text-sm shadow-sm shadow-black/10"
                             >
                               <div className="text-xs text-hush-text-accent">
                                 {formatTimestamp(event.OccurredAt)}
@@ -150,7 +150,7 @@ export function CeremonyTranscriptPanel({
                             </div>
                           ))
                         ) : (
-                          <div className="rounded-xl border border-dashed border-hush-bg-light px-3 py-3 text-sm text-hush-text-accent">
+                          <div className="rounded-2xl bg-hush-bg-dark/75 px-3 py-3 text-sm text-hush-text-accent shadow-inner shadow-black/15">
                             No non-secret transcript events were recorded for this version.
                           </div>
                         )}
