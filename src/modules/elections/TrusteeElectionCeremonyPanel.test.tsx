@@ -397,11 +397,13 @@ describe('TrusteeElectionCeremonyPanel', () => {
     expect(screen.getByTestId('trustee-ceremony-steps')).toHaveTextContent('Publish transport key');
     expect(screen.getByTestId('trustee-ceremony-steps')).toHaveTextContent('Join version');
     expect(screen.getByTestId('trustee-ceremony-steps')).toHaveTextContent('Run self-test');
-    expect(screen.getByTestId('trustee-ceremony-steps')).toHaveTextContent('Submit material');
+    expect(screen.getByTestId('trustee-ceremony-steps')).toHaveTextContent('Submit ceremony package');
     expect(screen.getByTestId('trustee-ceremony-steps')).toHaveTextContent('Export share backup');
     expect(screen.getByTestId('trustee-ceremony-steps')).toHaveTextContent(
-      'Mobile and desktop share the same task boundary.'
+      'One task stays in focus at a time.'
     );
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(screen.getByTestId('trustee-ceremony-continue-button')).toBeInTheDocument();
   });
 
   it('keeps trustee-only authority and transcript privacy copy visible without owner controls', async () => {
@@ -496,6 +498,518 @@ describe('TrusteeElectionCeremonyPanel', () => {
     );
   });
 
+  it('continues from validation failure through rerun self-test and resubmission with one click', async () => {
+    const validationFailed = createActionViewResponse({
+      TrusteeActions: [
+        {
+          ActionType: ElectionCeremonyActionTypeProto.CeremonyActionPublishTransportKey,
+          IsAvailable: false,
+          IsCompleted: true,
+          Reason: 'Transport key already published.',
+        },
+        {
+          ActionType: ElectionCeremonyActionTypeProto.CeremonyActionJoinVersion,
+          IsAvailable: false,
+          IsCompleted: true,
+          Reason: 'You already joined the active ceremony version.',
+        },
+        {
+          ActionType: ElectionCeremonyActionTypeProto.CeremonyActionRunSelfTest,
+          IsAvailable: true,
+          IsCompleted: false,
+          Reason: 'Validation failed previously. Run the self-test again before resubmitting.',
+        },
+        {
+          ActionType: ElectionCeremonyActionTypeProto.CeremonyActionSubmitMaterial,
+          IsAvailable: false,
+          IsCompleted: false,
+          Reason: 'Run the mandatory self-test before submitting ceremony material.',
+        },
+        {
+          ActionType: ElectionCeremonyActionTypeProto.CeremonyActionExportShare,
+          IsAvailable: false,
+          IsCompleted: false,
+          Reason: 'Share export becomes available after ceremony completion.',
+        },
+        {
+          ActionType: ElectionCeremonyActionTypeProto.CeremonyActionImportShare,
+          IsAvailable: false,
+          IsCompleted: false,
+          Reason: 'No encrypted backup is recorded yet.',
+        },
+      ],
+      SelfTrusteeState: createCeremonyTrusteeState({
+        State: ElectionTrusteeCeremonyStateProto.CeremonyStateValidationFailed,
+        ValidationFailedAt: timestamp,
+        ValidationFailureReason: 'Old package format rejected.',
+        SelfTestSucceededAt: undefined,
+        MaterialSubmittedAt: undefined,
+        ShareVersion: '',
+      }),
+    });
+    const selfTestRecovered = createActionViewResponse({
+      ...validationFailed,
+      TrusteeActions: validationFailed.TrusteeActions.map((action) => {
+        if (action.ActionType === ElectionCeremonyActionTypeProto.CeremonyActionRunSelfTest) {
+          return {
+            ...action,
+            IsAvailable: false,
+            IsCompleted: true,
+            Reason: 'Mandatory self-test already completed for this submission cycle.',
+          };
+        }
+        if (action.ActionType === ElectionCeremonyActionTypeProto.CeremonyActionSubmitMaterial) {
+          return {
+            ...action,
+            IsAvailable: true,
+            IsCompleted: false,
+            Reason: 'Submit ceremony material for validation.',
+          };
+        }
+        return action;
+      }),
+      SelfTrusteeState: createCeremonyTrusteeState({
+        State: ElectionTrusteeCeremonyStateProto.CeremonyStateJoined,
+        SelfTestSucceededAt: timestamp,
+        MaterialSubmittedAt: undefined,
+        ValidationFailedAt: undefined,
+        ValidationFailureReason: '',
+        ShareVersion: '',
+      }),
+    });
+    const resubmitted = createActionViewResponse({
+      ...selfTestRecovered,
+      TrusteeActions: selfTestRecovered.TrusteeActions.map((action) => {
+        if (action.ActionType === ElectionCeremonyActionTypeProto.CeremonyActionSubmitMaterial) {
+          return {
+            ...action,
+            IsAvailable: false,
+            IsCompleted: true,
+            Reason: 'Ceremony material already submitted for this version.',
+          };
+        }
+        return action;
+      }),
+      SelfTrusteeState: createCeremonyTrusteeState({
+        State: ElectionTrusteeCeremonyStateProto.CeremonyStateMaterialSubmitted,
+        SelfTestSucceededAt: timestamp,
+        MaterialSubmittedAt: timestamp,
+        ValidationFailedAt: undefined,
+        ValidationFailureReason: '',
+        ShareVersion: 'share-kc004-prod-3of5-v1-trustee-a',
+      }),
+    });
+
+    let actionViewCallCount = 0;
+    electionsServiceMock.getElectionCeremonyActionView.mockImplementation(async () => {
+      actionViewCallCount += 1;
+      if (actionViewCallCount === 1) return validationFailed;
+      if (actionViewCallCount <= 3) return selfTestRecovered;
+      return resubmitted;
+    });
+
+    transactionServiceMock.createRecordElectionCeremonySelfTestSuccessTransaction.mockResolvedValue({
+      signedTransaction: 'signed-rerun-self-test-transaction',
+    });
+    transactionServiceMock.createSubmitElectionCeremonyMaterialTransaction.mockResolvedValue({
+      signedTransaction: 'signed-resubmit-transaction',
+    });
+
+    render(
+      <TrusteeElectionCeremonyPanel
+        electionId="election-1"
+        actorPublicAddress="trustee-a"
+        actorEncryptionPublicKey="trustee-encryption-key"
+        actorEncryptionPrivateKey="trustee-encryption-private-key"
+        actorSigningPrivateKey="trustee-signing-private-key"
+      />
+    );
+
+    expect(await screen.findByTestId('trustee-ceremony-current-step')).toHaveTextContent(
+      'Run self-test'
+    );
+
+    fireEvent.click(screen.getByTestId('trustee-ceremony-continue-button'));
+
+    await waitFor(() => {
+      expect(transactionServiceMock.createRecordElectionCeremonySelfTestSuccessTransaction).toHaveBeenCalledTimes(1);
+      expect(transactionServiceMock.createSubmitElectionCeremonyMaterialTransaction).toHaveBeenCalledTimes(1);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('trustee-ceremony-current-step')).toHaveTextContent(
+        'Awaiting owner validation'
+      );
+    });
+  });
+
+  it('submits a system-managed ceremony package without calling trustee completion', async () => {
+    const initialActionViewResponse = createActionViewResponse({
+      TrusteeActions: [
+        {
+          ActionType: ElectionCeremonyActionTypeProto.CeremonyActionPublishTransportKey,
+          IsAvailable: false,
+          IsCompleted: true,
+          Reason: 'Transport key already published.',
+        },
+        {
+          ActionType: ElectionCeremonyActionTypeProto.CeremonyActionJoinVersion,
+          IsAvailable: false,
+          IsCompleted: true,
+          Reason: 'You already joined the active ceremony version.',
+        },
+        {
+          ActionType: ElectionCeremonyActionTypeProto.CeremonyActionRunSelfTest,
+          IsAvailable: false,
+          IsCompleted: true,
+          Reason: 'Mandatory self-test already completed for this submission cycle.',
+        },
+        {
+          ActionType: ElectionCeremonyActionTypeProto.CeremonyActionSubmitMaterial,
+          IsAvailable: true,
+          IsCompleted: false,
+          Reason: 'Submit ceremony material for validation.',
+        },
+        {
+          ActionType: ElectionCeremonyActionTypeProto.CeremonyActionExportShare,
+          IsAvailable: false,
+          IsCompleted: false,
+          Reason: 'Share export becomes available after ceremony completion.',
+        },
+        {
+          ActionType: ElectionCeremonyActionTypeProto.CeremonyActionImportShare,
+          IsAvailable: false,
+          IsCompleted: false,
+          Reason: 'Share import becomes available after ceremony completion.',
+        },
+      ],
+      SelfTrusteeState: createCeremonyTrusteeState({
+        State: ElectionTrusteeCeremonyStateProto.CeremonyStateJoined,
+        SelfTestSucceededAt: timestamp,
+      }),
+    });
+    const indexedActionViewResponse = createActionViewResponse({
+      ...initialActionViewResponse,
+      TrusteeActions: initialActionViewResponse.TrusteeActions.map((action) =>
+        action.ActionType === ElectionCeremonyActionTypeProto.CeremonyActionSubmitMaterial
+          ? { ...action, IsAvailable: false, IsCompleted: true, Reason: 'Ceremony material already submitted for this version.' }
+          : action
+      ),
+      SelfTrusteeState: createCeremonyTrusteeState({
+        State: ElectionTrusteeCeremonyStateProto.CeremonyStateMaterialSubmitted,
+        SelfTestSucceededAt: timestamp,
+        MaterialSubmittedAt: timestamp,
+        ShareVersion: 'share-kc004-prod-3of5-v1-trustee-a',
+      }),
+    });
+
+    electionsServiceMock.getElectionCeremonyActionView
+      .mockResolvedValueOnce(initialActionViewResponse)
+      .mockResolvedValueOnce(indexedActionViewResponse)
+      .mockResolvedValue(indexedActionViewResponse);
+    transactionServiceMock.createSubmitElectionCeremonyMaterialTransaction.mockResolvedValue({
+      signedTransaction: 'signed-submit-transaction',
+    });
+
+    render(
+      <TrusteeElectionCeremonyPanel
+        electionId="election-1"
+        actorPublicAddress="trustee-a"
+        actorEncryptionPublicKey="trustee-encryption-key"
+        actorEncryptionPrivateKey="trustee-encryption-private-key"
+        actorSigningPrivateKey="trustee-signing-private-key"
+      />
+    );
+
+    expect(await screen.findByTestId('trustee-ceremony-current-step')).toHaveTextContent(
+      'Submit ceremony package'
+    );
+    expect(screen.getByTestId('trustee-ceremony-step-workspace')).toHaveTextContent(
+      'System-managed ceremony envelope'
+    );
+
+    fireEvent.click(screen.getByTestId('trustee-ceremony-continue-button'));
+
+    await waitFor(() => {
+      expect(transactionServiceMock.createSubmitElectionCeremonyMaterialTransaction).toHaveBeenCalledWith(
+        'election-1',
+        'trustee-a',
+        'trustee-encryption-key',
+        'trustee-encryption-private-key',
+        'ceremony-version-1',
+        null,
+        'dkg-share-package',
+        'omega-v1.0.0',
+        expect.stringContaining('"packageKind":"trustee-ceremony-package"'),
+        expect.stringContaining('package-kc004'),
+        expect.stringContaining('share-kc004'),
+        'trustee-signing-private-key'
+      );
+    });
+
+    expect(transactionServiceMock.createCompleteElectionCeremonyTrusteeTransaction).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(screen.getByTestId('trustee-ceremony-current-step')).toHaveTextContent(
+        'Awaiting owner validation'
+      );
+    });
+    expect(screen.getByTestId('trustee-ceremony-awaiting-owner-validation')).toHaveTextContent(
+      'All trustee-local ceremony steps are complete'
+    );
+    expect(screen.queryByTestId('trustee-ceremony-continue-button')).not.toBeInTheDocument();
+  });
+
+  it('explains when an older submitted package needs owner resubmission before the trustee can continue', async () => {
+    electionsServiceMock.getElectionCeremonyActionView.mockResolvedValue(
+      createActionViewResponse({
+        TrusteeActions: [
+          {
+            ActionType: ElectionCeremonyActionTypeProto.CeremonyActionPublishTransportKey,
+            IsAvailable: false,
+            IsCompleted: true,
+            Reason: 'Transport key already published.',
+          },
+          {
+            ActionType: ElectionCeremonyActionTypeProto.CeremonyActionJoinVersion,
+            IsAvailable: false,
+            IsCompleted: true,
+            Reason: 'You already joined the active ceremony version.',
+          },
+          {
+            ActionType: ElectionCeremonyActionTypeProto.CeremonyActionRunSelfTest,
+            IsAvailable: false,
+            IsCompleted: true,
+            Reason: 'Mandatory self-test already completed for this submission cycle.',
+          },
+          {
+            ActionType: ElectionCeremonyActionTypeProto.CeremonyActionSubmitMaterial,
+            IsAvailable: false,
+            IsCompleted: true,
+            Reason: 'Ceremony material already submitted for this version.',
+          },
+          {
+            ActionType: ElectionCeremonyActionTypeProto.CeremonyActionExportShare,
+            IsAvailable: false,
+            IsCompleted: false,
+            Reason: 'Share export becomes available after ceremony completion.',
+          },
+          {
+            ActionType: ElectionCeremonyActionTypeProto.CeremonyActionImportShare,
+            IsAvailable: false,
+            IsCompleted: false,
+            Reason: 'Share import becomes available after ceremony completion.',
+          },
+        ],
+        SelfTrusteeState: createCeremonyTrusteeState({
+          State: ElectionTrusteeCeremonyStateProto.CeremonyStateMaterialSubmitted,
+          SelfTestSucceededAt: timestamp,
+          MaterialSubmittedAt: timestamp,
+          ShareVersion: '',
+        }),
+      })
+    );
+
+    render(
+      <TrusteeElectionCeremonyPanel
+        electionId="election-1"
+        actorPublicAddress="trustee-a"
+        actorEncryptionPublicKey="trustee-encryption-key"
+        actorEncryptionPrivateKey="trustee-encryption-private-key"
+        actorSigningPrivateKey="trustee-signing-private-key"
+      />
+    );
+
+    expect(await screen.findByTestId('trustee-ceremony-current-step')).toHaveTextContent(
+      'Awaiting owner resubmission request'
+    );
+    expect(screen.getByTestId('trustee-ceremony-step-list')).toHaveTextContent(
+      'Submitted using the older package format.'
+    );
+    expect(screen.getByTestId('trustee-ceremony-step-list')).toHaveTextContent(
+      'Step 5 is downstream. The owner must request resubmission first'
+    );
+    expect(screen.getByTestId('trustee-ceremony-awaiting-owner-validation')).toHaveTextContent(
+      'this older package cannot be approved'
+    );
+    expect(screen.getByText('Resubmission boundary')).toBeInTheDocument();
+    expect(screen.getByText('Owner resubmission request')).toBeInTheDocument();
+    expect(screen.getByText(/Step 5 stays blocked, but it is not the missing action\./i)).toBeInTheDocument();
+    expect(screen.queryByTestId('trustee-ceremony-continue-button')).not.toBeInTheDocument();
+  });
+
+  it('continues through the trustee-local ceremony steps with one click', async () => {
+    const preparedTransportFingerprint = 'transport-kc004-prod-3of5--trustee-a-ceremony-v';
+    const publishAvailable = createActionViewResponse({
+      TrusteeActions: [
+        {
+          ActionType: ElectionCeremonyActionTypeProto.CeremonyActionPublishTransportKey,
+          IsAvailable: true,
+          IsCompleted: false,
+          Reason: 'Publish your transport key.',
+        },
+        {
+          ActionType: ElectionCeremonyActionTypeProto.CeremonyActionJoinVersion,
+          IsAvailable: false,
+          IsCompleted: false,
+          Reason: 'Publish the transport key first.',
+        },
+        {
+          ActionType: ElectionCeremonyActionTypeProto.CeremonyActionRunSelfTest,
+          IsAvailable: false,
+          IsCompleted: false,
+          Reason: 'Join the version first.',
+        },
+        {
+          ActionType: ElectionCeremonyActionTypeProto.CeremonyActionSubmitMaterial,
+          IsAvailable: false,
+          IsCompleted: false,
+          Reason: 'Run the self-test first.',
+        },
+        {
+          ActionType: ElectionCeremonyActionTypeProto.CeremonyActionExportShare,
+          IsAvailable: false,
+          IsCompleted: false,
+          Reason: 'Complete the ceremony first.',
+        },
+        {
+          ActionType: ElectionCeremonyActionTypeProto.CeremonyActionImportShare,
+          IsAvailable: false,
+          IsCompleted: false,
+          Reason: 'No encrypted backup is recorded yet.',
+        },
+      ],
+      SelfTrusteeState: createCeremonyTrusteeState({
+        State: ElectionTrusteeCeremonyStateProto.CeremonyStateAcceptedTrustee,
+        TransportPublicKeyFingerprint: '',
+        TransportPublicKeyPublishedAt: undefined,
+        JoinedAt: undefined,
+        SelfTestSucceededAt: undefined,
+      }),
+    });
+    const joinAvailable = createActionViewResponse({
+      ...publishAvailable,
+      TrusteeActions: publishAvailable.TrusteeActions.map((action) => {
+        if (action.ActionType === ElectionCeremonyActionTypeProto.CeremonyActionPublishTransportKey) {
+          return { ...action, IsAvailable: false, IsCompleted: true, Reason: 'Transport key already published.' };
+        }
+        if (action.ActionType === ElectionCeremonyActionTypeProto.CeremonyActionJoinVersion) {
+          return { ...action, IsAvailable: true, IsCompleted: false, Reason: 'Join the active ceremony version.' };
+        }
+        return action;
+      }),
+      SelfTrusteeState: createCeremonyTrusteeState({
+        State: ElectionTrusteeCeremonyStateProto.CeremonyStateAcceptedTrustee,
+        TransportPublicKeyFingerprint: preparedTransportFingerprint,
+        TransportPublicKeyPublishedAt: timestamp,
+        JoinedAt: undefined,
+        SelfTestSucceededAt: undefined,
+      }),
+    });
+    const selfTestAvailable = createActionViewResponse({
+      ...joinAvailable,
+      TrusteeActions: joinAvailable.TrusteeActions.map((action) => {
+        if (action.ActionType === ElectionCeremonyActionTypeProto.CeremonyActionJoinVersion) {
+          return { ...action, IsAvailable: false, IsCompleted: true, Reason: 'You already joined the active ceremony version.' };
+        }
+        if (action.ActionType === ElectionCeremonyActionTypeProto.CeremonyActionRunSelfTest) {
+          return { ...action, IsAvailable: true, IsCompleted: false, Reason: 'Run the mandatory self-test before submitting ceremony material.' };
+        }
+        return action;
+      }),
+      SelfTrusteeState: createCeremonyTrusteeState({
+        State: ElectionTrusteeCeremonyStateProto.CeremonyStateJoined,
+        TransportPublicKeyFingerprint: preparedTransportFingerprint,
+        TransportPublicKeyPublishedAt: timestamp,
+        JoinedAt: timestamp,
+        SelfTestSucceededAt: undefined,
+      }),
+    });
+    const submitAvailable = createActionViewResponse({
+      ...selfTestAvailable,
+      TrusteeActions: selfTestAvailable.TrusteeActions.map((action) => {
+        if (action.ActionType === ElectionCeremonyActionTypeProto.CeremonyActionRunSelfTest) {
+          return { ...action, IsAvailable: false, IsCompleted: true, Reason: 'Mandatory self-test already completed for this submission cycle.' };
+        }
+        if (action.ActionType === ElectionCeremonyActionTypeProto.CeremonyActionSubmitMaterial) {
+          return { ...action, IsAvailable: true, IsCompleted: false, Reason: 'Submit ceremony material for validation.' };
+        }
+        return action;
+      }),
+      SelfTrusteeState: createCeremonyTrusteeState({
+        State: ElectionTrusteeCeremonyStateProto.CeremonyStateJoined,
+        TransportPublicKeyFingerprint: preparedTransportFingerprint,
+        TransportPublicKeyPublishedAt: timestamp,
+        JoinedAt: timestamp,
+        SelfTestSucceededAt: timestamp,
+      }),
+    });
+    const submitted = createActionViewResponse({
+      ...submitAvailable,
+      TrusteeActions: submitAvailable.TrusteeActions.map((action) => {
+        if (action.ActionType === ElectionCeremonyActionTypeProto.CeremonyActionSubmitMaterial) {
+          return { ...action, IsAvailable: false, IsCompleted: true, Reason: 'Ceremony material already submitted for this version.' };
+        }
+        return action;
+      }),
+      SelfTrusteeState: createCeremonyTrusteeState({
+        State: ElectionTrusteeCeremonyStateProto.CeremonyStateMaterialSubmitted,
+        TransportPublicKeyFingerprint: preparedTransportFingerprint,
+        TransportPublicKeyPublishedAt: timestamp,
+        JoinedAt: timestamp,
+        SelfTestSucceededAt: timestamp,
+        MaterialSubmittedAt: timestamp,
+      }),
+    });
+
+    let actionViewCallCount = 0;
+    electionsServiceMock.getElectionCeremonyActionView.mockImplementation(async () => {
+      actionViewCallCount += 1;
+      if (actionViewCallCount === 1) return publishAvailable;
+      if (actionViewCallCount <= 3) return joinAvailable;
+      if (actionViewCallCount <= 5) return selfTestAvailable;
+      if (actionViewCallCount <= 7) return submitAvailable;
+      return submitted;
+    });
+
+    transactionServiceMock.createPublishElectionCeremonyTransportKeyTransaction.mockResolvedValue({
+      signedTransaction: 'signed-publish-transaction',
+    });
+    transactionServiceMock.createJoinElectionCeremonyTransaction.mockResolvedValue({
+      signedTransaction: 'signed-join-transaction',
+    });
+    transactionServiceMock.createRecordElectionCeremonySelfTestSuccessTransaction.mockResolvedValue({
+      signedTransaction: 'signed-self-test-transaction',
+    });
+    transactionServiceMock.createSubmitElectionCeremonyMaterialTransaction.mockResolvedValue({
+      signedTransaction: 'signed-submit-transaction',
+    });
+
+    render(
+      <TrusteeElectionCeremonyPanel
+        electionId="election-1"
+        actorPublicAddress="trustee-a"
+        actorEncryptionPublicKey="trustee-encryption-key"
+        actorEncryptionPrivateKey="trustee-encryption-private-key"
+        actorSigningPrivateKey="trustee-signing-private-key"
+      />
+    );
+
+    expect(await screen.findByTestId('trustee-ceremony-current-step')).toHaveTextContent(
+      'Publish transport key'
+    );
+
+    fireEvent.click(screen.getByTestId('trustee-ceremony-continue-button'));
+
+    await waitFor(() => {
+      expect(transactionServiceMock.createPublishElectionCeremonyTransportKeyTransaction).toHaveBeenCalledTimes(1);
+      expect(transactionServiceMock.createJoinElectionCeremonyTransaction).toHaveBeenCalledTimes(1);
+      expect(transactionServiceMock.createRecordElectionCeremonySelfTestSuccessTransaction).toHaveBeenCalledTimes(1);
+      expect(transactionServiceMock.createSubmitElectionCeremonyMaterialTransaction).toHaveBeenCalledTimes(1);
+    });
+
+    expect(transactionServiceMock.createCompleteElectionCeremonyTrusteeTransaction).not.toHaveBeenCalled();
+  });
+
   it('shows completion and records the share export action', async () => {
     const initialActionViewResponse = createActionViewResponse({
         TrusteeActions: [
@@ -571,7 +1085,7 @@ describe('TrusteeElectionCeremonyPanel', () => {
 
     expect(await screen.findByTestId('trustee-ceremony-summary')).toHaveTextContent('Completed');
 
-    fireEvent.click(screen.getByTestId('trustee-ceremony-export-button'));
+    fireEvent.click(screen.getByTestId('trustee-ceremony-continue-button'));
 
     await waitFor(() => {
       expect(transactionServiceMock.createRecordElectionCeremonyShareExportTransaction).toHaveBeenCalledWith(

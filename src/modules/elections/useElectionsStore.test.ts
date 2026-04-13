@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
+  GetElectionCeremonyActionViewResponse,
   ElectionHubEntryView,
   ElectionRecordView,
   ElectionReportAccessGrantView,
@@ -9,12 +10,15 @@ import type {
   GetElectionResponse,
 } from '@/lib/grpc';
 import {
+  ElectionCeremonyActionTypeProto,
+  ElectionCeremonyActorRoleProto,
   ElectionBindingStatusProto,
   ElectionClosedProgressStatusProto,
   ElectionGovernanceModeProto,
   ElectionHubNextActionHintProto,
   ElectionLifecycleStateProto,
   ElectionReportAccessGrantRoleProto,
+  ElectionTrusteeCeremonyStateProto,
 } from '@/lib/grpc';
 import { useElectionsStore } from './useElectionsStore';
 
@@ -22,6 +26,7 @@ const { electionsServiceMock, identityServiceMock, blockchainServiceMock, transa
   vi.hoisted(() => ({
     electionsServiceMock: {
       getElection: vi.fn(),
+      getElectionCeremonyActionView: vi.fn(),
       getElectionHubView: vi.fn(),
       getElectionReportAccessGrants: vi.fn(),
     },
@@ -32,6 +37,7 @@ const { electionsServiceMock, identityServiceMock, blockchainServiceMock, transa
       submitTransaction: vi.fn(),
     },
     transactionServiceMock: {
+      createRecordElectionCeremonySelfTestSuccessTransaction: vi.fn(),
       createElectionReportAccessGrantTransaction: vi.fn(),
     },
   }));
@@ -52,6 +58,8 @@ vi.mock('./transactionService', async () => {
   const actual = await vi.importActual<typeof import('./transactionService')>('./transactionService');
   return {
     ...actual,
+    createRecordElectionCeremonySelfTestSuccessTransaction: (...args: unknown[]) =>
+      transactionServiceMock.createRecordElectionCeremonySelfTestSuccessTransaction(...args),
     createElectionReportAccessGrantTransaction: (...args: unknown[]) =>
       transactionServiceMock.createElectionReportAccessGrantTransaction(...args),
   };
@@ -207,14 +215,44 @@ function createGrantResponse(grants: ElectionReportAccessGrantView[]): GetElecti
   };
 }
 
+function createCeremonyActionViewResponse(
+  state: ElectionTrusteeCeremonyStateProto,
+  overrides?: Partial<GetElectionCeremonyActionViewResponse['SelfTrusteeState']>
+): GetElectionCeremonyActionViewResponse {
+  return {
+    Success: true,
+    ErrorMessage: '',
+    ActorRole: ElectionCeremonyActorRoleProto.CeremonyActorTrustee,
+    TrusteeActions: [
+      {
+        ActionType: ElectionCeremonyActionTypeProto.CeremonyActionRunSelfTest,
+        IsAvailable: state === ElectionTrusteeCeremonyStateProto.CeremonyStateValidationFailed,
+        IsCompleted: state !== ElectionTrusteeCeremonyStateProto.CeremonyStateValidationFailed,
+        Reason:
+          state === ElectionTrusteeCeremonyStateProto.CeremonyStateValidationFailed
+            ? 'Validation failed previously. Run the self-test again before resubmitting.'
+            : 'Mandatory self-test already completed for this submission cycle.',
+      },
+    ],
+    SelfTrusteeState: {
+      TrusteeUserAddress: 'trustee-a',
+      State: state,
+      JoinedAt: timestamp,
+      ...overrides,
+    },
+  } as GetElectionCeremonyActionViewResponse;
+}
+
 describe('useElectionsStore FEAT-103 hub state', () => {
   beforeEach(() => {
     useElectionsStore.getState().reset();
     electionsServiceMock.getElection.mockReset();
+    electionsServiceMock.getElectionCeremonyActionView.mockReset();
     electionsServiceMock.getElectionHubView.mockReset();
     electionsServiceMock.getElectionReportAccessGrants.mockReset();
     identityServiceMock.searchByDisplayName.mockReset();
     blockchainServiceMock.submitTransaction.mockReset();
+    transactionServiceMock.createRecordElectionCeremonySelfTestSuccessTransaction.mockReset();
     transactionServiceMock.createElectionReportAccessGrantTransaction.mockReset();
   });
 
@@ -303,5 +341,78 @@ describe('useElectionsStore FEAT-103 hub state', () => {
     expect(blockchainServiceMock.submitTransaction).toHaveBeenCalledWith('signed-grant-tx');
     expect(state.reportAccessGrants).toHaveLength(1);
     expect(state.feedback?.tone).toBe('success');
+  });
+
+  it('waits past stale returned-cycle timestamps before marking trustee self-test as recorded', async () => {
+    electionsServiceMock.getElection.mockResolvedValue(
+      createElectionResponse('election-1', ElectionLifecycleStateProto.Draft, 'Draft Election')
+    );
+
+    const staleReturnedState = createCeremonyActionViewResponse(
+      ElectionTrusteeCeremonyStateProto.CeremonyStateValidationFailed,
+      {
+        SelfTestSucceededAt: timestamp,
+        MaterialSubmittedAt: timestamp,
+        ValidationFailedAt: timestamp,
+        ValidationFailureReason: 'Rejected by validator.',
+        ShareVersion: 'share-old-cycle',
+      }
+    );
+    const recoveredState = createCeremonyActionViewResponse(
+      ElectionTrusteeCeremonyStateProto.CeremonyStateJoined,
+      {
+        SelfTestSucceededAt: timestamp,
+        MaterialSubmittedAt: undefined,
+        ValidationFailedAt: undefined,
+        ValidationFailureReason: '',
+        ShareVersion: '',
+      }
+    );
+
+    let ceremonyViewCallCount = 0;
+    electionsServiceMock.getElectionCeremonyActionView.mockImplementation(async () => {
+      ceremonyViewCallCount += 1;
+      if (ceremonyViewCallCount <= 2) {
+        return staleReturnedState;
+      }
+
+      return recoveredState;
+    });
+
+    transactionServiceMock.createRecordElectionCeremonySelfTestSuccessTransaction.mockResolvedValue({
+      signedTransaction: 'signed-self-test',
+    });
+    blockchainServiceMock.submitTransaction.mockResolvedValue({
+      successful: true,
+      message: '',
+    });
+
+    useElectionsStore.setState({
+      selectedElectionId: 'election-1',
+      actorPublicAddress: 'trustee-a',
+      ownerPublicAddress: 'trustee-a',
+      ceremonyActionView: staleReturnedState,
+    });
+
+    const recorded = await useElectionsStore.getState().recordElectionCeremonySelfTestSuccess(
+      {
+        ElectionId: 'election-1',
+        CeremonyVersionId: 'ceremony-version-1',
+        ActorPublicAddress: 'trustee-a',
+      },
+      'trustee-encryption-key',
+      'trustee-encryption-private-key',
+      'trustee-signing-private-key'
+    );
+
+    expect(recorded).toBe(true);
+    expect(
+      transactionServiceMock.createRecordElectionCeremonySelfTestSuccessTransaction
+    ).toHaveBeenCalledTimes(1);
+    expect(ceremonyViewCallCount).toBe(4);
+    expect(useElectionsStore.getState().ceremonyActionView?.SelfTrusteeState?.State).toBe(
+      ElectionTrusteeCeremonyStateProto.CeremonyStateJoined
+    );
+    expect(useElectionsStore.getState().feedback?.message).toBe('Ceremony self-test recorded.');
   });
 });

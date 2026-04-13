@@ -220,7 +220,7 @@ describe('ElectionSearchWorkspace', () => {
     expect(mockPush).not.toHaveBeenCalled();
   });
 
-  it('shows actor role badges and blocks elections already linked to this account', async () => {
+  it('shows mixed-role discovery correctly and still allows trustee-only or auditor-only accounts to claim-link', async () => {
     mockSearchByDisplayName.mockResolvedValue({ Identities: [] });
     mockSearchElectionDirectory.mockResolvedValue({
       Success: true,
@@ -256,6 +256,36 @@ describe('ElectionSearchWorkspace', () => {
             IsVoter: false,
             IsDesignatedAuditor: true,
           },
+          CanOpenEligibility: true,
+          EligibilityDisabledReason: '',
+        },
+        {
+          Election: createSummary(
+            'election-trustee',
+            ElectionLifecycleStateProto.Draft,
+            'Trustee Election'
+          ),
+          ActorRoles: {
+            IsOwnerAdmin: false,
+            IsTrustee: true,
+            IsVoter: false,
+            IsDesignatedAuditor: false,
+          },
+          CanOpenEligibility: true,
+          EligibilityDisabledReason: '',
+        },
+        {
+          Election: createSummary(
+            'election-linked-voter',
+            ElectionLifecycleStateProto.Open,
+            'Linked Voter Election'
+          ),
+          ActorRoles: {
+            IsOwnerAdmin: false,
+            IsTrustee: false,
+            IsVoter: true,
+            IsDesignatedAuditor: false,
+          },
           CanOpenEligibility: false,
           EligibilityDisabledReason: 'This election is already linked to this Hush account.',
         },
@@ -271,9 +301,12 @@ describe('ElectionSearchWorkspace', () => {
 
     expect(await screen.findByText('AdminOnly Election III')).toBeInTheDocument();
     expect(screen.getAllByText('ElectionOwner')).toHaveLength(2);
-    expect(screen.getByRole('button', { name: /Open eligibility/i })).toBeInTheDocument();
     expect(await screen.findByText('AdminOnly Election II')).toBeInTheDocument();
     expect(screen.getByText('Auditor')).toBeInTheDocument();
+    expect(await screen.findByText('Trustee Election')).toBeInTheDocument();
+    expect(screen.getByText('Trustee')).toBeInTheDocument();
+    expect(await screen.findByText('Linked Voter Election')).toBeInTheDocument();
     expect(screen.getByText('This election is already linked to this Hush account.')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /Open eligibility/i })).toHaveLength(3);
   });
 });

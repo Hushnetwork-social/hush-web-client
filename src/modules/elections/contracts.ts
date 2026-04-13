@@ -231,7 +231,7 @@ const CEREMONY_VERSION_STATUS_LABELS: Record<ElectionCeremonyVersionStatusProto,
 
 const TRUSTEE_CEREMONY_STATE_LABELS: Record<ElectionTrusteeCeremonyStateProto, string> = {
   [ElectionTrusteeCeremonyStateProto.CeremonyStateInvited]: 'Invited',
-  [ElectionTrusteeCeremonyStateProto.CeremonyStateAcceptedTrustee]: 'Accepted trustee',
+  [ElectionTrusteeCeremonyStateProto.CeremonyStateAcceptedTrustee]: 'Awaiting join',
   [ElectionTrusteeCeremonyStateProto.CeremonyStateNotStarted]: 'Not started',
   [ElectionTrusteeCeremonyStateProto.CeremonyStateJoined]: 'Joined',
   [ElectionTrusteeCeremonyStateProto.CeremonyStateMaterialSubmitted]: 'Material submitted',
@@ -247,7 +247,7 @@ const CEREMONY_ACTION_LABELS: Record<ElectionCeremonyActionTypeProto, string> = 
   [ElectionCeremonyActionTypeProto.CeremonyActionPublishTransportKey]: 'Publish transport key',
   [ElectionCeremonyActionTypeProto.CeremonyActionJoinVersion]: 'Join version',
   [ElectionCeremonyActionTypeProto.CeremonyActionRunSelfTest]: 'Run self-test',
-  [ElectionCeremonyActionTypeProto.CeremonyActionSubmitMaterial]: 'Submit material',
+  [ElectionCeremonyActionTypeProto.CeremonyActionSubmitMaterial]: 'Submit ceremony package',
   [ElectionCeremonyActionTypeProto.CeremonyActionExportShare]: 'Export share backup',
   [ElectionCeremonyActionTypeProto.CeremonyActionImportShare]: 'Import share backup',
 };
@@ -1438,6 +1438,28 @@ export function getElectionHubSuggestedActionLabel(
     default:
       return 'No suggested action';
   }
+}
+
+export function getElectionHubDisplayActionLabel(
+  entry: Pick<ElectionHubEntryView, 'ActorRoles' | 'SuggestedAction' | 'SuggestedActionReason'>
+): string {
+  if (entry.SuggestedAction !== ElectionHubNextActionHintProto.ElectionHubActionNone) {
+    return getElectionHubSuggestedActionLabel(entry.SuggestedAction);
+  }
+
+  const normalizedReason = entry.SuggestedActionReason.trim().toLowerCase();
+  if (normalizedReason.includes('trustee invitation')) {
+    return 'Respond to invitation';
+  }
+
+  if (
+    entry.ActorRoles.IsTrustee &&
+    normalizedReason.startsWith('continue the trustee ceremony.')
+  ) {
+    return 'Continue ceremony';
+  }
+
+  return getElectionHubSuggestedActionLabel(entry.SuggestedAction);
 }
 
 export function getClosedProgressBannerState(

@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import {
   ElectionBindingStatusProto,
+  ElectionTrusteeCeremonyStateProto,
   ElectionCeremonyVersionStatusProto,
   type ElectionDraftInput,
   ElectionGovernedActionTypeProto,
@@ -139,6 +140,7 @@ type OwnerWorkspaceTab = {
 
 const sectionClass =
   "rounded-2xl bg-hush-bg-element/95 p-5 shadow-lg shadow-black/10";
+const CEREMONY_REFRESH_INTERVAL_MS = 5_000;
 
 const UNSAVED_DRAFT_LEAVE_MESSAGE =
   "This election has unsaved local edits. Save the draft before leaving, or confirm that you want to discard those edits.";
@@ -399,6 +401,7 @@ export function ElectionsWorkspace({
     ceremonyActionView,
     clearFeedback,
     closeElection,
+    completeElectionCeremonyTrustee,
     createDraft,
     elections,
     error,
@@ -415,6 +418,7 @@ export function ElectionsWorkspace({
     loadOwnerDashboard,
     openElection,
     openReadiness,
+    recordElectionCeremonyValidationFailure,
     reset,
     revokeInvitation,
     selectedElection,
@@ -499,6 +503,10 @@ export function ElectionsWorkspace({
   const activeCeremonyVersion = useMemo(
     () => getActiveCeremonyVersion(selectedElection ?? null),
     [selectedElection],
+  );
+  const activeCeremonyTrusteeStates = useMemo(
+    () => selectedElection?.ActiveCeremonyTrusteeStates ?? [],
+    [selectedElection?.ActiveCeremonyTrusteeStates],
   );
   const fixedCeremonyProfileShape = useMemo(
     () => getFixedCeremonyProfileShape(selectedElection ?? null),
@@ -748,6 +756,15 @@ export function ElectionsWorkspace({
     !usesTrusteeThreshold ||
     activeCeremonyVersion?.Status ===
       ElectionCeremonyVersionStatusProto.CeremonyVersionReady;
+  const hasPendingOwnerCeremonyValidation =
+    usesTrusteeThreshold &&
+    activeCeremonyVersion?.Status ===
+      ElectionCeremonyVersionStatusProto.CeremonyVersionInProgress &&
+    activeCeremonyTrusteeStates.some(
+      (state) =>
+        state.State ===
+        ElectionTrusteeCeremonyStateProto.CeremonyStateMaterialSubmitted,
+    );
   const canOpenSelectedElection =
     supportsDirectOpen &&
     canOpenElection(election) &&
@@ -756,6 +773,64 @@ export function ElectionsWorkspace({
     openValidationErrors.length === 0;
   const canCloseSelectedElection = canCloseElection(election);
   const canFinalizeSelectedElection = canFinalizeElection(election);
+  const governedOpenPrerequisiteIssues = useMemo(() => {
+    if (!usesTrusteeThreshold) {
+      return [];
+    }
+
+    const issues: string[] = [];
+    if (!hasSavedElection) {
+      issues.push(
+        "Save the draft first to create the persisted election record before starting the governed open proposal.",
+      );
+    }
+    if (saveValidationErrors.length > 0) {
+      issues.push(
+        "Resolve the draft-save blockers before starting the governed open proposal.",
+      );
+    }
+    if (openValidationErrors.length > 0) {
+      issues.push(
+        "Resolve the ballot or local open-checklist blockers before starting the governed open proposal.",
+      );
+    }
+    if (missingRequiredWarningCodes.length > 0) {
+      issues.push(
+        "Acknowledge the required warnings before starting the governed open proposal.",
+      );
+    }
+    if (!hasAcceptedTrusteesForOpen) {
+      issues.push(
+        `Need at least ${requiredTrusteeCountForOpen} accepted trustee(s) before the governed open proposal can start.`,
+      );
+    }
+    if (!isKeyCeremonyReady) {
+      issues.push(
+        hasPendingOwnerCeremonyValidation && activeCeremonyVersion
+          ? `Ceremony version ${activeCeremonyVersion.VersionNumber} is waiting for owner validation of submitted trustee packages.`
+          : activeCeremonyVersion
+            ? `Ceremony version ${activeCeremonyVersion.VersionNumber} is still in progress.`
+            : "Start and complete the key ceremony before the governed open proposal can start.",
+      );
+    }
+
+    return issues;
+  }, [
+    activeCeremonyVersion,
+    hasAcceptedTrusteesForOpen,
+    hasPendingOwnerCeremonyValidation,
+    hasSavedElection,
+    isKeyCeremonyReady,
+    missingRequiredWarningCodes.length,
+    openValidationErrors.length,
+    requiredTrusteeCountForOpen,
+    saveValidationErrors.length,
+    usesTrusteeThreshold,
+  ]);
+  const isGovernedOpenWorkflowReady =
+    usesTrusteeThreshold &&
+    governedOpenPrerequisiteIssues.length === 0 &&
+    governedOpenActionState?.status === "available";
   const readyToOpenChecklist = useMemo(
     () => [
       {
@@ -805,9 +880,11 @@ export function ElectionsWorkspace({
                 ? activeCeremonyVersion
                   ? `Ceremony version ${activeCeremonyVersion.VersionNumber} is ready.`
                   : "The key ceremony is ready."
-                : activeCeremonyVersion
-                  ? `Ceremony version ${activeCeremonyVersion.VersionNumber} is not ready yet.`
-                  : "Start and complete the key ceremony before open can proceed.",
+                : hasPendingOwnerCeremonyValidation && activeCeremonyVersion
+                  ? `Ceremony version ${activeCeremonyVersion.VersionNumber} is waiting for owner validation of submitted trustee packages.`
+                  : activeCeremonyVersion
+                    ? `Ceremony version ${activeCeremonyVersion.VersionNumber} is not ready yet.`
+                    : "Start and complete the key ceremony before open can proceed.",
             },
           ]
         : [
@@ -826,6 +903,7 @@ export function ElectionsWorkspace({
       acceptedTrusteeCount,
       activeCeremonyVersion,
       hasAcceptedTrusteesForOpen,
+      hasPendingOwnerCeremonyValidation,
       hasSavedElection,
       isKeyCeremonyReady,
       missingRequiredWarningCodes.length,
@@ -1034,16 +1112,61 @@ export function ElectionsWorkspace({
   useEffect(() => {
     if (
       !selectedElectionId ||
-      !election ||
-      election.GovernanceMode !== ElectionGovernanceModeProto.TrusteeThreshold
+      election?.GovernanceMode !== ElectionGovernanceModeProto.TrusteeThreshold
     ) {
       return;
     }
 
     void loadCeremonyActionView(ownerPublicAddress, selectedElectionId);
   }, [
-    election,
+    election?.GovernanceMode,
     loadCeremonyActionView,
+    ownerPublicAddress,
+    selectedElectionId,
+  ]);
+
+  useEffect(() => {
+    if (
+      !selectedElectionId ||
+      election?.GovernanceMode !== ElectionGovernanceModeProto.TrusteeThreshold ||
+      !activeOwnerTab ||
+      !["ceremony", "readiness", "lifecycle"].includes(activeOwnerTab)
+    ) {
+      return;
+    }
+
+    let refreshInFlight = false;
+
+    const refreshCeremonyContext = async () => {
+      if (refreshInFlight) {
+        return;
+      }
+
+      refreshInFlight = true;
+      try {
+        await Promise.all([
+          loadElection(selectedElectionId, { silent: true }),
+          loadCeremonyActionView(ownerPublicAddress, selectedElectionId, {
+            silent: true,
+          }),
+        ]);
+      } finally {
+        refreshInFlight = false;
+      }
+    };
+
+    const intervalId = window.setInterval(() => {
+      void refreshCeremonyContext();
+    }, CEREMONY_REFRESH_INTERVAL_MS);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [
+    activeOwnerTab,
+    election?.GovernanceMode,
+    loadCeremonyActionView,
+    loadElection,
     ownerPublicAddress,
     selectedElectionId,
   ]);
@@ -1406,7 +1529,7 @@ export function ElectionsWorkspace({
   ) => {
     if (
       actionType === ElectionGovernedActionTypeProto.Open &&
-      (saveValidationErrors.length > 0 || openValidationErrors.length > 0)
+      governedOpenPrerequisiteIssues.length > 0
     ) {
       return;
     }
@@ -1459,6 +1582,54 @@ export function ElectionsWorkspace({
         ActorPublicAddress: ownerPublicAddress,
         ProfileId: profileId,
         RestartReason: restartReason,
+      },
+      ownerEncryptionPublicKey ?? "",
+      ownerEncryptionPrivateKey ?? "",
+      ownerSigningPrivateKey,
+    );
+  };
+
+  const handleCompleteCeremonyTrustee = async (
+    trusteeUserAddress: string,
+    shareVersion: string,
+    tallyPublicKeyFingerprint: string | null,
+  ) => {
+    if (!selectedElectionId || !activeCeremonyVersion) {
+      return false;
+    }
+
+    return completeElectionCeremonyTrustee(
+      {
+        ElectionId: selectedElectionId,
+        ActorPublicAddress: ownerPublicAddress,
+        CeremonyVersionId: activeCeremonyVersion.Id,
+        TrusteeUserAddress: trusteeUserAddress,
+        ShareVersion: shareVersion,
+        TallyPublicKeyFingerprint: tallyPublicKeyFingerprint ?? null,
+      },
+      ownerEncryptionPublicKey ?? "",
+      ownerEncryptionPrivateKey ?? "",
+      ownerSigningPrivateKey,
+    );
+  };
+
+  const handleRecordCeremonyValidationFailure = async (
+    trusteeUserAddress: string,
+    validationFailureReason: string,
+    evidenceReference: string,
+  ) => {
+    if (!selectedElectionId || !activeCeremonyVersion) {
+      return false;
+    }
+
+    return recordElectionCeremonyValidationFailure(
+      {
+        ElectionId: selectedElectionId,
+        ActorPublicAddress: ownerPublicAddress,
+        CeremonyVersionId: activeCeremonyVersion.Id,
+        TrusteeUserAddress: trusteeUserAddress,
+        ValidationFailureReason: validationFailureReason,
+        EvidenceReference: evidenceReference,
       },
       ownerEncryptionPublicKey ?? "",
       ownerEncryptionPrivateKey ?? "",
@@ -2166,30 +2337,19 @@ export function ElectionsWorkspace({
                     >
                       <div
                         className={`rounded-xl border px-3 py-3 text-sm ${
-                          hasSavedElection &&
-                          saveValidationErrors.length === 0 &&
-                          openValidationErrors.length === 0 &&
-                          missingRequiredWarningCodes.length === 0 &&
-                          hasAcceptedTrusteesForOpen &&
-                          isKeyCeremonyReady &&
-                          governedOpenActionState?.status === "available"
+                          isGovernedOpenWorkflowReady
                             ? "border-green-500/40 bg-green-500/10 text-green-100"
                             : "border-amber-500/40 bg-amber-500/10 text-amber-100"
                         }`}
                       >
-                        {hasSavedElection &&
-                        saveValidationErrors.length === 0 &&
-                        openValidationErrors.length === 0 &&
-                        missingRequiredWarningCodes.length === 0 &&
-                        hasAcceptedTrusteesForOpen &&
-                        isKeyCeremonyReady &&
-                        governedOpenActionState?.status === "available"
+                        {isGovernedOpenWorkflowReady
                           ? "Ready to start the governed open proposal."
                           : "Not ready to start the governed open proposal yet."}
                       </div>
 
                       <div className="text-xs text-hush-text-accent">
-                        {governedOpenActionState?.reason ||
+                        {governedOpenPrerequisiteIssues[0] ||
+                          governedOpenActionState?.reason ||
                           "Resolve the checklist above, then use Governed Actions to start the Open proposal."}
                       </div>
                     </div>
@@ -2885,6 +3045,8 @@ export function ElectionsWorkspace({
                 }
                 onStart={handleStartCeremony}
                 onRestart={handleRestartCeremony}
+                onCompleteTrustee={handleCompleteCeremonyTrustee}
+                onRecordValidationFailure={handleRecordCeremonyValidationFailure}
                 />
               </div>
             )}
@@ -2934,10 +3096,12 @@ export function ElectionsWorkspace({
                       const openWorkflowBlocked =
                         state.actionType ===
                           ElectionGovernedActionTypeProto.Open &&
-                        (saveValidationErrors.length > 0 ||
-                          openValidationErrors.length > 0);
+                        state.status === "available" &&
+                        governedOpenPrerequisiteIssues.length > 0;
+                      const presentationStatus =
+                        openWorkflowBlocked ? "unavailable" : state.status;
                       const resolvedReason = openWorkflowBlocked
-                        ? "Resolve the draft-save and open-checklist issues below before starting the governed open request."
+                        ? governedOpenPrerequisiteIssues[0]
                         : state.reason;
 
                       return (
@@ -2959,9 +3123,9 @@ export function ElectionsWorkspace({
                               </div>
                             </div>
                             <span
-                              className={`rounded-full border px-3 py-1 text-xs font-medium ${getGovernedActionStatusClass(state.status)}`}
+                              className={`rounded-full border px-3 py-1 text-xs font-medium ${getGovernedActionStatusClass(presentationStatus)}`}
                             >
-                              {getGovernedActionStatusLabel(state.status)}
+                              {getGovernedActionStatusLabel(presentationStatus)}
                             </span>
                           </div>
 
@@ -3021,7 +3185,7 @@ export function ElectionsWorkspace({
                           )}
 
                           <div className="mt-4 flex flex-wrap gap-2">
-                            {state.status === "available" && (
+                            {presentationStatus === "available" && (
                               <button
                                 type="button"
                                 onClick={() =>

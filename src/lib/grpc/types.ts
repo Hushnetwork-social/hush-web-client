@@ -1579,6 +1579,7 @@ export interface SubmitElectionCeremonyMaterialRequest {
   PayloadVersion: string;
   EncryptedPayload: string;
   PayloadFingerprint: string;
+  ShareVersion: string;
 }
 
 export interface RecordElectionCeremonyValidationFailureRequest {

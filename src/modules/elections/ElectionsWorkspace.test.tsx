@@ -2001,6 +2001,17 @@ describe("ElectionsWorkspace", () => {
     expect(
       await screen.findByTestId("elections-governed-open-readiness"),
     ).toHaveTextContent("Not ready to start the governed open proposal yet.");
+    await openOwnerDetailTab("governed");
+    expect(
+      await screen.findByTestId(
+        `elections-governed-card-${ElectionGovernedActionTypeProto.Open}`,
+      ),
+    ).toHaveTextContent("Unavailable");
+    expect(
+      screen.queryByTestId(
+        `elections-governed-start-${ElectionGovernedActionTypeProto.Open}`,
+      ),
+    ).not.toBeInTheDocument();
     await openOwnerDetailTab("trustees");
     expect(
       await screen.findByTestId("elections-trustee-blocked-panel"),
@@ -2832,6 +2843,147 @@ describe("ElectionsWorkspace", () => {
         "owner-private-key",
       );
     });
+  });
+
+  it("refreshes owner ceremony progress and shows trustee step status without a manual reload", async () => {
+    const intervalCallbacks: Array<() => void> = [];
+    vi.spyOn(window, "setInterval").mockImplementation(
+      ((callback: TimerHandler) => {
+        if (typeof callback === "function") {
+          intervalCallbacks.push(callback as () => void);
+        }
+        return 1 as unknown as ReturnType<typeof window.setInterval>;
+      }) as typeof window.setInterval,
+    );
+    vi.spyOn(window, "clearInterval").mockImplementation(
+      (() => undefined) as typeof window.clearInterval,
+    );
+
+    const thresholdElection = createElectionRecord(
+      ElectionLifecycleStateProto.Draft,
+      {
+        GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+        ReviewWindowPolicy:
+          ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+        RequiredApprovalCount: 3,
+      },
+    );
+    const initialElectionResponse = createElectionResponse({
+      Election: thresholdElection,
+      LatestDraftSnapshot: createDraftSnapshot({
+        Policy: {
+          ElectionClass: ElectionClassProto.OrganizationalRemoteVoting,
+          BindingStatus: ElectionBindingStatusProto.Binding,
+          GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+          DisclosureMode: ElectionDisclosureModeProto.FinalResultsOnly,
+          ParticipationPrivacyMode:
+            ParticipationPrivacyModeProto.PublicCheckoffAnonymousBallotPrivateChoice,
+          VoteUpdatePolicy: VoteUpdatePolicyProto.SingleSubmissionOnly,
+          EligibilitySourceType:
+            EligibilitySourceTypeProto.OrganizationImportedRoster,
+          EligibilityMutationPolicy:
+            EligibilityMutationPolicyProto.FrozenAtOpen,
+          OutcomeRule: thresholdElection.OutcomeRule,
+          ApprovedClientApplications: [
+            { ApplicationId: "hushsocial", Version: "1.0.0" },
+          ],
+          ProtocolOmegaVersion: "omega-v1.0.0",
+          ReportingPolicy: ReportingPolicyProto.DefaultPhaseOnePackage,
+          ReviewWindowPolicy:
+            ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+          RequiredApprovalCount: 3,
+        },
+      }),
+      CeremonyProfiles: [
+        {
+          ProfileId: "prod-3of5-v1",
+          DisplayName: "Production 3 of 5",
+          Description: "Production rollout profile",
+          ProviderKey: "provider-a",
+          ProfileVersion: "v1",
+          TrusteeCount: 5,
+          RequiredApprovalCount: 3,
+          DevOnly: false,
+          RegisteredAt: timestamp,
+          LastUpdatedAt: timestamp,
+        },
+      ],
+      ActiveCeremonyTrusteeStates: [
+        createCeremonyTrusteeState({
+          TrusteeUserAddress: "trustee-five",
+          TrusteeDisplayName: "TrusteeFive",
+          State: ElectionTrusteeCeremonyStateProto.CeremonyStateAcceptedTrustee,
+          TransportPublicKeyFingerprint: "",
+          TransportPublicKeyPublishedAt: undefined,
+          JoinedAt: undefined,
+          SelfTestSucceededAt: undefined,
+          MaterialSubmittedAt: undefined,
+          CompletedAt: undefined,
+        }),
+      ],
+    });
+    const updatedElectionResponse = createElectionResponse({
+      ...initialElectionResponse,
+      ActiveCeremonyTrusteeStates: [
+        createCeremonyTrusteeState({
+          TrusteeUserAddress: "trustee-five",
+          TrusteeDisplayName: "TrusteeFive",
+          State: ElectionTrusteeCeremonyStateProto.CeremonyStateMaterialSubmitted,
+          TransportPublicKeyPublishedAt: timestamp,
+          JoinedAt: timestamp,
+          SelfTestSucceededAt: timestamp,
+          MaterialSubmittedAt: timestamp,
+          ShareVersion: "share-v1",
+        }),
+      ],
+    });
+
+    electionsServiceMock.getElectionsByOwner.mockResolvedValueOnce({
+      Elections: [
+        createElectionSummary(ElectionLifecycleStateProto.Draft, {
+          GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+        }),
+      ],
+    });
+    electionsServiceMock.getElection
+      .mockResolvedValueOnce(initialElectionResponse)
+      .mockResolvedValueOnce(updatedElectionResponse)
+      .mockResolvedValue(updatedElectionResponse);
+    electionsServiceMock.getElectionCeremonyActionView.mockResolvedValue(
+      createCeremonyActionViewResponse(),
+    );
+
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />,
+    );
+
+    fireEvent.click(await screen.findByTestId("election-summary-election-1"));
+    await openOwnerDetailTab("ceremony");
+    expect(
+      await screen.findByText("Step 1 ready: Publish transport key"),
+    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(intervalCallbacks.length).toBeGreaterThan(0);
+    });
+
+    await act(async () => {
+      intervalCallbacks.forEach((callback) => callback());
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(electionsServiceMock.getElection).toHaveBeenCalledTimes(2);
+    });
+    expect(await screen.findByText("Ready for owner approval")).toBeInTheDocument();
+    expect(screen.getAllByText("Trustee-local steps are complete.").length).toBeGreaterThan(0);
+    expect(screen.getByTestId("elections-ceremony-approve-next")).toBeInTheDocument();
+    expect(electionsServiceMock.getElectionCeremonyActionView).toHaveBeenCalledTimes(2);
   });
 
   it("shows the weak-trustee warning and keeps trustee-only controls out of the owner workspace", async () => {

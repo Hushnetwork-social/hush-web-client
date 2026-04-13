@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { ChevronDown, ChevronUp, History } from 'lucide-react';
-import type { GetElectionResponse } from '@/lib/grpc';
+import type { ElectionCeremonyTranscriptEvent, GetElectionResponse } from '@/lib/grpc';
 import {
   formatArtifactValue,
   formatTimestamp,
@@ -14,17 +14,85 @@ import {
 type CeremonyTranscriptPanelProps = {
   detail: GetElectionResponse | null;
   className?: string;
+  defaultExpandLatestActiveGroup?: boolean;
 };
+
+type TranscriptActorGroup = {
+  key: string;
+  label: string;
+  meta: string;
+  latestSummary: string;
+  latestAt?: ElectionCeremonyTranscriptEvent['OccurredAt'];
+  events: ElectionCeremonyTranscriptEvent[];
+};
+
+function buildTranscriptActorGroups(
+  events: ElectionCeremonyTranscriptEvent[],
+  ownerPublicAddress?: string
+): TranscriptActorGroup[] {
+  const groups = new Map<string, TranscriptActorGroup>();
+
+  events.forEach((event) => {
+    const actorAddress = event.TrusteeUserAddress || event.ActorPublicAddress || 'workflow';
+    const isTrusteeEvent = Boolean(event.TrusteeDisplayName || event.TrusteeUserAddress);
+    const label = isTrusteeEvent
+      ? event.TrusteeDisplayName || event.TrusteeUserAddress
+      : ownerPublicAddress && event.ActorPublicAddress === ownerPublicAddress
+        ? 'Owner / workflow'
+        : event.ActorPublicAddress
+          ? `Workflow ${event.ActorPublicAddress.slice(0, 10)}...`
+          : 'Workflow';
+    const meta = isTrusteeEvent
+      ? event.TrusteeUserAddress || 'Trustee'
+      : event.ActorPublicAddress || 'System event';
+    const existing = groups.get(actorAddress);
+
+    if (!existing) {
+      groups.set(actorAddress, {
+        key: actorAddress,
+        label,
+        meta,
+        latestSummary: event.EventSummary,
+        latestAt: event.OccurredAt,
+        events: [event],
+      });
+      return;
+    }
+
+    existing.events.push(event);
+    existing.latestSummary = event.EventSummary;
+    existing.latestAt = event.OccurredAt;
+  });
+
+  return Array.from(groups.values()).sort((left, right) => {
+    const leftSeconds = Number(left.latestAt?.seconds ?? 0);
+    const rightSeconds = Number(right.latestAt?.seconds ?? 0);
+
+    if (leftSeconds !== rightSeconds) {
+      return rightSeconds - leftSeconds;
+    }
+
+    const leftNanos = left.latestAt?.nanos ?? 0;
+    const rightNanos = right.latestAt?.nanos ?? 0;
+    return rightNanos - leftNanos;
+  });
+}
 
 export function CeremonyTranscriptPanel({
   detail,
   className = '',
+  defaultExpandLatestActiveGroup = true,
 }: CeremonyTranscriptPanelProps) {
   const [expandedVersions, setExpandedVersions] = useState<Record<string, boolean>>({});
+  const [expandedActiveActors, setExpandedActiveActors] = useState<Record<string, boolean>>({});
   const activeVersion = useMemo(() => getActiveCeremonyVersion(detail), [detail]);
   const activeEvents = useMemo(
     () => getCeremonyTranscriptEvents(detail, activeVersion?.Id),
     [activeVersion?.Id, detail]
+  );
+  const activeActorGroups = useMemo(
+    () => buildTranscriptActorGroups(activeEvents, detail?.Election?.OwnerPublicAddress),
+    [activeEvents, detail?.Election?.OwnerPublicAddress]
   );
   const supersededVersions = useMemo(() => getSupersededCeremonyVersions(detail), [detail]);
 
@@ -32,6 +100,13 @@ export function CeremonyTranscriptPanel({
     setExpandedVersions((current) => ({
       ...current,
       [versionId]: !current[versionId],
+    }));
+  };
+
+  const toggleActiveActor = (actorKey: string) => {
+    setExpandedActiveActors((current) => ({
+      ...current,
+      [actorKey]: !current[actorKey],
     }));
   };
 
@@ -74,22 +149,61 @@ export function CeremonyTranscriptPanel({
                 </span>
               </div>
               <div className="mt-3 space-y-2">
-                {activeEvents.length > 0 ? (
-                  activeEvents.map((event) => (
-                    <div
-                      key={event.Id}
-                      className="rounded-2xl bg-[#1f2848] px-3 py-3 text-sm shadow-sm shadow-black/10"
-                    >
-                      <div className="flex flex-wrap items-center gap-2 text-xs text-hush-text-accent">
-                        <History className="h-3.5 w-3.5" />
-                        <span>{formatTimestamp(event.OccurredAt)}</span>
-                        {event.TrusteeDisplayName ? (
-                          <span className="text-hush-text-primary">{event.TrusteeDisplayName}</span>
+                {activeActorGroups.length > 0 ? (
+                  activeActorGroups.map((group, index) => {
+                    const isExpanded =
+                      expandedActiveActors[group.key] ??
+                      (defaultExpandLatestActiveGroup && index === 0);
+
+                    return (
+                      <div
+                        key={group.key}
+                        className="rounded-2xl bg-[#1f2848] px-3 py-3 text-sm shadow-sm shadow-black/10"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => toggleActiveActor(group.key)}
+                          className="flex w-full items-start justify-between gap-3 text-left"
+                          data-testid={`ceremony-active-group-toggle-${group.key}`}
+                        >
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-medium text-hush-text-primary">{group.label}</span>
+                              <span className="rounded-full bg-hush-bg-dark/70 px-2 py-0.5 text-[11px] text-hush-text-accent">
+                                {group.events.length} event{group.events.length === 1 ? '' : 's'}
+                              </span>
+                            </div>
+                            <div className="mt-1 text-xs text-hush-text-accent">
+                              {group.meta} | Last event {formatTimestamp(group.latestAt)}
+                            </div>
+                            <div className="mt-2 text-sm text-hush-text-accent">{group.latestSummary}</div>
+                          </div>
+                          {isExpanded ? (
+                            <ChevronUp className="mt-1 h-4 w-4 shrink-0 text-hush-text-accent" />
+                          ) : (
+                            <ChevronDown className="mt-1 h-4 w-4 shrink-0 text-hush-text-accent" />
+                          )}
+                        </button>
+
+                        {isExpanded ? (
+                          <div className="mt-3 space-y-2 border-t border-hush-bg-light/60 pt-3">
+                            {group.events.map((event) => (
+                              <div
+                                key={event.Id}
+                                className="rounded-2xl bg-[#18203a] px-3 py-3 text-sm shadow-inner shadow-black/10"
+                              >
+                                <div className="flex flex-wrap items-center gap-2 text-xs text-hush-text-accent">
+                                  <History className="h-3.5 w-3.5" />
+                                  <span>{formatTimestamp(event.OccurredAt)}</span>
+                                </div>
+                                <div className="mt-2 text-sm text-hush-text-primary">{event.EventSummary}</div>
+                              </div>
+                            ))}
+                          </div>
                         ) : null}
                       </div>
-                      <div className="mt-2 text-sm text-hush-text-primary">{event.EventSummary}</div>
-                    </div>
-                  ))
+                    );
+                  })
                 ) : (
                   <div className="rounded-2xl bg-hush-bg-dark/75 px-3 py-3 text-sm text-hush-text-accent shadow-inner shadow-black/15">
                     No transcript events recorded for the active version yet.

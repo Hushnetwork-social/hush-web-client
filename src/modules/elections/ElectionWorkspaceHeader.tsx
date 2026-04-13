@@ -5,7 +5,7 @@ import type { ElectionHubEntryView } from '@/lib/grpc';
 import { ArrowLeft } from 'lucide-react';
 import {
   formatTimestamp,
-  getElectionHubSuggestedActionLabel,
+  getElectionHubDisplayActionLabel,
   getLifecycleLabel,
 } from './contracts';
 import { RoleBadgeCluster } from './RoleBadgeCluster';
@@ -49,7 +49,7 @@ export function ElectionWorkspaceHeader({ entry }: ElectionWorkspaceHeaderProps)
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <div className="text-sm font-medium text-hush-text-primary">
-          {getElectionHubSuggestedActionLabel(entry.SuggestedAction)}
+          {getElectionHubDisplayActionLabel(entry)}
         </div>
         <RoleBadgeCluster roles={entry.ActorRoles} />
       </div>

@@ -7,6 +7,7 @@ import {
   ElectionGovernedActionTypeProto,
   ElectionGovernedProposalExecutionStatusProto,
   ElectionLifecycleStateProto,
+  ElectionTrusteeCeremonyStateProto,
   type GetElectionHubViewResponse,
   type SubmitElectionFinalizationShareRequest,
   ElectionTrusteeInvitationStatusProto,
@@ -76,6 +77,14 @@ type LoadOwnerDashboardOptions = {
   autoSelectFirst?: boolean;
 };
 
+type LoadElectionOptions = {
+  silent?: boolean;
+};
+
+type LoadCeremonyActionViewOptions = {
+  silent?: boolean;
+};
+
 interface ElectionsState {
   actorPublicAddress: string | null;
   ownerPublicAddress: string | null;
@@ -118,10 +127,11 @@ interface ElectionsState {
     ownerPublicAddress: string,
     options?: LoadOwnerDashboardOptions
   ) => Promise<void>;
-  loadElection: (electionId: string) => Promise<void>;
+  loadElection: (electionId: string, options?: LoadElectionOptions) => Promise<void>;
   loadCeremonyActionView: (
     actorPublicAddress: string,
-    electionId?: string
+    electionId?: string,
+    options?: LoadCeremonyActionViewOptions
   ) => Promise<GetElectionCeremonyActionViewResponse | null>;
   createReportAccessGrant: (
     designatedAuditorPublicAddress: string,
@@ -656,14 +666,14 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     }
   },
 
-  loadElection: async (electionId) => {
+  loadElection: async (electionId, options) => {
+    const isSilent = options?.silent ?? false;
+
     set({
-      isLoadingDetail: true,
+      ...(isSilent ? {} : { isLoadingDetail: true, feedback: null, error: null }),
       selectedElectionId: electionId,
       selectedHubEntry:
         get().hubEntries.find((entry) => entry.Election.ElectionId === electionId) ?? null,
-      feedback: null,
-      error: null,
     });
 
     try {
@@ -715,20 +725,23 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
         error: error instanceof Error ? error.message : 'Failed to load election details.',
       });
     } finally {
-      set({ isLoadingDetail: false });
+      if (!isSilent) {
+        set({ isLoadingDetail: false });
+      }
     }
   },
 
-  loadCeremonyActionView: async (actorPublicAddress, electionId) => {
+  loadCeremonyActionView: async (actorPublicAddress, electionId, options) => {
     const resolvedElectionId = electionId ?? get().selectedElectionId;
     if (!resolvedElectionId) {
       set({ ceremonyActionView: null });
       return null;
     }
 
+    const isSilent = options?.silent ?? false;
+
     set({
-      isLoadingCeremonyActionView: true,
-      error: null,
+      ...(isSilent ? {} : { isLoadingCeremonyActionView: true, error: null }),
     });
 
     try {
@@ -755,7 +768,9 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
       });
       return null;
     } finally {
-      set({ isLoadingCeremonyActionView: false });
+      if (!isSilent) {
+        set({ isLoadingCeremonyActionView: false });
+      }
     }
   },
 
@@ -2093,7 +2108,9 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
       const indexedActionView = await waitForIndexedCeremonyActionViewMatch(
         request.ElectionId,
         request.ActorPublicAddress,
-        (response) => Boolean(response.SelfTrusteeState?.SelfTestSucceededAt),
+        (response) =>
+          Boolean(response.SelfTrusteeState?.SelfTestSucceededAt)
+          && response.SelfTrusteeState?.State !== ElectionTrusteeCeremonyStateProto.CeremonyStateValidationFailed,
       );
       if (!indexedActionView) {
         return false;
@@ -2153,6 +2170,7 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
         request.PayloadVersion,
         request.EncryptedPayload,
         request.PayloadFingerprint,
+        request.ShareVersion,
         signingPrivateKeyHex,
       );
       const submitResult = await submitTransaction(signedTransaction);
@@ -2179,7 +2197,9 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
         request.ElectionId,
         request.ActorPublicAddress,
         (response) =>
-          Boolean(response.SelfTrusteeState?.MaterialSubmittedAt)
+          (response.SelfTrusteeState?.State === ElectionTrusteeCeremonyStateProto.CeremonyStateMaterialSubmitted
+            && Boolean(response.SelfTrusteeState?.MaterialSubmittedAt))
+          || response.SelfTrusteeState?.State === ElectionTrusteeCeremonyStateProto.CeremonyStateCompleted
           || Boolean(response.SelfTrusteeState?.CompletedAt),
       );
       if (!indexedActionView) {
@@ -2346,19 +2366,21 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
         },
       });
 
-      const indexedActionView = await waitForIndexedCeremonyActionViewMatch(
+      const indexedElection = await waitForIndexedElectionMatch(
         request.ElectionId,
-        request.TrusteeUserAddress,
         (response) =>
-          response.SelfTrusteeState?.TrusteeUserAddress === request.TrusteeUserAddress
-          && Boolean(response.SelfTrusteeState?.CompletedAt)
-          && response.SelfTrusteeState?.ShareVersion === request.ShareVersion,
+          response.ActiveCeremonyTrusteeStates.some(
+            (state) =>
+              state.TrusteeUserAddress === request.TrusteeUserAddress
+              && Boolean(state.CompletedAt)
+              && state.ShareVersion === request.ShareVersion
+          ),
       );
-      if (!indexedActionView) {
+      if (!indexedElection) {
         return false;
       }
 
-      await refreshElectionContext(get, request.TrusteeUserAddress);
+      await refreshElectionContext(get, request.ActorPublicAddress);
       set({
         feedback: {
           tone: 'success',

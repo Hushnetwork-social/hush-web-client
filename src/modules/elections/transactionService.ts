@@ -151,6 +151,7 @@ export interface SubmitElectionCeremonyMaterialActionPayload {
   PayloadVersion: string;
   EncryptedPayload: string;
   PayloadFingerprint: string;
+  ShareVersion: string;
 }
 
 export interface RecordElectionCeremonyValidationFailureActionPayload {
@@ -939,6 +940,7 @@ export async function createSubmitElectionCeremonyMaterialTransaction(
   payloadVersion: string,
   encryptedPayload: string,
   payloadFingerprint: string,
+  shareVersion: string,
   signingPrivateKeyHex: string,
 ): Promise<{ signedTransaction: string }> {
   const encryptedEnvelope =
@@ -956,6 +958,7 @@ export async function createSubmitElectionCeremonyMaterialTransaction(
         PayloadVersion: payloadVersion,
         EncryptedPayload: encryptedPayload,
         PayloadFingerprint: payloadFingerprint,
+        ShareVersion: shareVersion,
       },
       signingPrivateKeyHex,
     );
