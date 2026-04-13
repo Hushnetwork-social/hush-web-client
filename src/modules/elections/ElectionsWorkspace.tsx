@@ -118,8 +118,38 @@ type PolicyEditorState = {
   outcomeRuleKind: OutcomeRuleKindProto;
 };
 
+type OwnerWorkspaceTabId =
+  | "save"
+  | "lifecycle"
+  | "readiness"
+  | "trustees"
+  | "policy"
+  | "options"
+  | "roster"
+  | "auditors"
+  | "ceremony"
+  | "finalization"
+  | "governed";
+
+type OwnerWorkspaceTab = {
+  id: OwnerWorkspaceTabId;
+  label: string;
+  helper: string;
+};
+
 const sectionClass =
   "rounded-2xl bg-hush-bg-element/95 p-5 shadow-lg shadow-black/10";
+
+const UNSAVED_DRAFT_LEAVE_MESSAGE =
+  "This election has unsaved local edits. Save the draft before leaving, or confirm that you want to discard those edits.";
+
+function getDefaultOwnerWorkspaceTabId({
+  canEditDraft,
+}: {
+  canEditDraft: boolean;
+}): OwnerWorkspaceTabId {
+  return canEditDraft ? "save" : "lifecycle";
+}
 
 function buildFixedPolicyItems(draft: ElectionDraftInput): FixedPolicyItem[] {
   return [
@@ -411,6 +441,10 @@ export function ElectionsWorkspace({
   const [hasSearchedTrustees, setHasSearchedTrustees] = useState(false);
   const [activeOverlay, setActiveOverlay] =
     useState<OwnerEditorOverlayId>(null);
+  const [activeOwnerTab, setActiveOwnerTab] =
+    useState<OwnerWorkspaceTabId | null>(null);
+  const [hasManuallySelectedOwnerTab, setHasManuallySelectedOwnerTab] =
+    useState(false);
   const [metadataEditor, setMetadataEditor] = useState<MetadataEditorState>({
     title: "",
     externalReferenceCode: "",
@@ -587,15 +621,122 @@ export function ElectionsWorkspace({
         : elections,
     [elections, initialElectionId, isScopedElectionWorkspace],
   );
+  const workspaceGovernanceMode = canEditDraft
+    ? draft.GovernanceMode
+    : election?.GovernanceMode ?? draft.GovernanceMode;
   const usesTrusteeThreshold =
-    draft.GovernanceMode === ElectionGovernanceModeProto.TrusteeThreshold;
+    workspaceGovernanceMode === ElectionGovernanceModeProto.TrusteeThreshold;
+  const hasSavedElection = !!selectedElectionId;
+  const shouldWarnOnLeaveWithUnsavedChanges =
+    canEditDraft && hasPendingDraftChanges && !isSubmitting;
+  const ownerWorkspaceTabs = useMemo<OwnerWorkspaceTab[]>(
+    () => [
+      ...(canEditDraft
+        ? [
+            {
+              id: "save" as const,
+              label: "Save Draft",
+              helper: hasPendingDraftChanges
+                ? "This election has unsaved local edits. Save before leaving this workspace."
+                : selectedElectionId
+                  ? "Review the latest saved revision, local working copy, and the next revision note."
+                  : "Create the first saved draft once the required metadata is ready.",
+            },
+          ]
+        : []),
+      {
+        id: "lifecycle",
+        label: "Lifecycle",
+        helper: canEditDraft
+          ? "Review lifecycle state, timestamps, warning evidence, and frozen policy boundaries here."
+          : "Draft editing is frozen, so lifecycle state and boundary evidence stay visible here.",
+      },
+      {
+        id: "readiness",
+        label: "Ready to Open",
+        helper: usesTrusteeThreshold
+          ? "Review draft readiness, warnings, trustee requirements, and governed open status."
+          : "Review the current open blockers and warning evidence before opening.",
+      },
+      ...(usesTrusteeThreshold
+        ? [
+            {
+              id: "trustees" as const,
+              label: "Trustee Setup",
+              helper:
+                "Review the threshold, invitation state, and trustee-specific draft rules.",
+            },
+          ]
+        : []),
+      {
+        id: "policy",
+        label: "Draft Policy",
+        helper:
+          "Review governance, disclosure, and reporting values without expanding the full page.",
+      },
+      {
+        id: "options",
+        label: "Ballot Options",
+        helper:
+          "Review the current ballot roster and option ordering in a focused block.",
+      },
+      ...(selectedElectionId
+        ? [
+            {
+              id: "roster" as const,
+              label: "Roster",
+              helper:
+                "Open the restricted named-roster workflow and append operations here.",
+            },
+            {
+              id: "auditors" as const,
+              label: "Auditors",
+              helper:
+                "Manage designated-auditor grants without stacking them into the main page.",
+            },
+          ]
+        : []),
+      ...(usesTrusteeThreshold
+        ? [
+            {
+              id: "ceremony" as const,
+              label: "Key Ceremony",
+              helper:
+                "Track trustee-share readiness and ceremony version progress.",
+            },
+            {
+              id: "finalization" as const,
+              label: "Finalization",
+              helper:
+                "Review tally-share progress and aggregate-only release evidence.",
+            },
+            {
+              id: "governed" as const,
+              label: "Governed Actions",
+              helper:
+                "Track open, close, and finalize proposals in one focused area.",
+            },
+          ]
+        : []),
+    ],
+    [
+      canEditDraft,
+      hasPendingDraftChanges,
+      selectedElectionId,
+      usesTrusteeThreshold,
+    ],
+  );
+  const defaultOwnerWorkspaceTab = getDefaultOwnerWorkspaceTabId({
+    canEditDraft,
+  });
+  const activeOwnerWorkspaceTab =
+    ownerWorkspaceTabs.find((tab) => tab.id === activeOwnerTab) ?? null;
   const trusteeThresholdNeedsSaveAlignment =
     usesTrusteeThreshold &&
     !!fixedTrusteeApprovalCount &&
     persistedRequiredApprovalCount !== fixedTrusteeApprovalCount;
   const supportsDirectOpen =
     election?.GovernanceMode !== ElectionGovernanceModeProto.TrusteeThreshold;
-  const hasSavedElection = !!selectedElectionId;
   const requiredTrusteeCountForOpen = Math.max(
     1,
     draft.RequiredApprovalCount || 1,
@@ -737,6 +878,109 @@ export function ElectionsWorkspace({
   }, [selectedElection, selectedElectionId]);
 
   useEffect(() => {
+    setHasManuallySelectedOwnerTab(false);
+  }, [selectedElectionId]);
+
+  useEffect(() => {
+    const hasActiveTab = ownerWorkspaceTabs.some(
+      (tab) => tab.id === activeOwnerTab,
+    );
+
+    if (!hasActiveTab) {
+      setActiveOwnerTab(defaultOwnerWorkspaceTab);
+      return;
+    }
+
+    if (
+      !hasManuallySelectedOwnerTab &&
+      activeOwnerTab !== defaultOwnerWorkspaceTab
+    ) {
+      setActiveOwnerTab(defaultOwnerWorkspaceTab);
+    }
+  }, [
+    activeOwnerTab,
+    defaultOwnerWorkspaceTab,
+    hasManuallySelectedOwnerTab,
+      ownerWorkspaceTabs,
+  ]);
+
+  useEffect(() => {
+    if (!shouldWarnOnLeaveWithUnsavedChanges) {
+      return;
+    }
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = UNSAVED_DRAFT_LEAVE_MESSAGE;
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [shouldWarnOnLeaveWithUnsavedChanges]);
+
+  useEffect(() => {
+    if (!shouldWarnOnLeaveWithUnsavedChanges) {
+      return;
+    }
+
+    const handleDocumentClick = (event: MouseEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      ) {
+        return;
+      }
+
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        return;
+      }
+
+      const anchor = target.closest("a[href]");
+      if (!(anchor instanceof HTMLAnchorElement)) {
+        return;
+      }
+
+      if (anchor.target && anchor.target !== "_self") {
+        return;
+      }
+
+      const href = anchor.getAttribute("href");
+      if (
+        !href ||
+        href.startsWith("#") ||
+        href.startsWith("javascript:") ||
+        href.startsWith("mailto:") ||
+        href.startsWith("tel:")
+      ) {
+        return;
+      }
+
+      const destination = new URL(anchor.href, window.location.href);
+      const current = new URL(window.location.href);
+      if (destination.href === current.href) {
+        return;
+      }
+
+      if (!window.confirm(UNSAVED_DRAFT_LEAVE_MESSAGE)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+
+    document.addEventListener("click", handleDocumentClick, true);
+    return () => {
+      document.removeEventListener("click", handleDocumentClick, true);
+    };
+  }, [shouldWarnOnLeaveWithUnsavedChanges]);
+
+  useEffect(() => {
     if (
       draft.GovernanceMode !== ElectionGovernanceModeProto.TrusteeThreshold ||
       !fixedTrusteeApprovalCount ||
@@ -804,7 +1048,31 @@ export function ElectionsWorkspace({
     selectedElectionId,
   ]);
 
+  const confirmLeaveWithUnsavedChanges = () => {
+    if (!shouldWarnOnLeaveWithUnsavedChanges) {
+      return true;
+    }
+
+    return window.confirm(UNSAVED_DRAFT_LEAVE_MESSAGE);
+  };
+
+  const handleSelectElection = async (electionId: string) => {
+    if (selectedElectionId === electionId) {
+      return;
+    }
+
+    if (!confirmLeaveWithUnsavedChanges()) {
+      return;
+    }
+
+    await loadElection(electionId);
+  };
+
   const handleNewDraft = () => {
+    if (!confirmLeaveWithUnsavedChanges()) {
+      return;
+    }
+
     beginNewElection();
     clearFeedback();
     setDraft(createDefaultElectionDraft());
@@ -1200,7 +1468,7 @@ export function ElectionsWorkspace({
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto text-hush-text-primary">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 p-4 md:p-5">
+      <div className="flex w-full min-w-0 flex-col gap-5 p-4 md:p-5">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <Link
@@ -1268,7 +1536,7 @@ export function ElectionsWorkspace({
           </div>
         )}
 
-        <div className="grid gap-6 xl:grid-cols-[280px_minmax(0,1fr)]">
+        <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
           <aside
             className={`${sectionClass} h-fit`}
             data-testid="elections-sidebar"
@@ -1337,7 +1605,7 @@ export function ElectionsWorkspace({
                   <button
                     key={summary.ElectionId}
                     type="button"
-                    onClick={() => void loadElection(summary.ElectionId)}
+                    onClick={() => void handleSelectElection(summary.ElectionId)}
                     className={`w-full rounded-xl px-4 py-3 text-left shadow-sm transition-colors ${
                       selectedElectionId === summary.ElectionId
                         ? "bg-hush-purple/10 ring-1 ring-hush-purple/40"
@@ -1359,7 +1627,10 @@ export function ElectionsWorkspace({
             </div>
           </aside>
 
-          <main className="space-y-6" data-testid="elections-workspace">
+          <main
+            className="flex min-w-0 flex-col gap-6"
+            data-testid="elections-workspace"
+          >
             <section className={sectionClass}>
               <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div>
@@ -1513,9 +1784,84 @@ export function ElectionsWorkspace({
               </div>
             </OwnerOverviewSection>
 
-            {draft.GovernanceMode ===
-              ElectionGovernanceModeProto.TrusteeThreshold && (
-              <OwnerOverviewSection
+            <section
+              className={sectionClass}
+              data-testid="elections-detail-tabs"
+              style={{ order: 1 }}
+            >
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                    Workspace Detail Sections
+                  </h2>
+                  <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
+                    Keep metadata fixed at the top, then switch the workspace
+                    detail below one focused section at a time.
+                  </p>
+                </div>
+                {activeOwnerWorkspaceTab ? (
+                  <div className="rounded-2xl bg-hush-bg-dark/70 px-4 py-3">
+                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                      Focused detail
+                    </div>
+                    <div className="mt-2 text-sm font-medium text-hush-text-primary">
+                      {activeOwnerWorkspaceTab.label}
+                    </div>
+                    <div className="mt-1 max-w-sm text-xs text-hush-text-accent">
+                      {activeOwnerWorkspaceTab.helper}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              {shouldWarnOnLeaveWithUnsavedChanges && (
+                <div
+                  className="mt-5 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100"
+                  data-testid="elections-dirty-draft-banner"
+                >
+                  Unsaved local edits are still only on this device. Open Save
+                  Draft before leaving this election.
+                </div>
+              )}
+
+              <div className="mt-5 flex flex-wrap gap-2">
+                {ownerWorkspaceTabs.map((tab) => {
+                  const isActive = tab.id === activeOwnerTab;
+                  const isDirtySaveTab =
+                    tab.id === "save" && shouldWarnOnLeaveWithUnsavedChanges;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => {
+                        setActiveOwnerTab(tab.id);
+                        setHasManuallySelectedOwnerTab(true);
+                      }}
+                      aria-pressed={isActive}
+                      data-testid={`elections-detail-tab-${tab.id}`}
+                      className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+                        isActive
+                          ? "bg-hush-purple text-white shadow-sm shadow-hush-purple/20"
+                          : "bg-hush-bg-dark/70 text-hush-text-accent hover:bg-hush-bg-dark hover:text-hush-text-primary"
+                      }`}
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        <span>{tab.label}</span>
+                        {isDirtySaveTab ? (
+                          <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-100">
+                            Unsaved
+                          </span>
+                        ) : null}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+
+            {usesTrusteeThreshold && activeOwnerTab === "trustees" && (
+              <div style={{ order: 4 }}>
+                <OwnerOverviewSection
                 title="Trustee Setup"
                 description="Trustee approvals and invitations are reviewed here. Open the editor to adjust the approval threshold or manage invitation records without editing the whole page inline."
                 actionLabel={canEditDraft ? "Edit trustee setup" : undefined}
@@ -1607,10 +1953,13 @@ export function ElectionsWorkspace({
                     </div>
                   )}
                 </div>
-              </OwnerOverviewSection>
+                </OwnerOverviewSection>
+              </div>
             )}
 
-            <OwnerOverviewSection
+            {activeOwnerTab === "readiness" && (
+              <div style={{ order: 4 }}>
+                <OwnerOverviewSection
               title="Ready to Open"
               description={
                 usesTrusteeThreshold
@@ -1859,67 +2208,77 @@ export function ElectionsWorkspace({
                           .join(", ")
                       : "No warning acknowledgements have been read back yet."}
                   </div>
+                  </div>
                 </div>
+                </OwnerOverviewSection>
               </div>
-            </OwnerOverviewSection>
+            )}
 
-            <OwnerOverviewSection
-              title="Roster Management"
-              description="Roster import and append are managed separately from draft metadata. Open the roster manager to append voter IDs, review the restricted named roster, and handle draft-only activation work."
-              actionLabel={selectedElectionId ? "Manage roster" : undefined}
-              onAction={selectedElectionId ? openRosterOverlay : undefined}
-              dataTestId="elections-roster-overview"
-            >
-              <div className="grid gap-4 md:grid-cols-3">
-                <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
-                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
-                    Eligibility source
-                  </div>
-                  <div className="mt-2 text-sm font-medium">
-                    {getEligibilitySourceLabel(draft.EligibilitySourceType)}
-                  </div>
-                  <div className="mt-2 text-xs text-hush-text-accent">
-                    Imported roster remains the named checkoff source for this
-                    election.
-                  </div>
-                </div>
+            {activeOwnerTab === "roster" && (
+              <div style={{ order: 4 }}>
+                <OwnerOverviewSection
+                  title="Roster Management"
+                  description="Roster import and append are managed separately from draft metadata. Open the roster manager to append voter IDs, review the restricted named roster, and handle draft-only activation work."
+                  actionLabel={selectedElectionId ? "Manage roster" : undefined}
+                  onAction={selectedElectionId ? openRosterOverlay : undefined}
+                  dataTestId="elections-roster-overview"
+                >
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+                      <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                        Eligibility source
+                      </div>
+                      <div className="mt-2 text-sm font-medium">
+                        {getEligibilitySourceLabel(draft.EligibilitySourceType)}
+                      </div>
+                      <div className="mt-2 text-xs text-hush-text-accent">
+                        Imported roster remains the named checkoff source for this
+                        election.
+                      </div>
+                    </div>
 
-                <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
-                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
-                    Mutation policy
-                  </div>
-                  <div className="mt-2 text-sm font-medium">
-                    {getEligibilityMutationLabel(
-                      draft.EligibilityMutationPolicy,
-                    )}
-                  </div>
-                  <div className="mt-2 text-xs text-hush-text-accent">
-                    Append and activation work stay available only while the
-                    election remains editable.
-                  </div>
-                </div>
+                    <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+                      <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                        Mutation policy
+                      </div>
+                      <div className="mt-2 text-sm font-medium">
+                        {getEligibilityMutationLabel(
+                          draft.EligibilityMutationPolicy,
+                        )}
+                      </div>
+                      <div className="mt-2 text-xs text-hush-text-accent">
+                        Append and activation work stay available only while the
+                        election remains editable.
+                      </div>
+                    </div>
 
-                <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
-                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
-                    Workspace status
+                    <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+                      <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                        Workspace status
+                      </div>
+                      <div className="mt-2 text-sm font-medium">
+                        {selectedElectionId
+                          ? canEditDraft
+                            ? "Ready for roster edits"
+                            : "Read-only roster review"
+                          : "Create the draft first"}
+                      </div>
+                      <div className="mt-2 text-xs text-hush-text-accent">
+                        Roster operations are intentionally separated from the
+                        draft save action.
+                      </div>
+                    </div>
                   </div>
-                  <div className="mt-2 text-sm font-medium">
-                    {selectedElectionId
-                      ? canEditDraft
-                        ? "Ready for roster edits"
-                        : "Read-only roster review"
-                      : "Create the draft first"}
-                  </div>
-                  <div className="mt-2 text-xs text-hush-text-accent">
-                    Roster operations are intentionally separated from the draft
-                    save action.
-                  </div>
-                </div>
+                </OwnerOverviewSection>
               </div>
-            </OwnerOverviewSection>
+            )}
 
-            {selectedElectionId ? (
-              <div className={sectionClass} data-testid="elections-auditor-access-overview">
+            {selectedElectionId && activeOwnerTab === "auditors" ? (
+              <div
+                className={sectionClass}
+                data-testid="elections-auditor-access-overview"
+                style={{ order: 4 }}
+              >
                 <DesignatedAuditorGrantManager
                   detail={selectedElection}
                   actorEncryptionPublicKey={ownerEncryptionPublicKey ?? ""}
@@ -1929,8 +2288,9 @@ export function ElectionsWorkspace({
               </div>
             ) : null}
 
-            {canEditDraft ? (
-              <OwnerOverviewSection
+            {canEditDraft && activeOwnerTab === "save" ? (
+              <div style={{ order: 4 }}>
+                <OwnerOverviewSection
                 title="Save Current Draft"
                 description="This panel applies only to the election selected on the left. It shows the latest saved revision, the status of local edits, and the single save action that turns those edits into the next draft revision."
                 dataTestId="elections-draft-save-overview"
@@ -2021,12 +2381,15 @@ export function ElectionsWorkspace({
                         <span>{saveButtonLabel}</span>
                       </button>
                     </div>
+                    </div>
                   </div>
-                </div>
-              </OwnerOverviewSection>
+                </OwnerOverviewSection>
+              </div>
             ) : null}
 
-            <OwnerOverviewSection
+            {activeOwnerTab === "policy" && (
+              <div style={{ order: 4 }}>
+                <OwnerOverviewSection
               title="Draft Policy"
               description="These policy values are part of the draft itself. Edit them in one place, then save the draft when you are ready to persist the combined change set."
               actionLabel={canEditDraft ? "Edit draft policy" : undefined}
@@ -2078,9 +2441,13 @@ export function ElectionsWorkspace({
                   </div>
                 ))}
               </div>
-            </OwnerOverviewSection>
+                </OwnerOverviewSection>
+              </div>
+            )}
 
-            <OwnerOverviewSection
+            {activeOwnerTab === "options" && (
+              <div style={{ order: 4 }}>
+                <OwnerOverviewSection
               title="Ballot Options"
               description="Candidate and option edits stay local until you save the draft. Ballot options can be added later, but at least two named options are required before the election can open."
               actionLabel={canEditDraft ? "Edit ballot options" : undefined}
@@ -2121,7 +2488,9 @@ export function ElectionsWorkspace({
                   ))}
                 </div>
               )}
-            </OwnerOverviewSection>
+                </OwnerOverviewSection>
+              </div>
+            )}
 
             {false &&
               draft.GovernanceMode ===
@@ -2498,8 +2867,10 @@ export function ElectionsWorkspace({
             )}
 
             {election?.GovernanceMode ===
-              ElectionGovernanceModeProto.TrusteeThreshold && (
-              <ElectionCeremonyWorkspaceSection
+              ElectionGovernanceModeProto.TrusteeThreshold &&
+              activeOwnerTab === "ceremony" && (
+              <div style={{ order: 4 }}>
+                <ElectionCeremonyWorkspaceSection
                 detail={selectedElection}
                 actionView={ceremonyActionView}
                 ownerPublicAddress={ownerPublicAddress}
@@ -2514,22 +2885,28 @@ export function ElectionsWorkspace({
                 }
                 onStart={handleStartCeremony}
                 onRestart={handleRestartCeremony}
-              />
+                />
+              </div>
             )}
 
             {election?.GovernanceMode ===
-              ElectionGovernanceModeProto.TrusteeThreshold && (
-              <ElectionFinalizationWorkspaceSection
+              ElectionGovernanceModeProto.TrusteeThreshold &&
+              activeOwnerTab === "finalization" && (
+              <div style={{ order: 4 }}>
+                <ElectionFinalizationWorkspaceSection
                 detail={selectedElection}
                 finalizeActionState={finalizeActionState}
-              />
+                />
+              </div>
             )}
 
             {election?.GovernanceMode ===
-              ElectionGovernanceModeProto.TrusteeThreshold && (
+              ElectionGovernanceModeProto.TrusteeThreshold &&
+              activeOwnerTab === "governed" && (
               <section
                 className={sectionClass}
                 data-testid="elections-governed-actions"
+                style={{ order: 4 }}
               >
                 <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                   <div>
@@ -2704,7 +3081,8 @@ export function ElectionsWorkspace({
               </section>
             )}
 
-            <section className={sectionClass}>
+            {activeOwnerTab === "lifecycle" && (
+              <section className={sectionClass} style={{ order: 4 }}>
               <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div>
                   <h2 className="text-lg font-semibold">
@@ -2868,6 +3246,20 @@ export function ElectionsWorkspace({
                       </div>
                     </div>
                   </div>
+
+                  <div
+                    className="mt-4 rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-3 text-xs text-hush-text-accent"
+                    data-testid="elections-warning-evidence"
+                  >
+                    Persisted warning evidence on the selected election:{" "}
+                    {warningAcknowledgements.length > 0
+                      ? warningAcknowledgements
+                          .map((acknowledgement) =>
+                            getWarningTitle(acknowledgement.WarningCode),
+                          )
+                          .join(", ")
+                      : "No warning acknowledgements have been read back yet."}
+                  </div>
                 </div>
 
                 <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
@@ -2911,7 +3303,8 @@ export function ElectionsWorkspace({
                   )}
                 </div>
               </div>
-            </section>
+              </section>
+            )}
 
             {activeOverlay === "metadata" && (
               <OwnerEditorOverlay

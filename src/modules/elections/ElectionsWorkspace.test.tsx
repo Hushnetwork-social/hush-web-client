@@ -517,6 +517,10 @@ function createReadinessResponse(
   };
 }
 
+async function openOwnerDetailTab(tabId: string) {
+  fireEvent.click(await screen.findByTestId(`elections-detail-tab-${tabId}`));
+}
+
 describe("ElectionsWorkspace", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -525,6 +529,7 @@ describe("ElectionsWorkspace", () => {
   beforeEach(() => {
     useElectionsStore.getState().reset();
     vi.resetAllMocks();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
     electionsServiceMock.getElectionsByOwner.mockResolvedValue({
       Elections: [],
     });
@@ -767,6 +772,7 @@ describe("ElectionsWorkspace", () => {
       screen.getByRole("button", { name: "Apply metadata changes" }),
     );
 
+    fireEvent.click(screen.getByTestId("elections-detail-tab-options"));
     fireEvent.click(
       screen.getByRole("button", { name: "Edit ballot options" }),
     );
@@ -782,6 +788,7 @@ describe("ElectionsWorkspace", () => {
       screen.getByRole("button", { name: "Apply option changes" }),
     );
 
+    fireEvent.click(screen.getByTestId("elections-detail-tab-save"));
     fireEvent.click(screen.getByTestId("elections-save-button"));
 
     expect(
@@ -872,8 +879,9 @@ describe("ElectionsWorkspace", () => {
     );
   });
 
-  it("shows pending feedback when the draft transaction is accepted before indexing finishes", async () => {
-    vi.useFakeTimers();
+  it(
+    "shows pending feedback when the draft transaction is accepted before indexing finishes",
+    async () => {
     electionsServiceMock.getElectionsByOwner
       .mockResolvedValueOnce({ Elections: [] })
       .mockResolvedValueOnce({ Elections: [] });
@@ -910,6 +918,7 @@ describe("ElectionsWorkspace", () => {
       screen.getByRole("button", { name: "Apply metadata changes" }),
     );
 
+    await openOwnerDetailTab("options");
     fireEvent.click(
       screen.getByRole("button", { name: "Edit ballot options" }),
     );
@@ -925,16 +934,18 @@ describe("ElectionsWorkspace", () => {
       screen.getByRole("button", { name: "Apply option changes" }),
     );
 
-    await act(async () => {
+      fireEvent.click(screen.getByTestId("elections-detail-tab-save"));
       fireEvent.click(screen.getByTestId("elections-save-button"));
-      await vi.runAllTimersAsync();
-    });
 
-    expect(screen.getByText("Election draft submitted.")).toBeInTheDocument();
-    expect(
-      screen.getByText(/waiting for block confirmation/i),
-    ).toBeInTheDocument();
-  });
+      expect(
+        await screen.findByText("Election draft submitted.", {}, { timeout: 8_000 }),
+      ).toBeInTheDocument();
+      expect(
+        await screen.findByText(/waiting for block confirmation/i, {}, { timeout: 8_000 }),
+      ).toBeInTheDocument();
+    },
+    12_000,
+  );
 
   it("starts a new draft without pre-seeded ballot options", async () => {
     render(
@@ -946,12 +957,76 @@ describe("ElectionsWorkspace", () => {
       />,
     );
 
+    await openOwnerDetailTab("options");
     expect(
       await screen.findByTestId("elections-empty-options"),
     ).toBeInTheDocument();
     expect(
       screen.queryByTestId("elections-option-label-0"),
     ).not.toBeInTheDocument();
+  });
+
+  it("marks the save tab as unsaved and warns before leaving a dirty draft", async () => {
+    electionsServiceMock.getElectionsByOwner.mockResolvedValueOnce({
+      Elections: [
+        createElectionSummary(ElectionLifecycleStateProto.Draft, {
+          ElectionId: "election-1",
+          Title: "Board Election I",
+        }),
+        createElectionSummary(ElectionLifecycleStateProto.Draft, {
+          ElectionId: "election-2",
+          Title: "Board Election II",
+        }),
+      ],
+    });
+    electionsServiceMock.getElection.mockResolvedValueOnce(
+      createElectionResponse({
+        Election: createElectionRecord(ElectionLifecycleStateProto.Draft, {
+          ElectionId: "election-1",
+          Title: "Board Election I",
+        }),
+      }),
+    );
+
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit metadata" }));
+    fireEvent.change(screen.getByTestId("elections-title-input"), {
+      target: { value: "Board Election I Updated" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Apply metadata changes" }),
+    );
+
+    expect(
+      await screen.findByTestId("elections-dirty-draft-banner"),
+    ).toHaveTextContent("Unsaved local edits");
+    expect(screen.getByTestId("elections-detail-tab-save")).toHaveTextContent(
+      "Unsaved",
+    );
+
+    fireEvent.click(
+      screen.getByRole("link", { name: "Back to HushVoting! Hub" }),
+    );
+    fireEvent.click(screen.getByTestId("election-summary-election-2"));
+
+    expect(confirmSpy).toHaveBeenCalledTimes(2);
+    expect(confirmSpy).toHaveBeenCalledWith(
+      expect.stringContaining("unsaved local edits"),
+    );
+    expect(electionsServiceMock.getElection).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByText("Board Election I Updated").length).toBeGreaterThan(
+      0,
+    );
   });
 
   it("keeps the workspace on a blank new draft when opened in create mode", async () => {
@@ -980,6 +1055,7 @@ describe("ElectionsWorkspace", () => {
     expect(
       screen.getAllByText("Election title is required.").length,
     ).toBeGreaterThan(0);
+    await openOwnerDetailTab("options");
     expect(
       screen.getByText(
         /You can still save this draft now and add options later/i,
@@ -1155,6 +1231,7 @@ describe("ElectionsWorkspace", () => {
       />,
     );
 
+    await openOwnerDetailTab("policy");
     fireEvent.click(
       await screen.findByRole("button", { name: "Edit draft policy" }),
     );
@@ -1170,6 +1247,7 @@ describe("ElectionsWorkspace", () => {
         "Owner options must not mark themselves as the reserved blank vote option.",
       ),
     ).not.toBeInTheDocument();
+    await openOwnerDetailTab("save");
     expect(screen.getByTestId("elections-save-button")).toBeEnabled();
 
     fireEvent.click(screen.getByTestId("elections-save-button"));
@@ -1281,6 +1359,7 @@ describe("ElectionsWorkspace", () => {
       />,
     );
 
+    await openOwnerDetailTab("trustees");
     fireEvent.click(
       await screen.findByRole("button", { name: "Edit trustee setup" }),
     );
@@ -1417,6 +1496,7 @@ describe("ElectionsWorkspace", () => {
       />,
     );
 
+    await openOwnerDetailTab("trustees");
     fireEvent.click(
       await screen.findByRole("button", { name: "Edit trustee setup" }),
     );
@@ -1547,6 +1627,7 @@ describe("ElectionsWorkspace", () => {
       />,
     );
 
+    await openOwnerDetailTab("trustees");
     fireEvent.click(
       await screen.findByRole("button", { name: "Edit trustee setup" }),
     );
@@ -1653,6 +1734,7 @@ describe("ElectionsWorkspace", () => {
       />,
     );
 
+    await openOwnerDetailTab("trustees");
     fireEvent.click(
       await screen.findByRole("button", { name: "Edit trustee setup" }),
     );
@@ -1796,11 +1878,13 @@ describe("ElectionsWorkspace", () => {
       />,
     );
 
+    await openOwnerDetailTab("trustees");
     expect(
       await screen.findByText(
         /Aligned locally to the current 3-of-5 trustee rollout\./i,
       ),
     ).toBeInTheDocument();
+    await openOwnerDetailTab("ceremony");
     expect(
       screen.getByText(
         /Save the next draft revision to persist the aligned 3-of-5 threshold before the ceremony can start\./i,
@@ -1815,6 +1899,7 @@ describe("ElectionsWorkspace", () => {
       screen.getByTestId("elections-ceremony-start-button"),
     ).toBeDisabled();
 
+    await openOwnerDetailTab("trustees");
     fireEvent.click(
       await screen.findByRole("button", { name: "Edit trustee setup" }),
     );
@@ -1906,18 +1991,21 @@ describe("ElectionsWorkspace", () => {
       />,
     );
 
+    await openOwnerDetailTab("readiness");
     expect(
-      await screen.findByTestId("elections-trustee-blocked-panel"),
-    ).toHaveTextContent("Proposal approval is active");
-    expect(
-      screen.getByTestId("elections-ready-to-open-checklist"),
+      await screen.findByTestId("elections-ready-to-open-checklist"),
     ).toHaveTextContent("Accepted trustee roster");
     expect(
       screen.getByTestId("elections-ready-to-open-checklist"),
     ).toHaveTextContent("Key ceremony");
     expect(
-      screen.getByTestId("elections-governed-open-readiness"),
+      await screen.findByTestId("elections-governed-open-readiness"),
     ).toHaveTextContent("Not ready to start the governed open proposal yet.");
+    await openOwnerDetailTab("trustees");
+    expect(
+      await screen.findByTestId("elections-trustee-blocked-panel"),
+    ).toHaveTextContent("Proposal approval is active");
+    await openOwnerDetailTab("auditors");
     expect(
       screen.getByTestId("elections-auditor-access-overview"),
     ).toHaveTextContent("Manage auditor access");
@@ -2157,6 +2245,7 @@ describe("ElectionsWorkspace", () => {
       />,
     );
 
+    await openOwnerDetailTab("lifecycle");
     fireEvent.click(await screen.findByTestId("elections-open-button"));
 
     expect(await screen.findByText("Election opened.")).toBeInTheDocument();
@@ -2234,6 +2323,7 @@ describe("ElectionsWorkspace", () => {
       />,
     );
 
+    await openOwnerDetailTab("lifecycle");
     fireEvent.click(await screen.findByTestId("elections-close-button"));
 
     expect(await screen.findByText("Election closed.")).toBeInTheDocument();
@@ -2316,6 +2406,7 @@ describe("ElectionsWorkspace", () => {
       />,
     );
 
+    await openOwnerDetailTab("lifecycle");
     fireEvent.click(await screen.findByTestId("elections-finalize-button"));
 
     expect(await screen.findByText("Election finalized.")).toBeInTheDocument();
@@ -2393,6 +2484,7 @@ describe("ElectionsWorkspace", () => {
       />,
     );
 
+    await openOwnerDetailTab("governed");
     expect(
       await screen.findByTestId("elections-governed-actions"),
     ).toBeInTheDocument();
@@ -2492,6 +2584,7 @@ describe("ElectionsWorkspace", () => {
       />,
     );
 
+    await openOwnerDetailTab("governed");
     expect(
       await screen.findByTestId("elections-governed-actions"),
     ).toBeInTheDocument();
@@ -2714,6 +2807,7 @@ describe("ElectionsWorkspace", () => {
       />,
     );
 
+    await openOwnerDetailTab("ceremony");
     const ceremonySection = await screen.findByTestId(
       "elections-ceremony-section",
     );
@@ -2847,6 +2941,7 @@ describe("ElectionsWorkspace", () => {
       />,
     );
 
+    await openOwnerDetailTab("ceremony");
     expect(
       await screen.findByTestId("elections-ceremony-warning-card"),
     ).toHaveTextContent("Opening can still proceed when the ceremony is ready");
@@ -2918,6 +3013,7 @@ describe("ElectionsWorkspace", () => {
       />,
     );
 
+    await openOwnerDetailTab("finalization");
     const finalizationSection = await screen.findByTestId(
       "elections-finalization-section",
     );
@@ -3002,6 +3098,7 @@ describe("ElectionsWorkspace", () => {
       />,
     );
 
+    await openOwnerDetailTab("finalization");
     expect(
       await screen.findByTestId("elections-finalization-blocked"),
     ).toHaveTextContent(
@@ -3139,6 +3236,7 @@ describe("ElectionsWorkspace", () => {
       />,
     );
 
+    await openOwnerDetailTab("ceremony");
     expect(
       await screen.findByTestId("elections-ceremony-section"),
     ).toBeInTheDocument();
