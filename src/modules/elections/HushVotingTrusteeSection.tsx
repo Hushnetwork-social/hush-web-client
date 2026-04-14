@@ -6,7 +6,10 @@ import { ArrowRight, Files, ShieldCheck } from 'lucide-react';
 import type { ElectionHubEntryView, GetElectionResponse } from '@/lib/grpc';
 import {
   ElectionCeremonyVersionStatusProto,
+  ElectionFinalizationSessionPurposeProto,
   ElectionHubNextActionHintProto,
+  ElectionGovernedActionTypeProto,
+  ElectionGovernedProposalExecutionStatusProto,
 } from '@/lib/grpc';
 import {
   formatTimestamp,
@@ -15,7 +18,6 @@ import {
   getFinalizationSessionStatusLabel,
   getGovernedActionLabel,
   getGovernedProposalExecutionStatusLabel,
-  getLatestFinalizationSession,
 } from './contracts';
 import {
   AvailabilityCard,
@@ -34,7 +36,32 @@ export function TrusteeWorkspaceSummary({
 }: TrusteeWorkspaceSummaryProps) {
   const latestProposal = useMemo(() => getLatestProposal(detail), [detail]);
   const activeCeremonyVersion = useMemo(() => getActiveCeremonyVersion(detail), [detail]);
-  const latestFinalizationSession = useMemo(() => getLatestFinalizationSession(detail), [detail]);
+  const latestCloseProposal = useMemo(
+    () =>
+      (detail?.GovernedProposals ?? [])
+        .filter((proposal) => proposal.ActionType === ElectionGovernedActionTypeProto.Close)
+        .sort(
+          (left, right) =>
+            (right.CreatedAt?.seconds ?? 0) - (left.CreatedAt?.seconds ?? 0) ||
+            (right.CreatedAt?.nanos ?? 0) - (left.CreatedAt?.nanos ?? 0)
+        )[0] ?? null,
+    [detail?.GovernedProposals]
+  );
+  const latestCloseCountingSession = useMemo(
+    () =>
+      (detail?.FinalizationSessions ?? [])
+        .filter(
+          (session) =>
+            session.SessionPurpose ===
+            ElectionFinalizationSessionPurposeProto.FinalizationSessionPurposeCloseCounting
+        )
+        .sort(
+          (left, right) =>
+            (right.CreatedAt?.seconds ?? 0) - (left.CreatedAt?.seconds ?? 0) ||
+            (right.CreatedAt?.nanos ?? 0) - (left.CreatedAt?.nanos ?? 0)
+        )[0] ?? null,
+    [detail?.FinalizationSessions]
+  );
   const normalizedReason = entry.SuggestedActionReason.trim().toLowerCase();
   const needsGovernedReview =
     entry.SuggestedAction === ElectionHubNextActionHintProto.ElectionHubActionTrusteeApproveGovernedAction;
@@ -43,6 +70,12 @@ export function TrusteeWorkspaceSummary({
   const needsCeremonyFollowUp =
     entry.SuggestedAction === ElectionHubNextActionHintProto.ElectionHubActionNone &&
     normalizedReason.startsWith('continue the trustee ceremony.');
+  const waitingForCloseThreshold =
+    latestCloseProposal &&
+    latestCloseProposal.ExecutionStatus ===
+      ElectionGovernedProposalExecutionStatusProto.WaitingForApprovals &&
+    !latestCloseCountingSession;
+  const shareWorkspaceEnabled = Boolean(latestCloseCountingSession);
   const trusteeSurfaceSummary = useMemo(() => {
     if (needsGovernedReview) {
       return (
@@ -58,6 +91,25 @@ export function TrusteeWorkspaceSummary({
         <>
           <span className="font-semibold text-hush-text-primary">Ceremony follow-up required.</span>{' '}
           {entry.SuggestedActionReason}
+        </>
+      );
+    }
+
+    if (latestCloseCountingSession) {
+      return (
+        <>
+          <span className="font-semibold text-hush-text-primary">Close-counting share active.</span>{' '}
+          The bound tally-release session is ready in the share workspace.
+        </>
+      );
+    }
+
+    if (waitingForCloseThreshold) {
+      return (
+        <>
+          <span className="font-semibold text-hush-text-primary">Waiting for close threshold.</span>{' '}
+          The share workspace remains disabled until the governed close reaches threshold and the
+          bound close-counting session is created.
         </>
       );
     }
@@ -89,9 +141,11 @@ export function TrusteeWorkspaceSummary({
   }, [
     activeCeremonyVersion?.Status,
     entry.SuggestedActionReason,
+    latestCloseCountingSession,
     needsCeremonyFollowUp,
     needsGovernedReview,
     needsTrusteeResultReview,
+    waitingForCloseThreshold,
   ]);
 
   return (
@@ -114,7 +168,19 @@ export function TrusteeWorkspaceSummary({
           </Link>
           <Link
             href={`/elections/${entry.Election.ElectionId}/trustee/finalization`}
-            className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
+            aria-disabled={!shareWorkspaceEnabled}
+            tabIndex={shareWorkspaceEnabled ? undefined : -1}
+            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark ${
+              shareWorkspaceEnabled
+                ? 'bg-hush-purple text-white hover:bg-hush-purple/90'
+                : 'cursor-not-allowed bg-hush-bg-light text-hush-text-accent pointer-events-none'
+            }`}
+            title={
+              shareWorkspaceEnabled
+                ? 'Open the trustee share workspace.'
+                : 'Share submission unlocks only after close reaches threshold and the close-counting session exists.'
+            }
+            data-testid="trustee-share-workspace-action"
           >
             <Files className="h-4 w-4" />
             <span>Share workspace</span>
@@ -151,9 +217,11 @@ export function TrusteeWorkspaceSummary({
         <AvailabilityCard
           label="Latest share session"
           value={
-            latestFinalizationSession
-              ? `${getFinalizationSessionPurposeLabel(latestFinalizationSession.SessionPurpose)} | ${getFinalizationSessionStatusLabel(latestFinalizationSession.Status)}`
-              : 'No finalization session recorded'
+            latestCloseCountingSession
+              ? `${getFinalizationSessionPurposeLabel(latestCloseCountingSession.SessionPurpose)} | ${getFinalizationSessionStatusLabel(latestCloseCountingSession.Status)}`
+              : waitingForCloseThreshold
+                ? 'Waiting for close threshold'
+                : 'No close-counting session recorded'
           }
         />
       </div>

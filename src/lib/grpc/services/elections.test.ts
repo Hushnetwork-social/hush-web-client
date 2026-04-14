@@ -198,8 +198,9 @@ describe('electionsService query proxy', () => {
     expect(response.ReceiptMatchesAcceptedCheckoff).toBe(true);
   });
 
-  it('does not require actor-bound auth headers for public election reads', async () => {
+  it('allows unsigned public election reads when no actor credentials are present', async () => {
     const fetchMock = vi.mocked(fetch);
+    useAppStore.setState({ credentials: null });
     fetchMock.mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -229,6 +230,45 @@ describe('electionsService query proxy', () => {
         method: 'GetElection',
         request: {
           ElectionId: 'election-public-1',
+        },
+      }),
+    });
+  });
+
+  it('signs getElection when actor credentials are present', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          Success: true,
+          ErrorMessage: '',
+          Election: null,
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+    );
+
+    await electionsService.getElection({
+      ElectionId: 'election-public-2',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/elections/query', {
+      method: 'POST',
+      headers: expect.objectContaining({
+        'Content-Type': 'application/json',
+        'x-hush-election-query-signatory': TEST_CREDENTIALS.signingPublicKey,
+        'x-hush-election-query-signed-at': expect.any(String),
+        'x-hush-election-query-signature': expect.any(String),
+      }),
+      body: JSON.stringify({
+        method: 'GetElection',
+        request: {
+          ElectionId: 'election-public-2',
         },
       }),
     });

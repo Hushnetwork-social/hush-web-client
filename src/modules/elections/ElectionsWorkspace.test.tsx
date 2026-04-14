@@ -46,6 +46,7 @@ import {
   ReviewWindowPolicyProto,
   VoteUpdatePolicyProto,
 } from "@/lib/grpc";
+import { useBlockchainStore } from "@/modules/blockchain";
 import { ElectionsWorkspace } from "./ElectionsWorkspace";
 import { createDefaultElectionDraft } from "./contracts";
 import { useElectionsStore } from "./useElectionsStore";
@@ -527,6 +528,7 @@ describe("ElectionsWorkspace", () => {
   });
 
   beforeEach(() => {
+    useBlockchainStore.getState().reset();
     useElectionsStore.getState().reset();
     vi.resetAllMocks();
     vi.spyOn(window, "confirm").mockReturnValue(true);
@@ -2984,6 +2986,283 @@ describe("ElectionsWorkspace", () => {
     expect(screen.getAllByText("Trustee-local steps are complete.").length).toBeGreaterThan(0);
     expect(screen.getByTestId("elections-ceremony-approve-next")).toBeInTheDocument();
     expect(electionsServiceMock.getElectionCeremonyActionView).toHaveBeenCalledTimes(2);
+  });
+
+  it("refreshes governed proposal approvals on the owner tab without a manual reload", async () => {
+    const intervalCallbacks: Array<() => void> = [];
+    vi.spyOn(window, "setInterval").mockImplementation(
+      ((callback: TimerHandler) => {
+        if (typeof callback === "function") {
+          intervalCallbacks.push(callback as () => void);
+        }
+        return 1 as unknown as ReturnType<typeof window.setInterval>;
+      }) as typeof window.setInterval,
+    );
+    vi.spyOn(window, "clearInterval").mockImplementation(
+      (() => undefined) as typeof window.clearInterval,
+    );
+
+    const thresholdElection = createElectionRecord(
+      ElectionLifecycleStateProto.Draft,
+      {
+        GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+        ReviewWindowPolicy:
+          ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+        RequiredApprovalCount: 3,
+      },
+    );
+    const pendingOpenProposal = {
+      Id: "proposal-open-1",
+      ElectionId: "election-1",
+      ActionType: ElectionGovernedActionTypeProto.Open,
+      LifecycleStateAtCreation: ElectionLifecycleStateProto.Draft,
+      ProposedByPublicAddress: "owner-public-key",
+      CreatedAt: timestamp,
+      ExecutionStatus:
+        ElectionGovernedProposalExecutionStatusProto.WaitingForApprovals,
+      ExecutionFailureReason: "",
+      LastExecutionTriggeredByPublicAddress: "",
+    };
+    const initialElectionResponse = createElectionResponse({
+      Election: thresholdElection,
+      LatestDraftSnapshot: createDraftSnapshot({
+        Policy: {
+          ElectionClass: ElectionClassProto.OrganizationalRemoteVoting,
+          BindingStatus: ElectionBindingStatusProto.Binding,
+          GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+          DisclosureMode: ElectionDisclosureModeProto.FinalResultsOnly,
+          ParticipationPrivacyMode:
+            ParticipationPrivacyModeProto.PublicCheckoffAnonymousBallotPrivateChoice,
+          VoteUpdatePolicy: VoteUpdatePolicyProto.SingleSubmissionOnly,
+          EligibilitySourceType:
+            EligibilitySourceTypeProto.OrganizationImportedRoster,
+          EligibilityMutationPolicy:
+            EligibilityMutationPolicyProto.FrozenAtOpen,
+          OutcomeRule: thresholdElection.OutcomeRule,
+          ApprovedClientApplications: [
+            { ApplicationId: "hushsocial", Version: "1.0.0" },
+          ],
+          ProtocolOmegaVersion: "omega-v1.0.0",
+          ReportingPolicy: ReportingPolicyProto.DefaultPhaseOnePackage,
+          ReviewWindowPolicy:
+            ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+          RequiredApprovalCount: 3,
+        },
+      }),
+      GovernedProposals: [pendingOpenProposal],
+      GovernedProposalApprovals: [],
+    });
+    const updatedElectionResponse = createElectionResponse({
+      ...initialElectionResponse,
+      GovernedProposalApprovals: [
+        {
+          Id: "approval-open-1",
+          ProposalId: "proposal-open-1",
+          ElectionId: "election-1",
+          ActionType: ElectionGovernedActionTypeProto.Open,
+          LifecycleStateAtProposalCreation: ElectionLifecycleStateProto.Draft,
+          TrusteeUserAddress: "trustee-a",
+          TrusteeDisplayName: "Alice Trustee",
+          ApprovalNote: "Ready to open.",
+          ApprovedAt: timestamp,
+        },
+      ],
+    });
+
+    electionsServiceMock.getElectionsByOwner.mockResolvedValueOnce({
+      Elections: [
+        createElectionSummary(ElectionLifecycleStateProto.Draft, {
+          GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+        }),
+      ],
+    });
+    electionsServiceMock.getElection
+      .mockResolvedValueOnce(initialElectionResponse)
+      .mockResolvedValueOnce(updatedElectionResponse)
+      .mockResolvedValue(updatedElectionResponse);
+    electionsServiceMock.getElectionCeremonyActionView.mockResolvedValue(
+      createCeremonyActionViewResponse(),
+    );
+
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />,
+    );
+
+    fireEvent.click(await screen.findByTestId("election-summary-election-1"));
+    await openOwnerDetailTab("governed");
+    expect(
+      await screen.findByTestId(
+        `elections-governed-card-${ElectionGovernedActionTypeProto.Open}`,
+      ),
+    ).toHaveTextContent("0 of 3 approvals recorded");
+    await waitFor(() => {
+      expect(intervalCallbacks.length).toBeGreaterThan(0);
+    });
+
+    await act(async () => {
+      intervalCallbacks.forEach((callback) => callback());
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(electionsServiceMock.getElection).toHaveBeenCalledTimes(2);
+    });
+    expect(
+      await screen.findByTestId(
+        `elections-governed-card-${ElectionGovernedActionTypeProto.Open}`,
+      ),
+    ).toHaveTextContent("1 of 3 approvals recorded");
+    expect(screen.getByText("Alice Trustee")).toBeInTheDocument();
+    expect(screen.getByText("Note: Ready to open.")).toBeInTheDocument();
+  });
+
+  it("refreshes governed proposal approvals when block height advances on the owner tab", async () => {
+    vi.spyOn(window, "setInterval").mockImplementation(
+      (() => 1 as unknown as ReturnType<typeof window.setInterval>) as typeof window.setInterval,
+    );
+    vi.spyOn(window, "clearInterval").mockImplementation(
+      (() => undefined) as typeof window.clearInterval,
+    );
+
+    const thresholdElection = createElectionRecord(
+      ElectionLifecycleStateProto.Draft,
+      {
+        GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+        ReviewWindowPolicy:
+          ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+        RequiredApprovalCount: 3,
+      },
+    );
+    const pendingOpenProposal = {
+      Id: "proposal-open-1",
+      ElectionId: "election-1",
+      ActionType: ElectionGovernedActionTypeProto.Open,
+      LifecycleStateAtCreation: ElectionLifecycleStateProto.Draft,
+      ProposedByPublicAddress: "owner-public-key",
+      CreatedAt: timestamp,
+      ExecutionStatus:
+        ElectionGovernedProposalExecutionStatusProto.WaitingForApprovals,
+      ExecutionFailureReason: "",
+      LastExecutionTriggeredByPublicAddress: "",
+    };
+    const firstApproval = {
+      Id: "approval-open-1",
+      ProposalId: "proposal-open-1",
+      ElectionId: "election-1",
+      ActionType: ElectionGovernedActionTypeProto.Open,
+      LifecycleStateAtProposalCreation: ElectionLifecycleStateProto.Draft,
+      TrusteeUserAddress: "trustee-a",
+      TrusteeDisplayName: "Alice Trustee",
+      ApprovalNote: "Ready to open.",
+      ApprovedAt: timestamp,
+    };
+    const secondApproval = {
+      Id: "approval-open-2",
+      ProposalId: "proposal-open-1",
+      ElectionId: "election-1",
+      ActionType: ElectionGovernedActionTypeProto.Open,
+      LifecycleStateAtProposalCreation: ElectionLifecycleStateProto.Draft,
+      TrusteeUserAddress: "trustee-b",
+      TrusteeDisplayName: "Bob Trustee",
+      ApprovalNote: "Threshold almost there.",
+      ApprovedAt: {
+        seconds: timestamp.seconds + 30,
+        nanos: timestamp.nanos,
+      },
+    };
+    const initialElectionResponse = createElectionResponse({
+      Election: thresholdElection,
+      LatestDraftSnapshot: createDraftSnapshot({
+        Policy: {
+          ElectionClass: ElectionClassProto.OrganizationalRemoteVoting,
+          BindingStatus: ElectionBindingStatusProto.Binding,
+          GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+          DisclosureMode: ElectionDisclosureModeProto.FinalResultsOnly,
+          ParticipationPrivacyMode:
+            ParticipationPrivacyModeProto.PublicCheckoffAnonymousBallotPrivateChoice,
+          VoteUpdatePolicy: VoteUpdatePolicyProto.SingleSubmissionOnly,
+          EligibilitySourceType:
+            EligibilitySourceTypeProto.OrganizationImportedRoster,
+          EligibilityMutationPolicy:
+            EligibilityMutationPolicyProto.FrozenAtOpen,
+          OutcomeRule: thresholdElection.OutcomeRule,
+          ApprovedClientApplications: [
+            { ApplicationId: "hushsocial", Version: "1.0.0" },
+          ],
+          ProtocolOmegaVersion: "omega-v1.0.0",
+          ReportingPolicy: ReportingPolicyProto.DefaultPhaseOnePackage,
+          ReviewWindowPolicy:
+            ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+          RequiredApprovalCount: 3,
+        },
+      }),
+      GovernedProposals: [pendingOpenProposal],
+      GovernedProposalApprovals: [firstApproval],
+    });
+    const updatedElectionResponse = createElectionResponse({
+      ...initialElectionResponse,
+      GovernedProposalApprovals: [firstApproval, secondApproval],
+    });
+
+    electionsServiceMock.getElectionsByOwner.mockResolvedValueOnce({
+      Elections: [
+        createElectionSummary(ElectionLifecycleStateProto.Draft, {
+          GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+        }),
+      ],
+    });
+    electionsServiceMock.getElection
+      .mockResolvedValueOnce(initialElectionResponse)
+      .mockResolvedValueOnce(updatedElectionResponse)
+      .mockResolvedValue(updatedElectionResponse);
+    electionsServiceMock.getElectionCeremonyActionView.mockResolvedValue(
+      createCeremonyActionViewResponse(),
+    );
+
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />,
+    );
+
+    fireEvent.click(await screen.findByTestId("election-summary-election-1"));
+    await openOwnerDetailTab("governed");
+    expect(
+      await screen.findByTestId(
+        `elections-governed-card-${ElectionGovernedActionTypeProto.Open}`,
+      ),
+    ).toHaveTextContent("1 of 3 approvals recorded");
+    const initialGetElectionCallCount =
+      electionsServiceMock.getElection.mock.calls.length;
+
+    await act(async () => {
+      useBlockchainStore.getState().setBlockHeight(3934);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(electionsServiceMock.getElection.mock.calls.length).toBeGreaterThan(
+        initialGetElectionCallCount,
+      );
+    });
+    expect(
+      await screen.findByTestId(
+        `elections-governed-card-${ElectionGovernedActionTypeProto.Open}`,
+      ),
+    ).toHaveTextContent("2 of 3 approvals recorded");
+    expect(screen.getByText("Alice Trustee")).toBeInTheDocument();
+    expect(screen.getByText("Bob Trustee")).toBeInTheDocument();
+    expect(screen.getByText("Note: Threshold almost there.")).toBeInTheDocument();
   });
 
   it("shows the weak-trustee warning and keeps trustee-only controls out of the owner workspace", async () => {

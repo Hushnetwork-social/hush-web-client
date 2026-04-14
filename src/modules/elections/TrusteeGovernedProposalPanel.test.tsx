@@ -1,10 +1,12 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ElectionRecordView, GetElectionResponse } from '@/lib/grpc';
 import {
   ElectionBindingStatusProto,
   ElectionClassProto,
   ElectionDisclosureModeProto,
+  ElectionFinalizationSessionPurposeProto,
+  ElectionFinalizationSessionStatusProto,
   ElectionGovernanceModeProto,
   ElectionGovernedActionTypeProto,
   ElectionGovernedProposalExecutionStatusProto,
@@ -17,6 +19,7 @@ import {
   ReviewWindowPolicyProto,
   VoteUpdatePolicyProto,
 } from '@/lib/grpc';
+import { useBlockchainStore } from '@/modules/blockchain/useBlockchainStore';
 import { TrusteeGovernedProposalPanel } from './TrusteeGovernedProposalPanel';
 import { useElectionsStore } from './useElectionsStore';
 
@@ -136,13 +139,55 @@ function createElectionResponse(overrides?: Partial<GetElectionResponse>): GetEl
     CeremonyVersions: [],
     CeremonyTranscriptEvents: [],
     ActiveCeremonyTrusteeStates: [],
+    FinalizationSessions: [],
+    FinalizationShares: [],
+    FinalizationReleaseEvidenceRecords: [],
     ...overrides,
+  };
+}
+
+function createCloseCountingSession() {
+  return {
+    Id: 'close-counting-session-1',
+    ElectionId: 'election-1',
+    GovernedProposalId: 'proposal-1',
+    GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+    SessionPurpose: ElectionFinalizationSessionPurposeProto.FinalizationSessionPurposeCloseCounting,
+    CloseArtifactId: 'close-artifact-1',
+    AcceptedBallotSetHash: 'accepted-ballot-set-hash',
+    FinalEncryptedTallyHash: 'encrypted-tally-hash',
+    TargetTallyId: 'aggregate-tally-1',
+    CeremonySnapshot: {
+      CeremonyVersionId: 'ceremony-1',
+      VersionNumber: 1,
+      ProfileId: 'prod-3of5',
+      TrusteeCount: 5,
+      RequiredApprovalCount: 3,
+      CompletedTrustees: [],
+      TallyPublicKeyFingerprint: 'fingerprint-1',
+    },
+    RequiredShareCount: 3,
+    EligibleTrustees: [
+      {
+        TrusteeUserAddress: 'trustee-a',
+        TrusteeDisplayName: 'Alice Trustee',
+      },
+    ],
+    Status: ElectionFinalizationSessionStatusProto.FinalizationSessionAwaitingShares,
+    CreatedAt: timestamp,
+    CreatedByPublicAddress: 'owner-public-key',
+    CompletedAt: undefined,
+    ReleaseEvidenceId: '',
+    LatestTransactionId: 'transaction-1',
+    LatestBlockHeight: 100,
+    LatestBlockId: 'block-100',
   };
 }
 
 describe('TrusteeGovernedProposalPanel', () => {
   beforeEach(() => {
     useElectionsStore.getState().reset();
+    useBlockchainStore.getState().reset();
     vi.clearAllMocks();
     electionsServiceMock.getElection.mockResolvedValue(createElectionResponse());
     blockchainServiceMock.submitTransaction.mockResolvedValue({ successful: true, message: 'Accepted' });
@@ -208,7 +253,88 @@ describe('TrusteeGovernedProposalPanel', () => {
     );
   });
 
-  it('shows the FEAT-098 follow-up link for finalize proposals', async () => {
+  it('shows the waiting close state after approval and unlocks the counting-share link when the threshold executes', async () => {
+    electionsServiceMock.getElection
+      .mockResolvedValueOnce(
+        createElectionResponse({
+          GovernedProposalApprovals: [
+            {
+              Id: 'approval-1',
+              ProposalId: 'proposal-1',
+              ElectionId: 'election-1',
+              ActionType: ElectionGovernedActionTypeProto.Close,
+              LifecycleStateAtProposalCreation: ElectionLifecycleStateProto.Open,
+              TrusteeUserAddress: 'trustee-a',
+              TrusteeDisplayName: 'Alice Trustee',
+              ApprovalNote: '',
+              ApprovedAt: timestamp,
+            },
+          ],
+        })
+      )
+      .mockResolvedValue(
+        createElectionResponse({
+          GovernedProposals: [
+            {
+              Id: 'proposal-1',
+              ElectionId: 'election-1',
+              ActionType: ElectionGovernedActionTypeProto.Close,
+              LifecycleStateAtCreation: ElectionLifecycleStateProto.Open,
+              ProposedByPublicAddress: 'owner-public-key',
+              CreatedAt: timestamp,
+              ExecutionStatus: ElectionGovernedProposalExecutionStatusProto.ExecutionSucceeded,
+              ExecutionFailureReason: '',
+              LastExecutionTriggeredByPublicAddress: 'owner-public-key',
+            },
+          ],
+          GovernedProposalApprovals: [
+            {
+              Id: 'approval-1',
+              ProposalId: 'proposal-1',
+              ElectionId: 'election-1',
+              ActionType: ElectionGovernedActionTypeProto.Close,
+              LifecycleStateAtProposalCreation: ElectionLifecycleStateProto.Open,
+              TrusteeUserAddress: 'trustee-a',
+              TrusteeDisplayName: 'Alice Trustee',
+              ApprovalNote: '',
+              ApprovedAt: timestamp,
+            },
+          ],
+          FinalizationSessions: [createCloseCountingSession()],
+        })
+      );
+
+    render(
+      <TrusteeGovernedProposalPanel
+        electionId="election-1"
+        proposalId="proposal-1"
+        actorPublicAddress="trustee-a"
+        actorEncryptionPublicKey="trustee-a-encryption-key"
+        actorEncryptionPrivateKey="trustee-a-encryption-private-key"
+        actorSigningPrivateKey="trustee-a-private-key"
+      />
+    );
+
+    expect(await screen.findByTestId('trustee-approval-waiting-threshold')).toHaveTextContent(
+      'Close is still waiting for the remaining trustee approvals.'
+    );
+    expect(screen.getByTestId('trustee-proposal-finalization-link-disabled')).toHaveTextContent(
+      'Waiting for trustee threshold'
+    );
+
+    await act(async () => {
+      useBlockchainStore.getState().setBlockHeight(201);
+    });
+
+    expect(
+      await screen.findByRole('link', { name: 'Continue to counting share' })
+    ).toHaveAttribute('href', '/elections/election-1/trustee/finalization');
+    expect(screen.getByTestId('trustee-approval-share-ready')).toHaveTextContent(
+      'Close reached threshold.'
+    );
+  });
+
+  it('treats finalize as approval-only and removes the share follow-up link', async () => {
     electionsServiceMock.getElection.mockResolvedValueOnce(
       createElectionResponse({
         GovernedProposals: [
@@ -238,11 +364,9 @@ describe('TrusteeGovernedProposalPanel', () => {
       />
     );
 
-    const followUpLink = await screen.findByTestId('trustee-proposal-finalization-link');
-    expect(followUpLink).toHaveAttribute(
-      'href',
-      '/elections/election-1/trustee/finalization'
+    expect(await screen.findByTestId('trustee-proposal-finalize-follow-up')).toHaveTextContent(
+      'Finalize remains approval-only in Protocol Omega.'
     );
-    expect(followUpLink).toHaveTextContent('Open finalization page');
+    expect(screen.queryByTestId('trustee-proposal-finalization-link')).not.toBeInTheDocument();
   });
 });

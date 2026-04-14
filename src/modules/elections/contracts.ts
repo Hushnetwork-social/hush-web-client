@@ -103,7 +103,7 @@ export const GOVERNANCE_OPTIONS: ElectionSelectOption<ElectionGovernanceModeProt
   {
     value: ElectionGovernanceModeProto.TrusteeThreshold,
     label: 'Trustee threshold',
-    description: 'Draft setup is supported now, but open remains blocked until FEAT-096.',
+    description: 'Draft setup is supported now, but open requires governed trustee approval.',
   },
 ];
 
@@ -1240,9 +1240,7 @@ export function getUnsupportedDraftValueMessages(draft: ElectionDraftInput): str
     draft.GovernanceMode === ElectionGovernanceModeProto.TrusteeThreshold &&
     draft.ReviewWindowPolicy !== ReviewWindowPolicyProto.GovernedReviewWindowReserved
   ) {
-    messages.push(
-      'Trustee-threshold drafts should reserve the governed review-window policy for FEAT-096.'
-    );
+    messages.push('Trustee-threshold drafts should reserve the governed review-window policy.');
   }
 
   return messages;

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   ElectionFinalizationReleaseEvidence,
@@ -17,6 +17,8 @@ import {
   ElectionFinalizationShareStatusProto,
   ElectionFinalizationTargetTypeProto,
   ElectionGovernanceModeProto,
+  ElectionGovernedActionTypeProto,
+  ElectionGovernedProposalExecutionStatusProto,
   ElectionLifecycleStateProto,
   EligibilityMutationPolicyProto,
   EligibilitySourceTypeProto,
@@ -26,6 +28,7 @@ import {
   ReviewWindowPolicyProto,
   VoteUpdatePolicyProto,
 } from '@/lib/grpc';
+import { useBlockchainStore } from '@/modules/blockchain/useBlockchainStore';
 import { TrusteeElectionFinalizationPanel } from './TrusteeElectionFinalizationPanel';
 import { useElectionsStore } from './useElectionsStore';
 
@@ -123,9 +126,9 @@ function createFinalizationSession(
   return {
     Id: 'finalization-session-1',
     ElectionId: 'election-1',
-    GovernedProposalId: 'proposal-finalize-1',
+    GovernedProposalId: 'proposal-close-1',
     GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
-    SessionPurpose: ElectionFinalizationSessionPurposeProto.FinalizationSessionPurposeFinalize,
+    SessionPurpose: ElectionFinalizationSessionPurposeProto.FinalizationSessionPurposeCloseCounting,
     CloseArtifactId: 'close-artifact',
     AcceptedBallotSetHash: 'accepted-ballot-set-hash',
     FinalEncryptedTallyHash: 'final-encrypted-tally-hash',
@@ -258,6 +261,7 @@ function createElectionResponse(overrides?: Partial<GetElectionResponse>): GetEl
 describe('TrusteeElectionFinalizationPanel', () => {
   beforeEach(() => {
     useElectionsStore.getState().reset();
+    useBlockchainStore.getState().reset();
     vi.clearAllMocks();
     blockchainServiceMock.submitTransaction.mockResolvedValue({ successful: true, message: 'Accepted' });
     transactionServiceMock.createSubmitElectionFinalizationShareTransaction.mockResolvedValue({
@@ -265,7 +269,7 @@ describe('TrusteeElectionFinalizationPanel', () => {
     });
   });
 
-  it('submits one aggregate-only finalization share bound to the active session', async () => {
+  it('submits one aggregate-only close-counting share bound to the active session', async () => {
     const initialResponse = createElectionResponse();
     const indexedResponse = createElectionResponse({
       FinalizationShares: [createFinalizationShare()],
@@ -347,12 +351,106 @@ describe('TrusteeElectionFinalizationPanel', () => {
     ).toBeInTheDocument();
   });
 
-  it('shows the blocked FEAT-098 reason when no bound session exists yet', async () => {
+  it('shows the waiting threshold state and unlocks the share form when close-counting becomes available', async () => {
+    electionsServiceMock.getElection
+      .mockResolvedValueOnce(
+        createElectionResponse({
+          GovernedProposals: [
+            {
+              Id: 'proposal-close-1',
+              ElectionId: 'election-1',
+              ActionType: ElectionGovernedActionTypeProto.Close,
+              LifecycleStateAtCreation: ElectionLifecycleStateProto.Open,
+              ProposedByPublicAddress: 'owner-public-key',
+              CreatedAt: timestamp,
+              ExecutionStatus: ElectionGovernedProposalExecutionStatusProto.WaitingForApprovals,
+              ExecutionFailureReason: '',
+              LastExecutionTriggeredByPublicAddress: '',
+            },
+          ],
+          GovernedProposalApprovals: [
+            {
+              Id: 'approval-1',
+              ProposalId: 'proposal-close-1',
+              ElectionId: 'election-1',
+              ActionType: ElectionGovernedActionTypeProto.Close,
+              LifecycleStateAtProposalCreation: ElectionLifecycleStateProto.Open,
+              TrusteeUserAddress: 'trustee-a',
+              TrusteeDisplayName: 'Alice Trustee',
+              ApprovalNote: '',
+              ApprovedAt: timestamp,
+            },
+          ],
+          FinalizationSessions: [],
+          FinalizationShares: [],
+          FinalizationReleaseEvidenceRecords: [],
+        })
+      )
+      .mockResolvedValue(
+        createElectionResponse({
+          GovernedProposals: [
+            {
+              Id: 'proposal-close-1',
+              ElectionId: 'election-1',
+              ActionType: ElectionGovernedActionTypeProto.Close,
+              LifecycleStateAtCreation: ElectionLifecycleStateProto.Open,
+              ProposedByPublicAddress: 'owner-public-key',
+              CreatedAt: timestamp,
+              ExecutionStatus: ElectionGovernedProposalExecutionStatusProto.ExecutionSucceeded,
+              ExecutionFailureReason: '',
+              LastExecutionTriggeredByPublicAddress: 'owner-public-key',
+            },
+          ],
+          GovernedProposalApprovals: [
+            {
+              Id: 'approval-1',
+              ProposalId: 'proposal-close-1',
+              ElectionId: 'election-1',
+              ActionType: ElectionGovernedActionTypeProto.Close,
+              LifecycleStateAtProposalCreation: ElectionLifecycleStateProto.Open,
+              TrusteeUserAddress: 'trustee-a',
+              TrusteeDisplayName: 'Alice Trustee',
+              ApprovalNote: '',
+              ApprovedAt: timestamp,
+            },
+          ],
+          FinalizationSessions: [createFinalizationSession()],
+          FinalizationShares: [],
+          FinalizationReleaseEvidenceRecords: [],
+        })
+      );
+
+    render(
+      <TrusteeElectionFinalizationPanel
+        electionId="election-1"
+        actorPublicAddress="trustee-a"
+        actorEncryptionPublicKey="trustee-encryption-key"
+        actorEncryptionPrivateKey="trustee-encryption-private-key"
+        actorSigningPrivateKey="trustee-signing-private-key"
+      />
+    );
+
+    expect(await screen.findByTestId('trustee-finalization-blocked')).toHaveTextContent(
+      'Your close approval is recorded. Share submission stays disabled until the proposal reaches threshold'
+    );
+    expect(screen.queryByTestId('trustee-finalization-submit-button')).not.toBeInTheDocument();
+
+    await act(async () => {
+      useBlockchainStore.getState().setBlockHeight(202);
+    });
+
+    expect(await screen.findByTestId('trustee-finalization-submit-button')).toBeEnabled();
+    expect(screen.getByText('Close Counting Share Status')).toBeInTheDocument();
+  });
+
+  it('blocks non-close-counting share sessions because finalize is approval-only', async () => {
     electionsServiceMock.getElection.mockResolvedValueOnce(
       createElectionResponse({
-        FinalizationSessions: [],
-        FinalizationShares: [],
-        FinalizationReleaseEvidenceRecords: [],
+        FinalizationSessions: [
+          createFinalizationSession({
+            SessionPurpose: ElectionFinalizationSessionPurposeProto.FinalizationSessionPurposeFinalize,
+          }),
+        ],
       })
     );
 
@@ -366,12 +464,9 @@ describe('TrusteeElectionFinalizationPanel', () => {
       />
     );
 
-    expect(await screen.findByTestId('trustee-finalization-blocked')).toHaveTextContent(
-      'Finalize remains unavailable until tally readiness is recorded.'
-    );
-    expect(screen.getByTestId('trustee-finalization-blocked').className).not.toContain(
-      'border-hush-bg-light'
-    );
+    expect(
+      await screen.findByTestId('trustee-finalization-non-closecounting')
+    ).toHaveTextContent('Only close-counting sessions accept trustee shares in this rollout.');
     expect(screen.queryByTestId('trustee-finalization-submit-button')).not.toBeInTheDocument();
   });
 });

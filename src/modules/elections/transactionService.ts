@@ -339,12 +339,13 @@ async function resolveElectionEnvelopePrivateKey(
   actorPrivateEncryptKeyHex: string | undefined,
   options?: {
     allowBootstrapEnvelopeAccess?: boolean;
+    forceFreshEnvelopeAccess?: boolean;
   }
 ): Promise<{ electionId: string; electionPrivateEncryptKeyHex: string; electionPublicEncryptKeyHex: string }> {
   const resolvedElectionId = electionId ?? generateGuid();
 
   let electionPrivateEncryptKeyHex: string;
-  if (!electionId) {
+  if (!electionId || options?.forceFreshEnvelopeAccess) {
     const generatedPrivateKey = secp256k1.utils.randomSecretKey();
     electionPrivateEncryptKeyHex = bytesToHex(generatedPrivateKey);
   } else {
@@ -542,7 +543,7 @@ export async function createClaimElectionRosterEntryTransaction(
     },
     signingPrivateKeyHex,
     {
-      allowBootstrapEnvelopeAccess: true,
+      forceFreshEnvelopeAccess: true,
     }
   );
 
@@ -598,6 +599,9 @@ export async function createRegisterElectionVotingCommitmentTransaction(
         CommitmentHash: commitmentHash,
       },
       signingPrivateKeyHex,
+      {
+        forceFreshEnvelopeAccess: true,
+      }
     );
 
   return {
@@ -641,6 +645,9 @@ export async function createAcceptElectionBallotCastTransaction(
         TallyPublicKeyFingerprint: tallyPublicKeyFingerprint,
       },
       signingPrivateKeyHex,
+      {
+        forceFreshEnvelopeAccess: true,
+      }
     );
 
   return {

@@ -484,7 +484,7 @@ describe('transactionService encrypted election envelope helpers', () => {
     expect(decryptedPayload.ActionPayload.ApprovalNote).toBe('Looks good');
   });
 
-  it('bootstraps a claim-link envelope when stored election access does not exist yet', async () => {
+  it('creates a claim-link envelope without reading stored election envelope access', async () => {
     const voterSigningPrivateKeyHex = '7777777777777777777777777777777777777777777777777777777777777777';
     const voterEncryptionPrivateKeyHex = '8888888888888888888888888888888888888888888888888888888888888888';
     const nodeEncryptionPrivateKeyHex = '3333333333333333333333333333333333333333333333333333333333333333';
@@ -502,12 +502,6 @@ describe('transactionService encrypted election envelope helpers', () => {
       NodePublicEncryptAddress: nodeEncryptionPublicKey,
       ElectionEnvelopeVersion: 'election-envelope-v1',
     });
-    electionsServiceMock.getElectionEnvelopeAccess.mockResolvedValue({
-      Success: false,
-      ErrorMessage: 'No election envelope access was found for actor.',
-      ActorEncryptedElectionPrivateKey: '',
-    });
-
     const { signedTransaction } = await createClaimElectionRosterEntryTransaction(
       'election-123',
       voterSigningPublicKey,
@@ -550,13 +544,13 @@ describe('transactionService encrypted election envelope helpers', () => {
     expect(decryptedPayload.ActionPayload.ActorPublicAddress).toBe(voterSigningPublicKey);
     expect(decryptedPayload.ActionPayload.OrganizationVoterId).toBe('10042');
     expect(decryptedPayload.ActionPayload.VerificationCode).toBe('1111');
+    expect(electionsServiceMock.getElectionEnvelopeAccess).not.toHaveBeenCalled();
   });
 
-  it('creates a register-voting-commitment envelope using the existing election key wrappers', async () => {
+  it('creates a register-voting-commitment envelope without reading stored election envelope access', async () => {
     const voterSigningPrivateKeyHex = '7777777777777777777777777777777777777777777777777777777777777777';
     const voterEncryptionPrivateKeyHex = '8888888888888888888888888888888888888888888888888888888888888888';
     const nodeEncryptionPrivateKeyHex = '3333333333333333333333333333333333333333333333333333333333333333';
-    const electionPrivateKeyHex = '5555555555555555555555555555555555555555555555555555555555555555';
     const voterSigningPublicKey = bytesToHex(
       secp256k1.getPublicKey(hexToBytes(voterSigningPrivateKeyHex), true),
     );
@@ -566,19 +560,9 @@ describe('transactionService encrypted election envelope helpers', () => {
     const nodeEncryptionPublicKey = bytesToHex(
       secp256k1.getPublicKey(hexToBytes(nodeEncryptionPrivateKeyHex), true),
     );
-    const actorEncryptedElectionPrivateKey = await eciesEncrypt(
-      electionPrivateKeyHex,
-      voterEncryptionPublicKey,
-    );
-
     blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
       NodePublicEncryptAddress: nodeEncryptionPublicKey,
       ElectionEnvelopeVersion: 'election-envelope-v1',
-    });
-    electionsServiceMock.getElectionEnvelopeAccess.mockResolvedValue({
-      Success: true,
-      ErrorMessage: '',
-      ActorEncryptedElectionPrivateKey: actorEncryptedElectionPrivateKey,
     });
 
     const { signedTransaction } = await createRegisterElectionVotingCommitmentTransaction(
@@ -619,13 +603,13 @@ describe('transactionService encrypted election envelope helpers', () => {
     expect(decryptedPayload.ActionType).toBe('register_voting_commitment');
     expect(decryptedPayload.ActionPayload.ActorPublicAddress).toBe(voterSigningPublicKey);
     expect(decryptedPayload.ActionPayload.CommitmentHash).toBe('commitment-hash-1');
+    expect(electionsServiceMock.getElectionEnvelopeAccess).not.toHaveBeenCalled();
   });
 
-  it('creates an accept-ballot-cast envelope with the FEAT-099 cast boundary fields', async () => {
+  it('creates an accept-ballot-cast envelope with the FEAT-099 cast boundary fields without reading stored election envelope access', async () => {
     const voterSigningPrivateKeyHex = '7777777777777777777777777777777777777777777777777777777777777777';
     const voterEncryptionPrivateKeyHex = '8888888888888888888888888888888888888888888888888888888888888888';
     const nodeEncryptionPrivateKeyHex = '3333333333333333333333333333333333333333333333333333333333333333';
-    const electionPrivateKeyHex = '5555555555555555555555555555555555555555555555555555555555555555';
     const voterSigningPublicKey = bytesToHex(
       secp256k1.getPublicKey(hexToBytes(voterSigningPrivateKeyHex), true),
     );
@@ -635,19 +619,9 @@ describe('transactionService encrypted election envelope helpers', () => {
     const nodeEncryptionPublicKey = bytesToHex(
       secp256k1.getPublicKey(hexToBytes(nodeEncryptionPrivateKeyHex), true),
     );
-    const actorEncryptedElectionPrivateKey = await eciesEncrypt(
-      electionPrivateKeyHex,
-      voterEncryptionPublicKey,
-    );
-
     blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
       NodePublicEncryptAddress: nodeEncryptionPublicKey,
       ElectionEnvelopeVersion: 'election-envelope-v1',
-    });
-    electionsServiceMock.getElectionEnvelopeAccess.mockResolvedValue({
-      Success: true,
-      ErrorMessage: '',
-      ActorEncryptedElectionPrivateKey: actorEncryptedElectionPrivateKey,
     });
 
     const { signedTransaction } = await createAcceptElectionBallotCastTransaction(
@@ -712,6 +686,7 @@ describe('transactionService encrypted election envelope helpers', () => {
     expect(decryptedPayload.ActionPayload.CeremonyVersionId).toBe('ceremony-version-5');
     expect(decryptedPayload.ActionPayload.DkgProfileId).toBe('dkg-prod-1of1');
     expect(decryptedPayload.ActionPayload.TallyPublicKeyFingerprint).toBe('tally-fingerprint-9');
+    expect(electionsServiceMock.getElectionEnvelopeAccess).not.toHaveBeenCalled();
   });
 
   it('creates an encrypted aggregate-only finalization share envelope for a trustee actor', async () => {

@@ -227,13 +227,13 @@ describe('BlockHeightSyncable', () => {
     expect(useBlockchainStore.getState().blockHeight).toBe(201);
   });
 
-  it('should set error state on failure', async () => {
+  it('should set error state on failure without failing the sync loop', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 503,
     });
 
-    await expect(syncable.syncTask()).rejects.toThrow();
+    await expect(syncable.syncTask()).resolves.toBeUndefined();
 
     const state = useBlockchainStore.getState();
     expect(state.lastError).toBe('Failed to fetch block height: HTTP 503');

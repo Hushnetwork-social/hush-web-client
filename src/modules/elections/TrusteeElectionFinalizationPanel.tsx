@@ -1,7 +1,7 @@
 "use client";
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ArrowLeft, CheckCircle2, Loader2, ShieldAlert } from 'lucide-react';
 import {
   ElectionFinalizationSessionPurposeProto,
@@ -9,7 +9,9 @@ import {
   ElectionFinalizationShareStatusProto,
   ElectionFinalizationTargetTypeProto,
   ElectionGovernedActionTypeProto,
+  ElectionGovernedProposalExecutionStatusProto,
 } from '@/lib/grpc';
+import { useBlockchainStore } from '@/modules/blockchain/useBlockchainStore';
 import {
   formatArtifactValue,
   formatTimestamp,
@@ -60,6 +62,8 @@ export function TrusteeElectionFinalizationPanel({
   } = useElectionsStore();
   const [shareVersion, setShareVersion] = useState('share-v1');
   const [shareMaterial, setShareMaterial] = useState('aggregate-finalization-share');
+  const blockHeight = useBlockchainStore((state) => state.blockHeight);
+  const lastObservedBlockHeightRef = useRef(blockHeight);
 
   useEffect(() => {
     void loadElection(electionId);
@@ -87,12 +91,20 @@ export function TrusteeElectionFinalizationPanel({
       ) ?? null,
     [selectedElection]
   );
+  const closeActionState = useMemo(
+    () =>
+      getGovernedActionViewStates(selectedElection ?? null).find(
+        (state) => state.actionType === ElectionGovernedActionTypeProto.Close
+      ) ?? null,
+    [selectedElection]
+  );
   const sessionPurpose =
     session?.SessionPurpose ??
     ElectionFinalizationSessionPurposeProto.FinalizationSessionPurposeFinalize;
   const isCloseCountingSession =
     sessionPurpose ===
     ElectionFinalizationSessionPurposeProto.FinalizationSessionPurposeCloseCounting;
+  const closeProposalId = closeActionState?.proposal?.Id ?? null;
   const eligibleTrustee = useMemo(
     () =>
       session?.EligibleTrustees.find(
@@ -114,12 +126,52 @@ export function TrusteeElectionFinalizationPanel({
     () => getAcceptedFinalizationShareCount(selectedElection, session?.Id),
     [selectedElection, session?.Id]
   );
+  const hasRecordedCloseApproval = useMemo(() => {
+    if (!closeProposalId) {
+      return false;
+    }
+
+    return (selectedElection?.GovernedProposalApprovals ?? []).some(
+      (approval) =>
+        approval.ProposalId === closeProposalId &&
+        approval.TrusteeUserAddress === actorPublicAddress
+    );
+  }, [actorPublicAddress, closeProposalId, selectedElection?.GovernedProposalApprovals]);
+  const waitingForCloseThreshold =
+    !session &&
+    closeActionState?.proposal?.ExecutionStatus ===
+      ElectionGovernedProposalExecutionStatusProto.WaitingForApprovals;
+  const waitingForCloseCountingSession =
+    !session &&
+    closeActionState?.proposal?.ExecutionStatus ===
+      ElectionGovernedProposalExecutionStatusProto.ExecutionSucceeded;
+  const waitingForShares =
+    Boolean(session) &&
+    session!.Status === ElectionFinalizationSessionStatusProto.FinalizationSessionAwaitingShares &&
+    !releaseEvidence;
   const canSubmit =
     Boolean(session) &&
+    isCloseCountingSession &&
     session!.Status === ElectionFinalizationSessionStatusProto.FinalizationSessionAwaitingShares &&
     Boolean(eligibleTrustee) &&
     actorShare?.Status !== ElectionFinalizationShareStatusProto.FinalizationShareAccepted &&
     !releaseEvidence;
+  const shouldRefreshOnBlockAdvance =
+    waitingForCloseThreshold || waitingForCloseCountingSession || waitingForShares;
+
+  useEffect(() => {
+    if (blockHeight <= 0) {
+      lastObservedBlockHeightRef.current = blockHeight;
+      return;
+    }
+
+    if (!shouldRefreshOnBlockAdvance || blockHeight === lastObservedBlockHeightRef.current) {
+      return;
+    }
+
+    lastObservedBlockHeightRef.current = blockHeight;
+    void loadElection(electionId, { silent: true });
+  }, [blockHeight, electionId, loadElection, shouldRefreshOnBlockAdvance]);
 
   const handleSubmit = async () => {
     if (!session || !shareIndex) {
@@ -163,12 +215,11 @@ export function TrusteeElectionFinalizationPanel({
             <ArrowLeft className="h-4 w-4" />
             <span>Back to election</span>
           </Link>
-          <h1 className="text-2xl font-semibold">
-            {isCloseCountingSession ? 'Trustee Close Counting Share' : 'Trustee Finalization Share'}
-          </h1>
+          <h1 className="text-2xl font-semibold">Trustee Share Workspace</h1>
           <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
-            Submit one trustee share for the exact aggregate-tally release target. This page does
-            not provide arbitrary ballot-inspection or single-ballot decryption controls.
+            {isCloseCountingSession
+              ? 'Submit one trustee share for the exact aggregate-tally release target. This page does not provide arbitrary ballot-inspection or single-ballot decryption controls.'
+              : 'This workspace unlocks only for the exact close-counting session after a governed close reaches trustee threshold. Finalize remains approval-only.'}
           </p>
         </div>
 
@@ -233,7 +284,16 @@ export function TrusteeElectionFinalizationPanel({
                 <div className="rounded-xl bg-[#151c33] px-3 py-2 text-xs text-hush-text-accent shadow-[inset_0_1px_0_rgba(255,255,255,0.02),0_10px_20px_rgba(0,0,0,0.12)]">
                   {session
                     ? `${getFinalizationSessionPurposeLabel(session.SessionPurpose)} | ${getFinalizationSessionStatusLabel(session.Status)}`
-                    : finalizeActionState?.reason || 'No active share session'}
+                    : waitingForCloseThreshold
+                      ? hasRecordedCloseApproval
+                        ? 'Waiting for trustee threshold'
+                        : 'Close approval still pending'
+                      : waitingForCloseCountingSession
+                        ? 'Indexing close-counting session'
+                        : finalizeActionState?.proposal?.ExecutionStatus ===
+                              ElectionGovernedProposalExecutionStatusProto.WaitingForApprovals
+                          ? 'Finalize is approval-only'
+                          : closeActionState?.reason || finalizeActionState?.reason || 'No active share session'}
                 </div>
               </div>
 
@@ -314,12 +374,11 @@ export function TrusteeElectionFinalizationPanel({
 
             <section className={sectionClass} data-testid="trustee-finalization-panel">
               <div className="mb-4">
-                <h2 className="text-lg font-semibold">
-                  {isCloseCountingSession ? 'Close Counting Share Submission' : 'Aggregate Share Submission'}
-                </h2>
+                <h2 className="text-lg font-semibold">Close Counting Share Status</h2>
                 <p className="mt-1 text-sm text-hush-text-accent">
-                  Submit one exact share for the bound session. The client fixes the
-                  target to the final aggregate tally and does not expose a single-ballot option.
+                  {isCloseCountingSession
+                    ? 'Submit one exact share for the bound close-counting session. The client fixes the target to the final aggregate tally and does not expose a single-ballot option.'
+                    : 'This workspace reflects the second protocol step only after governed close threshold execution creates the bound close-counting session.'}
                 </p>
               </div>
 
@@ -328,8 +387,26 @@ export function TrusteeElectionFinalizationPanel({
                   className="rounded-2xl bg-hush-bg-dark/75 px-4 py-3 text-sm text-hush-text-accent shadow-inner shadow-black/15"
                   data-testid="trustee-finalization-blocked"
                 >
-                  {finalizeActionState?.reason ||
-                    'A close-counting or finalization share session is not available for this election yet.'}
+                  {waitingForCloseThreshold
+                    ? hasRecordedCloseApproval
+                      ? 'Your close approval is recorded. Share submission stays disabled until the proposal reaches threshold and the server creates the bound close-counting session.'
+                      : 'Close approval is still pending. A close-counting share can be submitted only after the proposal reaches trustee threshold.'
+                    : waitingForCloseCountingSession
+                      ? 'Close reached trustee threshold. The server is indexing the bound close-counting session now, and this workspace refreshes automatically as new blocks arrive.'
+                      : finalizeActionState?.proposal?.ExecutionStatus ===
+                            ElectionGovernedProposalExecutionStatusProto.WaitingForApprovals
+                        ? 'Finalize is approval-only in Protocol Omega. No trustee share is requested for that action.'
+                        : closeActionState?.reason ||
+                          finalizeActionState?.reason ||
+                          'A close-counting share session is not available for this election yet.'}
+                </div>
+              ) : !isCloseCountingSession ? (
+                <div
+                  className="rounded-2xl bg-hush-bg-dark/75 px-4 py-3 text-sm text-hush-text-accent shadow-inner shadow-black/15"
+                  data-testid="trustee-finalization-non-closecounting"
+                >
+                  Only close-counting sessions accept trustee shares in this rollout. Finalize is
+                  approval-only and does not unlock a share submission path.
                 </div>
               ) : !eligibleTrustee ? (
                 <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-100">
@@ -403,7 +480,7 @@ export function TrusteeElectionFinalizationPanel({
                       ) : (
                         <CheckCircle2 className="h-4 w-4" />
                       )}
-                      <span>{isCloseCountingSession ? 'Submit counting share' : 'Submit aggregate share'}</span>
+                      <span>Submit counting share</span>
                     </button>
                   </div>
                 </>

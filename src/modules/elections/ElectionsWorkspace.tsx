@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type { FormEvent, ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   ArrowLeft,
@@ -26,6 +26,7 @@ import {
   type ElectionDraftInput,
   ElectionGovernedActionTypeProto,
   ElectionGovernanceModeProto,
+  ElectionGovernedProposalExecutionStatusProto,
   type Identity,
   type ResolveElectionTrusteeInvitationRequest,
   ElectionTrusteeInvitationStatusProto,
@@ -33,6 +34,7 @@ import {
   OutcomeRuleKindProto,
 } from "@/lib/grpc";
 import { identityService } from "@/lib/grpc/services/identity";
+import { useBlockchainStore } from "@/modules/blockchain";
 import {
   BINDING_OPTIONS,
   GOVERNANCE_OPTIONS,
@@ -466,6 +468,8 @@ export function ElectionsWorkspace({
     ElectionWarningCodeProto[]
   >([]);
   const [trusteeApprovalEditor, setTrusteeApprovalEditor] = useState(1);
+  const ownerRefreshInFlightRef = useRef(false);
+  const blockHeight = useBlockchainStore((state) => state.blockHeight);
 
   const election = selectedElection?.Election;
   const latestDraftSnapshot = selectedElection?.LatestDraftSnapshot;
@@ -498,6 +502,15 @@ export function ElectionsWorkspace({
       governedActionStates.find(
         (state) => state.actionType === ElectionGovernedActionTypeProto.Open,
       ) ?? null,
+    [governedActionStates],
+  );
+  const hasPendingGovernedApprovalProposal = useMemo(
+    () =>
+      governedActionStates.some(
+        (state) =>
+          state.proposal?.ExecutionStatus ===
+          ElectionGovernedProposalExecutionStatusProto.WaitingForApprovals,
+      ),
     [governedActionStates],
   );
   const activeCeremonyVersion = useMemo(
@@ -1125,38 +1138,70 @@ export function ElectionsWorkspace({
     selectedElectionId,
   ]);
 
+  const refreshOwnerContext = useCallback(
+    async (options?: { includeCeremonyContext?: boolean }) => {
+      if (
+        !selectedElectionId ||
+        election?.GovernanceMode !== ElectionGovernanceModeProto.TrusteeThreshold
+      ) {
+        return;
+      }
+
+      if (ownerRefreshInFlightRef.current) {
+        return;
+      }
+
+      ownerRefreshInFlightRef.current = true;
+      try {
+        const refreshTasks: Array<Promise<unknown>> = [
+          loadElection(selectedElectionId, { silent: true }),
+        ];
+        if (options?.includeCeremonyContext) {
+          refreshTasks.push(
+            loadCeremonyActionView(ownerPublicAddress, selectedElectionId, {
+              silent: true,
+            }),
+          );
+        }
+        await Promise.all(refreshTasks);
+      } finally {
+        ownerRefreshInFlightRef.current = false;
+      }
+    },
+    [
+      election?.GovernanceMode,
+      loadCeremonyActionView,
+      loadElection,
+      ownerPublicAddress,
+      selectedElectionId,
+    ],
+  );
+
   useEffect(() => {
+    const refreshableOwnerTabs = [
+      "ceremony",
+      "readiness",
+      "lifecycle",
+      "governed",
+    ] as const;
+    const ceremonyRefreshTabs = ["ceremony", "readiness", "lifecycle"] as const;
+
     if (
       !selectedElectionId ||
       election?.GovernanceMode !== ElectionGovernanceModeProto.TrusteeThreshold ||
       !activeOwnerTab ||
-      !["ceremony", "readiness", "lifecycle"].includes(activeOwnerTab)
+      !refreshableOwnerTabs.includes(activeOwnerTab)
     ) {
       return;
     }
 
-    let refreshInFlight = false;
-
-    const refreshCeremonyContext = async () => {
-      if (refreshInFlight) {
-        return;
-      }
-
-      refreshInFlight = true;
-      try {
-        await Promise.all([
-          loadElection(selectedElectionId, { silent: true }),
-          loadCeremonyActionView(ownerPublicAddress, selectedElectionId, {
-            silent: true,
-          }),
-        ]);
-      } finally {
-        refreshInFlight = false;
-      }
-    };
+    const shouldRefreshCeremonyContext =
+      ceremonyRefreshTabs.includes(activeOwnerTab);
 
     const intervalId = window.setInterval(() => {
-      void refreshCeremonyContext();
+      void refreshOwnerContext({
+        includeCeremonyContext: shouldRefreshCeremonyContext,
+      });
     }, CEREMONY_REFRESH_INTERVAL_MS);
 
     return () => {
@@ -1165,9 +1210,25 @@ export function ElectionsWorkspace({
   }, [
     activeOwnerTab,
     election?.GovernanceMode,
-    loadCeremonyActionView,
-    loadElection,
-    ownerPublicAddress,
+    refreshOwnerContext,
+    selectedElectionId,
+  ]);
+
+  useEffect(() => {
+    if (
+      blockHeight <= 0 ||
+      activeOwnerTab !== "governed" ||
+      !hasPendingGovernedApprovalProposal
+    ) {
+      return;
+    }
+
+    void refreshOwnerContext();
+  }, [
+    activeOwnerTab,
+    blockHeight,
+    hasPendingGovernedApprovalProposal,
+    refreshOwnerContext,
     selectedElectionId,
   ]);
 
@@ -3107,7 +3168,7 @@ export function ElectionsWorkspace({
                       return (
                         <article
                           key={state.actionType}
-                          className="rounded-2xl border border-hush-bg-light bg-hush-bg-dark/80 p-4"
+                          className="rounded-2xl bg-hush-bg-dark/80 p-4"
                           data-testid={`elections-governed-card-${state.actionType}`}
                         >
                           <div className="flex items-start justify-between gap-3">
@@ -3134,7 +3195,7 @@ export function ElectionsWorkspace({
                           </p>
 
                           {state.proposal && (
-                            <div className="mt-4 rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-3 text-xs text-hush-text-accent">
+                            <div className="mt-4 rounded-xl bg-hush-bg-dark px-3 py-3 text-xs text-hush-text-accent">
                               <div>
                                 Proposal id:{" "}
                                 <span className="font-mono text-hush-text-primary">
@@ -3155,7 +3216,7 @@ export function ElectionsWorkspace({
                           )}
 
                           {state.approvals.length > 0 && (
-                            <div className="mt-4 rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-3">
+                            <div className="mt-4 rounded-xl bg-hush-bg-dark px-3 py-3">
                               <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
                                 Recorded approvals
                               </div>
@@ -3163,7 +3224,7 @@ export function ElectionsWorkspace({
                                 {state.approvals.map((approval) => (
                                   <div
                                     key={approval.Id}
-                                    className="rounded-xl border border-hush-bg-light/60 px-3 py-2 text-xs text-hush-text-accent"
+                                    className="rounded-lg bg-hush-bg-element/80 px-3 py-2 text-xs text-hush-text-accent"
                                   >
                                     <div className="font-medium text-hush-text-primary">
                                       {approval.TrusteeDisplayName ||
@@ -3231,7 +3292,7 @@ export function ElectionsWorkspace({
                             {state.proposal && (
                               <Link
                                 href={`/elections/${state.proposal.ElectionId}/trustee/proposal/${state.proposal.Id}`}
-                                className="inline-flex items-center gap-2 rounded-xl border border-hush-bg-light px-4 py-2 text-sm transition-colors hover:border-hush-purple"
+                                className="inline-flex items-center gap-2 rounded-xl bg-hush-bg-dark px-4 py-2 text-sm text-hush-text-primary transition-colors hover:bg-hush-bg-dark/90"
                               >
                                 <span>Open trustee approval page</span>
                               </Link>

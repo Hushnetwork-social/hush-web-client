@@ -10,7 +10,7 @@
 import type { ISyncable } from '@/lib/sync';
 import { fetchBlockHeight } from './BlockchainService';
 import { useBlockchainStore } from './useBlockchainStore';
-import { debugLog, debugError } from '@/lib/debug-logger';
+import { debugLog, debugWarn } from '@/lib/debug-logger';
 
 export class BlockHeightSyncable implements ISyncable {
   name = 'BlockHeightSyncable';
@@ -28,9 +28,8 @@ export class BlockHeightSyncable implements ISyncable {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
-      debugError(`[BlockHeightSyncable] Sync failed: ${message}`);
+      debugWarn(`[BlockHeightSyncable] Sync failed: ${message}`);
       useBlockchainStore.getState().setError(message);
-      throw error; // Re-throw so SyncProvider can track failures
     }
   }
 }

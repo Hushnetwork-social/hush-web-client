@@ -2,6 +2,10 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   ElectionCeremonyVersionStatusProto,
+  ElectionFinalizationSessionPurposeProto,
+  ElectionFinalizationSessionStatusProto,
+  ElectionGovernedActionTypeProto,
+  ElectionGovernedProposalExecutionStatusProto,
   ElectionHubNextActionHintProto,
   ElectionLifecycleStateProto,
 } from '@/lib/grpc';
@@ -63,9 +67,13 @@ describe('TrusteeWorkspaceSummary', () => {
       'href',
       '/elections/election-trustee-voter/trustee/ceremony'
     );
-    expect(screen.getByRole('link', { name: 'Share workspace' })).toHaveAttribute(
+    expect(screen.getByTestId('trustee-share-workspace-action')).toHaveAttribute(
       'href',
       '/elections/election-trustee-voter/trustee/finalization'
+    );
+    expect(screen.getByTestId('trustee-share-workspace-action')).toHaveAttribute(
+      'aria-disabled',
+      'true'
     );
   });
 
@@ -98,5 +106,129 @@ describe('TrusteeWorkspaceSummary', () => {
 
     expect(screen.getByTestId('hush-voting-trustee-toggle')).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByTestId('hush-voting-section-trustee')).toHaveTextContent('Ceremony follow-up required.');
+  });
+
+  it('shows the waiting close-threshold summary and disables the share workspace until the session exists', () => {
+    const entry = createHubEntry(
+      'election-trustee-close',
+      ElectionLifecycleStateProto.Open,
+      'Trustee Close Election',
+      {
+        ActorRoles: {
+          IsOwnerAdmin: false,
+          IsTrustee: true,
+          IsVoter: false,
+          IsDesignatedAuditor: false,
+        },
+        SuggestedAction: ElectionHubNextActionHintProto.ElectionHubActionNone,
+        SuggestedActionReason: 'No immediate action is required for this election.',
+        HasUnofficialResult: false,
+        HasOfficialResult: false,
+      }
+    );
+
+    const detail = createDetail(
+      'election-trustee-close',
+      ElectionLifecycleStateProto.Open,
+      'Trustee Close Election',
+      {
+        Election: {
+          ...createDetail(
+            'election-trustee-close',
+            ElectionLifecycleStateProto.Open,
+            'Trustee Close Election'
+          ).Election,
+          GovernanceMode: 1,
+        },
+        GovernedProposals: [
+          {
+            Id: 'proposal-close-1',
+            ElectionId: 'election-trustee-close',
+            ActionType: ElectionGovernedActionTypeProto.Close,
+            LifecycleStateAtCreation: ElectionLifecycleStateProto.Open,
+            ProposedByPublicAddress: 'owner-address',
+            CreatedAt: timestamp,
+            ExecutionStatus: ElectionGovernedProposalExecutionStatusProto.WaitingForApprovals,
+            ExecutionFailureReason: '',
+            LastExecutionTriggeredByPublicAddress: '',
+          },
+        ],
+      }
+    );
+
+    render(<TrusteeWorkspaceSummary entry={entry} detail={detail} />);
+
+    expect(screen.getByTestId('hush-voting-section-trustee')).toHaveTextContent(
+      'Waiting for close threshold.'
+    );
+    expect(screen.getByTestId('trustee-share-workspace-action')).toHaveAttribute(
+      'aria-disabled',
+      'true'
+    );
+    expect(screen.getByTestId('hush-voting-section-trustee')).toHaveTextContent(
+      'Waiting for close threshold'
+    );
+  });
+
+  it('enables the share workspace once a close-counting session exists', () => {
+    const entry = createHubEntry(
+      'election-trustee-share',
+      ElectionLifecycleStateProto.Closed,
+      'Trustee Share Election',
+      {
+        ActorRoles: {
+          IsOwnerAdmin: false,
+          IsTrustee: true,
+          IsVoter: false,
+          IsDesignatedAuditor: false,
+        },
+        SuggestedAction: ElectionHubNextActionHintProto.ElectionHubActionTrusteeReviewResult,
+        SuggestedActionReason: 'Trustee-specific result review is ready.',
+        HasUnofficialResult: true,
+        HasOfficialResult: false,
+      }
+    );
+
+    const detail = createDetail(
+      'election-trustee-share',
+      ElectionLifecycleStateProto.Closed,
+      'Trustee Share Election',
+      {
+        FinalizationSessions: [
+          {
+            Id: 'session-close-1',
+            ElectionId: 'election-trustee-share',
+            GovernedProposalId: 'proposal-close-1',
+            GovernanceMode: 1,
+            SessionPurpose: ElectionFinalizationSessionPurposeProto.FinalizationSessionPurposeCloseCounting,
+            CloseArtifactId: 'close-artifact-1',
+            AcceptedBallotSetHash: 'accepted-ballot-set-hash',
+            FinalEncryptedTallyHash: 'encrypted-tally-hash',
+            TargetTallyId: 'aggregate-tally-1',
+            CeremonySnapshot: undefined,
+            RequiredShareCount: 3,
+            EligibleTrustees: [],
+            Status: ElectionFinalizationSessionStatusProto.FinalizationSessionAwaitingShares,
+            CreatedAt: timestamp,
+            CreatedByPublicAddress: 'owner-address',
+            CompletedAt: undefined,
+            ReleaseEvidenceId: '',
+            LatestTransactionId: 'transaction-1',
+            LatestBlockHeight: 100,
+            LatestBlockId: 'block-100',
+          },
+        ],
+      }
+    );
+
+    render(<TrusteeWorkspaceSummary entry={entry} detail={detail} />);
+
+    expect(screen.getByTestId('trustee-share-workspace-action')).toHaveAttribute(
+      'aria-disabled',
+      'false'
+    );
+    expect(screen.getByTestId('hush-voting-section-trustee')).toHaveTextContent(
+      'Close-counting share active.'
+    );
   });
 });

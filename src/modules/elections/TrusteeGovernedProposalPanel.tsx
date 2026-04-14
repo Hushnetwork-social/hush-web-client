@@ -1,12 +1,14 @@
 "use client";
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ArrowLeft, CheckCircle2, Loader2, ShieldAlert } from 'lucide-react';
 import {
+  ElectionFinalizationSessionPurposeProto,
   ElectionGovernedActionTypeProto,
   ElectionGovernedProposalExecutionStatusProto,
 } from '@/lib/grpc';
+import { useBlockchainStore } from '@/modules/blockchain/useBlockchainStore';
 import {
   formatTimestamp,
   getGovernedActionLabel,
@@ -46,6 +48,8 @@ export function TrusteeGovernedProposalPanel({
     selectedElection,
   } = useElectionsStore();
   const [approvalNote, setApprovalNote] = useState('');
+  const blockHeight = useBlockchainStore((state) => state.blockHeight);
+  const lastObservedBlockHeightRef = useRef(blockHeight);
 
   useEffect(() => {
     void loadElection(electionId);
@@ -72,9 +76,68 @@ export function TrusteeGovernedProposalPanel({
   const hasCurrentActorApproved = progress.approvals.some(
     (approval) => approval.TrusteeUserAddress === actorPublicAddress
   );
+  const isCloseProposal = proposal?.ActionType === ElectionGovernedActionTypeProto.Close;
+  const isFinalizeProposal = proposal?.ActionType === ElectionGovernedActionTypeProto.Finalize;
+  const closeCountingSession = useMemo(() => {
+    if (!proposal || proposal.ActionType !== ElectionGovernedActionTypeProto.Close) {
+      return null;
+    }
+
+    return (
+      (selectedElection?.FinalizationSessions ?? [])
+        .filter(
+          (session) =>
+            session.SessionPurpose ===
+              ElectionFinalizationSessionPurposeProto.FinalizationSessionPurposeCloseCounting &&
+            session.GovernedProposalId === proposal.Id
+        )
+        .sort((left, right) => {
+          const rightSeconds = right.CreatedAt?.seconds ?? 0;
+          const leftSeconds = left.CreatedAt?.seconds ?? 0;
+          if (rightSeconds !== leftSeconds) {
+            return rightSeconds - leftSeconds;
+          }
+
+          return (right.CreatedAt?.nanos ?? 0) - (left.CreatedAt?.nanos ?? 0);
+        })[0] ?? null
+    );
+  }, [proposal, selectedElection?.FinalizationSessions]);
   const canApprove =
     proposal?.ExecutionStatus === ElectionGovernedProposalExecutionStatusProto.WaitingForApprovals &&
     !hasCurrentActorApproved;
+  const closeThresholdPending =
+    isCloseProposal &&
+    proposal?.ExecutionStatus === ElectionGovernedProposalExecutionStatusProto.WaitingForApprovals;
+  const closeShareWaitingForThreshold =
+    closeThresholdPending && hasCurrentActorApproved && !closeCountingSession;
+  const closeShareStillLocked =
+    closeThresholdPending && !hasCurrentActorApproved && !closeCountingSession;
+  const closeShareReady =
+    isCloseProposal &&
+    proposal?.ExecutionStatus === ElectionGovernedProposalExecutionStatusProto.ExecutionSucceeded &&
+    Boolean(closeCountingSession);
+  const closeShareSessionIndexing =
+    isCloseProposal &&
+    proposal?.ExecutionStatus === ElectionGovernedProposalExecutionStatusProto.ExecutionSucceeded &&
+    !closeCountingSession;
+  const shouldRefreshOnBlockAdvance =
+    Boolean(proposal) &&
+    (proposal.ExecutionStatus === ElectionGovernedProposalExecutionStatusProto.WaitingForApprovals ||
+      closeShareSessionIndexing);
+
+  useEffect(() => {
+    if (blockHeight <= 0) {
+      lastObservedBlockHeightRef.current = blockHeight;
+      return;
+    }
+
+    if (!shouldRefreshOnBlockAdvance || blockHeight === lastObservedBlockHeightRef.current) {
+      return;
+    }
+
+    lastObservedBlockHeightRef.current = blockHeight;
+    void loadElection(electionId, { silent: true });
+  }, [blockHeight, electionId, loadElection, shouldRefreshOnBlockAdvance]);
 
   const handleApprove = async () => {
     const didApprove = await approveGovernedProposal(
@@ -103,7 +166,7 @@ export function TrusteeGovernedProposalPanel({
           </Link>
           <h1 className="text-2xl font-semibold">Trustee Proposal Approval</h1>
           <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
-            Review one exact FEAT-096 governed action and record a single immutable approval.
+            Review one exact governed action and record a single immutable approval.
           </p>
         </div>
 
@@ -217,30 +280,54 @@ export function TrusteeGovernedProposalPanel({
                 </div>
               )}
 
-              {proposal.ActionType === ElectionGovernedActionTypeProto.Close ||
-              proposal.ActionType === ElectionGovernedActionTypeProto.Finalize ? (
-                <div className="mt-5 rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4 text-sm text-hush-text-accent">
+              {isCloseProposal ? (
+                <div
+                  className="mt-5 rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4 text-sm text-hush-text-accent"
+                  data-testid="trustee-proposal-close-follow-up"
+                >
                   <div className="font-medium text-hush-text-primary">
-                    {proposal.ActionType === ElectionGovernedActionTypeProto.Close
-                      ? 'Close follow-up'
-                      : 'Finalize follow-up'}
+                    Close follow-up
                   </div>
                   <p className="mt-2">
-                    {proposal.ActionType === ElectionGovernedActionTypeProto.Close
-                      ? 'This proposal can lead to one exact close-counting share session after the election is frozen. The follow-up page shows the bound session and aggregate-only share action once execution succeeds.'
-                      : 'This proposal can authorize one exact finalization workflow. The follow-up page shows the bound session and aggregate-only share action once execution succeeds.'}
+                    {closeShareReady
+                      ? 'Close threshold is satisfied. The bound close-counting share session is ready in the share workspace.'
+                      : closeShareSessionIndexing
+                        ? 'Close reached trustee threshold. The server is indexing the close-counting session now, and the share workspace will unlock automatically as the next block-confirmed read arrives.'
+                        : closeShareWaitingForThreshold
+                          ? 'Your close approval is recorded. The close-counting share remains disabled until the proposal reaches threshold and the server creates the bound session.'
+                          : 'Close uses one trustee workflow over two protocol steps: approve the exact close proposal here, then submit one bound close-counting share only after threshold execution creates the session.'}
                   </p>
-                  <Link
-                    href={`/elections/${electionId}/trustee/finalization`}
-                    className="mt-3 inline-flex items-center gap-2 rounded-xl border border-hush-bg-light px-4 py-2 text-sm transition-colors hover:border-hush-purple"
-                    data-testid="trustee-proposal-finalization-link"
-                  >
-                    <span>
-                      {proposal.ActionType === ElectionGovernedActionTypeProto.Close
-                        ? 'Open counting share page'
-                        : 'Open finalization page'}
+                  {closeShareReady ? (
+                    <Link
+                      href={`/elections/${electionId}/trustee/finalization`}
+                      className="mt-3 inline-flex items-center gap-2 rounded-xl border border-hush-bg-light px-4 py-2 text-sm transition-colors hover:border-hush-purple"
+                      data-testid="trustee-proposal-finalization-link"
+                    >
+                      <span>Continue to counting share</span>
+                    </Link>
+                  ) : (
+                    <span
+                      className="mt-3 inline-flex items-center gap-2 rounded-xl bg-hush-bg-light px-4 py-2 text-sm text-hush-text-accent"
+                      data-testid="trustee-proposal-finalization-link-disabled"
+                    >
+                      <span>
+                        {closeShareWaitingForThreshold || closeShareStillLocked
+                          ? 'Waiting for trustee threshold'
+                          : 'Waiting for counting share session'}
+                      </span>
                     </span>
-                  </Link>
+                  )}
+                </div>
+              ) : isFinalizeProposal ? (
+                <div
+                  className="mt-5 rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4 text-sm text-hush-text-accent"
+                  data-testid="trustee-proposal-finalize-follow-up"
+                >
+                  <div className="font-medium text-hush-text-primary">Finalize follow-up</div>
+                  <p className="mt-2">
+                    Finalize remains approval-only in Protocol Omega. Trustees review and approve the
+                    exact finalize target here, and no trustee share workspace is opened for this action.
+                  </p>
                 </div>
               ) : null}
             </section>
@@ -249,8 +336,8 @@ export function TrusteeGovernedProposalPanel({
               <div className="mb-4">
                 <h2 className="text-lg font-semibold">Trustee Approval</h2>
                 <p className="mt-1 text-sm text-hush-text-accent">
-                  Trustees can approve or do nothing in FEAT-096. Reject and abstain controls are
-                  intentionally absent in this rollout.
+                  Trustees can approve or do nothing for this governed action. Reject and abstain
+                  controls are intentionally absent in this rollout.
                 </p>
               </div>
 
@@ -278,9 +365,37 @@ export function TrusteeGovernedProposalPanel({
               )}
 
               {hasCurrentActorApproved ? (
-                <div className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-100">
-                  Your approval is already recorded for this proposal.
-                </div>
+                <>
+                  <div className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-100">
+                    Your approval is already recorded for this proposal.
+                  </div>
+                  {closeShareWaitingForThreshold ? (
+                    <div
+                      className="mt-4 rounded-xl bg-hush-bg-dark/80 px-4 py-3 text-sm text-hush-text-accent"
+                      data-testid="trustee-approval-waiting-threshold"
+                    >
+                      Close is still waiting for the remaining trustee approvals. The counting-share
+                      step will unlock automatically after threshold execution creates the bound
+                      close-counting session.
+                    </div>
+                  ) : closeShareReady ? (
+                    <div
+                      className="mt-4 rounded-xl bg-hush-bg-dark/80 px-4 py-3 text-sm text-hush-text-accent"
+                      data-testid="trustee-approval-share-ready"
+                    >
+                      Close reached threshold. Continue in the counting-share workspace to submit
+                      this trustee&apos;s bound tally-release share.
+                    </div>
+                  ) : closeShareSessionIndexing ? (
+                    <div
+                      className="mt-4 rounded-xl bg-hush-bg-dark/80 px-4 py-3 text-sm text-hush-text-accent"
+                      data-testid="trustee-approval-session-indexing"
+                    >
+                      Close executed and the server is indexing the bound close-counting session.
+                      This page refreshes automatically as new blocks arrive.
+                    </div>
+                  ) : null}
+                </>
               ) : canApprove ? (
                 <>
                   <label className="block text-sm">
@@ -297,6 +412,16 @@ export function TrusteeGovernedProposalPanel({
                   </label>
 
                   <div className="mt-4">
+                    {closeShareStillLocked ? (
+                      <div
+                        className="mb-4 rounded-xl bg-hush-bg-dark/80 px-4 py-3 text-sm text-hush-text-accent"
+                        data-testid="trustee-approval-next-step"
+                      >
+                        This records only the exact close approval. The counting-share step stays
+                        disabled until the proposal reaches threshold and the server creates the
+                        bound close-counting session.
+                      </div>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => void handleApprove()}

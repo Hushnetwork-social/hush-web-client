@@ -29,6 +29,7 @@ import type {
 import {
   createElectionQueryAuthHeaders,
   isSignedElectionQueryMethod,
+  supportsOptionalElectionQueryAuth,
 } from '../electionQueryAuth';
 
 const ELECTIONS_QUERY_PROXY_URL = '/api/elections/query';
@@ -40,13 +41,22 @@ async function proxyElectionQuery<TRequest, TResponse>(
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
+  const credentials = useAppStore.getState().credentials;
 
   if (isSignedElectionQueryMethod(method)) {
-    const credentials = useAppStore.getState().credentials;
     if (!credentials) {
       throw new Error(`Election query ${method} requires the authenticated actor credentials.`);
     }
 
+    Object.assign(
+      headers,
+      await createElectionQueryAuthHeaders(
+        method,
+        (request ?? {}) as Record<string, unknown>,
+        credentials
+      )
+    );
+  } else if (supportsOptionalElectionQueryAuth(method) && credentials) {
     Object.assign(
       headers,
       await createElectionQueryAuthHeaders(

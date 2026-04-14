@@ -28,6 +28,8 @@ const METHOD_ADDRESS_FIELD = new Map<string, string>([
   ['GetElectionsByOwner', 'OwnerPublicAddress'],
 ]);
 
+const OPTIONAL_SIGNED_METHODS = new Set<string>(['GetElection']);
+
 type ElectionQueryRequest = Record<string, unknown>;
 
 export type ElectionQueryAuthFailure = {
@@ -82,6 +84,10 @@ export function isSignedElectionQueryMethod(method: string): boolean {
   return METHOD_ADDRESS_FIELD.has(method);
 }
 
+export function supportsOptionalElectionQueryAuth(method: string): boolean {
+  return OPTIONAL_SIGNED_METHODS.has(method);
+}
+
 export function getSignedElectionQueryAddress(
   method: string,
   request: ElectionQueryRequest,
@@ -105,7 +111,9 @@ export async function createElectionQueryAuthHeaders(
   request: ElectionQueryRequest,
   credentials: Credentials,
 ): Promise<Record<string, string>> {
-  const actorAddress = getSignedElectionQueryAddress(method, request);
+  const actorAddress = method === 'GetElection'
+    ? normalizeAddress(credentials.signingPublicKey)
+    : getSignedElectionQueryAddress(method, request);
   if (!actorAddress) {
     throw new Error(`Election query ${method} requires a bound actor address.`);
   }
