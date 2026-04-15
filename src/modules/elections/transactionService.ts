@@ -424,8 +424,12 @@ function buildElectionEnvelopeSurface<TActionPayload>(
 
   switch (actionType) {
     case ENCRYPTED_ELECTION_ACTION_TYPES.CLAIM_ROSTER_ENTRY: {
-      const { VerificationCode: _verificationCode, ...publicActionPayload } =
-        actionPayload as ClaimElectionRosterEntryActionPayload;
+      const publicActionPayload = {
+        ...(actionPayload as ClaimElectionRosterEntryActionPayload),
+      };
+      delete (
+        publicActionPayload as Partial<ClaimElectionRosterEntryActionPayload>
+      ).VerificationCode;
       return {
         publicActionPayload,
       };

@@ -654,7 +654,9 @@ describe('TrusteeElectionFinalizationPanel', () => {
       useBlockchainStore.getState().setBlockHeight(202);
     });
 
-    expect(await screen.findByTestId('trustee-finalization-submit-button')).toBeEnabled();
+    await waitFor(() =>
+      expect(screen.getByTestId('trustee-finalization-submit-button')).toBeEnabled()
+    );
     expect(screen.getByTestId('trustee-finalization-vault-status')).toHaveTextContent('Loaded');
     expect(screen.getByText('Close Counting Share Status')).toBeInTheDocument();
   });

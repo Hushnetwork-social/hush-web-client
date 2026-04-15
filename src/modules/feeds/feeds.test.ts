@@ -463,13 +463,25 @@ describe('FeedsSyncable', () => {
     // Mark creation as pending
     useFeedsStore.getState().setPersonalFeedCreationPending(true);
 
-    // Add personal feed (simulating it appeared in sync)
+    // Add personal feed locally and return it from the server so the full-session
+    // validation path confirms it instead of clearing it as stale cache.
     useFeedsStore.getState().setFeeds([sampleFeed]);
 
-    // Mock empty responses (no new data)
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      json: () => Promise.resolve({ feeds: [] }),
+      json: () =>
+        Promise.resolve({
+          feeds: [
+            {
+              feedId: 'feed-1',
+              feedTitle: 'My Personal Feed',
+              feedOwner: 'user-public-key',
+              feedType: 0,
+              blockIndex: 100,
+              participants: [{ participantPublicAddress: 'user-public-key' }],
+            },
+          ],
+        }),
     });
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -497,12 +509,21 @@ describe('FeedsSyncable', () => {
     // Add personal feed
     useFeedsStore.getState().setFeeds([sampleFeed]);
 
-    // Mock feeds response with blockIndex
+    // Return the personal feed from the server as well so session validation keeps
+    // it and does not trigger personal-feed creation during this sync cycle.
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: () =>
         Promise.resolve({
           feeds: [
+            {
+              feedId: 'feed-1',
+              feedTitle: 'My Personal Feed',
+              feedOwner: 'user-public-key',
+              feedType: 0,
+              blockIndex: 100,
+              participants: [{ participantPublicAddress: 'user-public-key' }],
+            },
             {
               feedId: 'feed-new',
               feedTitle: 'New Chat',
