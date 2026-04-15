@@ -240,12 +240,13 @@ function createResultView(
 
 describe('ElectionVotingPanel', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     window.sessionStorage.clear();
     window.localStorage.clear();
     process.env.NEXT_PUBLIC_ELECTIONS_ALLOW_DEV_MODE = 'false';
     delete (window as Window & { __e2e_forceElectionMode?: unknown }).__e2e_forceElectionMode;
     electionsServiceMock.getElection.mockResolvedValue(createElectionResponse());
+    electionsServiceMock.getElectionVotingView.mockResolvedValue(createVotingViewResponse());
     electionsServiceMock.getElectionResultView.mockResolvedValue(createResultView());
     blockchainServiceMock.submitTransaction.mockResolvedValue({
       successful: true,
@@ -706,7 +707,7 @@ describe('ElectionVotingPanel', () => {
     fireEvent.click(screen.getByTestId('voting-submit'));
 
     expect(await screen.findByText(/Envelope access unavailable/)).toBeInTheDocument();
-    expect(window.sessionStorage.getItem('feat099:pending:election-1')).toBeNull();
+    expect(window.sessionStorage.getItem('feat099:pending:election-1') ?? null).toBeNull();
     expect(blockchainServiceMock.submitTransaction).toHaveBeenCalledTimes(1);
   });
 
