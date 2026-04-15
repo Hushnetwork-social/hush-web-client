@@ -1541,10 +1541,7 @@ export function getElectionHubDisplayActionLabel(
 }
 
 function resolveClosedProgressNarrativeAudience(
-  entry: Pick<
-    ElectionHubEntryView,
-    'ActorRoles' | 'SuggestedActionReason'
-  >
+  entry: Pick<ElectionHubEntryView, 'ActorRoles'>
 ): ClosedProgressNarrativeAudience {
   if (entry.ActorRoles.IsOwnerAdmin) {
     return 'owner-admin';

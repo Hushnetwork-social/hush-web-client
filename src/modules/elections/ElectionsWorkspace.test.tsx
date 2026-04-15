@@ -3587,7 +3587,7 @@ describe("ElectionsWorkspace", () => {
       ProposedByPublicAddress: "owner-public-key",
       CreatedAt: timestamp,
       ExecutionStatus:
-        ElectionGovernedProposalExecutionStatusProto.Executed,
+        ElectionGovernedProposalExecutionStatusProto.ExecutionSucceeded,
       ExecutionFailureReason: "",
       LastExecutionTriggeredByPublicAddress: "trustee-b",
     };
@@ -3995,7 +3995,7 @@ describe("ElectionsWorkspace", () => {
       ProposedByPublicAddress: "owner-public-key",
       CreatedAt: timestamp,
       ExecutionStatus:
-        ElectionGovernedProposalExecutionStatusProto.Executed,
+        ElectionGovernedProposalExecutionStatusProto.ExecutionSucceeded,
       ExecutionFailureReason: "",
       LastExecutionTriggeredByPublicAddress: "trustee-b",
     };

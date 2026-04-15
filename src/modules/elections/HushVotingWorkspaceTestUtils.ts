@@ -117,6 +117,12 @@ export function createElectionRecord(
     OpenArtifactId: '',
     CloseArtifactId: '',
     FinalizeArtifactId: '',
+    TallyReadyArtifactId: '',
+    OfficialResultVisibilityPolicy:
+      OfficialResultVisibilityPolicyProto.PublicPlaintext,
+    ClosedProgressStatus: ElectionClosedProgressStatusProto.ClosedProgressNone,
+    UnofficialResultArtifactId: '',
+    OfficialResultArtifactId: '',
     ...overrides,
   };
 }

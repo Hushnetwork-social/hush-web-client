@@ -121,9 +121,12 @@ export function TrusteeGovernedProposalPanel({
     proposal?.ExecutionStatus === ElectionGovernedProposalExecutionStatusProto.ExecutionSucceeded &&
     !closeCountingSession;
   const shouldRefreshOnBlockAdvance =
-    Boolean(proposal) &&
-    (proposal.ExecutionStatus === ElectionGovernedProposalExecutionStatusProto.WaitingForApprovals ||
-      closeShareSessionIndexing);
+    Boolean(
+      proposal &&
+        (proposal.ExecutionStatus ===
+          ElectionGovernedProposalExecutionStatusProto.WaitingForApprovals ||
+          closeShareSessionIndexing),
+    );
 
   useEffect(() => {
     if (blockHeight <= 0) {

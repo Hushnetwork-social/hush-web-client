@@ -314,7 +314,7 @@ export interface RetryElectionGovernedProposalExecutionPayload {
 }
 
 function isByteNumber(value: unknown): value is number {
-  return Number.isInteger(value) && value >= 0 && value <= 255;
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 255;
 }
 
 function normalizeOptionalBinaryClaim(value: unknown, fieldName: string): string | null {

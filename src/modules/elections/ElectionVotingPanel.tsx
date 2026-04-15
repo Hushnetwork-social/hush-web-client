@@ -1143,6 +1143,7 @@ export function ElectionVotingPanel({
           electionId,
           awaitedView,
           nextPendingSubmission,
+          localReceipt,
         );
         if (createdReceipt) {
           saveLocalReceipt(electionId, createdReceipt);

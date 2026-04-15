@@ -320,8 +320,8 @@ function TrusteeGovernedProposalSection({
                 Approval progress
               </div>
               <div className="mt-2 text-sm text-hush-text-primary">
-                {detail.Election.RequiredApprovalCount > 0
-                  ? `${getGovernedProposalProgress(detail, proposal.Id).approvalCount} of ${detail.Election.RequiredApprovalCount}`
+                {(detail.Election?.RequiredApprovalCount ?? 0) > 0
+                  ? `${getGovernedProposalProgress(detail, proposal.Id).approvalCount} of ${detail.Election?.RequiredApprovalCount ?? 0}`
                   : `${getGovernedProposalProgress(detail, proposal.Id).approvalCount} approvals`}
               </div>
             </div>

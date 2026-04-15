@@ -586,7 +586,7 @@ export function ElectionsWorkspace({
   const hasActiveCloseWorkflowFollowUp = useMemo(() => {
     if (
       governedCloseActionState?.proposal?.ExecutionStatus !==
-      ElectionGovernedProposalExecutionStatusProto.Executed
+      ElectionGovernedProposalExecutionStatusProto.ExecutionSucceeded
     ) {
       return false;
     }
@@ -1271,14 +1271,14 @@ export function ElectionsWorkspace({
   );
 
   useEffect(() => {
-    const refreshableOwnerTabs = [
+    const refreshableOwnerTabs: OwnerWorkspaceTabId[] = [
       "ceremony",
       "readiness",
       "trustees",
       "lifecycle",
       "governed",
-    ] as const;
-    const ceremonyRefreshTabs = ["ceremony", "readiness", "lifecycle"] as const;
+    ];
+    const ceremonyRefreshTabs: OwnerWorkspaceTabId[] = ["ceremony", "readiness", "lifecycle"];
 
     if (
       !selectedElectionId ||
@@ -1761,7 +1761,7 @@ export function ElectionsWorkspace({
         CeremonyVersionId: activeCeremonyVersion.Id,
         TrusteeUserAddress: trusteeUserAddress,
         ShareVersion: shareVersion,
-        TallyPublicKeyFingerprint: tallyPublicKeyFingerprint ?? null,
+        TallyPublicKeyFingerprint: tallyPublicKeyFingerprint ?? "",
       },
       ownerEncryptionPublicKey ?? "",
       ownerEncryptionPrivateKey ?? "",
@@ -2438,38 +2438,38 @@ export function ElectionsWorkspace({
                       >
                         <div
                           className={`rounded-xl border px-3 py-3 text-sm ${
-                            openReadiness.IsReadyToOpen
+                            openReadiness!.IsReadyToOpen
                               ? "border-green-500/40 bg-green-500/10 text-green-100"
                               : "border-amber-500/40 bg-amber-500/10 text-amber-100"
                           }`}
                         >
-                          {openReadiness.IsReadyToOpen
+                          {openReadiness!.IsReadyToOpen
                             ? "Ready to open."
                             : "Not ready to open yet."}
                         </div>
 
                         <div className="text-xs text-hush-text-accent">
                           Required warning codes:{" "}
-                          {openReadiness.RequiredWarningCodes.length > 0
-                            ? openReadiness.RequiredWarningCodes.map(
+                          {openReadiness!.RequiredWarningCodes.length > 0
+                            ? openReadiness!.RequiredWarningCodes.map(
                                 (warningCode) => getWarningTitle(warningCode),
                               ).join(", ")
                             : "None"}
                         </div>
 
-                        {openReadiness.MissingWarningAcknowledgements.length >
+                        {openReadiness!.MissingWarningAcknowledgements.length >
                           0 && (
                           <div className="text-xs text-hush-text-accent">
                             Missing acknowledgements:{" "}
-                            {openReadiness.MissingWarningAcknowledgements.map(
+                            {openReadiness!.MissingWarningAcknowledgements.map(
                               (warningCode) => getWarningTitle(warningCode),
                             ).join(", ")}
                           </div>
                         )}
 
-                        {openReadiness.ValidationErrors.length > 0 && (
+                        {openReadiness!.ValidationErrors.length > 0 && (
                           <ul className="list-disc space-y-1 pl-5 text-sm text-amber-100">
-                            {openReadiness.ValidationErrors.map(
+                            {openReadiness!.ValidationErrors.map(
                               (validationError) => (
                                 <li key={validationError}>{validationError}</li>
                               ),
@@ -3117,38 +3117,38 @@ export function ElectionsWorkspace({
                       >
                         <div
                           className={`rounded-xl border px-3 py-3 text-sm ${
-                            openReadiness.IsReadyToOpen
+                            openReadiness!.IsReadyToOpen
                               ? "border-green-500/40 bg-green-500/10 text-green-100"
                               : "border-amber-500/40 bg-amber-500/10 text-amber-100"
                           }`}
                         >
-                          {openReadiness.IsReadyToOpen
+                          {openReadiness!.IsReadyToOpen
                             ? "Ready to open."
                             : "Not ready to open yet."}
                         </div>
 
                         <div className="text-xs text-hush-text-accent">
                           Required warning codes:{" "}
-                          {openReadiness.RequiredWarningCodes.length > 0
-                            ? openReadiness.RequiredWarningCodes.map(
+                          {openReadiness!.RequiredWarningCodes.length > 0
+                            ? openReadiness!.RequiredWarningCodes.map(
                                 (warningCode) => getWarningTitle(warningCode),
                               ).join(", ")
                             : "None"}
                         </div>
 
-                        {openReadiness.MissingWarningAcknowledgements.length >
+                        {openReadiness!.MissingWarningAcknowledgements.length >
                           0 && (
                           <div className="text-xs text-hush-text-accent">
                             Missing acknowledgements:{" "}
-                            {openReadiness.MissingWarningAcknowledgements.map(
+                            {openReadiness!.MissingWarningAcknowledgements.map(
                               (warningCode) => getWarningTitle(warningCode),
                             ).join(", ")}
                           </div>
                         )}
 
-                        {openReadiness.ValidationErrors.length > 0 && (
+                        {openReadiness!.ValidationErrors.length > 0 && (
                           <ul className="list-disc space-y-1 pl-5 text-sm text-amber-100">
-                            {openReadiness.ValidationErrors.map(
+                            {openReadiness!.ValidationErrors.map(
                               (validationError) => (
                                 <li key={validationError}>{validationError}</li>
                               ),
@@ -3269,7 +3269,7 @@ export function ElectionsWorkspace({
                         ElectionGovernedProposalExecutionStatusProto.WaitingForApprovals;
                       const closeProposalExecuted =
                         state.proposal?.ExecutionStatus ===
-                        ElectionGovernedProposalExecutionStatusProto.Executed;
+                        ElectionGovernedProposalExecutionStatusProto.ExecutionSucceeded;
 
                       return (
                         <article
