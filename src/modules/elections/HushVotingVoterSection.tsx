@@ -21,7 +21,11 @@ import {
   ElectionLifecycleStateProto,
 } from '@/lib/grpc';
 import { electionsService } from '@/lib/grpc/services/elections';
-import { getLifecycleLabel } from './contracts';
+import {
+  getClosedProgressNarrative,
+  getLifecycleLabel,
+  getPublishedResultNarrative,
+} from './contracts';
 import {
   AvailabilityCard,
   CollapsibleSurfaceSection,
@@ -316,10 +320,14 @@ export function VoterWorkspaceSummary({
   const [isVerifyingReceipt, setIsVerifyingReceipt] = useState(false);
   const [receiptVerification, setReceiptVerification] =
     useState<HubReceiptVerificationFeedback | null>(null);
-  const hasResultToReview =
-    entry.SuggestedAction === ElectionHubNextActionHintProto.ElectionHubActionVoterReviewResult ||
-    entry.HasOfficialResult ||
-    entry.HasUnofficialResult;
+  const publishedResultState = useMemo(
+    () => getPublishedResultNarrative(entry, 'voter'),
+    [entry]
+  );
+  const closedVoterState = useMemo(
+    () => getClosedProgressNarrative(entry, 'voter'),
+    [entry]
+  );
   const needsVoterAction =
     entry.CanClaimIdentity ||
     entry.SuggestedAction === ElectionHubNextActionHintProto.ElectionHubActionVoterClaimIdentity ||
@@ -345,11 +353,11 @@ export function VoterWorkspaceSummary({
       );
     }
 
-    if (hasResultToReview) {
+    if (publishedResultState) {
       return (
         <>
-          <span className="font-semibold text-hush-text-primary">Results available.</span> Participant-facing result review
-          is available for this election.
+          <span className="font-semibold text-hush-text-primary">{publishedResultState.title}.</span>{' '}
+          {publishedResultState.description}
         </>
       );
     }
@@ -366,8 +374,11 @@ export function VoterWorkspaceSummary({
     if (entry.Election.LifecycleState === ElectionLifecycleStateProto.Closed) {
       return (
         <>
-          <span className="font-semibold text-hush-text-primary">Waiting for results.</span> Voting is closed. This section
-          can stay collapsed until results are published.
+          <span className="font-semibold text-hush-text-primary">
+            {closedVoterState?.title ?? 'Waiting for the unofficial result'}.
+          </span>{' '}
+          {closedVoterState?.description ??
+            'Voting is closed. This section can stay collapsed until results are published.'}
         </>
       );
     }
@@ -382,8 +393,9 @@ export function VoterWorkspaceSummary({
     entry.CanClaimIdentity,
     entry.Election.LifecycleState,
     hasAcceptedReceipt,
-    hasResultToReview,
     isOpenElection,
+    publishedResultState,
+    closedVoterState,
   ]);
 
   useEffect(() => {
@@ -526,10 +538,10 @@ export function VoterWorkspaceSummary({
           ? 'This election still needs a voter identity or eligibility review before the ballot surface can open.'
           : isOpenElection
             ? 'The election is open for this voter. Open the ballot screen to review options and continue with the current ballot-submission flow for this build.'
-            : 'Voting controls are no longer active, but this actor can still review the voter detail surface for election-specific context.'
+            : 'Voting controls are no longer active. This surface stays available only for voter-specific context and receipt verification.'
       }
       summary={voterSurfaceSummary}
-      defaultExpanded={needsVoterAction || hasResultToReview}
+      defaultExpanded={needsVoterAction}
       actions={
         <>
           <Link

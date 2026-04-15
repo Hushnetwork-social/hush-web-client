@@ -4,7 +4,7 @@ import { bytesToHex, hexToBytes } from '@/lib/crypto';
 import { createElectionQueryAuthHeaders } from '@/lib/grpc/electionQueryAuth';
 
 const fetchMock = vi.fn();
-const parseGrpcResponseMock = vi.fn();
+const parseGrpcWebResponseMock = vi.fn();
 const loadMock = vi.fn();
 const resolveAllMock = vi.fn();
 const lookupTypeMock = vi.fn();
@@ -34,7 +34,7 @@ vi.mock('protobufjs', () => ({
 }));
 
 vi.mock('@/lib/grpc/grpc-web-helper', () => ({
-  parseGrpcResponse: parseGrpcResponseMock,
+  parseGrpcWebResponse: parseGrpcWebResponseMock,
 }));
 
 const TEST_SIGNING_PRIVATE_KEY =
@@ -61,7 +61,10 @@ describe('POST /api/elections/query', () => {
       decode: decodeMock,
       toObject: toObjectMock,
     });
-    parseGrpcResponseMock.mockReturnValue(new Uint8Array([9, 9, 9]));
+    parseGrpcWebResponseMock.mockReturnValue({
+      messageBytes: new Uint8Array([9, 9, 9]),
+      trailers: { 'grpc-status': '0' },
+    });
     fetchMock.mockResolvedValue(
       new Response(new Uint8Array([7, 7, 7]), {
         status: 200,
@@ -128,6 +131,12 @@ describe('POST /api/elections/query', () => {
       ErrorMessage: '',
       ActorPublicAddress: 'actor-1',
     });
+    expect(toObjectMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        bytes: String,
+      })
+    );
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(
       'http://localhost:4666/rpcHush.HushElections/GetElectionEnvelopeAccess',
@@ -199,5 +208,54 @@ describe('POST /api/elections/query', () => {
 
     expect(response.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not fall back to the public upstream for signed queries when the local gRPC call fails', async () => {
+    const { POST } = await import('./route');
+    const signedHeaders = await createElectionQueryAuthHeaders(
+      'GetElectionEnvelopeAccess',
+      {
+        ElectionId: 'election-1',
+        ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+      },
+      TEST_CREDENTIALS
+    );
+
+    parseGrpcWebResponseMock.mockReturnValue({
+      messageBytes: null,
+      trailers: {
+        'grpc-status': '13',
+        'grpc-message': encodeURIComponent('internal test failure'),
+      },
+    });
+
+    const response = await POST(
+      new Request('http://localhost/api/elections/query', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...signedHeaders,
+        },
+        body: JSON.stringify({
+          method: 'GetElectionEnvelopeAccess',
+          request: {
+            ElectionId: 'election-1',
+            ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+          },
+        }),
+      }) as never
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      success: false,
+      message:
+        'gRPC upstream at http://localhost:4666 failed for GetElectionEnvelopeAccess with status 13: internal test failure',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:4666/rpcHush.HushElections/GetElectionEnvelopeAccess',
+      expect.anything()
+    );
   });
 });

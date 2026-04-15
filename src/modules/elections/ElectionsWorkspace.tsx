@@ -21,6 +21,8 @@ import {
 } from "lucide-react";
 import {
   ElectionBindingStatusProto,
+  ElectionFinalizationSessionPurposeProto,
+  ElectionFinalizationSessionStatusProto,
   ElectionTrusteeCeremonyStateProto,
   ElectionCeremonyVersionStatusProto,
   type ElectionDraftInput,
@@ -50,6 +52,7 @@ import {
   createOutcomeRuleForKind,
   formatArtifactValue,
   formatTimestamp,
+  getAcceptedFinalizationShareCount,
   getActiveCeremonyVersion,
   getBindingLabel,
   getFixedCeremonyProfileShape,
@@ -61,11 +64,15 @@ import {
   getElectionClassLabel,
   getGovernedActionLabel,
   getGovernedActionViewStates,
+  getFinalizationSessionStatusLabel,
+  getFinalizationShareStatusLabel,
+  getFinalizationShares,
   getGovernedProposalExecutionStatusLabel,
   getEligibilityMutationLabel,
   getEligibilitySourceLabel,
   getGovernanceLabel,
   getLifecycleLabel,
+  getLatestFinalizationReleaseEvidence,
   getOutcomeRuleLabel,
   getParticipationPrivacyLabel,
   getReportingPolicyLabel,
@@ -497,6 +504,13 @@ export function ElectionsWorkspace({
       ) ?? null,
     [governedActionStates],
   );
+  const governedCloseActionState = useMemo(
+    () =>
+      governedActionStates.find(
+        (state) => state.actionType === ElectionGovernedActionTypeProto.Close,
+      ) ?? null,
+    [governedActionStates],
+  );
   const governedOpenActionState = useMemo(
     () =>
       governedActionStates.find(
@@ -517,6 +531,85 @@ export function ElectionsWorkspace({
     () => getActiveCeremonyVersion(selectedElection ?? null),
     [selectedElection],
   );
+  const activeCloseCountingSession = useMemo(() => {
+    const sessions = (selectedElection?.FinalizationSessions ?? [])
+      .filter(
+        (session) =>
+          session.SessionPurpose ===
+          ElectionFinalizationSessionPurposeProto.FinalizationSessionPurposeCloseCounting,
+      )
+      .slice()
+      .sort((left, right) => {
+        const leftSeconds = Number(left.CreatedAt?.seconds ?? 0);
+        const rightSeconds = Number(right.CreatedAt?.seconds ?? 0);
+        if (leftSeconds === rightSeconds) {
+          return (right.CreatedAt?.nanos ?? 0) - (left.CreatedAt?.nanos ?? 0);
+        }
+
+        return rightSeconds - leftSeconds;
+      });
+
+    return (
+      sessions.find(
+        (session) =>
+          session.Status ===
+          ElectionFinalizationSessionStatusProto.FinalizationSessionAwaitingShares,
+      ) ??
+      sessions[0] ??
+      null
+    );
+  }, [selectedElection?.FinalizationSessions]);
+  const closeCountingShares = useMemo(
+    () =>
+      getFinalizationShares(
+        selectedElection ?? null,
+        activeCloseCountingSession?.Id,
+      ),
+    [activeCloseCountingSession?.Id, selectedElection],
+  );
+  const closeCountingAcceptedShareCount = useMemo(
+    () =>
+      getAcceptedFinalizationShareCount(
+        selectedElection ?? null,
+        activeCloseCountingSession?.Id,
+      ),
+    [activeCloseCountingSession?.Id, selectedElection],
+  );
+  const closeCountingReleaseEvidence = useMemo(
+    () =>
+      getLatestFinalizationReleaseEvidence(
+        selectedElection ?? null,
+        activeCloseCountingSession?.Id,
+      ),
+    [activeCloseCountingSession?.Id, selectedElection],
+  );
+  const hasActiveCloseWorkflowFollowUp = useMemo(() => {
+    if (
+      governedCloseActionState?.proposal?.ExecutionStatus !==
+      ElectionGovernedProposalExecutionStatusProto.Executed
+    ) {
+      return false;
+    }
+
+    return !closeCountingReleaseEvidence;
+  }, [
+    closeCountingReleaseEvidence,
+    governedCloseActionState?.proposal?.ExecutionStatus,
+  ]);
+  const closeCountingTrusteeProgress = useMemo(() => {
+    if (!activeCloseCountingSession) {
+      return [];
+    }
+
+    return activeCloseCountingSession.EligibleTrustees.map((trustee) => ({
+      trustee,
+      latestShare:
+        closeCountingShares.find(
+          (share) =>
+            share.TrusteeUserAddress === trustee.TrusteeUserAddress,
+        ) ?? null,
+    }));
+  }, [activeCloseCountingSession, closeCountingShares]);
   const activeCeremonyTrusteeStates = useMemo(
     () => selectedElection?.ActiveCeremonyTrusteeStates ?? [],
     [selectedElection?.ActiveCeremonyTrusteeStates],
@@ -1181,6 +1274,7 @@ export function ElectionsWorkspace({
     const refreshableOwnerTabs = [
       "ceremony",
       "readiness",
+      "trustees",
       "lifecycle",
       "governed",
     ] as const;
@@ -1218,7 +1312,7 @@ export function ElectionsWorkspace({
     if (
       blockHeight <= 0 ||
       activeOwnerTab !== "governed" ||
-      !hasPendingGovernedApprovalProposal
+      (!hasPendingGovernedApprovalProposal && !hasActiveCloseWorkflowFollowUp)
     ) {
       return;
     }
@@ -1227,6 +1321,7 @@ export function ElectionsWorkspace({
   }, [
     activeOwnerTab,
     blockHeight,
+    hasActiveCloseWorkflowFollowUp,
     hasPendingGovernedApprovalProposal,
     refreshOwnerContext,
     selectedElectionId,
@@ -3159,11 +3254,22 @@ export function ElectionsWorkspace({
                           ElectionGovernedActionTypeProto.Open &&
                         state.status === "available" &&
                         governedOpenPrerequisiteIssues.length > 0;
+                      const isCloseProposal =
+                        state.actionType ===
+                        ElectionGovernedActionTypeProto.Close;
                       const presentationStatus =
                         openWorkflowBlocked ? "unavailable" : state.status;
                       const resolvedReason = openWorkflowBlocked
                         ? governedOpenPrerequisiteIssues[0]
                         : state.reason;
+                      const showCloseCountingSummary =
+                        isCloseProposal && !!state.proposal;
+                      const closeProposalIsWaitingForApprovals =
+                        state.proposal?.ExecutionStatus ===
+                        ElectionGovernedProposalExecutionStatusProto.WaitingForApprovals;
+                      const closeProposalExecuted =
+                        state.proposal?.ExecutionStatus ===
+                        ElectionGovernedProposalExecutionStatusProto.Executed;
 
                       return (
                         <article
@@ -3242,6 +3348,64 @@ export function ElectionsWorkspace({
                                   </div>
                                 ))}
                               </div>
+                            </div>
+                          )}
+
+                          {showCloseCountingSummary && (
+                            <div
+                              className="mt-4 rounded-xl bg-hush-bg-dark px-3 py-3"
+                              data-testid="elections-governed-close-share-progress"
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                                  Close-counting shares
+                                </div>
+                                <div className="text-xs text-hush-text-accent">
+                                  {activeCloseCountingSession
+                                    ? `${closeCountingAcceptedShareCount} of ${activeCloseCountingSession.RequiredShareCount} shares recorded`
+                                    : closeProposalExecuted
+                                      ? "Indexing share session"
+                                      : "Waiting for close threshold"}
+                                </div>
+                              </div>
+
+                              <div className="mt-2 text-xs text-hush-text-accent">
+                                {closeCountingReleaseEvidence
+                                  ? `Aggregate tally release completed at ${formatTimestamp(closeCountingReleaseEvidence.CompletedAt)}.`
+                                  : activeCloseCountingSession
+                                    ? `Session status: ${getFinalizationSessionStatusLabel(activeCloseCountingSession.Status)}. Trustees listed below show who has already submitted the bound tally share.`
+                                    : closeProposalExecuted
+                                      ? "Close reached threshold. The server is creating the bound close-counting session now."
+                                      : "Share submission does not begin until close reaches trustee threshold."}
+                              </div>
+
+                              {activeCloseCountingSession ? (
+                                <div className="mt-3 space-y-2">
+                                  {closeCountingTrusteeProgress.map(
+                                    ({ trustee, latestShare }) => (
+                                      <div
+                                        key={trustee.TrusteeUserAddress}
+                                        className="rounded-lg bg-hush-bg-element/80 px-3 py-2 text-xs text-hush-text-accent"
+                                      >
+                                        <div className="font-medium text-hush-text-primary">
+                                          {trustee.TrusteeDisplayName ||
+                                            trustee.TrusteeUserAddress}
+                                        </div>
+                                        <div className="mt-1">
+                                          {latestShare
+                                            ? `${getFinalizationShareStatusLabel(latestShare.Status)} at ${formatTimestamp(latestShare.SubmittedAt)}`
+                                            : "Pending share submission"}
+                                        </div>
+                                      </div>
+                                    ),
+                                  )}
+                                </div>
+                              ) : closeProposalIsWaitingForApprovals ? (
+                                <div className="mt-3 rounded-lg bg-hush-bg-element/70 px-3 py-2 text-xs text-hush-text-accent">
+                                  The tally-share step stays locked until the
+                                  required close approvals are recorded.
+                                </div>
+                              ) : null}
                             </div>
                           )}
 

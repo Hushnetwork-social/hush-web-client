@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  ElectionClosedProgressStatusProto,
   ElectionHubNextActionHintProto,
   ElectionLifecycleStateProto,
   ElectionParticipationStatusProto,
@@ -103,6 +104,84 @@ describe('VoterWorkspaceSummary', () => {
     expect(screen.getByRole('link', { name: 'Open identity and eligibility' })).toHaveAttribute(
       'href',
       '/elections/election-claim/eligibility'
+    );
+  });
+
+  it('describes the closed voter phase as waiting for trustee tally shares before unofficial results', async () => {
+    const entry = createHubEntry(
+      'election-closed',
+      ElectionLifecycleStateProto.Closed,
+      'Closed Election',
+      {
+        ActorRoles: {
+          IsOwnerAdmin: false,
+          IsTrustee: false,
+          IsVoter: true,
+          IsDesignatedAuditor: false,
+        },
+        SuggestedAction: ElectionHubNextActionHintProto.ElectionHubActionNone,
+        SuggestedActionReason: 'No immediate action is required for this election.',
+        ClosedProgressStatus:
+          ElectionClosedProgressStatusProto.ClosedProgressWaitingForTrusteeShares,
+        HasUnofficialResult: false,
+        HasOfficialResult: false,
+      }
+    );
+
+    render(
+      <VoterWorkspaceSummary
+        entry={entry}
+        actorPublicAddress="actor-address"
+        resultView={null}
+      />
+    );
+
+    expect(await screen.findByTestId('hush-voting-section-voter')).toHaveTextContent(
+      'Waiting for the unofficial result.'
+    );
+    expect(screen.getByTestId('hush-voting-section-voter')).toHaveTextContent(
+      'Eligible trustees still need to provide the bound tally shares'
+    );
+  });
+
+  it('stays collapsed once a published result is available', async () => {
+    const entry = createHubEntry(
+      'election-published',
+      ElectionLifecycleStateProto.Closed,
+      'Published Result Election',
+      {
+        ActorRoles: {
+          IsOwnerAdmin: false,
+          IsTrustee: false,
+          IsVoter: true,
+          IsDesignatedAuditor: false,
+        },
+        SuggestedAction: ElectionHubNextActionHintProto.ElectionHubActionVoterReviewResult,
+        SuggestedActionReason: 'The unofficial result is ready for review.',
+        CanViewNamedParticipationRoster: false,
+        CanViewReportPackage: false,
+        CanViewParticipantResults: true,
+        HasUnofficialResult: true,
+        HasOfficialResult: false,
+      }
+    );
+
+    render(
+      <VoterWorkspaceSummary
+        entry={entry}
+        actorPublicAddress="actor-address"
+        resultView={createResultView({
+          UnofficialResult: createResultArtifact({
+            ArtifactKind: 0,
+            Title: 'Unofficial result',
+          }),
+        })}
+      />
+    );
+
+    expect(await screen.findByTestId('hush-voting-voter-toggle')).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByTestId('hush-voting-section-voter')).toHaveTextContent(
+      'Unofficial result published.'
     );
   });
 
@@ -254,6 +333,7 @@ describe('VoterWorkspaceSummary', () => {
       />
     );
 
+    fireEvent.click(await screen.findByTestId('hush-voting-voter-toggle'));
     fireEvent.click(await screen.findByTestId('hush-voting-verify-receipt-trigger'));
     fireEvent.change(screen.getByTestId('hush-voting-receipt-input'), {
       target: {
@@ -341,6 +421,7 @@ describe('VoterWorkspaceSummary', () => {
       />
     );
 
+    fireEvent.click(await screen.findByTestId('hush-voting-voter-toggle'));
     fireEvent.click(await screen.findByTestId('hush-voting-verify-receipt-trigger'));
     fireEvent.change(screen.getByTestId('hush-voting-receipt-input'), {
       target: {
@@ -435,6 +516,7 @@ describe('VoterWorkspaceSummary', () => {
       />
     );
 
+    fireEvent.click(await screen.findByTestId('hush-voting-voter-toggle'));
     fireEvent.click(await screen.findByTestId('hush-voting-verify-receipt-trigger'));
     fireEvent.change(screen.getByTestId('hush-voting-receipt-input'), {
       target: {

@@ -2,6 +2,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   ElectionCeremonyVersionStatusProto,
+  ElectionCloseCountingJobStatusProto,
   ElectionFinalizationSessionPurposeProto,
   ElectionFinalizationSessionStatusProto,
   ElectionGovernedActionTypeProto,
@@ -66,6 +67,10 @@ describe('TrusteeWorkspaceSummary', () => {
     expect(screen.getByRole('link', { name: 'Ceremony workspace' })).toHaveAttribute(
       'href',
       '/elections/election-trustee-voter/trustee/ceremony'
+    );
+    expect(screen.getByRole('link', { name: 'Open governed actions' })).toHaveAttribute(
+      'href',
+      '/elections/election-trustee-voter/trustee/governed'
     );
     expect(screen.getByTestId('trustee-share-workspace-action')).toHaveAttribute(
       'href',
@@ -182,9 +187,9 @@ describe('TrusteeWorkspaceSummary', () => {
           IsVoter: false,
           IsDesignatedAuditor: false,
         },
-        SuggestedAction: ElectionHubNextActionHintProto.ElectionHubActionTrusteeReviewResult,
-        SuggestedActionReason: 'Trustee-specific result review is ready.',
-        HasUnofficialResult: true,
+        SuggestedAction: ElectionHubNextActionHintProto.ElectionHubActionNone,
+        SuggestedActionReason: 'Submit the bound trustee tally share for close-counting.',
+        HasUnofficialResult: false,
         HasOfficialResult: false,
       }
     );
@@ -208,6 +213,10 @@ describe('TrusteeWorkspaceSummary', () => {
             CeremonySnapshot: undefined,
             RequiredShareCount: 3,
             EligibleTrustees: [],
+            CloseCountingJobId: 'close-counting-job-1',
+            CloseCountingJobStatus: ElectionCloseCountingJobStatusProto.CloseCountingJobAwaitingShares,
+            ExecutorSessionPublicKey: 'executor-session-public-key-1',
+            ExecutorKeyAlgorithm: 'ecies-secp256k1-v1',
             Status: ElectionFinalizationSessionStatusProto.FinalizationSessionAwaitingShares,
             CreatedAt: timestamp,
             CreatedByPublicAddress: 'owner-address',
@@ -223,12 +232,139 @@ describe('TrusteeWorkspaceSummary', () => {
 
     render(<TrusteeWorkspaceSummary entry={entry} detail={detail} />);
 
+    expect(screen.getByTestId('hush-voting-trustee-toggle')).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByTestId('trustee-share-workspace-action')).toHaveAttribute(
       'aria-disabled',
       'false'
     );
     expect(screen.getByTestId('hush-voting-section-trustee')).toHaveTextContent(
       'Close-counting share active.'
+    );
+  });
+
+  it('surfaces executor progress once threshold is reached and the worker starts running', () => {
+    const entry = createHubEntry(
+      'election-trustee-running',
+      ElectionLifecycleStateProto.Closed,
+      'Trustee Executor Election',
+      {
+        ActorRoles: {
+          IsOwnerAdmin: false,
+          IsTrustee: true,
+          IsVoter: false,
+          IsDesignatedAuditor: false,
+        },
+        SuggestedAction: ElectionHubNextActionHintProto.ElectionHubActionNone,
+        SuggestedActionReason: 'No immediate action is required for this election.',
+        HasUnofficialResult: false,
+        HasOfficialResult: false,
+      }
+    );
+
+    const detail = createDetail(
+      'election-trustee-running',
+      ElectionLifecycleStateProto.Closed,
+      'Trustee Executor Election',
+      {
+        FinalizationSessions: [
+          {
+            Id: 'session-close-running',
+            ElectionId: 'election-trustee-running',
+            GovernedProposalId: 'proposal-close-1',
+            GovernanceMode: 1,
+            SessionPurpose: ElectionFinalizationSessionPurposeProto.FinalizationSessionPurposeCloseCounting,
+            CloseArtifactId: 'close-artifact-1',
+            AcceptedBallotSetHash: 'accepted-ballot-set-hash',
+            FinalEncryptedTallyHash: 'encrypted-tally-hash',
+            TargetTallyId: 'aggregate-tally-1',
+            CeremonySnapshot: undefined,
+            RequiredShareCount: 3,
+            EligibleTrustees: [],
+            CloseCountingJobId: 'close-counting-job-1',
+            CloseCountingJobStatus: ElectionCloseCountingJobStatusProto.CloseCountingJobRunning,
+            ExecutorSessionPublicKey: 'executor-session-public-key-1',
+            ExecutorKeyAlgorithm: 'ecies-secp256k1-v1',
+            Status: ElectionFinalizationSessionStatusProto.FinalizationSessionAwaitingShares,
+            CreatedAt: timestamp,
+            CreatedByPublicAddress: 'owner-address',
+            CompletedAt: undefined,
+            ReleaseEvidenceId: '',
+            LatestTransactionId: 'transaction-1',
+            LatestBlockHeight: 100,
+            LatestBlockId: 'block-100',
+          },
+        ],
+      }
+    );
+
+    render(<TrusteeWorkspaceSummary entry={entry} detail={detail} />);
+
+    expect(screen.getByTestId('hush-voting-trustee-toggle')).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByTestId('hush-voting-section-trustee')).toHaveTextContent('Executor running.');
+    expect(screen.getByTestId('hush-voting-section-trustee')).toHaveTextContent(
+      'The tally executor is validating the bound trustee submissions'
+    );
+    expect(screen.getByTestId('hush-voting-section-trustee')).toHaveTextContent(
+      'Close counting | Executor running'
+    );
+  });
+
+  it('stays collapsed once the unofficial result is published', () => {
+    const entry = createHubEntry(
+      'election-trustee-result',
+      ElectionLifecycleStateProto.Closed,
+      'Trustee Result Election',
+      {
+        ActorRoles: {
+          IsOwnerAdmin: false,
+          IsTrustee: true,
+          IsVoter: false,
+          IsDesignatedAuditor: false,
+        },
+        SuggestedAction: ElectionHubNextActionHintProto.ElectionHubActionTrusteeReviewResult,
+        SuggestedActionReason: 'Review the available election result artifacts.',
+        HasUnofficialResult: true,
+        HasOfficialResult: false,
+      }
+    );
+
+    const detail = createDetail(
+      'election-trustee-result',
+      ElectionLifecycleStateProto.Closed,
+      'Trustee Result Election',
+      {
+        FinalizationSessions: [
+          {
+            Id: 'session-close-complete',
+            ElectionId: 'election-trustee-result',
+            GovernedProposalId: 'proposal-close-1',
+            GovernanceMode: 1,
+            SessionPurpose: ElectionFinalizationSessionPurposeProto.FinalizationSessionPurposeCloseCounting,
+            CloseArtifactId: 'close-artifact-1',
+            AcceptedBallotSetHash: 'accepted-ballot-set-hash',
+            FinalEncryptedTallyHash: 'encrypted-tally-hash',
+            TargetTallyId: 'aggregate-tally-1',
+            CeremonySnapshot: undefined,
+            RequiredShareCount: 3,
+            EligibleTrustees: [],
+            Status: ElectionFinalizationSessionStatusProto.FinalizationSessionCompleted,
+            CreatedAt: timestamp,
+            CreatedByPublicAddress: 'owner-address',
+            CompletedAt: timestamp,
+            ReleaseEvidenceId: 'release-evidence-1',
+            LatestTransactionId: 'transaction-2',
+            LatestBlockHeight: 101,
+            LatestBlockId: 'block-101',
+          },
+        ],
+      }
+    );
+
+    render(<TrusteeWorkspaceSummary entry={entry} detail={detail} />);
+
+    expect(screen.getByTestId('hush-voting-trustee-toggle')).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByTestId('hush-voting-section-trustee')).toHaveTextContent(
+      'Unofficial result published.'
     );
   });
 });

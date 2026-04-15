@@ -6,6 +6,7 @@ import { ArrowLeft } from 'lucide-react';
 import {
   formatTimestamp,
   getElectionHubDisplayActionLabel,
+  getElectionHubNarrative,
   getLifecycleLabel,
 } from './contracts';
 import { RoleBadgeCluster } from './RoleBadgeCluster';
@@ -44,7 +45,7 @@ export function ElectionWorkspaceHeader({ entry }: ElectionWorkspaceHeaderProps)
         </span>
       </p>
       <p className="mt-3 max-w-3xl text-sm text-hush-text-accent">
-        {entry.SuggestedActionReason || 'Review the available election surfaces for your roles.'}
+        {getElectionHubNarrative(entry)}
       </p>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">

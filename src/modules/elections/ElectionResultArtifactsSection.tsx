@@ -22,6 +22,7 @@ import {
   ElectionReportArtifactFormatProto,
   ElectionReportArtifactKindProto,
   ElectionReportPackageStatusProto,
+  ElectionResultArtifactKindProto,
   ElectionResultArtifactVisibilityProto,
 } from '@/lib/grpc';
 import {
@@ -45,6 +46,21 @@ function getVisibilityCopy(artifact: ElectionResultArtifact): string {
     ElectionResultArtifactVisibilityProto.ElectionResultArtifactPublicPlaintext
     ? 'Public plaintext'
     : 'Participant encrypted';
+}
+
+function getTallyReadyLineageCopy(artifact: ElectionResultArtifact): string {
+  if (artifact.TallyReadyArtifactId) {
+    return formatArtifactValue(artifact.TallyReadyArtifactId);
+  }
+
+  if (
+    artifact.ArtifactKind === ElectionResultArtifactKindProto.ElectionResultArtifactOfficial &&
+    artifact.SourceResultArtifactId
+  ) {
+    return 'Inherited via source result';
+  }
+
+  return 'Not recorded';
 }
 
 function renderProgressCopy(
@@ -283,7 +299,7 @@ function ResultArtifactCard({
             <div className="mt-2 space-y-2 text-sm text-hush-text-primary">
               <div>
                 Tally ready:{' '}
-                <span className="font-mono">{formatArtifactValue(artifact.TallyReadyArtifactId)}</span>
+                <span className="font-mono">{getTallyReadyLineageCopy(artifact)}</span>
               </div>
               <div>
                 Source result:{' '}

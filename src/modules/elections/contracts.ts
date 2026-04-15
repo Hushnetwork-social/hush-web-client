@@ -1,4 +1,5 @@
 import {
+  ElectionCloseCountingJobStatusProto,
   ElectionClosedProgressStatusProto,
   type ElectionHubEntryView,
   ElectionHubNextActionHintProto,
@@ -68,12 +69,22 @@ export type ElectionWorkspaceSectionId =
   | 'owner-admin'
   | 'trustee'
   | 'auditor'
-  | 'results';
+  | 'results'
+  | 'artifacts';
 
 export type ClosedProgressBannerState = {
   title: string;
   description: string;
 };
+
+type ClosedProgressNarrativeAudience =
+  | 'owner-admin'
+  | 'trustee'
+  | 'auditor'
+  | 'voter'
+  | 'generic';
+
+type PublishedResultNarrativeAudience = ClosedProgressNarrativeAudience;
 
 export const DEFAULT_APPROVED_CLIENT_APPLICATIONS = [
   { ApplicationId: 'hushsocial', Version: '1.0.0' },
@@ -203,9 +214,9 @@ const OFFICIAL_RESULT_VISIBILITY_LABELS: Record<OfficialResultVisibilityPolicyPr
 const CLOSED_PROGRESS_STATUS_LABELS: Record<ElectionClosedProgressStatusProto, string> = {
   [ElectionClosedProgressStatusProto.ClosedProgressNone]: 'No active close processing',
   [ElectionClosedProgressStatusProto.ClosedProgressWaitingForTrusteeShares]:
-    'Waiting for trustee shares',
+    'Waiting for trustee tally shares',
   [ElectionClosedProgressStatusProto.ClosedProgressTallyCalculationInProgress]:
-    'Tally calculation in progress',
+    'Unofficial tally calculation in progress',
 };
 
 const GOVERNED_ACTION_LABELS: Record<ElectionGovernedActionTypeProto, string> = {
@@ -275,6 +286,20 @@ const FINALIZATION_SESSION_PURPOSE_LABELS: Record<ElectionFinalizationSessionPur
   [ElectionFinalizationSessionPurposeProto.FinalizationSessionPurposeCloseCounting]:
     'Close counting',
   [ElectionFinalizationSessionPurposeProto.FinalizationSessionPurposeFinalize]: 'Finalize',
+};
+
+const CLOSE_COUNTING_JOB_STATUS_LABELS: Record<ElectionCloseCountingJobStatusProto, string> = {
+  [ElectionCloseCountingJobStatusProto.CloseCountingJobPending]: 'Pending',
+  [ElectionCloseCountingJobStatusProto.CloseCountingJobAwaitingShares]:
+    'Awaiting trustee shares',
+  [ElectionCloseCountingJobStatusProto.CloseCountingJobThresholdReached]:
+    'Threshold reached',
+  [ElectionCloseCountingJobStatusProto.CloseCountingJobRunning]: 'Executor running',
+  [ElectionCloseCountingJobStatusProto.CloseCountingJobPublishing]:
+    'Publishing unofficial result',
+  [ElectionCloseCountingJobStatusProto.CloseCountingJobCompleted]: 'Completed',
+  [ElectionCloseCountingJobStatusProto.CloseCountingJobFailed]: 'Failed',
+  [ElectionCloseCountingJobStatusProto.CloseCountingJobSuperseded]: 'Superseded',
 };
 
 const FINALIZATION_SHARE_STATUS_LABELS: Record<ElectionFinalizationShareStatusProto, string> = {
@@ -1160,6 +1185,12 @@ export function getFinalizationSessionPurposeLabel(
   return FINALIZATION_SESSION_PURPOSE_LABELS[purpose] ?? 'Unknown';
 }
 
+export function getCloseCountingJobStatusLabel(
+  status: ElectionCloseCountingJobStatusProto
+): string {
+  return CLOSE_COUNTING_JOB_STATUS_LABELS[status] ?? 'Unknown';
+}
+
 export function getFinalizationShareStatusLabel(
   status: ElectionFinalizationShareStatusProto
 ): string {
@@ -1439,8 +1470,25 @@ export function getElectionHubSuggestedActionLabel(
 }
 
 export function getElectionHubDisplayActionLabel(
-  entry: Pick<ElectionHubEntryView, 'ActorRoles' | 'SuggestedAction' | 'SuggestedActionReason'>
+  entry: Pick<
+    ElectionHubEntryView,
+    | 'ActorRoles'
+    | 'SuggestedAction'
+    | 'SuggestedActionReason'
+    | 'Election'
+    | 'ClosedProgressStatus'
+    | 'HasUnofficialResult'
+    | 'HasOfficialResult'
+  >
 ): string {
+  if (entry.HasOfficialResult) {
+    return 'Review official result';
+  }
+
+  if (entry.HasUnofficialResult) {
+    return 'Review unofficial result';
+  }
+
   if (entry.SuggestedAction !== ElectionHubNextActionHintProto.ElectionHubActionNone) {
     return getElectionHubSuggestedActionLabel(entry.SuggestedAction);
   }
@@ -1457,32 +1505,298 @@ export function getElectionHubDisplayActionLabel(
     return 'Continue ceremony';
   }
 
+  if (
+    entry.ActorRoles.IsTrustee &&
+    normalizedReason.startsWith('submit the bound trustee tally share for close-counting.')
+  ) {
+    return 'Submit tally share';
+  }
+
+  if (
+    entry.ActorRoles.IsTrustee &&
+    normalizedReason.startsWith('resubmit the bound trustee tally share for close-counting.')
+  ) {
+    return 'Resubmit tally share';
+  }
+
+  if (
+    entry.Election.LifecycleState === ElectionLifecycleStateProto.Closed &&
+    !entry.HasUnofficialResult &&
+    !entry.HasOfficialResult
+  ) {
+    if (entry.ActorRoles.IsVoter) {
+      return 'Waiting for unofficial result';
+    }
+
+    if (entry.ActorRoles.IsDesignatedAuditor) {
+      return 'Await result package';
+    }
+
+    if (entry.ActorRoles.IsTrustee) {
+      return 'Monitor tally phase';
+    }
+  }
+
   return getElectionHubSuggestedActionLabel(entry.SuggestedAction);
+}
+
+function resolveClosedProgressNarrativeAudience(
+  entry: Pick<
+    ElectionHubEntryView,
+    'ActorRoles' | 'SuggestedActionReason'
+  >
+): ClosedProgressNarrativeAudience {
+  if (entry.ActorRoles.IsOwnerAdmin) {
+    return 'owner-admin';
+  }
+
+  if (entry.ActorRoles.IsTrustee) {
+    return 'trustee';
+  }
+
+  if (entry.ActorRoles.IsDesignatedAuditor) {
+    return 'auditor';
+  }
+
+  if (entry.ActorRoles.IsVoter) {
+    return 'voter';
+  }
+
+  return 'generic';
+}
+
+export function getPublishedResultNarrative(
+  entry: Pick<
+    ElectionHubEntryView,
+    | 'ActorRoles'
+    | 'Election'
+    | 'HasUnofficialResult'
+    | 'HasOfficialResult'
+  >,
+  audience: PublishedResultNarrativeAudience = resolveClosedProgressNarrativeAudience(entry)
+): ClosedProgressBannerState | null {
+  if (!entry.HasUnofficialResult && !entry.HasOfficialResult) {
+    return null;
+  }
+
+  if (entry.HasOfficialResult) {
+    switch (audience) {
+      case 'owner-admin':
+        return {
+          title: 'Official result published',
+          description:
+            'Finalization is complete and the official result is published. Report packages and boundary artifacts remain separate review surfaces.',
+        };
+      case 'trustee':
+        return {
+          title: 'Official result published',
+          description:
+            'Finalization is complete and the official result is published. Trustee operational steps are complete for this election.',
+        };
+      case 'auditor':
+        return {
+          title: 'Official result published',
+          description:
+            'Finalization is complete and the official result is published. Auditor-visible report artifacts remain available through the separate artifact/package surface.',
+        };
+      case 'voter':
+        return {
+          title: 'Official result published',
+          description:
+            'Finalization is complete and the official result is published. Voting is closed, and the voter surface remains available only for personal context and receipt verification.',
+        };
+      case 'generic':
+      default:
+        return {
+          title: 'Official result published',
+          description:
+            'Finalization is complete and the official result is now published for this election.',
+        };
+    }
+  }
+
+  switch (audience) {
+    case 'owner-admin':
+      return {
+        title: 'Unofficial result published',
+        description:
+          'Election close is complete and the unofficial result is published. Finalization remains the separate governed step that creates the official result.',
+      };
+    case 'trustee':
+      return {
+        title: 'Unofficial result published',
+        description:
+          'Election close is complete and the unofficial result is published. The trustee tally-share workflow is complete, and finalization remains the separate governed step.',
+      };
+    case 'auditor':
+      return {
+        title: 'Unofficial result published',
+        description:
+          'Election close is complete and the unofficial result is published. Auditor-visible package artifacts remain a separate review surface until finalization publishes the official result.',
+      };
+    case 'voter':
+      return {
+        title: 'Unofficial result published',
+        description:
+          'Election close is complete and the unofficial result is published. Finalization remains the later step that creates the official result.',
+      };
+    case 'generic':
+    default:
+      return {
+        title: 'Unofficial result published',
+        description:
+          'Election close is complete and the unofficial result is now published. Finalization remains the later step that creates the official result.',
+      };
+  }
+}
+
+export function getClosedProgressNarrative(
+  entry: Pick<
+    ElectionHubEntryView,
+    | 'ActorRoles'
+    | 'SuggestedActionReason'
+    | 'ClosedProgressStatus'
+    | 'Election'
+    | 'HasUnofficialResult'
+    | 'HasOfficialResult'
+  >,
+  audience: ClosedProgressNarrativeAudience = resolveClosedProgressNarrativeAudience(entry)
+): ClosedProgressBannerState | null {
+  if (entry.Election.LifecycleState !== ElectionLifecycleStateProto.Closed) {
+    return null;
+  }
+
+  if (entry.HasUnofficialResult || entry.HasOfficialResult) {
+    return null;
+  }
+
+  const normalizedReason = entry.SuggestedActionReason.trim().toLowerCase();
+
+  switch (entry.ClosedProgressStatus) {
+    case ElectionClosedProgressStatusProto.ClosedProgressWaitingForTrusteeShares:
+      switch (audience) {
+        case 'owner-admin':
+          return {
+            title: 'Waiting for trustee tally shares',
+            description:
+              'Governed close is complete. Vote casting is locked, and the election is waiting for eligible trustees to provide the bound tally shares required to count votes and publish the unofficial result.',
+          };
+        case 'trustee':
+          if (
+            normalizedReason.startsWith(
+              'submit the bound trustee tally share for close-counting.'
+            )
+          ) {
+            return {
+              title: 'Submit trustee tally share',
+              description:
+                'Governed close is complete. This trustee still needs to provide the bound tally share required to count votes and publish the unofficial result.',
+            };
+          }
+
+          if (
+            normalizedReason.startsWith(
+              'resubmit the bound trustee tally share for close-counting.'
+            )
+          ) {
+            return {
+              title: 'Resubmit trustee tally share',
+              description:
+                'Governed close is complete. This trustee needs to resubmit the bound tally share before votes can be counted and the unofficial result can be published.',
+            };
+          }
+
+          return {
+            title: 'Waiting for trustee tally shares',
+            description:
+              'Governed close is complete. Eligible trustees are still providing the bound tally shares required to count votes and publish the unofficial result.',
+          };
+        case 'auditor':
+          return {
+            title: 'Awaiting unofficial result preparation',
+            description:
+              'Governed close is complete, but eligible trustees still need to provide the bound tally shares before the unofficial result and auditor-visible evidence can be reviewed.',
+          };
+        case 'voter':
+          return {
+            title: 'Waiting for the unofficial result',
+            description:
+              'Voting is closed. Eligible trustees still need to provide the bound tally shares before the election can count votes and publish the unofficial result.',
+          };
+        case 'generic':
+        default:
+          return {
+            title: 'Waiting for trustee tally shares',
+            description:
+              'The election is closed and waiting for the required trustee tally shares before votes can be counted and the unofficial result can be published.',
+          };
+      }
+    case ElectionClosedProgressStatusProto.ClosedProgressTallyCalculationInProgress:
+      switch (audience) {
+        case 'owner-admin':
+          return {
+            title: 'Counting votes for the unofficial result',
+            description:
+              'The required trustee tally shares were accepted. The election is counting the closed ballot set and preparing the unofficial result. The official result will be created only after finalization.',
+          };
+        case 'trustee':
+          return {
+            title: 'Unofficial tally calculation in progress',
+            description:
+              'The required trustee tally shares were accepted. The election is counting votes for the unofficial result. Finalization remains a separate governed step.',
+          };
+        case 'auditor':
+          return {
+            title: 'Unofficial result is being prepared',
+            description:
+              'The required trustee tally shares were accepted. The election is counting votes for the unofficial result and preparing the next auditor-visible artifacts. The official result will appear only after finalization.',
+          };
+        case 'voter':
+          return {
+            title: 'Unofficial result is being prepared',
+            description:
+              'Voting is closed. The required trustee tally shares were accepted, and the election is now counting votes for the unofficial result. The official result will appear only after finalization.',
+          };
+        case 'generic':
+        default:
+          return {
+            title: 'Unofficial tally calculation in progress',
+            description:
+              'The required trustee tally shares were accepted, and the election is counting votes for the unofficial result. The official result will appear only after finalization.',
+          };
+      }
+    default:
+      return null;
+  }
 }
 
 export function getClosedProgressBannerState(
   entry: ElectionHubEntryView | null
 ): ClosedProgressBannerState | null {
-  if (!entry || entry.Election.LifecycleState !== ElectionLifecycleStateProto.Closed) {
+  if (!entry) {
     return null;
   }
 
-  switch (entry.ClosedProgressStatus) {
-    case ElectionClosedProgressStatusProto.ClosedProgressWaitingForTrusteeShares:
-      return {
-        title: 'Waiting for trustee shares',
-        description:
-          'The election is closed and waiting for the required trustee shares before tally work can continue.',
-      };
-    case ElectionClosedProgressStatusProto.ClosedProgressTallyCalculationInProgress:
-      return {
-        title: 'Tally calculation in progress',
-        description:
-          'The close boundary is sealed and tally processing is running on the persisted election state.',
-      };
-    default:
-      return null;
-  }
+  return getClosedProgressNarrative(entry);
+}
+
+export function getElectionHubNarrative(
+  entry: Pick<
+    ElectionHubEntryView,
+    | 'ActorRoles'
+    | 'SuggestedActionReason'
+    | 'ClosedProgressStatus'
+    | 'Election'
+    | 'HasUnofficialResult'
+    | 'HasOfficialResult'
+  >
+): string {
+  return (
+    getPublishedResultNarrative(entry)?.description ||
+    getClosedProgressNarrative(entry)?.description ||
+    entry.SuggestedActionReason ||
+    'Review the available election surfaces for your roles.'
+  );
 }
 
 export function getElectionWorkspaceSectionOrder(
@@ -1496,12 +1810,13 @@ export function getElectionWorkspaceSectionOrder(
   const canOpenVoterSurface = entry.ActorRoles.IsVoter || entry.CanClaimIdentity;
   const isOpenVoter =
     canOpenVoterSurface && entry.Election.LifecycleState === ElectionLifecycleStateProto.Open;
-  const shouldKeepResultReviewInsideVoterDetails = canOpenVoterSurface;
-  const hasWorkspaceResultSurface =
-    !shouldKeepResultReviewInsideVoterDetails &&
-    (entry.CanViewParticipantResults || entry.HasUnofficialResult || entry.HasOfficialResult);
+  const hasPublishedResult = entry.HasUnofficialResult || entry.HasOfficialResult;
   const hasWorkspaceArtifactSurface =
     entry.CanViewReportPackage || entry.CanViewNamedParticipationRoster;
+
+  if (hasPublishedResult) {
+    sections.push('results');
+  }
 
   if (isOpenVoter) {
     sections.push('voter');
@@ -1523,8 +1838,8 @@ export function getElectionWorkspaceSectionOrder(
     sections.push('voter');
   }
 
-  if (hasWorkspaceResultSurface || hasWorkspaceArtifactSurface) {
-    sections.push('results');
+  if (hasWorkspaceArtifactSurface) {
+    sections.push('artifacts');
   }
 
   return sections;

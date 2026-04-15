@@ -1000,6 +1000,17 @@ export enum ElectionFinalizationSessionPurposeProto {
   FinalizationSessionPurposeFinalize = 1,
 }
 
+export enum ElectionCloseCountingJobStatusProto {
+  CloseCountingJobPending = 0,
+  CloseCountingJobAwaitingShares = 1,
+  CloseCountingJobThresholdReached = 2,
+  CloseCountingJobRunning = 3,
+  CloseCountingJobPublishing = 4,
+  CloseCountingJobCompleted = 5,
+  CloseCountingJobFailed = 6,
+  CloseCountingJobSuperseded = 7,
+}
+
 export enum ElectionFinalizationShareStatusProto {
   FinalizationShareAccepted = 0,
   FinalizationShareRejected = 1,
@@ -1219,6 +1230,10 @@ export interface ElectionFinalizationSession {
   LatestTransactionId: string;
   LatestBlockHeight?: number;
   LatestBlockId: string;
+  CloseCountingJobId: string;
+  CloseCountingJobStatus: ElectionCloseCountingJobStatusProto;
+  ExecutorSessionPublicKey: string;
+  ExecutorKeyAlgorithm: string;
 }
 
 export interface ElectionFinalizationShare {
@@ -1613,6 +1628,9 @@ export interface SubmitElectionFinalizationShareRequest {
   ClaimedTargetTallyId: string;
   ClaimedCeremonyVersionId?: string | null;
   ClaimedTallyPublicKeyFingerprint?: string | null;
+  CloseCountingJobId?: string | null;
+  ExecutorSessionPublicKey?: string | null;
+  ExecutorKeyAlgorithm?: string | null;
   ShareMaterial: string;
 }
 
@@ -2019,6 +2037,7 @@ export interface GetElectionCeremonyActionViewResponse {
   SelfShareCustody?: ElectionCeremonyShareCustody;
   PendingIncomingMessageCount: number;
   BlockedReasons: string[];
+  SelfVaultEnvelopes?: ElectionCeremonyMessageEnvelope[];
 }
 
 export interface GetElectionEligibilityViewResponse {

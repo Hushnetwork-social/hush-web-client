@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   ElectionClassProto,
   ElectionCeremonyVersionStatusProto,
+  ElectionClosedProgressStatusProto,
   ElectionDisclosureModeProto,
   ElectionGovernanceModeProto,
   ElectionLifecycleStateProto,
@@ -216,6 +217,105 @@ describe('OwnerAdminWorkspaceSummary', () => {
     expect(screen.getByRole('link', { name: 'Owner Workspace' })).toHaveAttribute(
       'href',
       '/elections/owner?electionId=election-ready'
+    );
+  });
+
+  it('reframes the owner surface around trustee tally shares once the election is closed', () => {
+    const ownerEntry = createHubEntry(
+      'election-closed',
+      ElectionLifecycleStateProto.Closed,
+      'Closed Election',
+      {
+        ActorRoles: {
+          IsOwnerAdmin: true,
+          IsTrustee: false,
+          IsVoter: true,
+          IsDesignatedAuditor: false,
+        },
+        Election: createSummary(
+          'election-closed',
+          ElectionLifecycleStateProto.Closed,
+          'Closed Election',
+          'actor-address'
+        ),
+        ClosedProgressStatus:
+          ElectionClosedProgressStatusProto.ClosedProgressWaitingForTrusteeShares,
+        HasUnofficialResult: false,
+        HasOfficialResult: false,
+      }
+    );
+    ownerEntry.Election.GovernanceMode = ElectionGovernanceModeProto.TrusteeThreshold;
+
+    render(
+      <OwnerAdminWorkspaceSummary
+        entry={ownerEntry}
+        detail={createDetail('election-closed', ElectionLifecycleStateProto.Closed, 'Closed Election', {
+          Election: createElectionRecord(
+            'election-closed',
+            ElectionLifecycleStateProto.Closed,
+            'Closed Election',
+            {
+              GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+              ClosedProgressStatus:
+                ElectionClosedProgressStatusProto.ClosedProgressWaitingForTrusteeShares,
+            }
+          ),
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('hush-voting-section-owner-admin')).toHaveTextContent(
+      'Waiting for trustee tally shares.'
+    );
+    fireEvent.click(screen.getByTestId('hush-voting-owner-admin-toggle'));
+    expect(screen.getByTestId('hush-voting-section-owner-admin')).toHaveTextContent(
+      'Close-to-unofficial-result snapshot'
+    );
+    expect(screen.getByTestId('hush-voting-section-owner-admin')).toHaveTextContent(
+      'publish the unofficial result'
+    );
+    expect(screen.getByTestId('hush-voting-section-owner-admin')).toHaveTextContent(
+      'Pending finalization'
+    );
+  });
+
+  it('stays collapsed and explicit once the unofficial result is published', () => {
+    const ownerEntry = createHubEntry(
+      'election-unofficial',
+      ElectionLifecycleStateProto.Closed,
+      'Unofficial Result Election',
+      {
+        ActorRoles: {
+          IsOwnerAdmin: true,
+          IsTrustee: false,
+          IsVoter: true,
+          IsDesignatedAuditor: false,
+        },
+        Election: createSummary(
+          'election-unofficial',
+          ElectionLifecycleStateProto.Closed,
+          'Unofficial Result Election',
+          'actor-address'
+        ),
+        HasUnofficialResult: true,
+        HasOfficialResult: false,
+      }
+    );
+
+    render(
+      <OwnerAdminWorkspaceSummary
+        entry={ownerEntry}
+        detail={createDetail(
+          'election-unofficial',
+          ElectionLifecycleStateProto.Closed,
+          'Unofficial Result Election'
+        )}
+      />
+    );
+
+    expect(screen.getByTestId('hush-voting-owner-admin-toggle')).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByTestId('hush-voting-section-owner-admin')).toHaveTextContent(
+      'Unofficial result published.'
     );
   });
 });

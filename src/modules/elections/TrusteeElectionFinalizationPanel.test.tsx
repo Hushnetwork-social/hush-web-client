@@ -1,15 +1,21 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as secp256k1 from '@noble/secp256k1';
 import type {
+  ElectionCeremonyMessageEnvelope,
   ElectionFinalizationReleaseEvidence,
   ElectionFinalizationSession,
   ElectionFinalizationShare,
   ElectionRecordView,
+  GetElectionCeremonyActionViewResponse,
   GetElectionResponse,
 } from '@/lib/grpc';
 import {
   ElectionBindingStatusProto,
+  ElectionCeremonyActorRoleProto,
+  ElectionCeremonyVersionStatusProto,
   ElectionClassProto,
+  ElectionCloseCountingJobStatusProto,
   ElectionDisclosureModeProto,
   ElectionFinalizationReleaseModeProto,
   ElectionFinalizationSessionPurposeProto,
@@ -28,13 +34,20 @@ import {
   ReviewWindowPolicyProto,
   VoteUpdatePolicyProto,
 } from '@/lib/grpc';
+import { bytesToBase64, bytesToHex, hexToBytes } from '@/lib/crypto';
 import { useBlockchainStore } from '@/modules/blockchain/useBlockchainStore';
+import { useAppStore } from '@/stores/useAppStore';
+import {
+  createTrusteeShareVaultEnvelope,
+  deriveTrusteeCloseCountingShareMaterial,
+} from './trusteeShareVault';
 import { TrusteeElectionFinalizationPanel } from './TrusteeElectionFinalizationPanel';
 import { useElectionsStore } from './useElectionsStore';
 
 const { electionsServiceMock, blockchainServiceMock, transactionServiceMock } = vi.hoisted(() => ({
   electionsServiceMock: {
     getElection: vi.fn(),
+    getElectionCeremonyActionView: vi.fn(),
   },
   blockchainServiceMock: {
     submitTransaction: vi.fn(),
@@ -58,6 +71,27 @@ vi.mock('./transactionService', () => ({
 }));
 
 const timestamp = { seconds: 1_711_410_000, nanos: 0 };
+const trusteeMnemonic = [
+  'abandon',
+  'abandon',
+  'abandon',
+  'abandon',
+  'abandon',
+  'abandon',
+  'abandon',
+  'abandon',
+  'abandon',
+  'abandon',
+  'abandon',
+  'about',
+];
+const trusteeEncryptionPrivateKey =
+  '1111111111111111111111111111111111111111111111111111111111111111';
+const trusteeEncryptionPublicKey = bytesToHex(
+  secp256k1.getPublicKey(hexToBytes(trusteeEncryptionPrivateKey), true)
+);
+const trusteeSigningPrivateKey =
+  '2222222222222222222222222222222222222222222222222222222222222222';
 
 function createElectionRecord(overrides?: Partial<ElectionRecordView>): ElectionRecordView {
   return {
@@ -162,6 +196,10 @@ function createFinalizationSession(
         TrusteeDisplayName: 'Bob Trustee',
       },
     ],
+    CloseCountingJobId: 'close-counting-job-1',
+    CloseCountingJobStatus: ElectionCloseCountingJobStatusProto.CloseCountingJobAwaitingShares,
+    ExecutorSessionPublicKey: 'executor-session-public-key-1',
+    ExecutorKeyAlgorithm: 'ecies-secp256k1-v1',
     Status: ElectionFinalizationSessionStatusProto.FinalizationSessionAwaitingShares,
     CreatedAt: timestamp,
     CreatedByPublicAddress: 'owner-public-key',
@@ -258,12 +296,122 @@ function createElectionResponse(overrides?: Partial<GetElectionResponse>): GetEl
   };
 }
 
+function createCeremonyActionViewResponse(
+  overrides?: Partial<GetElectionCeremonyActionViewResponse>
+): GetElectionCeremonyActionViewResponse {
+  return {
+    Success: true,
+    ErrorMessage: '',
+    ActorRole: ElectionCeremonyActorRoleProto.CeremonyActorTrustee,
+    ActorPublicAddress: 'trustee-a',
+    ActiveCeremonyVersion: {
+      Id: 'ceremony-version-1',
+      ElectionId: 'election-1',
+      VersionNumber: 4,
+      ProfileId: 'prod-3of5-v1',
+      Status: ElectionCeremonyVersionStatusProto.CeremonyVersionCompleted,
+      TrusteeCount: 2,
+      RequiredApprovalCount: 2,
+      BoundTrustees: [
+        {
+          TrusteeUserAddress: 'trustee-a',
+          TrusteeDisplayName: 'Alice Trustee',
+        },
+        {
+          TrusteeUserAddress: 'trustee-b',
+          TrusteeDisplayName: 'Bob Trustee',
+        },
+      ],
+      StartedByPublicAddress: 'owner-public-key',
+      StartedAt: timestamp,
+      SupersededReason: '',
+      TallyPublicKeyFingerprint: 'tally-fingerprint-1',
+    },
+    OwnerActions: [],
+    TrusteeActions: [],
+    PendingIncomingMessageCount: 0,
+    BlockedReasons: [],
+    SelfVaultEnvelopes: [],
+    ...overrides,
+  };
+}
+
+async function createStoredVaultEnvelopeFixture(): Promise<{
+  envelope: ElectionCeremonyMessageEnvelope;
+  shareVersion: string;
+  shareMaterial: string;
+  shareMaterialHash: string;
+}> {
+  const shareVersion = 'share-v2';
+  const closeCountingShare = await deriveTrusteeCloseCountingShareMaterial({
+    electionId: 'election-1',
+    ceremonyVersionId: 'ceremony-version-1',
+    trusteeUserAddress: 'trustee-a',
+    mnemonic: trusteeMnemonic,
+    shareVersion,
+  });
+  const vaultEnvelope = await createTrusteeShareVaultEnvelope({
+    electionId: 'election-1',
+    ceremonyVersionId: 'ceremony-version-1',
+    trusteeUserAddress: 'trustee-a',
+    trusteeEncryptionPublicKey,
+    mnemonic: trusteeMnemonic,
+    shareVersion,
+    material: {
+      packageKind: 'trustee-ceremony-package',
+      ceremonyMessageType: 'dkg-share-package',
+      ceremonyPayloadVersion: 'omega-v1.0.0',
+      ceremonyPayloadFingerprint: 'package-fingerprint',
+      ceremonyEncryptedPayload: '{"packageKind":"trustee-ceremony-package"}',
+      transportPublicKeyFingerprint: 'transport-fingerprint',
+      protocolVersion: 'omega-v1.0.0',
+      profileId: 'prod-3of5-v1',
+      versionNumber: 4,
+      closeCountingShare,
+    },
+  });
+
+  return {
+    envelope: {
+      Id: 'vault-envelope-1',
+      ElectionId: 'election-1',
+      CeremonyVersionId: 'ceremony-version-1',
+      VersionNumber: 4,
+      ProfileId: 'prod-3of5-v1',
+      SenderTrusteeUserAddress: 'trustee-a',
+      RecipientTrusteeUserAddress: 'trustee-a',
+      MessageType: vaultEnvelope.messageType,
+      PayloadVersion: vaultEnvelope.payloadVersion,
+      EncryptedPayload: bytesToBase64(
+        new TextEncoder().encode(vaultEnvelope.encryptedPayload)
+      ),
+      PayloadFingerprint: vaultEnvelope.payloadFingerprint,
+      SubmittedAt: timestamp,
+    },
+    shareVersion,
+    shareMaterial: closeCountingShare.scalarMaterial,
+    shareMaterialHash: closeCountingShare.scalarMaterialHash,
+  };
+}
+
 describe('TrusteeElectionFinalizationPanel', () => {
   beforeEach(() => {
     useElectionsStore.getState().reset();
     useBlockchainStore.getState().reset();
+    useAppStore.setState({
+      credentials: {
+        signingPublicKey: 'trustee-signing-public-key',
+        signingPrivateKey: trusteeSigningPrivateKey,
+        encryptionPublicKey: trusteeEncryptionPublicKey,
+        encryptionPrivateKey: trusteeEncryptionPrivateKey,
+        mnemonic: trusteeMnemonic,
+      },
+    });
     vi.clearAllMocks();
-    blockchainServiceMock.submitTransaction.mockResolvedValue({ successful: true, message: 'Accepted' });
+    blockchainServiceMock.submitTransaction.mockResolvedValue({
+      successful: true,
+      message: 'Accepted',
+    });
     transactionServiceMock.createSubmitElectionFinalizationShareTransaction.mockResolvedValue({
       signedTransaction: 'signed-finalization-share-transaction',
     });
@@ -275,18 +423,24 @@ describe('TrusteeElectionFinalizationPanel', () => {
       FinalizationShares: [createFinalizationShare()],
       FinalizationReleaseEvidenceRecords: [createFinalizationReleaseEvidence()],
     });
+    const vaultFixture = await createStoredVaultEnvelopeFixture();
 
     electionsServiceMock.getElection
       .mockResolvedValueOnce(initialResponse)
       .mockResolvedValue(indexedResponse);
+    electionsServiceMock.getElectionCeremonyActionView.mockResolvedValue(
+      createCeremonyActionViewResponse({
+        SelfVaultEnvelopes: [vaultFixture.envelope],
+      })
+    );
 
     render(
       <TrusteeElectionFinalizationPanel
         electionId="election-1"
         actorPublicAddress="trustee-a"
-        actorEncryptionPublicKey="trustee-encryption-key"
-        actorEncryptionPrivateKey="trustee-encryption-private-key"
-        actorSigningPrivateKey="trustee-signing-private-key"
+        actorEncryptionPublicKey={trusteeEncryptionPublicKey}
+        actorEncryptionPrivateKey={trusteeEncryptionPrivateKey}
+        actorSigningPrivateKey={trusteeSigningPrivateKey}
       />
     );
 
@@ -310,12 +464,16 @@ describe('TrusteeElectionFinalizationPanel', () => {
     );
     expect(screen.getByTestId('trustee-finalization-panel')).toHaveTextContent('Share index 1');
 
-    fireEvent.change(screen.getByTestId('trustee-finalization-share-version'), {
-      target: { value: 'share-v2' },
+    await waitFor(() => {
+      expect(screen.getByTestId('trustee-finalization-vault-status')).toHaveTextContent('Loaded');
     });
-    fireEvent.change(screen.getByTestId('trustee-finalization-share-material'), {
-      target: { value: 'aggregate-share-material-v2' },
-    });
+    expect(screen.getByTestId('trustee-finalization-share-version')).toHaveTextContent(
+      vaultFixture.shareVersion
+    );
+    expect(
+      screen.getByTestId('trustee-finalization-share-material-hash')
+    ).toHaveTextContent(vaultFixture.shareMaterialHash.slice(0, 8));
+
     fireEvent.click(screen.getByTestId('trustee-finalization-submit-button'));
 
     await waitFor(() => {
@@ -327,7 +485,7 @@ describe('TrusteeElectionFinalizationPanel', () => {
           FinalizationSessionId: 'finalization-session-1',
           ActorPublicAddress: 'trustee-a',
           ShareIndex: 1,
-          ShareVersion: 'share-v2',
+          ShareVersion: vaultFixture.shareVersion,
           TargetType: ElectionFinalizationTargetTypeProto.FinalizationTargetAggregateTally,
           ClaimedCloseArtifactId: 'close-artifact',
           ClaimedAcceptedBallotSetHash: 'accepted-ballot-set-hash',
@@ -335,11 +493,14 @@ describe('TrusteeElectionFinalizationPanel', () => {
           ClaimedTargetTallyId: 'aggregate-tally-1',
           ClaimedCeremonyVersionId: 'ceremony-version-1',
           ClaimedTallyPublicKeyFingerprint: 'tally-fingerprint-1',
-          ShareMaterial: 'aggregate-share-material-v2',
+          CloseCountingJobId: 'close-counting-job-1',
+          ExecutorSessionPublicKey: 'executor-session-public-key-1',
+          ExecutorKeyAlgorithm: 'ecies-secp256k1-v1',
+          ShareMaterial: vaultFixture.shareMaterial,
         },
-        'trustee-encryption-key',
-        'trustee-encryption-private-key',
-        'trustee-signing-private-key'
+        trusteeEncryptionPublicKey,
+        trusteeEncryptionPrivateKey,
+        trusteeSigningPrivateKey
       );
     });
 
@@ -351,7 +512,56 @@ describe('TrusteeElectionFinalizationPanel', () => {
     ).toBeInTheDocument();
   });
 
+  it('shows executor progress while the bound close-counting job is running', async () => {
+    const vaultFixture = await createStoredVaultEnvelopeFixture();
+
+    electionsServiceMock.getElection.mockResolvedValue(
+      createElectionResponse({
+        FinalizationSessions: [
+          createFinalizationSession({
+            CloseCountingJobStatus:
+              ElectionCloseCountingJobStatusProto.CloseCountingJobRunning,
+          }),
+        ],
+        FinalizationShares: [
+          createFinalizationShare({
+            Status: ElectionFinalizationShareStatusProto.FinalizationShareAccepted,
+          }),
+        ],
+        FinalizationReleaseEvidenceRecords: [],
+      })
+    );
+    electionsServiceMock.getElectionCeremonyActionView.mockResolvedValue(
+      createCeremonyActionViewResponse({
+        SelfVaultEnvelopes: [vaultFixture.envelope],
+      })
+    );
+
+    render(
+      <TrusteeElectionFinalizationPanel
+        electionId="election-1"
+        actorPublicAddress="trustee-a"
+        actorEncryptionPublicKey={trusteeEncryptionPublicKey}
+        actorEncryptionPrivateKey={trusteeEncryptionPrivateKey}
+        actorSigningPrivateKey={trusteeSigningPrivateKey}
+      />
+    );
+
+    expect(await screen.findByTestId('trustee-finalization-executor-state')).toHaveTextContent(
+      'Executor running'
+    );
+    expect(screen.getByTestId('trustee-finalization-executor-state')).toHaveTextContent(
+      'The tally executor is decrypting the bound submissions'
+    );
+    expect(screen.getByTestId('trustee-finalization-summary')).toHaveTextContent(
+      'Close counting | Executor running'
+    );
+    expect(screen.getByTestId('trustee-finalization-summary')).toHaveTextContent('Executor job');
+  });
+
   it('shows the waiting threshold state and unlocks the share form when close-counting becomes available', async () => {
+    const vaultFixture = await createStoredVaultEnvelopeFixture();
+
     electionsServiceMock.getElection
       .mockResolvedValueOnce(
         createElectionResponse({
@@ -419,14 +629,19 @@ describe('TrusteeElectionFinalizationPanel', () => {
           FinalizationReleaseEvidenceRecords: [],
         })
       );
+    electionsServiceMock.getElectionCeremonyActionView.mockResolvedValue(
+      createCeremonyActionViewResponse({
+        SelfVaultEnvelopes: [vaultFixture.envelope],
+      })
+    );
 
     render(
       <TrusteeElectionFinalizationPanel
         electionId="election-1"
         actorPublicAddress="trustee-a"
-        actorEncryptionPublicKey="trustee-encryption-key"
-        actorEncryptionPrivateKey="trustee-encryption-private-key"
-        actorSigningPrivateKey="trustee-signing-private-key"
+        actorEncryptionPublicKey={trusteeEncryptionPublicKey}
+        actorEncryptionPrivateKey={trusteeEncryptionPrivateKey}
+        actorSigningPrivateKey={trusteeSigningPrivateKey}
       />
     );
 
@@ -440,10 +655,13 @@ describe('TrusteeElectionFinalizationPanel', () => {
     });
 
     expect(await screen.findByTestId('trustee-finalization-submit-button')).toBeEnabled();
+    expect(screen.getByTestId('trustee-finalization-vault-status')).toHaveTextContent('Loaded');
     expect(screen.getByText('Close Counting Share Status')).toBeInTheDocument();
   });
 
   it('blocks non-close-counting share sessions because finalize is approval-only', async () => {
+    const vaultFixture = await createStoredVaultEnvelopeFixture();
+
     electionsServiceMock.getElection.mockResolvedValueOnce(
       createElectionResponse({
         FinalizationSessions: [
@@ -453,14 +671,19 @@ describe('TrusteeElectionFinalizationPanel', () => {
         ],
       })
     );
+    electionsServiceMock.getElectionCeremonyActionView.mockResolvedValue(
+      createCeremonyActionViewResponse({
+        SelfVaultEnvelopes: [vaultFixture.envelope],
+      })
+    );
 
     render(
       <TrusteeElectionFinalizationPanel
         electionId="election-1"
         actorPublicAddress="trustee-a"
-        actorEncryptionPublicKey="trustee-encryption-key"
-        actorEncryptionPrivateKey="trustee-encryption-private-key"
-        actorSigningPrivateKey="trustee-signing-private-key"
+        actorEncryptionPublicKey={trusteeEncryptionPublicKey}
+        actorEncryptionPrivateKey={trusteeEncryptionPrivateKey}
+        actorSigningPrivateKey={trusteeSigningPrivateKey}
       />
     );
 
@@ -468,5 +691,32 @@ describe('TrusteeElectionFinalizationPanel', () => {
       await screen.findByTestId('trustee-finalization-non-closecounting')
     ).toHaveTextContent('Only close-counting sessions accept trustee shares in this rollout.');
     expect(screen.queryByTestId('trustee-finalization-submit-button')).not.toBeInTheDocument();
+  });
+
+  it('fails closed when the trustee vault package is missing', async () => {
+    electionsServiceMock.getElection.mockResolvedValue(createElectionResponse());
+    electionsServiceMock.getElectionCeremonyActionView.mockResolvedValue(
+      createCeremonyActionViewResponse({
+        SelfVaultEnvelopes: [],
+      })
+    );
+
+    render(
+      <TrusteeElectionFinalizationPanel
+        electionId="election-1"
+        actorPublicAddress="trustee-a"
+        actorEncryptionPublicKey={trusteeEncryptionPublicKey}
+        actorEncryptionPrivateKey={trusteeEncryptionPrivateKey}
+        actorSigningPrivateKey={trusteeSigningPrivateKey}
+      />
+    );
+
+    expect(await screen.findByTestId('trustee-finalization-vault-blocked')).toHaveTextContent(
+      'No trustee-owned vault package is available'
+    );
+    expect(screen.getByTestId('trustee-finalization-submit-button')).toBeDisabled();
+    expect(
+      transactionServiceMock.createSubmitElectionFinalizationShareTransaction
+    ).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,15 @@
 import type { ElectionDraftInput, SubmitElectionFinalizationShareRequest } from '@/lib/grpc';
 import * as secp256k1 from '@noble/secp256k1';
-import { bytesToHex, createUnsignedTransaction, eciesDecrypt, eciesEncrypt, generateGuid, hexToBytes, signByUser } from '@/lib/crypto';
+import {
+  bytesToBase64,
+  bytesToHex,
+  createUnsignedTransaction,
+  eciesDecrypt,
+  eciesEncrypt,
+  generateGuid,
+  hexToBytes,
+  signByUser,
+} from '@/lib/crypto';
 import { blockchainService } from '@/lib/grpc/services/blockchain';
 import { electionsService } from '@/lib/grpc/services/elections';
 import { identityService } from '@/lib/grpc/services/identity';
@@ -29,7 +38,11 @@ export interface EncryptedElectionEnvelopePayload {
   EnvelopeVersion: string;
   NodeEncryptedElectionPrivateKey: string;
   ActorEncryptedElectionPrivateKey: string;
+  ElectionPublicEncryptKey: string;
   EncryptedPayload: string;
+  ActionType: string;
+  ActionPayload: unknown;
+  ActionArtifacts?: unknown;
 }
 
 export interface EncryptedElectionActionEnvelope<TActionPayload> {
@@ -49,6 +62,10 @@ export interface InviteElectionTrusteeActionPayload {
   TrusteeUserAddress: string;
   TrusteeEncryptedElectionPrivateKey: string;
   TrusteeDisplayName: string;
+}
+
+export interface InviteElectionTrusteeActionArtifacts {
+  TrusteeEncryptedElectionPrivateKey: string;
 }
 
 export interface CreateElectionReportAccessGrantActionPayload {
@@ -228,7 +245,9 @@ export interface FinalizeElectionActionPayload {
   FinalEncryptedTallyHash: string | null;
 }
 
-export interface SubmitElectionFinalizationShareActionPayload {
+export interface CloseCountingExecutorSubmissionPayload {
+  CloseCountingJobId: string;
+  ElectionId: string;
   FinalizationSessionId: string;
   ActorPublicAddress: string;
   ShareIndex: number;
@@ -241,6 +260,24 @@ export interface SubmitElectionFinalizationShareActionPayload {
   ClaimedCeremonyVersionId: string | null;
   ClaimedTallyPublicKeyFingerprint: string | null;
   ShareMaterial: string;
+}
+
+export interface SubmitElectionFinalizationShareActionPayload {
+  FinalizationSessionId: string;
+  ActorPublicAddress: string;
+  ShareIndex: number;
+  ShareVersion: string;
+  TargetType: number;
+  ClaimedCloseArtifactId: string;
+  ClaimedAcceptedBallotSetHash: string | null;
+  ClaimedFinalEncryptedTallyHash: string | null;
+  ClaimedTargetTallyId: string;
+  ClaimedCeremonyVersionId: string | null;
+  ClaimedTallyPublicKeyFingerprint: string | null;
+  ShareMaterial?: string | null;
+  CloseCountingJobId?: string | null;
+  ExecutorKeyAlgorithm?: string | null;
+  EncryptedExecutorSubmission?: string | null;
 }
 
 export interface UpdateElectionDraftPayload {
@@ -274,6 +311,40 @@ export interface RetryElectionGovernedProposalExecutionPayload {
   ElectionId: string;
   ProposalId: string;
   ActorPublicAddress: string;
+}
+
+function isByteNumber(value: unknown): value is number {
+  return Number.isInteger(value) && value >= 0 && value <= 255;
+}
+
+function normalizeOptionalBinaryClaim(value: unknown, fieldName: string): string | null {
+  if (value == null) {
+    return null;
+  }
+
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (value instanceof Uint8Array) {
+    return bytesToBase64(value);
+  }
+
+  if (Array.isArray(value) && value.every(isByteNumber)) {
+    return bytesToBase64(Uint8Array.from(value));
+  }
+
+  if (typeof value === 'object') {
+    const bufferLike = value as {
+      data?: unknown;
+    };
+
+    if (Array.isArray(bufferLike.data) && bufferLike.data.every(isByteNumber)) {
+      return bytesToBase64(Uint8Array.from(bufferLike.data));
+    }
+  }
+
+  throw new Error(`${fieldName} must be a base64 string or byte array.`);
 }
 
 export interface OpenElectionPayload {
@@ -331,6 +402,50 @@ const ENCRYPTED_ELECTION_ACTION_TYPES = {
   RECORD_CEREMONY_SHARE_EXPORT: 'record_ceremony_share_export',
   RECORD_CEREMONY_SHARE_IMPORT: 'record_ceremony_share_import',
 } as const;
+
+const ENCRYPTED_ELECTION_ENVELOPE_VERSIONS = {
+  V2: 'election-envelope-v2',
+  V21: 'election-envelope-v2.1',
+} as const;
+
+function buildElectionEnvelopeSurface<TActionPayload>(
+  envelopeVersion: string,
+  actionType: string,
+  actionPayload: TActionPayload,
+): {
+  publicActionPayload: unknown;
+  actionArtifacts?: unknown;
+} {
+  if (envelopeVersion !== ENCRYPTED_ELECTION_ENVELOPE_VERSIONS.V21) {
+    return {
+      publicActionPayload: actionPayload,
+    };
+  }
+
+  switch (actionType) {
+    case ENCRYPTED_ELECTION_ACTION_TYPES.CLAIM_ROSTER_ENTRY: {
+      const { VerificationCode: _verificationCode, ...publicActionPayload } =
+        actionPayload as ClaimElectionRosterEntryActionPayload;
+      return {
+        publicActionPayload,
+      };
+    }
+    case ENCRYPTED_ELECTION_ACTION_TYPES.INVITE_TRUSTEE: {
+      const { TrusteeEncryptedElectionPrivateKey, ...publicActionPayload } =
+        actionPayload as InviteElectionTrusteeActionPayload;
+      return {
+        publicActionPayload,
+        actionArtifacts: {
+          TrusteeEncryptedElectionPrivateKey,
+        } satisfies InviteElectionTrusteeActionArtifacts,
+      };
+    }
+    default:
+      return {
+        publicActionPayload: actionPayload,
+      };
+  }
+}
 
 async function resolveElectionEnvelopePrivateKey(
   electionId: string | undefined,
@@ -396,6 +511,7 @@ async function createEncryptedElectionEnvelopeTransaction<TActionPayload>(
   signingPrivateKeyHex: string,
   options?: {
     allowBootstrapEnvelopeAccess?: boolean;
+    forceFreshEnvelopeAccess?: boolean;
   }
 ): Promise<{ signedTransaction: string; electionId: string }> {
   const envelopeContext = await blockchainService.getElectionEnvelopeContext();
@@ -407,10 +523,6 @@ async function createEncryptedElectionEnvelopeTransaction<TActionPayload>(
     options
   );
 
-  const nodeEncryptedElectionPrivateKey = await eciesEncrypt(
-    envelopeKeys.electionPrivateEncryptKeyHex,
-    envelopeContext.NodePublicEncryptAddress,
-  );
   const actorEncryptedElectionPrivateKey = await eciesEncrypt(
     envelopeKeys.electionPrivateEncryptKeyHex,
     actorPublicEncryptAddress,
@@ -422,15 +534,24 @@ async function createEncryptedElectionEnvelopeTransaction<TActionPayload>(
     } satisfies EncryptedElectionActionEnvelope<TActionPayload>),
     envelopeKeys.electionPublicEncryptKeyHex,
   );
+  const { publicActionPayload, actionArtifacts } = buildElectionEnvelopeSurface(
+    envelopeContext.ElectionEnvelopeVersion,
+    actionType,
+    actionPayload,
+  );
 
   const unsignedTx = createUnsignedTransaction<EncryptedElectionEnvelopePayload>(
     ENCRYPTED_ELECTION_ENVELOPE_PAYLOAD_KIND,
     {
       ElectionId: envelopeKeys.electionId,
       EnvelopeVersion: envelopeContext.ElectionEnvelopeVersion,
-      NodeEncryptedElectionPrivateKey: nodeEncryptedElectionPrivateKey,
+      NodeEncryptedElectionPrivateKey: '',
       ActorEncryptedElectionPrivateKey: actorEncryptedElectionPrivateKey,
+      ElectionPublicEncryptKey: envelopeKeys.electionPublicEncryptKeyHex,
       EncryptedPayload: encryptedActionPayload,
+      ActionType: actionType,
+      ActionPayload: publicActionPayload,
+      ActionArtifacts: actionArtifacts,
     },
   );
 
@@ -752,6 +873,9 @@ async function createResolveElectionTrusteeInvitationTransaction(
         ActorPublicAddress: actorPublicAddress,
       },
       signingPrivateKeyHex,
+      {
+        forceFreshEnvelopeAccess: true,
+      }
     );
 
   return {
@@ -1317,6 +1441,45 @@ export async function createSubmitElectionFinalizationShareTransaction(
   actorPrivateEncryptKeyHex: string,
   signingPrivateKeyHex: string,
 ): Promise<{ signedTransaction: string }> {
+  const claimedAcceptedBallotSetHash = normalizeOptionalBinaryClaim(
+    request.ClaimedAcceptedBallotSetHash,
+    'ClaimedAcceptedBallotSetHash',
+  );
+  const claimedFinalEncryptedTallyHash = normalizeOptionalBinaryClaim(
+    request.ClaimedFinalEncryptedTallyHash,
+    'ClaimedFinalEncryptedTallyHash',
+  );
+  const hasExecutorBinding =
+    Boolean(request.CloseCountingJobId?.trim()) &&
+    Boolean(request.ExecutorSessionPublicKey?.trim()) &&
+    Boolean(request.ExecutorKeyAlgorithm?.trim());
+  if (!hasExecutorBinding) {
+    throw new Error(
+      'Executor-encrypted trustee share submission requires CloseCountingJobId, ExecutorSessionPublicKey, and ExecutorKeyAlgorithm.',
+    );
+  }
+
+  const encryptedExecutorSubmission = hasExecutorBinding
+    ? await eciesEncrypt(
+        JSON.stringify({
+          CloseCountingJobId: request.CloseCountingJobId!.trim(),
+          ElectionId: request.ElectionId,
+          FinalizationSessionId: request.FinalizationSessionId,
+          ActorPublicAddress: request.ActorPublicAddress,
+          ShareIndex: request.ShareIndex,
+          ShareVersion: request.ShareVersion,
+          TargetType: request.TargetType,
+          ClaimedCloseArtifactId: request.ClaimedCloseArtifactId,
+          ClaimedAcceptedBallotSetHash: claimedAcceptedBallotSetHash,
+          ClaimedFinalEncryptedTallyHash: claimedFinalEncryptedTallyHash,
+          ClaimedTargetTallyId: request.ClaimedTargetTallyId,
+          ClaimedCeremonyVersionId: request.ClaimedCeremonyVersionId ?? null,
+          ClaimedTallyPublicKeyFingerprint: request.ClaimedTallyPublicKeyFingerprint ?? null,
+          ShareMaterial: request.ShareMaterial,
+        } satisfies CloseCountingExecutorSubmissionPayload),
+        request.ExecutorSessionPublicKey!.trim(),
+      )
+    : null;
   const encryptedEnvelope =
     await createEncryptedElectionEnvelopeTransaction<SubmitElectionFinalizationShareActionPayload>(
       request.ElectionId,
@@ -1331,12 +1494,15 @@ export async function createSubmitElectionFinalizationShareTransaction(
         ShareVersion: request.ShareVersion,
         TargetType: request.TargetType,
         ClaimedCloseArtifactId: request.ClaimedCloseArtifactId,
-        ClaimedAcceptedBallotSetHash: request.ClaimedAcceptedBallotSetHash ?? null,
-        ClaimedFinalEncryptedTallyHash: request.ClaimedFinalEncryptedTallyHash ?? null,
+        ClaimedAcceptedBallotSetHash: claimedAcceptedBallotSetHash,
+        ClaimedFinalEncryptedTallyHash: claimedFinalEncryptedTallyHash,
         ClaimedTargetTallyId: request.ClaimedTargetTallyId,
         ClaimedCeremonyVersionId: request.ClaimedCeremonyVersionId ?? null,
         ClaimedTallyPublicKeyFingerprint: request.ClaimedTallyPublicKeyFingerprint ?? null,
-        ShareMaterial: request.ShareMaterial,
+        ShareMaterial: encryptedExecutorSubmission ? null : request.ShareMaterial,
+        CloseCountingJobId: request.CloseCountingJobId ?? null,
+        ExecutorKeyAlgorithm: request.ExecutorKeyAlgorithm ?? null,
+        EncryptedExecutorSubmission: encryptedExecutorSubmission,
       },
       signingPrivateKeyHex,
     );

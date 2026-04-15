@@ -9,6 +9,7 @@ import {
 } from '@/lib/grpc';
 import {
   getClosedProgressBannerState,
+  getElectionHubNarrative,
   getElectionHubDisplayActionLabel,
   getElectionHubSuggestedActionLabel,
   getElectionWorkspaceSectionOrder,
@@ -62,7 +63,7 @@ function createHubEntry(
 }
 
 describe('election hub contract helpers', () => {
-  it('keeps result review inside voter details for open mixed-role entries', () => {
+  it('keeps open mixed-role entries focused on the voter and owner surfaces before results exist', () => {
     const entry = createHubEntry('election-1', ElectionLifecycleStateProto.Open, {
       ActorRoles: {
         IsOwnerAdmin: true,
@@ -94,7 +95,7 @@ describe('election hub contract helpers', () => {
     expect(getElectionWorkspaceSectionOrder(entry)).toEqual([
       'owner-admin',
       'voter',
-      'results',
+      'artifacts',
     ]);
   });
 
@@ -105,10 +106,32 @@ describe('election hub contract helpers', () => {
     });
 
     expect(getClosedProgressBannerState(entry)).toEqual({
-      title: 'Waiting for trustee shares',
+      title: 'Waiting for trustee tally shares',
       description:
-        'The election is closed and waiting for the required trustee shares before tally work can continue.',
+        'The election is closed and waiting for the required trustee tally shares before votes can be counted and the unofficial result can be published.',
     });
+  });
+
+  it('prioritizes the owner narrative for mixed-role closed-progress entries', () => {
+    const entry = createHubEntry('election-2b', ElectionLifecycleStateProto.Closed, {
+      ActorRoles: {
+        IsOwnerAdmin: true,
+        IsTrustee: false,
+        IsVoter: true,
+        IsDesignatedAuditor: false,
+      },
+      ClosedProgressStatus:
+        ElectionClosedProgressStatusProto.ClosedProgressWaitingForTrusteeShares,
+    });
+
+    expect(getClosedProgressBannerState(entry)).toEqual({
+      title: 'Waiting for trustee tally shares',
+      description:
+        'Governed close is complete. Vote casting is locked, and the election is waiting for eligible trustees to provide the bound tally shares required to count votes and publish the unofficial result.',
+    });
+    expect(getElectionHubNarrative(entry)).toContain(
+      'Governed close is complete. Vote casting is locked'
+    );
   });
 
   it('maps hub suggested actions into stable client labels', () => {
@@ -142,6 +165,75 @@ describe('election hub contract helpers', () => {
     });
 
     expect(getElectionHubDisplayActionLabel(entry)).toBe('Respond to invitation');
+  });
+
+  it('promotes close-counting share reasons into a trustee tally-share label', () => {
+    const entry = createHubEntry('election-6', ElectionLifecycleStateProto.Closed, {
+      ActorRoles: {
+        IsOwnerAdmin: false,
+        IsTrustee: true,
+        IsVoter: false,
+        IsDesignatedAuditor: false,
+      },
+      SuggestedAction: ElectionHubNextActionHintProto.ElectionHubActionNone,
+      SuggestedActionReason: 'Submit the bound trustee tally share for close-counting.',
+    });
+
+    expect(getElectionHubDisplayActionLabel(entry)).toBe('Submit tally share');
+  });
+
+  it('promotes published unofficial results into an explicit review label and narrative', () => {
+    const entry = createHubEntry('election-6a', ElectionLifecycleStateProto.Closed, {
+      ActorRoles: {
+        IsOwnerAdmin: false,
+        IsTrustee: true,
+        IsVoter: false,
+        IsDesignatedAuditor: false,
+      },
+      SuggestedAction: ElectionHubNextActionHintProto.ElectionHubActionTrusteeReviewResult,
+      SuggestedActionReason: 'Review the available election result artifacts.',
+      HasUnofficialResult: true,
+      HasOfficialResult: false,
+    });
+
+    expect(getElectionHubDisplayActionLabel(entry)).toBe('Review unofficial result');
+    expect(getElectionHubNarrative(entry)).toContain(
+      'Election close is complete and the unofficial result is published.'
+    );
+  });
+
+  it('promotes closed voter entries into an unofficial-result waiting label', () => {
+    const entry = createHubEntry('election-6b', ElectionLifecycleStateProto.Closed, {
+      ActorRoles: {
+        IsOwnerAdmin: false,
+        IsTrustee: false,
+        IsVoter: true,
+        IsDesignatedAuditor: false,
+      },
+      SuggestedAction: ElectionHubNextActionHintProto.ElectionHubActionNone,
+      SuggestedActionReason: 'No immediate action is required for this election.',
+      ClosedProgressStatus:
+        ElectionClosedProgressStatusProto.ClosedProgressWaitingForTrusteeShares,
+      HasUnofficialResult: false,
+      HasOfficialResult: false,
+    });
+
+    expect(getElectionHubDisplayActionLabel(entry)).toBe('Waiting for unofficial result');
+  });
+
+  it('promotes rejected close-counting share reasons into a trustee resubmit label', () => {
+    const entry = createHubEntry('election-7', ElectionLifecycleStateProto.Closed, {
+      ActorRoles: {
+        IsOwnerAdmin: false,
+        IsTrustee: true,
+        IsVoter: false,
+        IsDesignatedAuditor: false,
+      },
+      SuggestedAction: ElectionHubNextActionHintProto.ElectionHubActionNone,
+      SuggestedActionReason: 'Resubmit the bound trustee tally share for close-counting.',
+    });
+
+    expect(getElectionHubDisplayActionLabel(entry)).toBe('Resubmit tally share');
   });
 
   it('formats non-string artifact values without throwing', () => {

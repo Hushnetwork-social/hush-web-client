@@ -9,6 +9,7 @@ import { ClosedProgressBanner } from './ClosedProgressBanner';
 import { ElectionAccessBoundaryNotice } from './ElectionAccessBoundaryNotice';
 import { ElectionHubList } from './ElectionHubList';
 import { ElectionWorkspaceHeader } from './ElectionWorkspaceHeader';
+import { ArtifactsWorkspaceSummary } from './HushVotingArtifactsSection';
 import { AuditorWorkspaceSummary } from './HushVotingAuditorSection';
 import { OwnerAdminWorkspaceSummary } from './HushVotingOwnerAdminSection';
 import { PendingTrusteeInvitationSummary } from './HushVotingPendingTrusteeInvitationSection';
@@ -137,9 +138,29 @@ export function HushVotingWorkspace({
     [activeDetail, actorPublicAddress]
   );
   const hasPendingInvitationSurface = Boolean(pendingSelfTrusteeInvitation);
+  const effectiveEntry = useMemo(() => {
+    if (!activeEntry) {
+      return null;
+    }
+
+    const hasUnofficialResult =
+      activeEntry.HasUnofficialResult || Boolean(resultView?.UnofficialResult);
+    const hasOfficialResult =
+      activeEntry.HasOfficialResult || Boolean(resultView?.OfficialResult);
+
+    return {
+      ...activeEntry,
+      HasUnofficialResult: hasUnofficialResult,
+      HasOfficialResult: hasOfficialResult,
+      CanViewParticipantResults:
+        activeEntry.CanViewParticipantResults || hasUnofficialResult || hasOfficialResult,
+      CanViewReportPackage:
+        activeEntry.CanViewReportPackage || Boolean(resultView?.CanViewReportPackage),
+    };
+  }, [activeEntry, resultView]);
 
   const requestedEntryMissing = Boolean(initialElectionId && !isLoadingHub && hubView && !requestedEntry);
-  const sectionOrder = getElectionWorkspaceSectionOrder(activeEntry);
+  const sectionOrder = getElectionWorkspaceSectionOrder(effectiveEntry);
   const hasVisibleSections = sectionOrder.length > 0;
   const isDetailRoute = Boolean(initialElectionId);
   const isWaitingForPendingInvitationDetail =
@@ -370,19 +391,19 @@ export function HushVotingWorkspace({
               'This route only opens elections that the current actor can access.',
             ]}
           />
-        ) : !activeEntry ? (
+        ) : !effectiveEntry ? (
           <div className={`${sectionClass} flex items-center gap-3`}>
             <Loader2 className="h-5 w-5 animate-spin text-hush-purple" />
             <span className="text-sm text-hush-text-accent">Preparing election workspace...</span>
           </div>
         ) : (
           <>
-            <ElectionWorkspaceHeader entry={activeEntry} />
-            <ClosedProgressBanner entry={activeEntry} />
+            <ElectionWorkspaceHeader entry={effectiveEntry} />
+            <ClosedProgressBanner entry={effectiveEntry} />
 
             {hasPendingInvitationSurface && pendingSelfTrusteeInvitation ? (
               <PendingTrusteeInvitationSummary
-                electionTitle={activeEntry.Election.Title || activeEntry.Election.ElectionId}
+                electionTitle={effectiveEntry.Election.Title || effectiveEntry.Election.ElectionId}
                 invitation={pendingSelfTrusteeInvitation}
                 isSubmitting={isSubmitting}
                 onAccept={() => void handleAcceptPendingTrusteeInvitation()}
@@ -394,7 +415,7 @@ export function HushVotingWorkspace({
               <ElectionAccessBoundaryNotice
                 title="No workspace surface is available"
                 message={
-                  activeEntry.SuggestedActionReason ||
+                  effectiveEntry.SuggestedActionReason ||
                   'This actor does not currently have an owner, trustee, voter, auditor, or result-review surface for the selected election.'
                 }
                 primaryLabel="Back to HushVoting! Hub"
@@ -405,49 +426,74 @@ export function HushVotingWorkspace({
               <div className={`${sectionClass} flex items-center gap-3`}>
                 <Loader2 className="h-5 w-5 animate-spin text-hush-purple" />
                 <span className="text-sm text-hush-text-accent">
-                  Loading detailed context for {activeEntry.Election.Title || activeEntry.Election.ElectionId}...
+                  Loading detailed context for {effectiveEntry.Election.Title || effectiveEntry.Election.ElectionId}...
                 </span>
               </div>
             ) : null}
 
-            {sectionOrder.includes('voter') ? (
-              <VoterWorkspaceSummary
-                entry={activeEntry}
-                actorPublicAddress={actorPublicAddress}
-                resultView={resultView}
-              />
-            ) : null}
+            {sectionOrder.map((sectionId) => {
+              switch (sectionId) {
+                case 'results':
+                  return (
+                    <ResultsWorkspaceSummary
+                      key="results"
+                      entry={effectiveEntry}
+                      detail={activeDetail}
+                      resultView={resultView}
+                      isLoadingResultView={isLoadingResultView}
+                    />
+                  );
+                case 'owner-admin':
+                  return (
+                    <OwnerAdminWorkspaceSummary
+                      key="owner-admin"
+                      entry={effectiveEntry}
+                      detail={activeDetail}
+                    />
+                  );
+                case 'trustee':
+                  return (
+                    <TrusteeWorkspaceSummary
+                      key="trustee"
+                      entry={effectiveEntry}
+                      detail={activeDetail}
+                    />
+                  );
+                case 'auditor':
+                  return (
+                    <AuditorWorkspaceSummary
+                      key="auditor"
+                      entry={effectiveEntry}
+                      detail={activeDetail}
+                      resultView={resultView}
+                      isLoadingResultView={isLoadingResultView}
+                    />
+                  );
+                case 'voter':
+                  return (
+                    <VoterWorkspaceSummary
+                      key="voter"
+                      entry={effectiveEntry}
+                      actorPublicAddress={actorPublicAddress}
+                      resultView={resultView}
+                    />
+                  );
+                case 'artifacts':
+                  return (
+                    <ArtifactsWorkspaceSummary
+                      key="artifacts"
+                      entry={effectiveEntry}
+                      detail={activeDetail}
+                      resultView={resultView}
+                      isLoadingResultView={isLoadingResultView}
+                    />
+                  );
+                default:
+                  return null;
+              }
+            })}
 
-            {sectionOrder.includes('owner-admin') ? (
-              <OwnerAdminWorkspaceSummary
-                entry={activeEntry}
-                detail={activeDetail}
-              />
-            ) : null}
-
-            {sectionOrder.includes('trustee') ? (
-              <TrusteeWorkspaceSummary entry={activeEntry} detail={activeDetail} />
-            ) : null}
-
-            {sectionOrder.includes('auditor') ? (
-              <AuditorWorkspaceSummary
-                entry={activeEntry}
-                detail={activeDetail}
-                resultView={resultView}
-                isLoadingResultView={isLoadingResultView}
-              />
-            ) : null}
-
-            {sectionOrder.includes('results') ? (
-              <ResultsWorkspaceSummary
-                entry={activeEntry}
-                detail={activeDetail}
-                resultView={resultView}
-                isLoadingResultView={isLoadingResultView}
-              />
-            ) : null}
-
-            {!sectionOrder.includes('results') && activeEntry.HasOfficialResult ? (
+            {!sectionOrder.includes('results') && effectiveEntry.HasOfficialResult ? (
               <section className={sectionClass}>
                 <div className="flex items-start gap-3">
                   <div className="rounded-2xl bg-green-500/10 p-3 text-green-100">

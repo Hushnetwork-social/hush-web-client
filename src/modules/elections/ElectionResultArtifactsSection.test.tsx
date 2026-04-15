@@ -320,6 +320,24 @@ describe('ElectionResultArtifactsSection', () => {
     expect(screen.queryByText('Named roster')).not.toBeInTheDocument();
   });
 
+  it('shows inherited tally-ready lineage wording for official results', () => {
+    render(
+      <ElectionResultArtifactsSection
+        election={createElectionRecord()}
+        resultView={createResultView({
+          OfficialResult: createResultArtifact({
+            TallyReadyArtifactId: '',
+            SourceResultArtifactId: 'unofficial-result-1',
+          }),
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('election-official-result')).toHaveTextContent(
+      'Tally ready: Inherited via source result'
+    );
+  });
+
   it('can suppress the report package while still rendering result artifacts', () => {
     render(
       <ElectionResultArtifactsSection

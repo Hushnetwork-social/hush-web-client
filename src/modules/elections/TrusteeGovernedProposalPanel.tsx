@@ -158,11 +158,11 @@ export function TrusteeGovernedProposalPanel({
       <div className="mx-auto flex w-full max-w-4xl min-w-0 flex-col p-4 md:p-6">
         <div className="mb-6">
           <Link
-            href={`/elections/${electionId}`}
+            href={`/elections/${electionId}/trustee/governed`}
             className="mb-3 inline-flex items-center gap-2 text-sm text-hush-text-accent transition-colors hover:text-hush-purple"
           >
             <ArrowLeft className="h-4 w-4" />
-            <span>Back to election</span>
+            <span>Back to governed actions</span>
           </Link>
           <h1 className="text-2xl font-semibold">Trustee Proposal Approval</h1>
           <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
@@ -290,9 +290,9 @@ export function TrusteeGovernedProposalPanel({
                   </div>
                   <p className="mt-2">
                     {closeShareReady
-                      ? 'Close threshold is satisfied. The bound close-counting share session is ready in the share workspace.'
+                      ? 'Close threshold is satisfied. The bound close-counting share session is ready in the tally share workspace.'
                       : closeShareSessionIndexing
-                        ? 'Close reached trustee threshold. The server is indexing the close-counting session now, and the share workspace will unlock automatically as the next block-confirmed read arrives.'
+                        ? 'Close reached trustee threshold. The server is indexing the close-counting session now, and the tally share workspace will unlock automatically as the next block-confirmed read arrives.'
                         : closeShareWaitingForThreshold
                           ? 'Your close approval is recorded. The close-counting share remains disabled until the proposal reaches threshold and the server creates the bound session.'
                           : 'Close uses one trustee workflow over two protocol steps: approve the exact close proposal here, then submit one bound close-counting share only after threshold execution creates the session.'}
@@ -326,7 +326,7 @@ export function TrusteeGovernedProposalPanel({
                   <div className="font-medium text-hush-text-primary">Finalize follow-up</div>
                   <p className="mt-2">
                     Finalize remains approval-only in Protocol Omega. Trustees review and approve the
-                    exact finalize target here, and no trustee share workspace is opened for this action.
+                    exact finalize target here, and no tally share workspace is opened for this action.
                   </p>
                 </div>
               ) : null}

@@ -26,10 +26,11 @@ import {
   ReviewWindowPolicyProto,
   VoteUpdatePolicyProto,
 } from '@/lib/grpc';
+import { useAppStore } from '@/stores/useAppStore';
 import { TrusteeElectionCeremonyPanel } from './TrusteeElectionCeremonyPanel';
 import { useElectionsStore } from './useElectionsStore';
 
-const { electionsServiceMock, blockchainServiceMock, transactionServiceMock } = vi.hoisted(() => ({
+const { electionsServiceMock, blockchainServiceMock, transactionServiceMock, trusteeShareVaultMock } = vi.hoisted(() => ({
   electionsServiceMock: {
     getElection: vi.fn(),
     getElectionCeremonyActionView: vi.fn(),
@@ -61,6 +62,11 @@ const { electionsServiceMock, blockchainServiceMock, transactionServiceMock } = 
     createSubmitElectionFinalizationShareTransaction: vi.fn(),
     createSubmitElectionCeremonyMaterialTransaction: vi.fn(),
     createUpdateElectionDraftTransaction: vi.fn(),
+  },
+  trusteeShareVaultMock: {
+    createTrusteeShareVaultEnvelope: vi.fn(),
+    decryptStoredTrusteeShareVaultEnvelope: vi.fn(),
+    deriveTrusteeCloseCountingShareMaterial: vi.fn(),
   },
 }));
 
@@ -121,7 +127,30 @@ vi.mock('./transactionService', () => ({
     transactionServiceMock.createUpdateElectionDraftTransaction(...args),
 }));
 
+vi.mock('./trusteeShareVault', () => ({
+  createTrusteeShareVaultEnvelope: (...args: unknown[]) =>
+    trusteeShareVaultMock.createTrusteeShareVaultEnvelope(...args),
+  decryptStoredTrusteeShareVaultEnvelope: (...args: unknown[]) =>
+    trusteeShareVaultMock.decryptStoredTrusteeShareVaultEnvelope(...args),
+  deriveTrusteeCloseCountingShareMaterial: (...args: unknown[]) =>
+    trusteeShareVaultMock.deriveTrusteeCloseCountingShareMaterial(...args),
+}));
+
 const timestamp = { seconds: 1_711_410_000, nanos: 0 };
+const trusteeMnemonic = [
+  'abandon',
+  'abandon',
+  'abandon',
+  'abandon',
+  'abandon',
+  'abandon',
+  'abandon',
+  'abandon',
+  'abandon',
+  'abandon',
+  'abandon',
+  'about',
+];
 
 function createElectionRecord(overrides?: Partial<ElectionRecordView>): ElectionRecordView {
   return {
@@ -359,10 +388,55 @@ function createActionViewResponse(
 describe('TrusteeElectionCeremonyPanel', () => {
   beforeEach(() => {
     useElectionsStore.getState().reset();
+    useAppStore.setState({
+      credentials: {
+        signingPublicKey: 'trustee-signing-public-key',
+        signingPrivateKey: 'trustee-signing-private-key',
+        encryptionPublicKey: 'trustee-encryption-key',
+        encryptionPrivateKey: 'trustee-encryption-private-key',
+        mnemonic: trusteeMnemonic,
+      },
+    });
     vi.clearAllMocks();
     electionsServiceMock.getElection.mockResolvedValue(createElectionResponse());
     electionsServiceMock.getElectionCeremonyActionView.mockResolvedValue(createActionViewResponse());
     blockchainServiceMock.submitTransaction.mockResolvedValue({ successful: true, message: 'Accepted' });
+    trusteeShareVaultMock.createTrusteeShareVaultEnvelope.mockResolvedValue({
+      messageType: 'trustee-share-vault-package',
+      payloadVersion: 'omega-trustee-share-vault-v1',
+      encryptedPayload: 'vault-ciphertext',
+      payloadFingerprint: 'vault-fingerprint',
+      shareVersion: 'share-kc004-prod-3of5-v1-trustee-a',
+    });
+    trusteeShareVaultMock.deriveTrusteeCloseCountingShareMaterial.mockResolvedValue({
+      format: 'omega-controlled-threshold-scalar-v1',
+      scalarMaterial: '123456789',
+      scalarMaterialHash: 'abc123',
+    });
+    trusteeShareVaultMock.decryptStoredTrusteeShareVaultEnvelope.mockResolvedValue({
+      packageVersion: 'omega-trustee-share-vault-inner-v1',
+      materialKind: 'ceremony-package',
+      electionId: 'election-1',
+      ceremonyVersionId: 'ceremony-version-1',
+      trusteeUserAddress: 'trustee-a',
+      shareVersion: 'share-kc004-prod-3of5-v1-trustee-a',
+      material: {
+        packageKind: 'trustee-ceremony-package',
+        ceremonyMessageType: 'dkg-share-package',
+        ceremonyPayloadVersion: 'omega-v1.0.0',
+        ceremonyPayloadFingerprint: 'vault-fingerprint',
+        ceremonyEncryptedPayload: '{"packageKind":"trustee-ceremony-package"}',
+        transportPublicKeyFingerprint: 'transport-kc004-prod-3of5-v1-trustee-a',
+        protocolVersion: 'omega-v1.0.0',
+        profileId: 'dkg-prod-3of5',
+        versionNumber: 4,
+        closeCountingShare: {
+          format: 'omega-controlled-threshold-scalar-v1',
+          scalarMaterial: '123456789',
+          scalarMaterialHash: 'abc123',
+        },
+      },
+    });
     transactionServiceMock.createRecordElectionCeremonyShareExportTransaction.mockResolvedValue({
       signedTransaction: 'signed-share-export-transaction',
     });
@@ -725,23 +799,36 @@ describe('TrusteeElectionCeremonyPanel', () => {
       'Submit ceremony package'
     );
     expect(screen.getByTestId('trustee-ceremony-step-workspace')).toHaveTextContent(
-      'System-managed ceremony envelope'
+      'Self-addressed trustee vault envelope'
     );
 
     fireEvent.click(screen.getByTestId('trustee-ceremony-continue-button'));
 
     await waitFor(() => {
+      expect(trusteeShareVaultMock.createTrusteeShareVaultEnvelope).toHaveBeenCalledTimes(1);
+      expect(trusteeShareVaultMock.createTrusteeShareVaultEnvelope).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mnemonic: trusteeMnemonic,
+          material: expect.objectContaining({
+            closeCountingShare: expect.objectContaining({
+              format: 'omega-controlled-threshold-scalar-v1',
+              scalarMaterial: expect.any(String),
+              scalarMaterialHash: expect.any(String),
+            }),
+          }),
+        })
+      );
       expect(transactionServiceMock.createSubmitElectionCeremonyMaterialTransaction).toHaveBeenCalledWith(
         'election-1',
         'trustee-a',
         'trustee-encryption-key',
         'trustee-encryption-private-key',
         'ceremony-version-1',
-        null,
-        'dkg-share-package',
-        'omega-v1.0.0',
-        expect.stringContaining('"packageKind":"trustee-ceremony-package"'),
-        expect.stringContaining('package-kc004'),
+        'trustee-a',
+        'trustee-share-vault-package',
+        'omega-trustee-share-vault-v1',
+        'vault-ciphertext',
+        'vault-fingerprint',
         expect.stringContaining('share-kc004'),
         'trustee-signing-private-key'
       );

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as secp256k1 from '@noble/secp256k1';
-import { bytesToHex, eciesDecrypt, eciesEncrypt, hexToBytes } from '@/lib/crypto';
+import { bytesToBase64, bytesToHex, eciesDecrypt, eciesEncrypt, hexToBytes } from '@/lib/crypto';
 import {
   ElectionFinalizationTargetTypeProto,
   type ElectionDraftInput,
@@ -8,7 +8,9 @@ import {
 } from '@/lib/grpc';
 import {
   ENCRYPTED_ELECTION_ENVELOPE_PAYLOAD_KIND,
+  type CloseCountingExecutorSubmissionPayload,
   createAcceptElectionBallotCastTransaction,
+  createAcceptElectionTrusteeInvitationTransaction,
   createRegisterElectionVotingCommitmentTransaction,
   createApproveElectionGovernedProposalTransaction,
   createClaimElectionRosterEntryTransaction,
@@ -16,6 +18,7 @@ import {
   createElectionReportAccessGrantTransaction,
   createElectionTrusteeInvitationTransaction,
   createOpenElectionTransaction,
+  createRejectElectionTrusteeInvitationTransaction,
   createSubmitElectionFinalizationShareTransaction,
 } from './transactionService';
 
@@ -58,7 +61,7 @@ describe('transactionService encrypted election envelope helpers', () => {
     identityServiceMock.getIdentity.mockReset();
   });
 
-  it('creates an encrypted election envelope with node and actor key wrappers', async () => {
+  it('creates a v2.1 election envelope with actor key access and plaintext validator action data', async () => {
     const ownerSigningPrivateKeyHex = '1111111111111111111111111111111111111111111111111111111111111111';
     const ownerEncryptionPrivateKeyHex = '2222222222222222222222222222222222222222222222222222222222222222';
     const nodeEncryptionPrivateKeyHex = '3333333333333333333333333333333333333333333333333333333333333333';
@@ -73,7 +76,7 @@ describe('transactionService encrypted election envelope helpers', () => {
     );
     blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
       NodePublicEncryptAddress: nodeEncryptionPublicKey,
-      ElectionEnvelopeVersion: 'election-envelope-v1',
+      ElectionEnvelopeVersion: 'election-envelope-v2.1',
     });
 
     const draft: ElectionDraftInput = {
@@ -143,25 +146,32 @@ describe('transactionService encrypted election envelope helpers', () => {
         EnvelopeVersion: string;
         NodeEncryptedElectionPrivateKey: string;
         ActorEncryptedElectionPrivateKey: string;
+        ElectionPublicEncryptKey: string;
         EncryptedPayload: string;
+        ActionType: string;
+        ActionPayload: {
+          OwnerPublicAddress: string;
+          SnapshotReason: string;
+          Draft: typeof draft;
+        };
       };
     };
 
     expect(parsedTransaction.PayloadKind).toBe(ENCRYPTED_ELECTION_ENVELOPE_PAYLOAD_KIND);
     expect(parsedTransaction.UserSignature.Signatory).toBe(ownerSigningPublicKey);
     expect(parsedTransaction.Payload.ElectionId).toBe(electionId);
-    expect(parsedTransaction.Payload.EnvelopeVersion).toBe('election-envelope-v1');
+    expect(parsedTransaction.Payload.EnvelopeVersion).toBe('election-envelope-v2.1');
+    expect(parsedTransaction.Payload.NodeEncryptedElectionPrivateKey).toBe('');
+    expect(parsedTransaction.Payload.ElectionPublicEncryptKey).toMatch(/^(02|03|04)[0-9a-f]+$/i);
+    expect(parsedTransaction.Payload.ActionType).toBe('create_draft');
+    expect(parsedTransaction.Payload.ActionPayload.OwnerPublicAddress).toBe(ownerSigningPublicKey);
+    expect(parsedTransaction.Payload.ActionPayload.SnapshotReason).toBe('initial draft');
+    expect(parsedTransaction.Payload.ActionPayload.Draft.Title).toBe(draft.Title);
 
-    const nodeElectionPrivateKey = await eciesDecrypt(
-      parsedTransaction.Payload.NodeEncryptedElectionPrivateKey,
-      nodeEncryptionPrivateKeyHex,
-    );
     const actorElectionPrivateKey = await eciesDecrypt(
       parsedTransaction.Payload.ActorEncryptedElectionPrivateKey,
       ownerEncryptionPrivateKeyHex,
     );
-
-    expect(actorElectionPrivateKey).toBe(nodeElectionPrivateKey);
 
     const decryptedPayloadJson = await eciesDecrypt(
       parsedTransaction.Payload.EncryptedPayload,
@@ -208,7 +218,7 @@ describe('transactionService encrypted election envelope helpers', () => {
 
     blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
       NodePublicEncryptAddress: nodeEncryptionPublicKey,
-      ElectionEnvelopeVersion: 'election-envelope-v1',
+      ElectionEnvelopeVersion: 'election-envelope-v2.1',
     });
     electionsServiceMock.getElectionEnvelopeAccess.mockResolvedValue({
       Success: true,
@@ -236,6 +246,13 @@ describe('transactionService encrypted election envelope helpers', () => {
 
     const parsedTransaction = JSON.parse(signedTransaction) as {
       Payload: {
+        ActionPayload: {
+          TrusteeUserAddress: string;
+          TrusteeEncryptedElectionPrivateKey?: string;
+        };
+        ActionArtifacts?: {
+          TrusteeEncryptedElectionPrivateKey: string;
+        };
         ActorEncryptedElectionPrivateKey: string;
         EncryptedPayload: string;
       };
@@ -257,13 +274,142 @@ describe('transactionService encrypted election envelope helpers', () => {
       };
     };
     const trusteeElectionPrivateKey = await eciesDecrypt(
-      decryptedPayload.ActionPayload.TrusteeEncryptedElectionPrivateKey,
+      parsedTransaction.Payload.ActionArtifacts!.TrusteeEncryptedElectionPrivateKey,
       trusteeEncryptionPrivateKeyHex,
     );
 
     expect(decryptedPayload.ActionType).toBe('invite_trustee');
+    expect(parsedTransaction.Payload.ActionPayload.TrusteeEncryptedElectionPrivateKey).toBeUndefined();
     expect(decryptedPayload.ActionPayload.TrusteeUserAddress).toBe('trustee-address');
     expect(trusteeElectionPrivateKey).toBe(electionPrivateKeyHex);
+  });
+
+  it('creates a trustee-acceptance envelope without requiring existing election envelope access', async () => {
+    const trusteeSigningPrivateKeyHex = '6666666666666666666666666666666666666666666666666666666666666666';
+    const trusteeEncryptionPrivateKeyHex = '4444444444444444444444444444444444444444444444444444444444444444';
+    const nodeEncryptionPrivateKeyHex = '3333333333333333333333333333333333333333333333333333333333333333';
+    const trusteeSigningPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(trusteeSigningPrivateKeyHex), true),
+    );
+    const trusteeEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(trusteeEncryptionPrivateKeyHex), true),
+    );
+    const nodeEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(nodeEncryptionPrivateKeyHex), true),
+    );
+
+    blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
+      NodePublicEncryptAddress: nodeEncryptionPublicKey,
+      ElectionEnvelopeVersion: 'election-envelope-v2.1',
+    });
+    electionsServiceMock.getElectionEnvelopeAccess.mockResolvedValue({
+      Success: false,
+      ErrorMessage: 'should not be used',
+      ActorEncryptedElectionPrivateKey: '',
+    });
+
+    const { signedTransaction } = await createAcceptElectionTrusteeInvitationTransaction(
+      'election-123',
+      'invite-123',
+      trusteeSigningPublicKey,
+      trusteeEncryptionPublicKey,
+      trusteeEncryptionPrivateKeyHex,
+      trusteeSigningPrivateKeyHex,
+    );
+
+    const parsedTransaction = JSON.parse(signedTransaction) as {
+      PayloadKind: string;
+      Payload: {
+        ActorEncryptedElectionPrivateKey: string;
+        EncryptedPayload: string;
+      };
+    };
+
+    const actorElectionPrivateKey = await eciesDecrypt(
+      parsedTransaction.Payload.ActorEncryptedElectionPrivateKey,
+      trusteeEncryptionPrivateKeyHex,
+    );
+    const decryptedPayloadJson = await eciesDecrypt(
+      parsedTransaction.Payload.EncryptedPayload,
+      actorElectionPrivateKey,
+    );
+    const decryptedPayload = JSON.parse(decryptedPayloadJson) as {
+      ActionType: string;
+      ActionPayload: {
+        InvitationId: string;
+        ActorPublicAddress: string;
+      };
+    };
+
+    expect(parsedTransaction.PayloadKind).toBe(ENCRYPTED_ELECTION_ENVELOPE_PAYLOAD_KIND);
+    expect(electionsServiceMock.getElectionEnvelopeAccess).not.toHaveBeenCalled();
+    expect(decryptedPayload.ActionType).toBe('accept_trustee_invitation');
+    expect(decryptedPayload.ActionPayload.InvitationId).toBe('invite-123');
+    expect(decryptedPayload.ActionPayload.ActorPublicAddress).toBe(trusteeSigningPublicKey);
+  });
+
+  it('creates a trustee-rejection envelope without requiring existing election envelope access', async () => {
+    const trusteeSigningPrivateKeyHex = '6666666666666666666666666666666666666666666666666666666666666666';
+    const trusteeEncryptionPrivateKeyHex = '4444444444444444444444444444444444444444444444444444444444444444';
+    const nodeEncryptionPrivateKeyHex = '3333333333333333333333333333333333333333333333333333333333333333';
+    const trusteeSigningPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(trusteeSigningPrivateKeyHex), true),
+    );
+    const trusteeEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(trusteeEncryptionPrivateKeyHex), true),
+    );
+    const nodeEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(nodeEncryptionPrivateKeyHex), true),
+    );
+
+    blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
+      NodePublicEncryptAddress: nodeEncryptionPublicKey,
+      ElectionEnvelopeVersion: 'election-envelope-v2.1',
+    });
+    electionsServiceMock.getElectionEnvelopeAccess.mockResolvedValue({
+      Success: false,
+      ErrorMessage: 'should not be used',
+      ActorEncryptedElectionPrivateKey: '',
+    });
+
+    const { signedTransaction } = await createRejectElectionTrusteeInvitationTransaction(
+      'election-123',
+      'invite-123',
+      trusteeSigningPublicKey,
+      trusteeEncryptionPublicKey,
+      trusteeEncryptionPrivateKeyHex,
+      trusteeSigningPrivateKeyHex,
+    );
+
+    const parsedTransaction = JSON.parse(signedTransaction) as {
+      PayloadKind: string;
+      Payload: {
+        ActorEncryptedElectionPrivateKey: string;
+        EncryptedPayload: string;
+      };
+    };
+
+    const actorElectionPrivateKey = await eciesDecrypt(
+      parsedTransaction.Payload.ActorEncryptedElectionPrivateKey,
+      trusteeEncryptionPrivateKeyHex,
+    );
+    const decryptedPayloadJson = await eciesDecrypt(
+      parsedTransaction.Payload.EncryptedPayload,
+      actorElectionPrivateKey,
+    );
+    const decryptedPayload = JSON.parse(decryptedPayloadJson) as {
+      ActionType: string;
+      ActionPayload: {
+        InvitationId: string;
+        ActorPublicAddress: string;
+      };
+    };
+
+    expect(parsedTransaction.PayloadKind).toBe(ENCRYPTED_ELECTION_ENVELOPE_PAYLOAD_KIND);
+    expect(electionsServiceMock.getElectionEnvelopeAccess).not.toHaveBeenCalled();
+    expect(decryptedPayload.ActionType).toBe('reject_trustee_invitation');
+    expect(decryptedPayload.ActionPayload.InvitationId).toBe('invite-123');
+    expect(decryptedPayload.ActionPayload.ActorPublicAddress).toBe(trusteeSigningPublicKey);
   });
 
   it('creates a designated-auditor grant envelope using the existing election key wrappers', async () => {
@@ -287,7 +433,7 @@ describe('transactionService encrypted election envelope helpers', () => {
 
     blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
       NodePublicEncryptAddress: nodeEncryptionPublicKey,
-      ElectionEnvelopeVersion: 'election-envelope-v1',
+      ElectionEnvelopeVersion: 'election-envelope-v2.1',
     });
     electionsServiceMock.getElectionEnvelopeAccess.mockResolvedValue({
       Success: true,
@@ -307,12 +453,18 @@ describe('transactionService encrypted election envelope helpers', () => {
     const parsedTransaction = JSON.parse(signedTransaction) as {
       PayloadKind: string;
       Payload: {
+        ActionPayload: {
+          ActorPublicAddress: string;
+          OrganizationVoterId: string;
+          VerificationCode?: string;
+        };
         ActorEncryptedElectionPrivateKey: string;
         EncryptedPayload: string;
       };
     };
 
     expect(parsedTransaction.PayloadKind).toBe(ENCRYPTED_ELECTION_ENVELOPE_PAYLOAD_KIND);
+    expect(parsedTransaction.Payload.ActionPayload.VerificationCode).toBeUndefined();
 
     const actorElectionPrivateKey = await eciesDecrypt(
       parsedTransaction.Payload.ActorEncryptedElectionPrivateKey,
@@ -358,7 +510,7 @@ describe('transactionService encrypted election envelope helpers', () => {
 
     blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
       NodePublicEncryptAddress: nodeEncryptionPublicKey,
-      ElectionEnvelopeVersion: 'election-envelope-v1',
+      ElectionEnvelopeVersion: 'election-envelope-v2.1',
     });
     electionsServiceMock.getElectionEnvelopeAccess.mockResolvedValue({
       Success: true,
@@ -433,7 +585,7 @@ describe('transactionService encrypted election envelope helpers', () => {
 
     blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
       NodePublicEncryptAddress: nodeEncryptionPublicKey,
-      ElectionEnvelopeVersion: 'election-envelope-v1',
+      ElectionEnvelopeVersion: 'election-envelope-v2.1',
     });
     electionsServiceMock.getElectionEnvelopeAccess.mockResolvedValue({
       Success: true,
@@ -500,7 +652,7 @@ describe('transactionService encrypted election envelope helpers', () => {
 
     blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
       NodePublicEncryptAddress: nodeEncryptionPublicKey,
-      ElectionEnvelopeVersion: 'election-envelope-v1',
+      ElectionEnvelopeVersion: 'election-envelope-v2.1',
     });
     const { signedTransaction } = await createClaimElectionRosterEntryTransaction(
       'election-123',
@@ -562,7 +714,7 @@ describe('transactionService encrypted election envelope helpers', () => {
     );
     blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
       NodePublicEncryptAddress: nodeEncryptionPublicKey,
-      ElectionEnvelopeVersion: 'election-envelope-v1',
+      ElectionEnvelopeVersion: 'election-envelope-v2.1',
     });
 
     const { signedTransaction } = await createRegisterElectionVotingCommitmentTransaction(
@@ -621,7 +773,7 @@ describe('transactionService encrypted election envelope helpers', () => {
     );
     blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
       NodePublicEncryptAddress: nodeEncryptionPublicKey,
-      ElectionEnvelopeVersion: 'election-envelope-v1',
+      ElectionEnvelopeVersion: 'election-envelope-v2.1',
     });
 
     const { signedTransaction } = await createAcceptElectionBallotCastTransaction(
@@ -694,6 +846,7 @@ describe('transactionService encrypted election envelope helpers', () => {
     const trusteeEncryptionPrivateKeyHex = '4444444444444444444444444444444444444444444444444444444444444444';
     const nodeEncryptionPrivateKeyHex = '3333333333333333333333333333333333333333333333333333333333333333';
     const electionPrivateKeyHex = '5555555555555555555555555555555555555555555555555555555555555555';
+    const executorSessionPrivateKeyHex = '7777777777777777777777777777777777777777777777777777777777777777';
     const trusteeSigningPublicKey = bytesToHex(
       secp256k1.getPublicKey(hexToBytes(trusteeSigningPrivateKeyHex), true),
     );
@@ -703,6 +856,9 @@ describe('transactionService encrypted election envelope helpers', () => {
     const nodeEncryptionPublicKey = bytesToHex(
       secp256k1.getPublicKey(hexToBytes(nodeEncryptionPrivateKeyHex), true),
     );
+    const executorSessionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(executorSessionPrivateKeyHex), true),
+    );
     const actorEncryptedElectionPrivateKey = await eciesEncrypt(
       electionPrivateKeyHex,
       trusteeEncryptionPublicKey,
@@ -710,7 +866,7 @@ describe('transactionService encrypted election envelope helpers', () => {
 
     blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
       NodePublicEncryptAddress: nodeEncryptionPublicKey,
-      ElectionEnvelopeVersion: 'election-envelope-v1',
+      ElectionEnvelopeVersion: 'election-envelope-v2.1',
     });
     electionsServiceMock.getElectionEnvelopeAccess.mockResolvedValue({
       Success: true,
@@ -731,6 +887,9 @@ describe('transactionService encrypted election envelope helpers', () => {
       ClaimedTargetTallyId: 'aggregate-tally-1',
       ClaimedCeremonyVersionId: 'ceremony-version-5',
       ClaimedTallyPublicKeyFingerprint: 'tally-fingerprint-9',
+      CloseCountingJobId: 'job-close-counting-1',
+      ExecutorSessionPublicKey: executorSessionPublicKey,
+      ExecutorKeyAlgorithm: 'ecies-secp256k1-v1',
       ShareMaterial: 'aggregate-share-material',
     };
 
@@ -773,9 +932,19 @@ describe('transactionService encrypted election envelope helpers', () => {
         ClaimedTargetTallyId: string;
         ClaimedCeremonyVersionId: string | null;
         ClaimedTallyPublicKeyFingerprint: string | null;
-        ShareMaterial: string;
+        ShareMaterial?: string | null;
+        CloseCountingJobId?: string | null;
+        ExecutorKeyAlgorithm?: string | null;
+        EncryptedExecutorSubmission?: string | null;
       };
     };
+    const decryptedExecutorSubmissionJson = await eciesDecrypt(
+      decryptedPayload.ActionPayload.EncryptedExecutorSubmission!,
+      executorSessionPrivateKeyHex,
+    );
+    const decryptedExecutorSubmission = JSON.parse(
+      decryptedExecutorSubmissionJson,
+    ) as CloseCountingExecutorSubmissionPayload;
 
     expect(decryptedPayload.ActionType).toBe('submit_finalization_share');
     expect(decryptedPayload.ActionPayload.FinalizationSessionId).toBe('finalization-session-7');
@@ -797,6 +966,150 @@ describe('transactionService encrypted election envelope helpers', () => {
     expect(decryptedPayload.ActionPayload.ClaimedTallyPublicKeyFingerprint).toBe(
       'tally-fingerprint-9'
     );
-    expect(decryptedPayload.ActionPayload.ShareMaterial).toBe('aggregate-share-material');
+    expect(decryptedPayload.ActionPayload.CloseCountingJobId).toBe('job-close-counting-1');
+    expect(decryptedPayload.ActionPayload.ExecutorKeyAlgorithm).toBe('ecies-secp256k1-v1');
+    expect(decryptedPayload.ActionPayload.ShareMaterial).toBeNull();
+    expect(decryptedExecutorSubmission.CloseCountingJobId).toBe('job-close-counting-1');
+    expect(decryptedExecutorSubmission.ElectionId).toBe('election-123');
+    expect(decryptedExecutorSubmission.FinalizationSessionId).toBe('finalization-session-7');
+    expect(decryptedExecutorSubmission.ActorPublicAddress).toBe(trusteeSigningPublicKey);
+    expect(decryptedExecutorSubmission.ShareIndex).toBe(2);
+    expect(decryptedExecutorSubmission.ShareVersion).toBe('share-v2');
+    expect(decryptedExecutorSubmission.TargetType).toBe(
+      ElectionFinalizationTargetTypeProto.FinalizationTargetAggregateTally
+    );
+    expect(decryptedExecutorSubmission.ShareMaterial).toBe('aggregate-share-material');
+  });
+
+  it('rejects trustee finalization-share envelopes without executor binding', async () => {
+    const trusteeSigningPrivateKeyHex = '6666666666666666666666666666666666666666666666666666666666666666';
+    const trusteeEncryptionPrivateKeyHex = '4444444444444444444444444444444444444444444444444444444444444444';
+    const trusteeEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(trusteeEncryptionPrivateKeyHex), true),
+    );
+
+    const request: SubmitElectionFinalizationShareRequest = {
+      ElectionId: 'election-123',
+      FinalizationSessionId: 'finalization-session-7',
+      ActorPublicAddress: 'trustee-address',
+      ShareIndex: 2,
+      ShareVersion: 'share-v2',
+      TargetType: ElectionFinalizationTargetTypeProto.FinalizationTargetAggregateTally,
+      ClaimedCloseArtifactId: 'close-artifact-3',
+      ClaimedAcceptedBallotSetHash: 'accepted-ballots-hash',
+      ClaimedFinalEncryptedTallyHash: 'final-encrypted-tally-hash',
+      ClaimedTargetTallyId: 'aggregate-tally-1',
+      ClaimedCeremonyVersionId: 'ceremony-version-5',
+      ClaimedTallyPublicKeyFingerprint: 'tally-fingerprint-9',
+      ShareMaterial: 'aggregate-share-material',
+    };
+
+    await expect(
+      createSubmitElectionFinalizationShareTransaction(
+        request,
+        trusteeEncryptionPublicKey,
+        trusteeEncryptionPrivateKeyHex,
+        trusteeSigningPrivateKeyHex,
+      ),
+    ).rejects.toThrow(
+      'Executor-encrypted trustee share submission requires CloseCountingJobId, ExecutorSessionPublicKey, and ExecutorKeyAlgorithm.',
+    );
+  });
+
+  it('normalizes protobuf bytes fields before building the trustee finalization-share envelope', async () => {
+    const trusteeSigningPrivateKeyHex = '6666666666666666666666666666666666666666666666666666666666666666';
+    const trusteeEncryptionPrivateKeyHex = '4444444444444444444444444444444444444444444444444444444444444444';
+    const nodeEncryptionPrivateKeyHex = '3333333333333333333333333333333333333333333333333333333333333333';
+    const electionPrivateKeyHex = '5555555555555555555555555555555555555555555555555555555555555555';
+    const executorSessionPrivateKeyHex = '7777777777777777777777777777777777777777777777777777777777777777';
+    const trusteeSigningPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(trusteeSigningPrivateKeyHex), true),
+    );
+    const trusteeEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(trusteeEncryptionPrivateKeyHex), true),
+    );
+    const nodeEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(nodeEncryptionPrivateKeyHex), true),
+    );
+    const executorSessionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(executorSessionPrivateKeyHex), true),
+    );
+    const actorEncryptedElectionPrivateKey = await eciesEncrypt(
+      electionPrivateKeyHex,
+      trusteeEncryptionPublicKey,
+    );
+
+    blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
+      NodePublicEncryptAddress: nodeEncryptionPublicKey,
+      ElectionEnvelopeVersion: 'election-envelope-v2.1',
+    });
+    electionsServiceMock.getElectionEnvelopeAccess.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      ActorEncryptedElectionPrivateKey: actorEncryptedElectionPrivateKey,
+    });
+
+    const request: SubmitElectionFinalizationShareRequest = {
+      ElectionId: 'election-456',
+      FinalizationSessionId: 'finalization-session-9',
+      ActorPublicAddress: trusteeSigningPublicKey,
+      ShareIndex: 3,
+      ShareVersion: 'share-v3',
+      TargetType: ElectionFinalizationTargetTypeProto.FinalizationTargetAggregateTally,
+      ClaimedCloseArtifactId: 'close-artifact-9',
+      ClaimedAcceptedBallotSetHash: {
+        type: 'Buffer',
+        data: [1, 2, 3, 4],
+      } as unknown as string,
+      ClaimedFinalEncryptedTallyHash: new Uint8Array([5, 6, 7, 8]) as unknown as string,
+      ClaimedTargetTallyId: 'aggregate-tally-9',
+      ClaimedCeremonyVersionId: 'ceremony-version-9',
+      ClaimedTallyPublicKeyFingerprint: 'tally-fingerprint-11',
+      CloseCountingJobId: 'job-close-counting-9',
+      ExecutorSessionPublicKey: executorSessionPublicKey,
+      ExecutorKeyAlgorithm: 'ecies-secp256k1-v1',
+      ShareMaterial: 'aggregate-share-material-v3',
+    };
+
+    const { signedTransaction } = await createSubmitElectionFinalizationShareTransaction(
+      request,
+      trusteeEncryptionPublicKey,
+      trusteeEncryptionPrivateKeyHex,
+      trusteeSigningPrivateKeyHex,
+    );
+
+    const parsedTransaction = JSON.parse(signedTransaction) as {
+      Payload: {
+        ActorEncryptedElectionPrivateKey: string;
+        EncryptedPayload: string;
+      };
+    };
+    const actorElectionPrivateKey = await eciesDecrypt(
+      parsedTransaction.Payload.ActorEncryptedElectionPrivateKey,
+      trusteeEncryptionPrivateKeyHex,
+    );
+    const decryptedPayloadJson = await eciesDecrypt(
+      parsedTransaction.Payload.EncryptedPayload,
+      actorElectionPrivateKey,
+    );
+    const decryptedPayload = JSON.parse(decryptedPayloadJson) as {
+      ActionPayload: {
+        EncryptedExecutorSubmission: string | null;
+      };
+    };
+    const decryptedExecutorSubmissionJson = await eciesDecrypt(
+      decryptedPayload.ActionPayload.EncryptedExecutorSubmission!,
+      executorSessionPrivateKeyHex,
+    );
+    const decryptedExecutorSubmission = JSON.parse(
+      decryptedExecutorSubmissionJson,
+    ) as CloseCountingExecutorSubmissionPayload;
+
+    expect(decryptedExecutorSubmission.ClaimedAcceptedBallotSetHash).toBe(
+      bytesToBase64(Uint8Array.from([1, 2, 3, 4]))
+    );
+    expect(decryptedExecutorSubmission.ClaimedFinalEncryptedTallyHash).toBe(
+      bytesToBase64(Uint8Array.from([5, 6, 7, 8]))
+    );
   });
 });

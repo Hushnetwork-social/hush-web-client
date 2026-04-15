@@ -6,6 +6,7 @@ import { ArrowRight, Files, ShieldCheck } from 'lucide-react';
 import type { ElectionHubEntryView, GetElectionResponse } from '@/lib/grpc';
 import {
   ElectionCeremonyVersionStatusProto,
+  ElectionCloseCountingJobStatusProto,
   ElectionFinalizationSessionPurposeProto,
   ElectionHubNextActionHintProto,
   ElectionGovernedActionTypeProto,
@@ -14,10 +15,12 @@ import {
 import {
   formatTimestamp,
   getActiveCeremonyVersion,
+  getClosedProgressNarrative,
+  getCloseCountingJobStatusLabel,
   getFinalizationSessionPurposeLabel,
-  getFinalizationSessionStatusLabel,
   getGovernedActionLabel,
   getGovernedProposalExecutionStatusLabel,
+  getPublishedResultNarrative,
 } from './contracts';
 import {
   AvailabilityCard,
@@ -65,17 +68,60 @@ export function TrusteeWorkspaceSummary({
   const normalizedReason = entry.SuggestedActionReason.trim().toLowerCase();
   const needsGovernedReview =
     entry.SuggestedAction === ElectionHubNextActionHintProto.ElectionHubActionTrusteeApproveGovernedAction;
-  const needsTrusteeResultReview =
-    entry.SuggestedAction === ElectionHubNextActionHintProto.ElectionHubActionTrusteeReviewResult;
   const needsCeremonyFollowUp =
     entry.SuggestedAction === ElectionHubNextActionHintProto.ElectionHubActionNone &&
     normalizedReason.startsWith('continue the trustee ceremony.');
+  const needsTallyShareFollowUp =
+    normalizedReason.startsWith('submit the bound trustee tally share for close-counting.') ||
+    normalizedReason.startsWith('resubmit the bound trustee tally share for close-counting.');
   const waitingForCloseThreshold =
     latestCloseProposal &&
     latestCloseProposal.ExecutionStatus ===
       ElectionGovernedProposalExecutionStatusProto.WaitingForApprovals &&
     !latestCloseCountingSession;
   const shareWorkspaceEnabled = Boolean(latestCloseCountingSession);
+  const publishedResultState = useMemo(
+    () => getPublishedResultNarrative(entry, 'trustee'),
+    [entry]
+  );
+  const closeCountingJobSummary = useMemo(() => {
+    if (!latestCloseCountingSession) {
+      return null;
+    }
+
+    switch (latestCloseCountingSession.CloseCountingJobStatus) {
+      case ElectionCloseCountingJobStatusProto.CloseCountingJobThresholdReached:
+        return {
+          title: 'Threshold reached',
+          description:
+            'The required trustee shares are recorded. The tally executor is about to start the bound release job.',
+        };
+      case ElectionCloseCountingJobStatusProto.CloseCountingJobRunning:
+        return {
+          title: 'Executor running',
+          description:
+            'The tally executor is validating the bound trustee submissions and combining the exact aggregate tally now.',
+        };
+      case ElectionCloseCountingJobStatusProto.CloseCountingJobPublishing:
+        return {
+          title: 'Publishing unofficial result',
+          description:
+            'Aggregate release succeeded. The tally executor is sealing tally-ready and unofficial-result artifacts now.',
+        };
+      case ElectionCloseCountingJobStatusProto.CloseCountingJobFailed:
+        return {
+          title: 'Executor failed',
+          description:
+            'The bound close-counting job failed. Review the latest failure evidence or retry path before expecting a result.',
+        };
+      default:
+        return null;
+    }
+  }, [latestCloseCountingSession]);
+  const closedTrusteeState = useMemo(
+    () => getClosedProgressNarrative(entry, 'trustee'),
+    [entry]
+  );
   const trusteeSurfaceSummary = useMemo(() => {
     if (needsGovernedReview) {
       return (
@@ -95,11 +141,32 @@ export function TrusteeWorkspaceSummary({
       );
     }
 
+    if (publishedResultState) {
+      return (
+        <>
+          <span className="font-semibold text-hush-text-primary">{publishedResultState.title}.</span>{' '}
+          {publishedResultState.description}
+        </>
+      );
+    }
+
+    if (closeCountingJobSummary) {
+      return (
+        <>
+          <span className="font-semibold text-hush-text-primary">{closeCountingJobSummary.title}.</span>{' '}
+          {closeCountingJobSummary.description}
+        </>
+      );
+    }
+
     if (latestCloseCountingSession) {
       return (
         <>
-          <span className="font-semibold text-hush-text-primary">Close-counting share active.</span>{' '}
-          The bound tally-release session is ready in the share workspace.
+          <span className="font-semibold text-hush-text-primary">
+            {closedTrusteeState?.title ?? 'Close-counting share active'}.
+          </span>{' '}
+          {closedTrusteeState?.description ??
+            'The bound tally-release session is ready in the tally share workspace.'}
         </>
       );
     }
@@ -108,17 +175,8 @@ export function TrusteeWorkspaceSummary({
       return (
         <>
           <span className="font-semibold text-hush-text-primary">Waiting for close threshold.</span>{' '}
-          The share workspace remains disabled until the governed close reaches threshold and the
-          bound close-counting session is created.
-        </>
-      );
-    }
-
-    if (needsTrusteeResultReview) {
-      return (
-        <>
-          <span className="font-semibold text-hush-text-primary">Trustee result available.</span> Trustee-specific result
-          or finalization follow-up is ready for review.
+          The tally share workspace remains disabled until the governed close reaches threshold and
+          the bound close-counting session is created.
         </>
       );
     }
@@ -144,8 +202,10 @@ export function TrusteeWorkspaceSummary({
     latestCloseCountingSession,
     needsCeremonyFollowUp,
     needsGovernedReview,
-    needsTrusteeResultReview,
     waitingForCloseThreshold,
+    publishedResultState,
+    closeCountingJobSummary,
+    closedTrusteeState,
   ]);
 
   return (
@@ -154,9 +214,14 @@ export function TrusteeWorkspaceSummary({
       toggleTestId="hush-voting-trustee-toggle"
       eyebrow="Trustee Surface"
       title="Governed action, ceremony, and share follow-up"
-      description="Trustee actions stay on their explicit pages. This shell keeps the election-specific ceremony and approval context visible before you jump into the bound action route."
+      description="Trustee actions stay on their explicit pages. This shell keeps the election-specific ceremony, governed-action, and tally-share context visible before you jump into the bound trustee routes."
       summary={trusteeSurfaceSummary}
-      defaultExpanded={needsGovernedReview || needsCeremonyFollowUp || needsTrusteeResultReview}
+      defaultExpanded={
+        needsGovernedReview ||
+        needsCeremonyFollowUp ||
+        needsTallyShareFollowUp ||
+        Boolean(closeCountingJobSummary)
+      }
       actions={
         <>
           <Link
@@ -177,29 +242,27 @@ export function TrusteeWorkspaceSummary({
             }`}
             title={
               shareWorkspaceEnabled
-                ? 'Open the trustee share workspace.'
-                : 'Share submission unlocks only after close reaches threshold and the close-counting session exists.'
+                ? 'Open the trustee tally share workspace.'
+                : 'Tally-share submission unlocks only after close reaches threshold and the close-counting session exists.'
             }
             data-testid="trustee-share-workspace-action"
           >
             <Files className="h-4 w-4" />
-            <span>Share workspace</span>
+            <span>Tally share workspace</span>
           </Link>
-          {latestProposal ? (
-            <Link
-              href={`/elections/${entry.Election.ElectionId}/trustee/proposal/${latestProposal.Id}`}
-              className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
-            >
-              <ArrowRight className="h-4 w-4" />
-              <span>Open latest trustee proposal</span>
-            </Link>
-          ) : null}
+          <Link
+            href={`/elections/${entry.Election.ElectionId}/trustee/governed`}
+            className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
+          >
+            <ArrowRight className="h-4 w-4" />
+            <span>Open governed actions</span>
+          </Link>
         </>
       }
     >
       <div className="grid gap-4 md:grid-cols-3">
         <AvailabilityCard
-          label="Latest proposal"
+          label="Latest governed action"
           value={
             latestProposal
               ? `${getGovernedActionLabel(latestProposal.ActionType)} | ${getGovernedProposalExecutionStatusLabel(latestProposal.ExecutionStatus)}`
@@ -218,7 +281,7 @@ export function TrusteeWorkspaceSummary({
           label="Latest share session"
           value={
             latestCloseCountingSession
-              ? `${getFinalizationSessionPurposeLabel(latestCloseCountingSession.SessionPurpose)} | ${getFinalizationSessionStatusLabel(latestCloseCountingSession.Status)}`
+              ? `${getFinalizationSessionPurposeLabel(latestCloseCountingSession.SessionPurpose)} | ${getCloseCountingJobStatusLabel(latestCloseCountingSession.CloseCountingJobStatus)}`
               : waitingForCloseThreshold
                 ? 'Waiting for close threshold'
                 : 'No close-counting session recorded'

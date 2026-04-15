@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, ArrowLeft, CheckCircle2, Loader2, ShieldAlert } from 'lucide-react';
 import { ElectionCeremonyActionTypeProto, ElectionTrusteeCeremonyStateProto } from '@/lib/grpc';
+import { useAppStore } from '@/stores/useAppStore';
 import {
   DEFAULT_PROTOCOL_OMEGA_VERSION,
   type CeremonyActionViewState,
@@ -14,6 +15,11 @@ import {
   getTrusteeCeremonyStateLabel,
 } from './contracts';
 import { CeremonyTranscriptPanel } from './CeremonyTranscriptPanel';
+import {
+  createTrusteeShareVaultEnvelope,
+  decryptStoredTrusteeShareVaultEnvelope,
+  deriveTrusteeCloseCountingShareMaterial,
+} from './trusteeShareVault';
 import { useElectionsStore } from './useElectionsStore';
 
 type TrusteeElectionCeremonyPanelProps = {
@@ -31,6 +37,9 @@ type PreparedPackage = {
   payloadFingerprint: string;
   encryptedPayload: string;
   shareVersion: string;
+  protocolVersion: string;
+  profileId: string;
+  versionNumber: number;
 };
 
 const sectionClass = 'rounded-3xl bg-hush-bg-element/95 p-5 shadow-lg shadow-black/10';
@@ -38,6 +47,7 @@ const insetSurfaceClass = 'rounded-[24px] bg-[#18203a] p-4 shadow-inner shadow-b
 const valueWellClass = 'rounded-2xl bg-[#151c33] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.02),0_12px_24px_rgba(0,0,0,0.14)]';
 const primaryButtonClass = 'mt-4 inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 disabled:cursor-not-allowed disabled:bg-hush-bg-light disabled:text-hush-text-accent';
 const CEREMONY_REFRESH_INTERVAL_MS = 5_000;
+const EMPTY_MNEMONIC: string[] = [];
 const stepSequence = [
   ElectionCeremonyActionTypeProto.CeremonyActionPublishTransportKey,
   ElectionCeremonyActionTypeProto.CeremonyActionJoinVersion,
@@ -66,6 +76,9 @@ function getPreparedPackage(
     payloadFingerprint: `package-${suffix}`,
     encryptedPayload: JSON.stringify({ packageKind: 'trustee-ceremony-package', electionId, ceremonyVersionId: versionId, protocolVersion, profileId, trusteeUserAddress: actorPublicAddress, versionNumber }),
     shareVersion: `share-${suffix}`,
+    protocolVersion,
+    profileId,
+    versionNumber,
   };
 }
 
@@ -113,6 +126,11 @@ export function TrusteeElectionCeremonyPanel({
     submitElectionCeremonyMaterial,
   } = useElectionsStore();
   const [isAutoAdvancing, setIsAutoAdvancing] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [vaultReadStatus, setVaultReadStatus] = useState<'pending' | 'stored' | 'unreadable'>('pending');
+  const [vaultReadDetail, setVaultReadDetail] = useState('Encrypted trustee-only storage appears after the material step.');
+  const trusteeCredentials = useAppStore((state) => state.credentials);
+  const trusteeMnemonic = trusteeCredentials?.mnemonic ?? EMPTY_MNEMONIC;
 
   useEffect(() => { void loadElection(electionId); void loadCeremonyActionView(actorPublicAddress, electionId); }, [actorPublicAddress, electionId, loadCeremonyActionView, loadElection]);
   useEffect(() => () => reset(), [reset]);
@@ -149,9 +167,61 @@ export function TrusteeElectionCeremonyPanel({
   const trusteeActions = useMemo(() => getCeremonyActionViewStates(ceremonyActionView, 'trustee'), [ceremonyActionView]);
   const selfState = ceremonyActionView?.SelfTrusteeState;
   const shareCustody = ceremonyActionView?.SelfShareCustody;
+  const latestVaultEnvelope = useMemo(
+    () => (ceremonyActionView?.SelfVaultEnvelopes ?? [])[0] ?? null,
+    [ceremonyActionView?.SelfVaultEnvelopes]
+  );
+  const latestVaultPayload = latestVaultEnvelope?.EncryptedPayload ?? null;
   const importAction = trusteeActions.find((action) => action.actionType === ElectionCeremonyActionTypeProto.CeremonyActionImportShare);
   const protocolVersion = election?.ProtocolOmegaVersion?.trim() || DEFAULT_PROTOCOL_OMEGA_VERSION;
   const preparedPackage = useMemo(() => activeVersion ? getPreparedPackage(actorPublicAddress, electionId, protocolVersion, activeVersion.ProfileId, activeVersion.Id, activeVersion.VersionNumber) : null, [activeVersion, actorPublicAddress, electionId, protocolVersion]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!latestVaultPayload) {
+      setVaultReadStatus('pending');
+      setVaultReadDetail('Encrypted trustee-only storage appears after the material step.');
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (!actorEncryptionPrivateKey || !trusteeMnemonic.length) {
+      setVaultReadStatus('unreadable');
+      setVaultReadDetail('Local trustee decryption material is not available on this device.');
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void (async () => {
+      try {
+        const decryptedVault = await decryptStoredTrusteeShareVaultEnvelope(
+          latestVaultPayload,
+          actorEncryptionPrivateKey,
+          trusteeMnemonic
+        );
+        if (!cancelled) {
+          setVaultReadStatus('stored');
+          setVaultReadDetail(`Share ${decryptedVault.shareVersion} is readable only with this trustee context.`);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setVaultReadStatus('unreadable');
+          setVaultReadDetail(
+            error instanceof Error
+              ? error.message
+              : 'The latest trustee vault package could not be reopened locally.'
+          );
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [actorEncryptionPrivateKey, latestVaultPayload, trusteeMnemonic]);
   const isSubmittedWithoutApprovalMetadata =
     selfState?.State === ElectionTrusteeCeremonyStateProto.CeremonyStateMaterialSubmitted
     && !selfState.ShareVersion?.trim();
@@ -220,6 +290,7 @@ export function TrusteeElectionCeremonyPanel({
       return;
     }
 
+    setLocalError(null);
     setIsAutoAdvancing(true);
 
     try {
@@ -268,16 +339,43 @@ export function TrusteeElectionCeremonyPanel({
             actorSigningPrivateKey
           );
         } else if (availableAction.actionType === ElectionCeremonyActionTypeProto.CeremonyActionSubmitMaterial) {
+          const closeCountingShare = await deriveTrusteeCloseCountingShareMaterial({
+            electionId,
+            ceremonyVersionId: activeVersion.Id,
+            trusteeUserAddress: actorPublicAddress,
+            mnemonic: trusteeMnemonic,
+            shareVersion: preparedPackage.shareVersion,
+          });
+          const vaultEnvelope = await createTrusteeShareVaultEnvelope({
+            electionId,
+            ceremonyVersionId: activeVersion.Id,
+            trusteeUserAddress: actorPublicAddress,
+            trusteeEncryptionPublicKey: actorEncryptionPublicKey,
+            mnemonic: trusteeMnemonic,
+            shareVersion: preparedPackage.shareVersion,
+            material: {
+              packageKind: 'trustee-ceremony-package',
+              ceremonyMessageType: preparedPackage.messageType,
+              ceremonyPayloadVersion: preparedPackage.payloadVersion,
+              ceremonyPayloadFingerprint: preparedPackage.payloadFingerprint,
+              ceremonyEncryptedPayload: preparedPackage.encryptedPayload,
+              transportPublicKeyFingerprint: preparedPackage.transportPublicKeyFingerprint,
+              protocolVersion: preparedPackage.protocolVersion,
+              profileId: preparedPackage.profileId,
+              versionNumber: preparedPackage.versionNumber,
+              closeCountingShare,
+            },
+          });
           didAdvance = await submitElectionCeremonyMaterial(
             {
               ElectionId: electionId,
               CeremonyVersionId: activeVersion.Id,
               ActorPublicAddress: actorPublicAddress,
-              RecipientTrusteeUserAddress: null,
-              MessageType: preparedPackage.messageType,
-              PayloadVersion: preparedPackage.payloadVersion,
-              EncryptedPayload: preparedPackage.encryptedPayload,
-              PayloadFingerprint: preparedPackage.payloadFingerprint,
+              RecipientTrusteeUserAddress: actorPublicAddress,
+              MessageType: vaultEnvelope.messageType,
+              PayloadVersion: vaultEnvelope.payloadVersion,
+              EncryptedPayload: vaultEnvelope.encryptedPayload,
+              PayloadFingerprint: vaultEnvelope.payloadFingerprint,
               ShareVersion: preparedPackage.shareVersion,
             },
             actorEncryptionPublicKey,
@@ -305,6 +403,12 @@ export function TrusteeElectionCeremonyPanel({
           break;
         }
       }
+    } catch (error) {
+      setLocalError(
+        error instanceof Error
+          ? error.message
+          : 'Failed to prepare the trustee share vault package.'
+      );
     } finally {
       setIsAutoAdvancing(false);
     }
@@ -320,7 +424,7 @@ export function TrusteeElectionCeremonyPanel({
           </Link>
           <h1 className="text-2xl font-semibold">Trustee Key Ceremony</h1>
           <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
-            Follow the ceremony in order. The trustee surface now prepares the required package metadata for you and keeps completion under the owner validation path.
+            Follow the ceremony in order. The trustee surface now prepares one double-encrypted trustee vault package for your Hush personal area and keeps completion under the owner validation path.
           </p>
         </div>
 
@@ -338,7 +442,11 @@ export function TrusteeElectionCeremonyPanel({
           </div>
         ) : null}
 
-        {error ? <div className="mb-4 rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-100">{error}</div> : null}
+        {error || localError ? (
+          <div className="mb-4 rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+            {localError ?? error}
+          </div>
+        ) : null}
 
         {(isLoadingDetail || isLoadingCeremonyActionView) && !selectedElection ? (
           <div className={`${sectionClass} flex items-center gap-3`}>
@@ -366,7 +474,7 @@ export function TrusteeElectionCeremonyPanel({
                 </div>
               </div>
 
-              <div className="mt-5 grid gap-4 md:grid-cols-3">
+              <div className="mt-5 grid gap-4 md:grid-cols-4">
                 <div className={valueWellClass}>
                   <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">Profile</div>
                   <div className="mt-2 text-sm">{activeVersion?.ProfileId || 'Not started'}</div>
@@ -379,6 +487,21 @@ export function TrusteeElectionCeremonyPanel({
                   <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">Your state</div>
                   <div className="mt-2 text-sm">{selfState ? getTrusteeCeremonyStateLabel(selfState.State) : 'Waiting'}</div>
                 </div>
+                <div className={valueWellClass}>
+                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">Vault package</div>
+                  <div className="mt-2 text-sm">
+                    {vaultReadStatus === 'stored'
+                      ? 'Stored'
+                      : vaultReadStatus === 'unreadable'
+                        ? 'Unreadable'
+                        : 'Pending'}
+                  </div>
+                  <div className="mt-1 text-xs text-hush-text-accent">
+                    {latestVaultEnvelope?.SubmittedAt
+                      ? `Updated ${formatTimestamp(latestVaultEnvelope.SubmittedAt)}. ${vaultReadDetail}`
+                      : vaultReadDetail}
+                  </div>
+                </div>
               </div>
 
               <div className="mt-5 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-100">
@@ -386,7 +509,7 @@ export function TrusteeElectionCeremonyPanel({
                   <ShieldAlert className="h-4 w-4" />
                   <span>Authority boundary</span>
                 </div>
-                <p className="mt-2">This workflow records one trustee share for the tally-release path only. It is not a general ballot inspection or decryption control.</p>
+                <p className="mt-2">This workflow stores one trustee-owned vault package for the tally-release path only. It is not a general ballot inspection or decryption control.</p>
               </div>
 
               {selfState?.State === ElectionTrusteeCeremonyStateProto.CeremonyStateValidationFailed ? (
@@ -542,7 +665,7 @@ export function TrusteeElectionCeremonyPanel({
                   {focusedAction?.actionType === ElectionCeremonyActionTypeProto.CeremonyActionSubmitMaterial ? (
                     <div className={insetSurfaceClass}>
                       <div className="text-sm font-semibold">Step 4: Submit ceremony package</div>
-                      <p className="mt-2 text-sm text-hush-text-accent">The client prepares the bound package metadata for this trustee and version. Raw recipient and payload fields are intentionally hidden from the normal ceremony flow.</p>
+                      <p className="mt-2 text-sm text-hush-text-accent">The client prepares one self-addressed trustee vault envelope for this trustee and version. The wrapped ceremony material stays hidden behind the trustee-owned vault layer.</p>
                       <div className="mt-4 grid gap-3 md:grid-cols-2">
                         <div className={valueWellClass}>
                           <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">Sender</div>
@@ -550,15 +673,15 @@ export function TrusteeElectionCeremonyPanel({
                         </div>
                         <div className={valueWellClass}>
                           <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">Routing</div>
-                          <div className="mt-2 text-sm">System-managed ceremony envelope</div>
+                          <div className="mt-2 text-sm">Self-addressed trustee vault envelope</div>
                         </div>
                         <div className={valueWellClass}>
                           <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">Message type</div>
-                          <div className="mt-2 text-sm">{preparedPackage?.messageType || 'dkg-share-package'}</div>
+                          <div className="mt-2 text-sm">trustee-share-vault-package</div>
                         </div>
                         <div className={valueWellClass}>
-                          <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">Protocol version</div>
-                          <div className="mt-2 text-sm">{preparedPackage?.payloadVersion || protocolVersion}</div>
+                          <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">Vault version</div>
+                          <div className="mt-2 text-sm">omega-trustee-share-vault-v1</div>
                         </div>
                         <div className={`${valueWellClass} md:col-span-2`}>
                           <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">Package fingerprint</div>

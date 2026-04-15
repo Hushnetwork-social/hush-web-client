@@ -1,6 +1,9 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { ElectionLifecycleStateProto } from '@/lib/grpc';
+import {
+  ElectionClosedProgressStatusProto,
+  ElectionLifecycleStateProto,
+} from '@/lib/grpc';
 import { AuditorWorkspaceSummary } from './HushVotingAuditorSection';
 import {
   createDetail,
@@ -16,7 +19,7 @@ describe('AuditorWorkspaceSummary', () => {
     cleanup();
   });
 
-  it('shows the report package and official result actions for an auditor-only actor', async () => {
+  it('stays collapsed when unofficial or official results are already published', async () => {
     const entry = createHubEntry(
       'election-auditor',
       ElectionLifecycleStateProto.Finalized,
@@ -51,13 +54,55 @@ describe('AuditorWorkspaceSummary', () => {
     );
 
     expect(await screen.findByTestId('hush-voting-section-auditor')).toBeInTheDocument();
-    expect(screen.getByTestId('hush-voting-open-report-package')).toHaveAttribute(
-      'href',
-      '#hush-voting-report-package'
+    expect(screen.getByTestId('hush-voting-auditor-toggle')).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByTestId('hush-voting-section-auditor')).toHaveTextContent(
+      'Official result published.'
     );
-    expect(screen.getByTestId('hush-voting-open-auditor-result')).toHaveAttribute(
-      'href',
-      '#hush-voting-official-result'
+  });
+
+  it('shows a closed-progress callout while trustees are still unlocking the unofficial result', async () => {
+    const entry = createHubEntry(
+      'election-auditor-closed',
+      ElectionLifecycleStateProto.Closed,
+      'Auditor Waiting Election',
+      {
+        ActorRoles: {
+          IsOwnerAdmin: false,
+          IsTrustee: false,
+          IsVoter: false,
+          IsDesignatedAuditor: true,
+        },
+        CanViewNamedParticipationRoster: true,
+        CanViewReportPackage: true,
+        CanViewParticipantResults: true,
+        ClosedProgressStatus:
+          ElectionClosedProgressStatusProto.ClosedProgressWaitingForTrusteeShares,
+        HasUnofficialResult: false,
+        HasOfficialResult: false,
+      }
     );
+
+    render(
+      <AuditorWorkspaceSummary
+        entry={entry}
+        detail={createDetail(
+          'election-auditor-closed',
+          ElectionLifecycleStateProto.Closed,
+          'Auditor Waiting Election'
+        )}
+        resultView={createResultView({
+          CanViewReportPackage: false,
+        })}
+        isLoadingResultView={false}
+      />
+    );
+
+    expect(await screen.findByTestId('hush-voting-section-auditor')).toHaveTextContent(
+      'Awaiting unofficial result preparation'
+    );
+    expect(screen.getByTestId('hush-voting-section-auditor')).toHaveTextContent(
+      'auditor-visible evidence can be reviewed'
+    );
+    expect(screen.getByTestId('hush-voting-auditor-toggle')).toHaveAttribute('aria-expanded', 'false');
   });
 });

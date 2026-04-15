@@ -1,13 +1,20 @@
 "use client";
 
-import { Files, Vote } from 'lucide-react';
+import { useMemo } from 'react';
 import type {
   ElectionHubEntryView,
   GetElectionResponse,
   GetElectionResultViewResponse,
 } from '@/lib/grpc';
+import {
+  getClosedProgressNarrative,
+  getPublishedResultNarrative,
+} from './contracts';
 import { ReadOnlyGovernedActionSummary } from './ReadOnlyGovernedActionSummary';
-import { AvailabilityCard } from './HushVotingWorkspaceShared';
+import {
+  AvailabilityCard,
+  CollapsibleSurfaceSection,
+} from './HushVotingWorkspaceShared';
 
 type AuditorWorkspaceSummaryProps = {
   entry: ElectionHubEntryView;
@@ -23,27 +30,41 @@ export function AuditorWorkspaceSummary({
   isLoadingResultView,
 }: AuditorWorkspaceSummaryProps) {
   const hasReportPackage = Boolean(resultView?.CanViewReportPackage && resultView?.LatestReportPackage);
-  const resultTargetId = resultView?.OfficialResult
-    ? 'hush-voting-official-result'
-    : resultView?.UnofficialResult
-      ? 'hush-voting-unofficial-result'
-      : null;
+  const publishedResultState = useMemo(
+    () => getPublishedResultNarrative(entry, 'auditor'),
+    [entry]
+  );
+  const closedAuditorState = useMemo(
+    () => getClosedProgressNarrative(entry, 'auditor'),
+    [entry]
+  );
+  const auditorSummary = publishedResultState ? (
+    <>
+      <span className="font-semibold text-hush-text-primary">{publishedResultState.title}.</span>{' '}
+      {publishedResultState.description}
+    </>
+  ) : closedAuditorState ? (
+    <>
+      <span className="font-semibold text-hush-text-primary">{closedAuditorState.title}.</span>{' '}
+      {closedAuditorState.description}
+    </>
+  ) : (
+    <>
+      <span className="font-semibold text-hush-text-primary">No auditor action right now.</span>{' '}
+      This surface stays available for read-only governance and package context.
+    </>
+  );
 
   return (
-    <section className="space-y-5 pt-4 md:pt-6" data-testid="hush-voting-section-auditor">
-      <div>
-        <div className="text-xs font-semibold uppercase tracking-[0.24em] text-hush-text-accent">
-          Auditor Surface
-        </div>
-        <h2 className="mt-2 text-xl font-semibold text-hush-text-primary">
-          Read-only governance and package access
-        </h2>
-        <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
-          Designated-auditor access stays read-only here. The shell mirrors server-approved
-          package and governance visibility without introducing any auditor-only mutation path.
-        </p>
-      </div>
-
+    <CollapsibleSurfaceSection
+      testId="hush-voting-section-auditor"
+      toggleTestId="hush-voting-auditor-toggle"
+      eyebrow="Auditor Surface"
+      title="Read-only governance and package access"
+      description="Designated-auditor access stays read-only here. Published results and report packages are exposed through their own dedicated sections, while this surface keeps governance context available."
+      summary={auditorSummary}
+      defaultExpanded={false}
+    >
       <div className="grid gap-4 md:grid-cols-3">
         <AvailabilityCard
           label="Report package"
@@ -66,34 +87,16 @@ export function AuditorWorkspaceSummary({
         <div className="rounded-2xl bg-hush-bg-dark/60 px-4 py-3 text-sm text-hush-text-accent">
           Loading the auditor-visible package and result surfaces for this election.
         </div>
-      ) : hasReportPackage || resultTargetId ? (
-        <div className="flex flex-wrap gap-3">
-          {hasReportPackage ? (
-            <a
-              href="#hush-voting-report-package"
-              className="inline-flex items-center gap-2 rounded-full bg-[#1b2544] px-4 py-2 text-sm font-medium text-hush-text-primary transition-colors hover:bg-[#243158]"
-              data-testid="hush-voting-open-report-package"
-            >
-              <Files className="h-4 w-4" />
-              <span>Open report package</span>
-            </a>
-          ) : null}
-          {resultTargetId ? (
-            <a
-              href={`#${resultTargetId}`}
-              className="inline-flex items-center gap-2 rounded-full bg-[#1b2544] px-4 py-2 text-sm font-medium text-hush-text-primary transition-colors hover:bg-[#243158]"
-              data-testid="hush-voting-open-auditor-result"
-            >
-              <Vote className="h-4 w-4" />
-              <span>{resultView?.OfficialResult ? 'Open official result' : 'Open unofficial result'}</span>
-            </a>
-          ) : null}
-        </div>
       ) : null}
 
       {detail ? (
         <ReadOnlyGovernedActionSummary detail={detail} />
       ) : null}
-    </section>
+      {hasReportPackage ? (
+        <div className="rounded-2xl bg-hush-bg-dark/70 px-4 py-3 text-sm text-hush-text-accent shadow-sm shadow-black/10">
+          Report package access is available through the separate artifact and package section.
+        </div>
+      ) : null}
+    </CollapsibleSurfaceSection>
   );
 }

@@ -450,6 +450,18 @@ describe('HushVotingWorkspace', () => {
     expect(screen.getByTestId('hush-voting-section-trustee')).toBeInTheDocument();
     expect(screen.getByTestId('hush-voting-section-auditor')).toBeInTheDocument();
     expect(screen.getByTestId('hush-voting-section-results')).toBeInTheDocument();
+    expect(screen.getByTestId('hush-voting-section-artifacts')).toBeInTheDocument();
+    const sectionOrder = Array.from(
+      document.querySelectorAll('[data-testid^="hush-voting-section-"]')
+    ).map((section) => section.getAttribute('data-testid'));
+    expect(sectionOrder).toEqual([
+      'hush-voting-section-results',
+      'hush-voting-section-owner-admin',
+      'hush-voting-section-trustee',
+      'hush-voting-section-auditor',
+      'hush-voting-section-voter',
+      'hush-voting-section-artifacts',
+    ]);
     expect(screen.getByRole('link', { name: 'Back to HushVoting! Hub' })).toHaveAttribute(
       'href',
       '/elections'

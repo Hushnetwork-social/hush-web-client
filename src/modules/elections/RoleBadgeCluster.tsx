@@ -4,6 +4,7 @@ import type { ElectionApplicationRoleFlagsView } from '@/lib/grpc';
 
 type RoleBadgeClusterProps = {
   roles: ElectionApplicationRoleFlagsView;
+  compact?: boolean;
 };
 
 const ROLE_BADGES = [
@@ -13,13 +14,17 @@ const ROLE_BADGES = [
   { key: 'IsDesignatedAuditor', label: 'Auditor', className: 'border-amber-500/40 bg-amber-500/10 text-amber-100' },
 ] as const;
 
-export function RoleBadgeCluster({ roles }: RoleBadgeClusterProps) {
+export function RoleBadgeCluster({ roles, compact = false }: RoleBadgeClusterProps) {
+  const badgeClassName = compact
+    ? 'rounded-full border px-2.5 py-0.5 text-[11px] font-medium'
+    : 'rounded-full border px-3 py-1 text-xs font-medium';
+
   return (
     <div className="flex flex-wrap gap-2" data-testid="role-badge-cluster">
       {ROLE_BADGES.filter((badge) => roles[badge.key]).map((badge) => (
         <span
           key={badge.key}
-          className={`rounded-full border px-3 py-1 text-xs font-medium ${badge.className}`}
+          className={`${badgeClassName} ${badge.className}`}
         >
           {badge.label}
         </span>

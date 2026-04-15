@@ -1,15 +1,10 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import {
-  ElectionHubNextActionHintProto,
-  ElectionLifecycleStateProto,
-} from '@/lib/grpc';
+import { ElectionLifecycleStateProto } from '@/lib/grpc';
 import { ResultsWorkspaceSummary } from './HushVotingResultsSection';
 import {
   createDetail,
   createHubEntry,
-  createReportArtifact,
-  createReportPackage,
   createResultArtifact,
   createResultView,
 } from './HushVotingWorkspaceTestUtils';
@@ -19,11 +14,11 @@ describe('ResultsWorkspaceSummary', () => {
     cleanup();
   });
 
-  it('keeps voter-only workspaces focused on voter details when no artifact package is available', () => {
+  it('shows published results directly for voter entries instead of keeping them inside voter details', () => {
     const entry = createHubEntry(
-      'election-no-results',
-      ElectionLifecycleStateProto.Draft,
-      'Annual Elections 2026',
+      'election-voter-results',
+      ElectionLifecycleStateProto.Closed,
+      'Voter Results Election',
       {
         ActorRoles: {
           IsOwnerAdmin: false,
@@ -31,12 +26,10 @@ describe('ResultsWorkspaceSummary', () => {
           IsVoter: true,
           IsDesignatedAuditor: false,
         },
-        SuggestedAction: ElectionHubNextActionHintProto.ElectionHubActionNone,
-        SuggestedActionReason: 'No immediate action is required for this election.',
         CanViewNamedParticipationRoster: false,
         CanViewReportPackage: false,
         CanViewParticipantResults: true,
-        HasUnofficialResult: false,
+        HasUnofficialResult: true,
         HasOfficialResult: false,
       }
     );
@@ -44,18 +37,34 @@ describe('ResultsWorkspaceSummary', () => {
     render(
       <ResultsWorkspaceSummary
         entry={entry}
-        detail={createDetail('election-no-results', ElectionLifecycleStateProto.Draft, 'Annual Elections 2026')}
-        resultView={createResultView()}
+        detail={createDetail(
+          'election-voter-results',
+          ElectionLifecycleStateProto.Closed,
+          'Voter Results Election'
+        )}
+        resultView={createResultView({
+          UnofficialResult: createResultArtifact({
+            ArtifactKind: 0,
+            Title: 'Unofficial result',
+          }),
+        })}
         isLoadingResultView={false}
       />
     );
 
-    expect(screen.getByTestId('hush-voting-section-results')).toHaveTextContent('Boundary Artifacts');
-    expect(screen.queryByRole('button', { name: 'Result details' })).not.toBeInTheDocument();
-    expect(screen.queryByTestId('hush-voting-results-open-report-package')).not.toBeInTheDocument();
+    expect(screen.getByTestId('hush-voting-section-results')).toHaveTextContent(
+      'Published Results'
+    );
+    expect(screen.getByTestId('hush-voting-section-results')).toHaveTextContent(
+      'Unofficial result published.'
+    );
+    expect(screen.getByTestId('hush-voting-results-open-result')).toHaveAttribute(
+      'href',
+      '#hush-voting-unofficial-result'
+    );
   });
 
-  it('shows result and report-package actions when the workspace owns result review', () => {
+  it('keeps report-package access out of the results surface', () => {
     const entry = createHubEntry(
       'election-results',
       ElectionLifecycleStateProto.Finalized,
@@ -78,24 +87,23 @@ describe('ResultsWorkspaceSummary', () => {
     render(
       <ResultsWorkspaceSummary
         entry={entry}
-        detail={createDetail('election-results', ElectionLifecycleStateProto.Finalized, 'Results Election')}
+        detail={createDetail(
+          'election-results',
+          ElectionLifecycleStateProto.Finalized,
+          'Results Election'
+        )}
         resultView={createResultView({
           CanViewReportPackage: true,
-          LatestReportPackage: createReportPackage(),
           OfficialResult: createResultArtifact(),
-          VisibleReportArtifacts: [createReportArtifact()],
         })}
         isLoadingResultView={false}
       />
     );
 
-    expect(screen.getByTestId('hush-voting-results-open-report-package')).toHaveAttribute(
-      'href',
-      '#hush-voting-report-package'
-    );
     expect(screen.getByTestId('hush-voting-results-open-result')).toHaveAttribute(
       'href',
       '#hush-voting-official-result'
     );
+    expect(screen.queryByTestId('hush-voting-results-open-report-package')).not.toBeInTheDocument();
   });
 });

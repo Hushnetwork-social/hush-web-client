@@ -119,29 +119,62 @@ export async function grpcCall(
 }
 
 // Parse gRPC response to extract message bytes
-export function parseGrpcResponse(responseBytes: Uint8Array): Uint8Array | null {
+export type ParsedGrpcWebResponse = {
+  messageBytes: Uint8Array | null;
+  trailers: Record<string, string>;
+};
+
+export function parseGrpcWebResponse(responseBytes: Uint8Array): ParsedGrpcWebResponse {
   let offset = 0;
+  let messageBytes: Uint8Array | null = null;
+  const trailers: Record<string, string> = {};
 
   while (offset < responseBytes.length) {
     if (offset + 5 > responseBytes.length) break;
 
     const flag = responseBytes[offset];
     const messageLength =
-      (responseBytes[offset + 1] << 24) |
-      (responseBytes[offset + 2] << 16) |
-      (responseBytes[offset + 3] << 8) |
+      responseBytes[offset + 1] * 0x1000000 +
+      responseBytes[offset + 2] * 0x10000 +
+      responseBytes[offset + 3] * 0x100 +
       responseBytes[offset + 4];
     offset += 5;
 
-    // Data frame (flag = 0)
-    if (flag === 0 && messageLength > 0) {
-      return responseBytes.slice(offset, offset + messageLength);
+    if (offset + messageLength > responseBytes.length) {
+      break;
+    }
+
+    const frameBytes = responseBytes.slice(offset, offset + messageLength);
+
+    if ((flag & 0x80) === 0x80) {
+      const trailerText = new TextDecoder().decode(frameBytes);
+      for (const line of trailerText.split('\r\n')) {
+        const separatorIndex = line.indexOf(':');
+        if (separatorIndex <= 0) {
+          continue;
+        }
+
+        const key = line.slice(0, separatorIndex).trim().toLowerCase();
+        const value = line.slice(separatorIndex + 1).trim();
+        if (key) {
+          trailers[key] = value;
+        }
+      }
+    } else if (flag === 0 && messageLength > 0 && !messageBytes) {
+      messageBytes = frameBytes;
     }
 
     offset += messageLength;
   }
 
-  return null;
+  return {
+    messageBytes,
+    trailers,
+  };
+}
+
+export function parseGrpcResponse(responseBytes: Uint8Array): Uint8Array | null {
+  return parseGrpcWebResponse(responseBytes).messageBytes;
 }
 
 // Parse ALL data frames from a gRPC-Web streaming response (server-streaming calls)

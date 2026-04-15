@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ArrowLeft, CheckCircle2, Loader2, ShieldAlert } from 'lucide-react';
 import {
+  ElectionCloseCountingJobStatusProto,
   ElectionFinalizationSessionPurposeProto,
   ElectionFinalizationSessionStatusProto,
   ElectionFinalizationShareStatusProto,
@@ -12,11 +13,13 @@ import {
   ElectionGovernedProposalExecutionStatusProto,
 } from '@/lib/grpc';
 import { useBlockchainStore } from '@/modules/blockchain/useBlockchainStore';
+import { useAppStore } from '@/stores/useAppStore';
 import {
   formatArtifactValue,
   formatTimestamp,
   getAcceptedFinalizationShareCount,
   getActiveFinalizationSession,
+  getCloseCountingJobStatusLabel,
   getFinalizationSessionPurposeLabel,
   getFinalizationSessionStatusLabel,
   getFinalizationShareStatusLabel,
@@ -26,6 +29,10 @@ import {
   getLatestFinalizationSession,
   getLatestFinalizationShareForTrustee,
 } from './contracts';
+import {
+  decryptStoredTrusteeShareVaultEnvelope,
+  extractTrusteeCloseCountingShare,
+} from './trusteeShareVault';
 import { useElectionsStore } from './useElectionsStore';
 
 type TrusteeElectionFinalizationPanelProps = {
@@ -40,8 +47,25 @@ const sectionClass =
   'rounded-3xl bg-hush-bg-element/95 p-5 shadow-lg shadow-black/10';
 const valueWellClass =
   'rounded-2xl bg-[#151c33] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.02),0_12px_24px_rgba(0,0,0,0.14)]';
-const fieldClass =
-  'w-full rounded-xl bg-hush-bg-element/70 px-3 py-3 text-sm outline-none ring-1 ring-inset ring-white/10 transition focus:ring-2 focus:ring-hush-purple/60';
+const EMPTY_MNEMONIC: string[] = [];
+
+type VaultShareState =
+  | { status: 'pending'; detail: string }
+  | { status: 'missing'; detail: string }
+  | { status: 'unreadable'; detail: string }
+  | {
+      status: 'ready';
+      detail: string;
+      shareVersion: string;
+      shareMaterial: string;
+      shareMaterialHash: string;
+    };
+
+type CloseCountingJobState = {
+  tone: 'info' | 'warning' | 'success' | 'error';
+  title: string;
+  description: string;
+};
 
 export function TrusteeElectionFinalizationPanel({
   electionId,
@@ -59,15 +83,21 @@ export function TrusteeElectionFinalizationPanel({
     reset,
     selectedElection,
     submitFinalizationShare,
+    ceremonyActionView,
+    loadCeremonyActionView,
   } = useElectionsStore();
-  const [shareVersion, setShareVersion] = useState('share-v1');
-  const [shareMaterial, setShareMaterial] = useState('aggregate-finalization-share');
+  const trusteeMnemonic = useAppStore((state) => state.credentials?.mnemonic ?? EMPTY_MNEMONIC);
+  const [vaultShareState, setVaultShareState] = useState<VaultShareState>({
+    status: 'pending',
+    detail: 'Loading the trustee-owned close-counting share from your private vault.',
+  });
   const blockHeight = useBlockchainStore((state) => state.blockHeight);
   const lastObservedBlockHeightRef = useRef(blockHeight);
 
   useEffect(() => {
     void loadElection(electionId);
-  }, [electionId, loadElection]);
+    void loadCeremonyActionView(actorPublicAddress, electionId);
+  }, [actorPublicAddress, electionId, loadCeremonyActionView, loadElection]);
 
   useEffect(() => () => reset(), [reset]);
 
@@ -75,6 +105,10 @@ export function TrusteeElectionFinalizationPanel({
   const session = useMemo(
     () => getActiveFinalizationSession(selectedElection) ?? getLatestFinalizationSession(selectedElection),
     [selectedElection]
+  );
+  const latestVaultEnvelope = useMemo(
+    () => (ceremonyActionView?.SelfVaultEnvelopes ?? [])[0] ?? null,
+    [ceremonyActionView?.SelfVaultEnvelopes]
   );
   const releaseEvidence = useMemo(
     () => getLatestFinalizationReleaseEvidence(selectedElection, session?.Id),
@@ -149,15 +183,151 @@ export function TrusteeElectionFinalizationPanel({
     Boolean(session) &&
     session!.Status === ElectionFinalizationSessionStatusProto.FinalizationSessionAwaitingShares &&
     !releaseEvidence;
+  const closeCountingJobState = useMemo<CloseCountingJobState | null>(() => {
+    if (!session || !isCloseCountingSession) {
+      return null;
+    }
+
+    switch (session.CloseCountingJobStatus) {
+      case ElectionCloseCountingJobStatusProto.CloseCountingJobPending:
+        return {
+          tone: 'info',
+          title: 'Executor pending',
+          description:
+            'The bound close-counting job exists, but the tally executor has not started the release pass yet.',
+        };
+      case ElectionCloseCountingJobStatusProto.CloseCountingJobAwaitingShares:
+        return {
+          tone: 'warning',
+          title: 'Awaiting trustee shares',
+          description:
+            'The tally executor is armed for this session, but it cannot start until enough exact trustee submissions are accepted.',
+        };
+      case ElectionCloseCountingJobStatusProto.CloseCountingJobThresholdReached:
+        return {
+          tone: 'info',
+          title: 'Threshold reached',
+          description:
+            'The required trustee shares are recorded. The tally executor will pick up the bound close-counting job on its next worker pass.',
+        };
+      case ElectionCloseCountingJobStatusProto.CloseCountingJobRunning:
+        return {
+          tone: 'info',
+          title: 'Executor running',
+          description:
+            'The tally executor is decrypting the bound submissions, validating the exact target, and combining the aggregate tally now.',
+        };
+      case ElectionCloseCountingJobStatusProto.CloseCountingJobPublishing:
+        return {
+          tone: 'info',
+          title: 'Publishing unofficial result',
+          description:
+            'Aggregate release succeeded. The tally executor is sealing tally-ready and unofficial-result artifacts now.',
+        };
+      case ElectionCloseCountingJobStatusProto.CloseCountingJobCompleted:
+        return {
+          tone: 'success',
+          title: 'Close-counting completed',
+          description:
+            'Release evidence is recorded for this session. Trustee share submission no longer needs any follow-up.',
+        };
+      case ElectionCloseCountingJobStatusProto.CloseCountingJobFailed:
+        return {
+          tone: 'error',
+          title: 'Executor failed',
+          description:
+            'The bound close-counting job failed. Review the latest failure evidence or retry path before expecting a result.',
+        };
+      case ElectionCloseCountingJobStatusProto.CloseCountingJobSuperseded:
+        return {
+          tone: 'warning',
+          title: 'Executor superseded',
+          description:
+            'This close-counting job is no longer active. Follow the latest session and result artifacts for the current state.',
+        };
+      default:
+        return null;
+    }
+  }, [isCloseCountingSession, session]);
+  const vaultShareReady = vaultShareState.status === 'ready';
   const canSubmit =
     Boolean(session) &&
     isCloseCountingSession &&
     session!.Status === ElectionFinalizationSessionStatusProto.FinalizationSessionAwaitingShares &&
     Boolean(eligibleTrustee) &&
     actorShare?.Status !== ElectionFinalizationShareStatusProto.FinalizationShareAccepted &&
-    !releaseEvidence;
+    !releaseEvidence &&
+    vaultShareReady;
   const shouldRefreshOnBlockAdvance =
     waitingForCloseThreshold || waitingForCloseCountingSession || waitingForShares;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!latestVaultEnvelope?.EncryptedPayload) {
+      setVaultShareState({
+        status: 'missing',
+        detail: 'No trustee-owned vault package is available for this election on this account.',
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (!actorEncryptionPrivateKey || !trusteeMnemonic.length) {
+      setVaultShareState({
+        status: 'unreadable',
+        detail: 'This device does not have the trustee decryption context required to open the vault.',
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setVaultShareState({
+      status: 'pending',
+      detail: 'Opening the trustee-owned close-counting share from your private vault.',
+    });
+
+    void (async () => {
+      try {
+        const decryptedVault = await decryptStoredTrusteeShareVaultEnvelope(
+          latestVaultEnvelope.EncryptedPayload,
+          actorEncryptionPrivateKey,
+          trusteeMnemonic
+        );
+        const resolvedShare = extractTrusteeCloseCountingShare(decryptedVault);
+
+        if (!cancelled) {
+          setVaultShareState({
+            status: 'ready',
+            detail: `Loaded share ${resolvedShare.shareVersion} from your trustee-owned vault.`,
+            shareVersion: resolvedShare.shareVersion,
+            shareMaterial: resolvedShare.shareMaterial,
+            shareMaterialHash: resolvedShare.shareMaterialHash,
+          });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setVaultShareState({
+            status: 'unreadable',
+            detail:
+              error instanceof Error
+                ? error.message
+                : 'The trustee vault package could not be opened on this device.',
+          });
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    actorEncryptionPrivateKey,
+    latestVaultEnvelope?.EncryptedPayload,
+    trusteeMnemonic,
+  ]);
 
   useEffect(() => {
     if (blockHeight <= 0) {
@@ -174,7 +344,7 @@ export function TrusteeElectionFinalizationPanel({
   }, [blockHeight, electionId, loadElection, shouldRefreshOnBlockAdvance]);
 
   const handleSubmit = async () => {
-    if (!session || !shareIndex) {
+    if (!session || !shareIndex || vaultShareState.status !== 'ready') {
       return;
     }
 
@@ -184,7 +354,6 @@ export function TrusteeElectionFinalizationPanel({
         FinalizationSessionId: session.Id,
         ActorPublicAddress: actorPublicAddress,
         ShareIndex: shareIndex,
-        ShareVersion: shareVersion.trim(),
         TargetType: ElectionFinalizationTargetTypeProto.FinalizationTargetAggregateTally,
         ClaimedCloseArtifactId: session.CloseArtifactId,
         ClaimedAcceptedBallotSetHash: session.AcceptedBallotSetHash,
@@ -192,15 +361,19 @@ export function TrusteeElectionFinalizationPanel({
         ClaimedTargetTallyId: session.TargetTallyId,
         ClaimedCeremonyVersionId: session.CeremonySnapshot?.CeremonyVersionId || null,
         ClaimedTallyPublicKeyFingerprint: session.CeremonySnapshot?.TallyPublicKeyFingerprint || null,
-        ShareMaterial: shareMaterial.trim(),
+        CloseCountingJobId: session.CloseCountingJobId || null,
+        ExecutorSessionPublicKey: session.ExecutorSessionPublicKey || null,
+        ExecutorKeyAlgorithm: session.ExecutorKeyAlgorithm || null,
+        ShareVersion: vaultShareState.shareVersion,
+        ShareMaterial: vaultShareState.shareMaterial,
       },
       actorEncryptionPublicKey,
       actorEncryptionPrivateKey,
       actorSigningPrivateKey,
     );
 
-    if (didSubmit) {
-      setShareMaterial('aggregate-finalization-share');
+    if (!didSubmit) {
+      return;
     }
   };
 
@@ -215,7 +388,7 @@ export function TrusteeElectionFinalizationPanel({
             <ArrowLeft className="h-4 w-4" />
             <span>Back to election</span>
           </Link>
-          <h1 className="text-2xl font-semibold">Trustee Share Workspace</h1>
+          <h1 className="text-2xl font-semibold">Trustee Tally Share Workspace</h1>
           <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
             {isCloseCountingSession
               ? 'Submit one trustee share for the exact aggregate-tally release target. This page does not provide arbitrary ballot-inspection or single-ballot decryption controls.'
@@ -283,7 +456,11 @@ export function TrusteeElectionFinalizationPanel({
                 </div>
                 <div className="rounded-xl bg-[#151c33] px-3 py-2 text-xs text-hush-text-accent shadow-[inset_0_1px_0_rgba(255,255,255,0.02),0_10px_20px_rgba(0,0,0,0.12)]">
                   {session
-                    ? `${getFinalizationSessionPurposeLabel(session.SessionPurpose)} | ${getFinalizationSessionStatusLabel(session.Status)}`
+                    ? `${getFinalizationSessionPurposeLabel(session.SessionPurpose)} | ${
+                        isCloseCountingSession
+                          ? getCloseCountingJobStatusLabel(session.CloseCountingJobStatus)
+                          : getFinalizationSessionStatusLabel(session.Status)
+                      }`
                     : waitingForCloseThreshold
                       ? hasRecordedCloseApproval
                         ? 'Waiting for trustee threshold'
@@ -297,7 +474,7 @@ export function TrusteeElectionFinalizationPanel({
                 </div>
               </div>
 
-              <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+              <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
                 <div className={valueWellClass}>
                   <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
                     Session purpose
@@ -338,6 +515,16 @@ export function TrusteeElectionFinalizationPanel({
                     {session?.CeremonySnapshot?.CeremonyVersionId || 'Not recorded'}
                   </div>
                 </div>
+                <div className={valueWellClass}>
+                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                    Executor job
+                  </div>
+                  <div className="mt-2 text-sm text-hush-text-primary">
+                    {session && isCloseCountingSession
+                      ? getCloseCountingJobStatusLabel(session.CloseCountingJobStatus)
+                      : 'Not available'}
+                  </div>
+                </div>
               </div>
 
               <div className="mt-5 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-100">
@@ -350,6 +537,24 @@ export function TrusteeElectionFinalizationPanel({
                   reusable as general decryption authority.
                 </p>
               </div>
+
+              {closeCountingJobState && !releaseEvidence ? (
+                <div
+                  className={`mt-5 rounded-xl border p-4 text-sm ${
+                    closeCountingJobState.tone === 'success'
+                      ? 'border-green-500/40 bg-green-500/10 text-green-100'
+                      : closeCountingJobState.tone === 'error'
+                        ? 'border-red-500/40 bg-red-500/10 text-red-100'
+                        : closeCountingJobState.tone === 'warning'
+                          ? 'border-amber-500/40 bg-amber-500/10 text-amber-100'
+                          : 'border-cyan-500/40 bg-cyan-500/10 text-cyan-100'
+                  }`}
+                  data-testid="trustee-finalization-executor-state"
+                >
+                  <div className="font-medium">{closeCountingJobState.title}</div>
+                  <p className="mt-2">{closeCountingJobState.description}</p>
+                </div>
+              ) : null}
 
               {actorShare ? (
                 <div
@@ -431,7 +636,7 @@ export function TrusteeElectionFinalizationPanel({
                         {formatArtifactValue(session.TargetTallyId)}
                       </div>
                     </div>
-                    <div className={valueWellClass}>
+                  <div className={valueWellClass}>
                       <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
                         Trustee slot
                       </div>
@@ -441,31 +646,72 @@ export function TrusteeElectionFinalizationPanel({
                     </div>
                   </div>
 
-                  <label className="mt-5 block text-sm" htmlFor="trustee-finalization-share-version">
-                    <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
-                      Share version
-                    </span>
-                    <input
-                      id="trustee-finalization-share-version"
-                      value={shareVersion}
-                      onChange={(event) => setShareVersion(event.target.value)}
-                      className={fieldClass}
+                  <div className="mt-5 grid gap-4 md:grid-cols-3">
+                    <div
+                      className={valueWellClass}
+                      data-testid="trustee-finalization-vault-status"
+                    >
+                      <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                        Trustee vault
+                      </div>
+                      <div className="mt-2 text-sm text-hush-text-primary">
+                        {vaultShareState.status === 'ready'
+                          ? 'Loaded'
+                          : vaultShareState.status === 'pending'
+                            ? 'Loading'
+                            : vaultShareState.status === 'missing'
+                              ? 'Missing'
+                              : 'Unreadable'}
+                      </div>
+                      <div className="mt-2 text-xs text-hush-text-accent">
+                        {vaultShareState.detail}
+                      </div>
+                    </div>
+                    <div
+                      className={valueWellClass}
                       data-testid="trustee-finalization-share-version"
-                    />
-                  </label>
+                    >
+                      <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                        Share version
+                      </div>
+                      <div className="mt-2 text-sm text-hush-text-primary">
+                        {vaultShareState.status === 'ready'
+                          ? vaultShareState.shareVersion
+                          : 'Not available'}
+                      </div>
+                    </div>
+                    <div
+                      className={valueWellClass}
+                      data-testid="trustee-finalization-share-material-hash"
+                    >
+                      <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                        Share material hash
+                      </div>
+                      <div className="mt-2 font-mono text-sm text-hush-text-primary">
+                        {vaultShareState.status === 'ready'
+                          ? formatArtifactValue(vaultShareState.shareMaterialHash)
+                          : 'Not available'}
+                      </div>
+                    </div>
+                  </div>
 
-                  <label className="mt-5 block text-sm" htmlFor="trustee-finalization-share-material">
-                    <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
-                      Share material
-                    </span>
-                    <textarea
-                      id="trustee-finalization-share-material"
-                      value={shareMaterial}
-                      onChange={(event) => setShareMaterial(event.target.value)}
-                      className={`min-h-28 ${fieldClass}`}
-                      data-testid="trustee-finalization-share-material"
-                    />
-                  </label>
+                  {vaultShareState.status !== 'ready' ? (
+                    <div
+                      className={`mt-5 rounded-xl border px-4 py-3 text-sm ${
+                        vaultShareState.status === 'pending'
+                          ? 'border-white/10 bg-hush-bg-dark/75 text-hush-text-accent'
+                          : 'border-red-500/40 bg-red-500/10 text-red-100'
+                      }`}
+                      data-testid="trustee-finalization-vault-blocked"
+                    >
+                      {vaultShareState.detail}
+                    </div>
+                  ) : (
+                    <div className="mt-5 rounded-xl border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm text-green-100">
+                      The trustee close-counting share is loaded locally from your private vault. The
+                      raw share is not displayed in this workspace.
+                    </div>
+                  )}
 
                   <div className="mt-4">
                     <button

@@ -2,7 +2,7 @@ import path from 'node:path';
 import protobuf from 'protobufjs';
 import { NextRequest, NextResponse } from 'next/server';
 
-import { parseGrpcResponse } from '@/lib/grpc/grpc-web-helper';
+import { parseGrpcWebResponse } from '@/lib/grpc/grpc-web-helper';
 import {
   ELECTION_QUERY_AUTH_HEADERS,
   validateElectionQueryAuth,
@@ -38,7 +38,7 @@ function createGrpcFrame(messageBytes: Uint8Array): Uint8Array {
   return frame;
 }
 
-function getGrpcUrlCandidates(): string[] {
+function getGrpcUrlCandidates(forwardedHeaders: Record<string, string>): string[] {
   const candidates = [
     process.env.GRPC_SERVER_URL,
     process.env.NEXT_PUBLIC_GRPC_URL,
@@ -49,6 +49,10 @@ function getGrpcUrlCandidates(): string[] {
   return candidates
     .filter((value): value is string => !!value)
     .map((value) => value.trim())
+    .filter((value) =>
+      Object.keys(forwardedHeaders).length === 0 ||
+      value !== 'https://api.hushnetwork.social'
+    )
     .filter((value) => value.length > 0)
     .filter((value, index, values) => values.indexOf(value) === index);
 }
@@ -58,9 +62,9 @@ async function grpcCallWithFallback(
   method: string,
   requestBytes: Uint8Array,
   forwardedHeaders: Record<string, string>
-): Promise<{ responseBytes: Uint8Array; grpcUrl: string }> {
+): Promise<{ grpcUrl: string; messageBytes: Uint8Array }> {
   const frame = createGrpcFrame(requestBytes);
-  const grpcUrls = getGrpcUrlCandidates();
+  const grpcUrls = getGrpcUrlCandidates(forwardedHeaders);
   let lastError: Error | null = null;
 
   for (const grpcUrl of grpcUrls) {
@@ -85,13 +89,34 @@ async function grpcCallWithFallback(
       }
 
       const responseBytes = new Uint8Array(await response.arrayBuffer());
-      if (!parseGrpcResponse(responseBytes) && grpcUrls.length > 1) {
+      const parsedResponse = parseGrpcWebResponse(responseBytes);
+      const grpcStatus = parsedResponse.trailers['grpc-status'];
+      const grpcMessage = parsedResponse.trailers['grpc-message'];
+
+      if (grpcStatus && grpcStatus !== '0') {
+        lastError = new Error(
+          `gRPC upstream at ${grpcUrl} failed for ${method} with status ${grpcStatus}${grpcMessage ? `: ${decodeURIComponent(grpcMessage)}` : ''}`
+        );
+        console.warn(
+          `[API] Election query proxy upstream gRPC failure at ${grpcUrl} for ${method}: status=${grpcStatus} message=${grpcMessage ?? '(none)'}`
+        );
+        break;
+      }
+
+      if (!parsedResponse.messageBytes && grpcUrls.length > 1) {
         lastError = new Error(`gRPC upstream at ${grpcUrl} returned no payload frame for ${method}`);
         console.warn(`[API] Election query proxy upstream returned no payload at ${grpcUrl} for ${method}`);
         continue;
       }
 
-      return { responseBytes, grpcUrl };
+      if (!parsedResponse.messageBytes) {
+        throw new Error(`gRPC upstream at ${grpcUrl} returned no payload frame for ${method}`);
+      }
+
+      return {
+        grpcUrl,
+        messageBytes: parsedResponse.messageBytes,
+      };
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
       console.warn(`[API] Election query proxy upstream unreachable at ${grpcUrl}:`, lastError);
@@ -192,28 +217,18 @@ export async function POST(request: NextRequest) {
     const requestMessage = requestType.fromObject(body.request ?? {});
     const requestBytes = requestType.encode(requestMessage).finish();
     const forwardedHeaders = getForwardedElectionQueryHeaders(request.headers);
-    const { responseBytes, grpcUrl } = await grpcCallWithFallback(
+    const { messageBytes } = await grpcCallWithFallback(
       SERVICE_NAME,
       method,
       requestBytes,
       forwardedHeaders
     );
-    const messageBytes = parseGrpcResponse(responseBytes);
-
-    if (!messageBytes) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: `No gRPC payload returned for ${method} from ${grpcUrl}`,
-        },
-        { status: 502 }
-      );
-    }
 
     const decoded = responseType.decode(messageBytes);
     const payload = responseType.toObject(decoded, {
       enums: Number,
       longs: Number,
+      bytes: String,
       defaults: true,
       arrays: true,
       objects: true,
