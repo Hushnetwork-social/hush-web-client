@@ -3,11 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ElectionHubNextActionHintProto,
   ElectionLifecycleStateProto,
+  ElectionResultArtifactKindProto,
   ElectionTrusteeInvitationStatusProto,
 } from '@/lib/grpc';
 import { HushVotingWorkspace } from './HushVotingWorkspace';
 import {
   createDetail,
+  createElectionRecord,
   createHubEntry,
   createHubView,
   createReportArtifact,
@@ -470,5 +472,89 @@ describe('HushVotingWorkspace', () => {
       ElectionId: 'election-mixed',
       ActorPublicAddress: 'actor-address',
     });
+  });
+
+  it('promotes the official result from finalized detail artifacts when hub state lags behind', async () => {
+    const loadElectionHub = vi.fn().mockResolvedValue(undefined);
+    const selectHubElection = vi.fn().mockResolvedValue(undefined);
+    const finalizedEntry = createHubEntry(
+      'election-finalized-stale',
+      ElectionLifecycleStateProto.Finalized,
+      'Finalized Trustee Election',
+      {
+        ActorRoles: {
+          IsOwnerAdmin: true,
+          IsTrustee: true,
+          IsVoter: false,
+          IsDesignatedAuditor: false,
+        },
+        HasUnofficialResult: true,
+        HasOfficialResult: false,
+      }
+    );
+
+    electionsServiceMock.getElectionResultView.mockResolvedValue(createResultView());
+
+    useElectionsStore.setState({
+      loadElectionHub,
+      clearGrantCandidateSearch: vi.fn(),
+      selectHubElection,
+      reset: vi.fn(),
+      hubView: createHubView([finalizedEntry]),
+      hubEntries: [finalizedEntry],
+      selectedElectionId: null,
+      selectedHubEntry: null,
+      selectedElection: createDetail(
+        'election-finalized-stale',
+        ElectionLifecycleStateProto.Finalized,
+        'Finalized Trustee Election',
+        {
+          Election: createElectionRecord(
+            'election-finalized-stale',
+            ElectionLifecycleStateProto.Finalized,
+            'Finalized Trustee Election',
+            {
+              UnofficialResultArtifactId: 'unofficial-result-stale',
+              OfficialResultArtifactId: 'official-result-stale',
+            }
+          ),
+          ResultArtifacts: [
+            createResultArtifact({
+              Id: 'official-result-stale',
+              ElectionId: 'election-finalized-stale',
+              ArtifactKind: ElectionResultArtifactKindProto.ElectionResultArtifactOfficial,
+              Title: 'Official result',
+            }),
+          ],
+        }
+      ),
+      canManageReportAccessGrants: false,
+      reportAccessGrantDeniedReason: '',
+      reportAccessGrants: [],
+      feedback: null,
+      error: null,
+      isLoadingHub: false,
+      isLoadingDetail: false,
+      actorPublicAddress: 'actor-address',
+    });
+
+    render(
+      <HushVotingWorkspace
+        actorPublicAddress="actor-address"
+        actorEncryptionPublicKey="actor-encrypt-address"
+        actorEncryptionPrivateKey="actor-private-encrypt-key"
+        actorSigningPrivateKey="actor-signing-private-key"
+        initialElectionId="election-finalized-stale"
+      />
+    );
+
+    await waitFor(() => {
+      expect(selectHubElection).toHaveBeenCalledWith('actor-address', 'election-finalized-stale');
+    });
+
+    expect(await screen.findAllByText('Official result published.')).not.toHaveLength(0);
+    expect(screen.getByRole('link', { name: 'Open official result' })).toBeInTheDocument();
+    expect(screen.getByTestId('election-official-result')).toBeInTheDocument();
+    expect(screen.queryByText('Unofficial result published.')).not.toBeInTheDocument();
   });
 });

@@ -24,7 +24,8 @@ export default function OwnerElectionsWorkspacePage() {
 
       setActiveApp('voting');
       setSelectedNav('open-voting');
-      router.replace('/elections/owner');
+      const search = window.location.search.replace(/^\?/, '');
+      router.replace(search ? `/elections/owner?${search}` : '/elections/owner');
     }, 100);
 
     return () => clearTimeout(timer);

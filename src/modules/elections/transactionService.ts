@@ -1,4 +1,4 @@
-import type { ElectionDraftInput, SubmitElectionFinalizationShareRequest } from '@/lib/grpc';
+import type { ECPoint, ElectionDraftInput, SubmitElectionFinalizationShareRequest } from '@/lib/grpc';
 import * as secp256k1 from '@noble/secp256k1';
 import {
   bytesToBase64,
@@ -169,6 +169,7 @@ export interface SubmitElectionCeremonyMaterialActionPayload {
   EncryptedPayload: string;
   PayloadFingerprint: string;
   ShareVersion: string;
+  CloseCountingPublicCommitment?: ECPoint | null;
 }
 
 export interface RecordElectionCeremonyValidationFailureActionPayload {
@@ -1076,6 +1077,7 @@ export async function createSubmitElectionCeremonyMaterialTransaction(
   encryptedPayload: string,
   payloadFingerprint: string,
   shareVersion: string,
+  closeCountingPublicCommitment: ECPoint | null | undefined,
   signingPrivateKeyHex: string,
 ): Promise<{ signedTransaction: string }> {
   const encryptedEnvelope =
@@ -1094,6 +1096,7 @@ export async function createSubmitElectionCeremonyMaterialTransaction(
         EncryptedPayload: encryptedPayload,
         PayloadFingerprint: payloadFingerprint,
         ShareVersion: shareVersion,
+        CloseCountingPublicCommitment: closeCountingPublicCommitment ?? null,
       },
       signingPrivateKeyHex,
     );

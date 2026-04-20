@@ -112,7 +112,7 @@ describe('OwnerAdminWorkspaceSummary', () => {
     expect(screen.getByTestId('hush-voting-owner-admin-toggle')).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByTestId('hush-voting-section-owner-admin')).toHaveTextContent('Not ready:');
     expect(screen.getByTestId('hush-voting-section-owner-admin')).toHaveTextContent(
-      'open prerequisites, key ceremony'
+      'open prerequisites, accepted trustees, key ceremony'
     );
 
     fireEvent.click(screen.getByTestId('hush-voting-owner-admin-toggle'));
@@ -120,6 +120,9 @@ describe('OwnerAdminWorkspaceSummary', () => {
     expect(screen.getByTestId('hush-voting-owner-admin-toggle')).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByTestId('hush-voting-section-owner-admin')).toHaveTextContent('Ready-to-open snapshot');
     expect(screen.getByTestId('hush-voting-section-owner-admin')).toHaveTextContent('Accepted trustees');
+    expect(screen.getByTestId('hush-voting-section-owner-admin')).toHaveTextContent(
+      'Need at least 5 accepted trustee(s) to match the selected 3-of-5 profile before open can proceed.'
+    );
     expect(screen.getByTestId('hush-voting-section-owner-admin')).toHaveTextContent('Key ceremony');
     expect(screen.getByTestId('hush-voting-section-owner-admin')).toHaveTextContent('1 accepted | 1 pending');
   });
@@ -160,7 +163,7 @@ describe('OwnerAdminWorkspaceSummary', () => {
             EligibilityMutationPolicy: EligibilityMutationPolicyProto.FrozenAtOpen,
             ReportingPolicy: ReportingPolicyProto.DefaultPhaseOnePackage,
             ReviewWindowPolicy: ReviewWindowPolicyProto.GovernedReviewWindowReserved,
-            RequiredApprovalCount: 1,
+            RequiredApprovalCount: 3,
             Options: [
               {
                 OptionId: 'candidate-a',
@@ -191,15 +194,59 @@ describe('OwnerAdminWorkspaceSummary', () => {
             SentAtDraftRevision: 2,
             SentAt: timestamp,
           },
+          {
+            Id: 'invite-2',
+            ElectionId: 'election-ready',
+            TrusteeUserAddress: 'trustee-b',
+            TrusteeDisplayName: 'Bob Trustee',
+            InvitedByPublicAddress: 'actor-address',
+            LinkedMessageId: 'msg-2',
+            Status: ElectionTrusteeInvitationStatusProto.Accepted,
+            SentAtDraftRevision: 2,
+            SentAt: timestamp,
+          },
+          {
+            Id: 'invite-3',
+            ElectionId: 'election-ready',
+            TrusteeUserAddress: 'trustee-c',
+            TrusteeDisplayName: 'Charlie Trustee',
+            InvitedByPublicAddress: 'actor-address',
+            LinkedMessageId: 'msg-3',
+            Status: ElectionTrusteeInvitationStatusProto.Accepted,
+            SentAtDraftRevision: 2,
+            SentAt: timestamp,
+          },
+          {
+            Id: 'invite-4',
+            ElectionId: 'election-ready',
+            TrusteeUserAddress: 'trustee-d',
+            TrusteeDisplayName: 'Dana Trustee',
+            InvitedByPublicAddress: 'actor-address',
+            LinkedMessageId: 'msg-4',
+            Status: ElectionTrusteeInvitationStatusProto.Accepted,
+            SentAtDraftRevision: 2,
+            SentAt: timestamp,
+          },
+          {
+            Id: 'invite-5',
+            ElectionId: 'election-ready',
+            TrusteeUserAddress: 'trustee-e',
+            TrusteeDisplayName: 'Evan Trustee',
+            InvitedByPublicAddress: 'actor-address',
+            LinkedMessageId: 'msg-5',
+            Status: ElectionTrusteeInvitationStatusProto.Accepted,
+            SentAtDraftRevision: 2,
+            SentAt: timestamp,
+          },
         ],
         CeremonyVersions: [
           {
             Id: 'ceremony-ready',
             ElectionId: 'election-ready',
             VersionNumber: 1,
-            ProfileId: 'prod-1of1-v1',
-            TrusteeCount: 1,
-            RequiredApprovalCount: 1,
+            ProfileId: 'dkg-prod-3of5',
+            TrusteeCount: 5,
+            RequiredApprovalCount: 3,
             Status: ElectionCeremonyVersionStatusProto.CeremonyVersionReady,
             StartedAt: timestamp,
             StartedByPublicAddress: 'actor-address',
@@ -316,6 +363,14 @@ describe('OwnerAdminWorkspaceSummary', () => {
     expect(screen.getByTestId('hush-voting-owner-admin-toggle')).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByTestId('hush-voting-section-owner-admin')).toHaveTextContent(
       'Unofficial result published.'
+    );
+
+    fireEvent.click(screen.getByTestId('hush-voting-owner-admin-toggle'));
+    expect(screen.getByTestId('hush-voting-section-owner-admin')).toHaveTextContent(
+      'Admin-only protected custody path'
+    );
+    expect(screen.getByTestId('hush-voting-section-owner-admin')).toHaveTextContent(
+      'owner-admin protected custody profile'
     );
   });
 });

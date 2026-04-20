@@ -44,6 +44,8 @@ function createElectionRecord(overrides?: Partial<ElectionRecordView>): Election
     LifecycleState: ElectionLifecycleStateProto.Finalized,
     ElectionClass: ElectionClassProto.OrganizationalRemoteVoting,
     BindingStatus: ElectionBindingStatusProto.Binding,
+    SelectedProfileId: 'dkg-prod-3of5',
+    SelectedProfileDevOnly: false,
     GovernanceMode: ElectionGovernanceModeProto.AdminOnly,
     DisclosureMode: ElectionDisclosureModeProto.FinalResultsOnly,
     ParticipationPrivacyMode:
@@ -184,6 +186,28 @@ function createReportArtifact(
   };
 }
 
+function createCeremonySnapshot(overrides?: {
+  ProfileId?: string;
+  TrusteeCount?: number;
+  RequiredApprovalCount?: number;
+  TallyPublicKeyFingerprint?: string;
+}): GetElectionResultViewResponse['CeremonySnapshot'] {
+  return {
+    CeremonyVersionId: 'ceremony-version-1',
+    VersionNumber: 1,
+    ProfileId: overrides?.ProfileId ?? 'dkg-prod-3of5',
+    TrusteeCount: overrides?.TrusteeCount ?? 5,
+    RequiredApprovalCount: overrides?.RequiredApprovalCount ?? 3,
+    CompletedTrustees: [
+      { TrusteeUserAddress: 'trustee-a', TrusteeDisplayName: 'Trustee A' },
+      { TrusteeUserAddress: 'trustee-b', TrusteeDisplayName: 'Trustee B' },
+      { TrusteeUserAddress: 'trustee-c', TrusteeDisplayName: 'Trustee C' },
+    ],
+    TallyPublicKeyFingerprint:
+      overrides?.TallyPublicKeyFingerprint ?? 'tally-fingerprint-123456',
+  };
+}
+
 function createResultView(
   overrides?: Partial<GetElectionResultViewResponse>
 ): GetElectionResultViewResponse {
@@ -223,6 +247,7 @@ describe('ElectionResultArtifactsSection', () => {
       <ElectionResultArtifactsSection
         election={createElectionRecord()}
         resultView={createResultView({
+          CeremonySnapshot: createCeremonySnapshot(),
           CanViewReportPackage: true,
           CanRetryFailedPackageFinalization: true,
           LatestReportPackage: createReportPackage({
@@ -252,6 +277,7 @@ describe('ElectionResultArtifactsSection', () => {
       <ElectionResultArtifactsSection
         election={createElectionRecord()}
         resultView={createResultView({
+          CeremonySnapshot: createCeremonySnapshot(),
           CanViewReportPackage: true,
           LatestReportPackage: createReportPackage(),
           VisibleReportArtifacts: [
@@ -291,6 +317,7 @@ describe('ElectionResultArtifactsSection', () => {
       <ElectionResultArtifactsSection
         election={createElectionRecord()}
         resultView={createResultView({
+          CeremonySnapshot: createCeremonySnapshot(),
           UnofficialResult: createResultArtifact({
             Id: 'unofficial-result-1',
             ArtifactKind: ElectionResultArtifactKindProto.ElectionResultArtifactUnofficial,
@@ -314,10 +341,64 @@ describe('ElectionResultArtifactsSection', () => {
     );
 
     expect(screen.getByTestId('election-official-result')).toHaveTextContent('Official result');
-    expect(screen.queryByText('Official result visibility')).not.toBeInTheDocument();
+    expect(screen.getByTestId('election-artifact-context')).toHaveTextContent(
+      'Official visibility'
+    );
     expect(screen.queryByTestId('election-unofficial-result')).not.toBeInTheDocument();
     expect(screen.queryByTestId('report-package-summary')).not.toBeInTheDocument();
     expect(screen.queryByText('Named roster')).not.toBeInTheDocument();
+  });
+
+  it('shows binding mode, ceremony profile, and secrecy boundary context for result artifacts', () => {
+    render(
+      <ElectionResultArtifactsSection
+        election={createElectionRecord()}
+        resultView={createResultView({
+          CeremonySnapshot: createCeremonySnapshot(),
+          OfficialResult: createResultArtifact(),
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('election-artifact-context')).toHaveTextContent('Mode and circuit truth');
+    expect(screen.getByTestId('election-artifact-context')).toHaveTextContent('Binding');
+    expect(screen.getByTestId('election-artifact-context')).toHaveTextContent('Admin-only protected custody path');
+    expect(screen.getByTestId('election-artifact-context')).toHaveTextContent('non-dev circuits');
+    expect(screen.getByTestId('election-artifact-context')).toHaveTextContent('Non-dev circuit');
+    expect(screen.getByTestId('election-artifact-context')).toHaveTextContent('dkg-prod-3of5');
+    expect(screen.getByTestId('election-artifact-context')).toHaveTextContent('tally-fingerprint-123456');
+    expect(screen.getByTestId('election-artifact-context')).toHaveTextContent(
+      'protected non-dev circuit'
+    );
+    expect(screen.getByTestId('election-artifact-context')).toHaveTextContent(
+      'Admin-only protected custody keeps tally release bound'
+    );
+  });
+
+  it('shows explicit open-audit context for non-binding election artifacts', () => {
+    render(
+      <ElectionResultArtifactsSection
+        election={createElectionRecord({
+          BindingStatus: ElectionBindingStatusProto.NonBinding,
+          SelectedProfileId: 'dkg-dev-3of5',
+          SelectedProfileDevOnly: true,
+        })}
+        resultView={createResultView({
+          CeremonySnapshot: createCeremonySnapshot({
+            ProfileId: 'dkg-dev-3of5',
+          }),
+          OfficialResult: createResultArtifact(),
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('election-artifact-context')).toHaveTextContent('Non-binding');
+    expect(screen.getByTestId('election-artifact-context')).toHaveTextContent('dev/open and non-dev circuits');
+    expect(screen.getByTestId('election-artifact-context')).toHaveTextContent('Dev/open circuit');
+    expect(screen.getByTestId('election-artifact-context')).toHaveTextContent('dkg-dev-3of5');
+    expect(screen.getByTestId('election-artifact-context')).toHaveTextContent(
+      'explicit open-audit circuit'
+    );
   });
 
   it('shows inherited tally-ready lineage wording for official results', () => {
@@ -325,6 +406,7 @@ describe('ElectionResultArtifactsSection', () => {
       <ElectionResultArtifactsSection
         election={createElectionRecord()}
         resultView={createResultView({
+          CeremonySnapshot: createCeremonySnapshot(),
           OfficialResult: createResultArtifact({
             TallyReadyArtifactId: '',
             SourceResultArtifactId: 'unofficial-result-1',
@@ -343,6 +425,7 @@ describe('ElectionResultArtifactsSection', () => {
       <ElectionResultArtifactsSection
         election={createElectionRecord()}
         resultView={createResultView({
+          CeremonySnapshot: createCeremonySnapshot(),
           OfficialResult: createResultArtifact(),
           CanViewReportPackage: true,
           LatestReportPackage: createReportPackage(),
@@ -363,6 +446,7 @@ describe('ElectionResultArtifactsSection', () => {
       <ElectionResultArtifactsSection
         election={createElectionRecord()}
         resultView={createResultView({
+          CeremonySnapshot: createCeremonySnapshot(),
           CanViewReportPackage: true,
           LatestReportPackage: createReportPackage({
             FrozenEvidenceFingerprint: longFingerprint,
@@ -373,6 +457,29 @@ describe('ElectionResultArtifactsSection', () => {
 
     expect(screen.getByTitle(longFingerprint)).toHaveTextContent('ee0a9b7d1073...858041cb');
     expect(screen.queryByText(longFingerprint)).not.toBeInTheDocument();
+  });
+
+  it('repeats the package boundary truth when a sealed report package is visible', () => {
+    render(
+      <ElectionResultArtifactsSection
+        election={createElectionRecord()}
+        resultView={createResultView({
+          CeremonySnapshot: createCeremonySnapshot(),
+          CanViewReportPackage: true,
+          LatestReportPackage: createReportPackage(),
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('report-package-boundary-context')).toHaveTextContent('Binding');
+    expect(screen.getByTestId('report-package-boundary-context')).toHaveTextContent(
+      'Admin-only protected custody path'
+    );
+    expect(screen.getByTestId('report-package-boundary-context')).toHaveTextContent(
+      'non-dev circuits'
+    );
+    expect(screen.getByTestId('report-package-boundary-context')).toHaveTextContent('Non-dev circuit');
+    expect(screen.getByTestId('report-package-boundary-context')).toHaveTextContent('dkg-prod-3of5');
   });
 
   it('falls back to the persisted election closed-progress status when result view is unavailable', () => {

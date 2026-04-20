@@ -2171,6 +2171,7 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
         request.EncryptedPayload,
         request.PayloadFingerprint,
         request.ShareVersion,
+        request.CloseCountingPublicCommitment,
         signingPrivateKeyHex,
       );
       const submitResult = await submitTransaction(signedTransaction);

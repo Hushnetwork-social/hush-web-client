@@ -3,7 +3,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AlertCircle, CheckCircle2, Loader2, ShieldAlert } from 'lucide-react';
-import type { GetElectionResultViewResponse } from '@/lib/grpc';
+import {
+  ElectionClosedProgressStatusProto,
+  ElectionResultArtifactKindProto,
+  OfficialResultVisibilityPolicyProto,
+  type GetElectionResponse,
+  type GetElectionResultViewResponse,
+} from '@/lib/grpc';
 import { electionsService } from '@/lib/grpc/services/elections';
 import { ClosedProgressBanner } from './ClosedProgressBanner';
 import { ElectionAccessBoundaryNotice } from './ElectionAccessBoundaryNotice';
@@ -43,6 +49,66 @@ async function loadElectionResultViewSafely(
   } catch {
     return null;
   }
+}
+
+function getDetailResultArtifact(
+  detail: GetElectionResponse | null,
+  artifactKind: ElectionResultArtifactKindProto
+) {
+  return (
+    detail?.ResultArtifacts?.find((artifact) => artifact.ArtifactKind === artifactKind) ?? null
+  );
+}
+
+function buildEffectiveResultView(
+  resultView: GetElectionResultViewResponse | null,
+  detail: GetElectionResponse | null,
+  actorPublicAddress: string,
+  canViewReportPackage: boolean
+): GetElectionResultViewResponse | null {
+  const fallbackUnofficialResult = getDetailResultArtifact(
+    detail,
+    ElectionResultArtifactKindProto.ElectionResultArtifactUnofficial
+  );
+  const fallbackOfficialResult = getDetailResultArtifact(
+    detail,
+    ElectionResultArtifactKindProto.ElectionResultArtifactOfficial
+  );
+
+  if (!resultView && !fallbackUnofficialResult && !fallbackOfficialResult) {
+    return null;
+  }
+
+  const mergedResultView: GetElectionResultViewResponse = resultView
+    ? {
+        ...resultView,
+        VisibleReportArtifacts: [...(resultView.VisibleReportArtifacts ?? [])],
+      }
+    : {
+        Success: true,
+        ErrorMessage: '',
+        ActorPublicAddress: actorPublicAddress,
+        CanViewParticipantEncryptedResults: false,
+        OfficialResultVisibilityPolicy:
+          detail?.Election?.OfficialResultVisibilityPolicy ??
+          OfficialResultVisibilityPolicyProto.PublicPlaintext,
+        ClosedProgressStatus:
+          detail?.Election?.ClosedProgressStatus ??
+          ElectionClosedProgressStatusProto.ClosedProgressNone,
+        CanViewReportPackage: canViewReportPackage,
+        CanRetryFailedPackageFinalization: false,
+        VisibleReportArtifacts: [],
+      };
+
+  if (!mergedResultView.UnofficialResult && fallbackUnofficialResult) {
+    mergedResultView.UnofficialResult = fallbackUnofficialResult;
+  }
+
+  if (!mergedResultView.OfficialResult && fallbackOfficialResult) {
+    mergedResultView.OfficialResult = fallbackOfficialResult;
+  }
+
+  return mergedResultView;
 }
 
 export function HushVotingWorkspace({
@@ -138,15 +204,29 @@ export function HushVotingWorkspace({
     [activeDetail, actorPublicAddress]
   );
   const hasPendingInvitationSurface = Boolean(pendingSelfTrusteeInvitation);
+  const effectiveResultView = useMemo(
+    () =>
+      buildEffectiveResultView(
+        resultView,
+        activeDetail,
+        actorPublicAddress,
+        activeEntry?.CanViewReportPackage ?? false
+      ),
+    [activeDetail, activeEntry?.CanViewReportPackage, actorPublicAddress, resultView]
+  );
   const effectiveEntry = useMemo(() => {
     if (!activeEntry) {
       return null;
     }
 
     const hasUnofficialResult =
-      activeEntry.HasUnofficialResult || Boolean(resultView?.UnofficialResult);
+      activeEntry.HasUnofficialResult ||
+      Boolean(activeDetail?.Election?.UnofficialResultArtifactId) ||
+      Boolean(effectiveResultView?.UnofficialResult);
     const hasOfficialResult =
-      activeEntry.HasOfficialResult || Boolean(resultView?.OfficialResult);
+      activeEntry.HasOfficialResult ||
+      Boolean(activeDetail?.Election?.OfficialResultArtifactId) ||
+      Boolean(effectiveResultView?.OfficialResult);
 
     return {
       ...activeEntry,
@@ -155,9 +235,9 @@ export function HushVotingWorkspace({
       CanViewParticipantResults:
         activeEntry.CanViewParticipantResults || hasUnofficialResult || hasOfficialResult,
       CanViewReportPackage:
-        activeEntry.CanViewReportPackage || Boolean(resultView?.CanViewReportPackage),
+        activeEntry.CanViewReportPackage || Boolean(effectiveResultView?.CanViewReportPackage),
     };
-  }, [activeEntry, resultView]);
+  }, [activeDetail, activeEntry, effectiveResultView]);
 
   const requestedEntryMissing = Boolean(initialElectionId && !isLoadingHub && hubView && !requestedEntry);
   const sectionOrder = getElectionWorkspaceSectionOrder(effectiveEntry);
@@ -181,7 +261,9 @@ export function HushVotingWorkspace({
       activeEntry.CanViewParticipantResults ||
       activeEntry.CanViewReportPackage ||
       activeEntry.HasUnofficialResult ||
-      activeEntry.HasOfficialResult;
+      activeEntry.HasOfficialResult ||
+      Boolean(activeDetail?.Election?.UnofficialResultArtifactId) ||
+      Boolean(activeDetail?.Election?.OfficialResultArtifactId);
 
     if (!shouldLoadResultView) {
       setResultView(null);
@@ -206,7 +288,7 @@ export function HushVotingWorkspace({
     return () => {
       isCancelled = true;
     };
-  }, [activeEntry, actorPublicAddress, isDetailRoute]);
+  }, [activeDetail, activeEntry, actorPublicAddress, isDetailRoute]);
 
   const handleSelectElection = (electionId: string) => {
     if (electionId !== initialElectionId) {
@@ -439,7 +521,7 @@ export function HushVotingWorkspace({
                       key="results"
                       entry={effectiveEntry}
                       detail={activeDetail}
-                      resultView={resultView}
+                      resultView={effectiveResultView}
                       isLoadingResultView={isLoadingResultView}
                     />
                   );
@@ -465,7 +547,7 @@ export function HushVotingWorkspace({
                       key="auditor"
                       entry={effectiveEntry}
                       detail={activeDetail}
-                      resultView={resultView}
+                      resultView={effectiveResultView}
                       isLoadingResultView={isLoadingResultView}
                     />
                   );
@@ -475,7 +557,7 @@ export function HushVotingWorkspace({
                       key="voter"
                       entry={effectiveEntry}
                       actorPublicAddress={actorPublicAddress}
-                      resultView={resultView}
+                      resultView={effectiveResultView}
                     />
                   );
                 case 'artifacts':
@@ -484,7 +566,7 @@ export function HushVotingWorkspace({
                       key="artifacts"
                       entry={effectiveEntry}
                       detail={activeDetail}
-                      resultView={resultView}
+                      resultView={effectiveResultView}
                       isLoadingResultView={isLoadingResultView}
                     />
                   );

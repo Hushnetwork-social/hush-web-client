@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useMemo, useRef, useState } from "react";
+import { Suspense, useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { UserPlus, Download, Key, FolderOpen, Lock, RefreshCw, Copy, Eye, EyeOff, Loader2 } from "lucide-react";
 import { useAppStore } from "@/stores";
@@ -513,6 +513,11 @@ function AuthPageContent() {
     }
   };
 
+  const handleImportFromFileSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    void handleImportFromFile();
+  };
+
   const canCreateAccount = profileName.trim() && mnemonicWords.length > 0 && hasSavedMnemonic;
 
   return (
@@ -746,7 +751,11 @@ function AuthPageContent() {
 
               {/* Backup File Sub-tab */}
               {importSubTab === "file" && (
-                <div className="p-4 space-y-5">
+                <form
+                  className="p-4 space-y-5"
+                  onSubmit={handleImportFromFileSubmit}
+                  data-testid="auth-backup-import-form"
+                >
                   <div className="flex flex-col items-center space-y-3">
                     <div className="w-14 h-14 rounded-full bg-hush-bg-element flex items-center justify-center">
                       <Download className="w-6 h-6 text-hush-purple" />
@@ -765,6 +774,7 @@ function AuthPageContent() {
                     className="hidden"
                   />
                   <button
+                    type="button"
                     onClick={() => fileInputRef.current?.click()}
                     className="w-full py-3 bg-hush-bg-element border border-hush-purple/50 rounded-lg text-hush-text-primary hover:bg-hush-bg-hover transition-colors flex items-center justify-center space-x-2"
                   >
@@ -804,7 +814,7 @@ function AuthPageContent() {
                   )}
 
                   <button
-                    onClick={handleImportFromFile}
+                    type="submit"
                     disabled={!selectedFile || !importPassword.trim() || isCreatingAccount}
                     className="w-full py-3 bg-hush-purple hover:bg-hush-purple-hover disabled:opacity-50 rounded-lg text-hush-bg-dark font-semibold transition-colors flex items-center justify-center space-x-2"
                   >
@@ -817,7 +827,7 @@ function AuthPageContent() {
                       <span>Import Keys</span>
                     )}
                   </button>
-                </div>
+                </form>
               )}
 
               {/* Footer */}

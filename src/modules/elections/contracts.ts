@@ -91,6 +91,71 @@ export const DEFAULT_APPROVED_CLIENT_APPLICATIONS = [
 ];
 
 export const DEFAULT_PROTOCOL_OMEGA_VERSION = 'omega-v1.0.0';
+const DEFAULT_CEREMONY_PROFILE_TIMESTAMP: GrpcTimestamp = {
+  seconds: 0,
+  nanos: 0,
+};
+const TRUSTEE_PRODUCTION_PROFILE_ID = 'dkg-prod-3of5';
+const TRUSTEE_DEV_PROFILE_ID = 'dkg-dev-3of5';
+const ADMIN_ONLY_PRODUCTION_PROFILE_ID = 'admin-prod-1of1';
+const ADMIN_ONLY_DEV_PROFILE_ID = 'admin-dev-1of1';
+
+const DEFAULT_TRUSTEE_CEREMONY_PROFILES: ElectionCeremonyProfile[] = [
+  {
+    ProfileId: TRUSTEE_PRODUCTION_PROFILE_ID,
+    DisplayName: 'Default protected circuit (3 of 5)',
+    Description:
+      'Built-in protected circuit for binding elections and non-binding protected audit runs.',
+    ProviderKey: 'built-in',
+    ProfileVersion: 'v1',
+    TrusteeCount: 5,
+    RequiredApprovalCount: 3,
+    DevOnly: false,
+    RegisteredAt: DEFAULT_CEREMONY_PROFILE_TIMESTAMP,
+    LastUpdatedAt: DEFAULT_CEREMONY_PROFILE_TIMESTAMP,
+  },
+  {
+    ProfileId: TRUSTEE_DEV_PROFILE_ID,
+    DisplayName: 'Open audit circuit (3 of 5)',
+    Description:
+      'Built-in dev/open circuit for explicit non-binding audit elections with readable ballots.',
+    ProviderKey: 'built-in',
+    ProfileVersion: 'v1',
+    TrusteeCount: 5,
+    RequiredApprovalCount: 3,
+    DevOnly: true,
+    RegisteredAt: DEFAULT_CEREMONY_PROFILE_TIMESTAMP,
+    LastUpdatedAt: DEFAULT_CEREMONY_PROFILE_TIMESTAMP,
+  },
+];
+const DEFAULT_ADMIN_ONLY_CEREMONY_PROFILES: ElectionCeremonyProfile[] = [
+  {
+    ProfileId: ADMIN_ONLY_PRODUCTION_PROFILE_ID,
+    DisplayName: 'Admin-only protected circuit',
+    Description:
+      'Built-in protected circuit for admin-only elections with aggregate-only protected tally custody.',
+    ProviderKey: 'built-in-admin',
+    ProfileVersion: 'omega-v1.0.0-admin-prod-1of1',
+    TrusteeCount: 1,
+    RequiredApprovalCount: 1,
+    DevOnly: false,
+    RegisteredAt: DEFAULT_CEREMONY_PROFILE_TIMESTAMP,
+    LastUpdatedAt: DEFAULT_CEREMONY_PROFILE_TIMESTAMP,
+  },
+  {
+    ProfileId: ADMIN_ONLY_DEV_PROFILE_ID,
+    DisplayName: 'Admin-only open audit circuit',
+    Description:
+      'Built-in dev/open circuit for explicit non-binding admin-only audit elections with readable ballots.',
+    ProviderKey: 'built-in-admin',
+    ProfileVersion: 'omega-v1.0.0-admin-dev-1of1',
+    TrusteeCount: 1,
+    RequiredApprovalCount: 1,
+    DevOnly: true,
+    RegisteredAt: DEFAULT_CEREMONY_PROFILE_TIMESTAMP,
+    LastUpdatedAt: DEFAULT_CEREMONY_PROFILE_TIMESTAMP,
+  },
+];
 
 export const BINDING_OPTIONS: ElectionSelectOption<ElectionBindingStatusProto>[] = [
   {
@@ -406,6 +471,147 @@ export function applyGovernanceModeDefaults(
   };
 }
 
+function normalizeSelectedCeremonyProfileId(
+  governanceMode: ElectionGovernanceModeProto,
+  profileId?: string | null
+): string {
+  const normalizedProfileId = profileId?.trim() ?? '';
+  if (!normalizedProfileId) {
+    return '';
+  }
+
+  if (governanceMode !== ElectionGovernanceModeProto.AdminOnly) {
+    return normalizedProfileId;
+  }
+
+  if (normalizedProfileId === TRUSTEE_PRODUCTION_PROFILE_ID) {
+    return ADMIN_ONLY_PRODUCTION_PROFILE_ID;
+  }
+
+  if (normalizedProfileId === TRUSTEE_DEV_PROFILE_ID) {
+    return ADMIN_ONLY_DEV_PROFILE_ID;
+  }
+
+  return normalizedProfileId;
+}
+
+function getDefaultCeremonyProfiles(
+  governanceMode: ElectionGovernanceModeProto
+): ElectionCeremonyProfile[] {
+  return governanceMode === ElectionGovernanceModeProto.AdminOnly
+    ? DEFAULT_ADMIN_ONLY_CEREMONY_PROFILES
+    : DEFAULT_TRUSTEE_CEREMONY_PROFILES;
+}
+
+export function getAvailableCeremonyProfiles(
+  detail: GetElectionResponse | null,
+  governanceMode?: ElectionGovernanceModeProto
+): ElectionCeremonyProfile[] {
+  const effectiveGovernanceMode =
+    governanceMode ??
+    detail?.LatestDraftSnapshot?.Policy.GovernanceMode ??
+    detail?.Election?.GovernanceMode ??
+    ElectionGovernanceModeProto.AdminOnly;
+  const detailGovernanceMode =
+    detail?.LatestDraftSnapshot?.Policy.GovernanceMode ??
+    detail?.Election?.GovernanceMode;
+
+  if (!detail?.CeremonyProfiles?.length) {
+    return getDefaultCeremonyProfiles(effectiveGovernanceMode);
+  }
+
+  return detailGovernanceMode === effectiveGovernanceMode
+    ? detail.CeremonyProfiles
+    : getDefaultCeremonyProfiles(effectiveGovernanceMode);
+}
+
+export function isCeremonyProfileCompatible(
+  bindingStatus: ElectionBindingStatusProto,
+  profile: Pick<ElectionCeremonyProfile, 'DevOnly'>
+): boolean {
+  return bindingStatus === ElectionBindingStatusProto.Binding ? !profile.DevOnly : true;
+}
+
+export function findCeremonyProfileById(
+  profiles: ElectionCeremonyProfile[],
+  profileId?: string | null,
+  governanceMode: ElectionGovernanceModeProto = ElectionGovernanceModeProto.AdminOnly
+): ElectionCeremonyProfile | null {
+  const normalizedProfileId = normalizeSelectedCeremonyProfileId(
+    governanceMode,
+    profileId
+  );
+  if (!normalizedProfileId) {
+    return null;
+  }
+
+  return (
+    profiles.find((profile) => profile.ProfileId === normalizedProfileId) ??
+    getDefaultCeremonyProfiles(governanceMode).find(
+      (profile) => profile.ProfileId === normalizedProfileId
+    ) ??
+    null
+  );
+}
+
+export function getAllowedCeremonyProfiles(
+  detail: GetElectionResponse | null,
+  bindingStatus?: ElectionBindingStatusProto,
+  governanceMode?: ElectionGovernanceModeProto
+): ElectionCeremonyProfile[] {
+  const effectiveGovernanceMode =
+    governanceMode ??
+    detail?.LatestDraftSnapshot?.Policy.GovernanceMode ??
+    detail?.Election?.GovernanceMode ??
+    ElectionGovernanceModeProto.AdminOnly;
+  const profiles = getAvailableCeremonyProfiles(detail, effectiveGovernanceMode);
+  if (bindingStatus === undefined) {
+    return profiles;
+  }
+
+  return profiles.filter((profile) => isCeremonyProfileCompatible(bindingStatus, profile));
+}
+
+export function coerceSelectedCeremonyProfileId(
+  bindingStatus: ElectionBindingStatusProto,
+  governanceMode: ElectionGovernanceModeProto,
+  selectedProfileId: string,
+  profiles: ElectionCeremonyProfile[]
+): string {
+  const compatibleProfiles = profiles.filter((profile) =>
+    isCeremonyProfileCompatible(bindingStatus, profile)
+  );
+  const normalizedSelectedProfileId = normalizeSelectedCeremonyProfileId(
+    governanceMode,
+    selectedProfileId
+  );
+  if (
+    normalizedSelectedProfileId &&
+    compatibleProfiles.some((profile) => profile.ProfileId === normalizedSelectedProfileId)
+  ) {
+    return normalizedSelectedProfileId;
+  }
+
+  return compatibleProfiles[0]?.ProfileId ??
+    getDefaultCeremonyProfiles(governanceMode).find((profile) =>
+      isCeremonyProfileCompatible(bindingStatus, profile)
+    )?.ProfileId ??
+    getDefaultCeremonyProfiles(governanceMode)[0].ProfileId;
+}
+
+export function resolveSelectedProfileDevOnly(
+  profileId: string | null | undefined,
+  explicitDevOnly: boolean | undefined,
+  profiles: ElectionCeremonyProfile[],
+  governanceMode: ElectionGovernanceModeProto = ElectionGovernanceModeProto.AdminOnly
+): boolean | undefined {
+  if (explicitDevOnly !== undefined) {
+    return explicitDevOnly;
+  }
+
+  return findCeremonyProfileById(profiles, profileId, governanceMode)?.DevOnly;
+}
+
 export function createDefaultElectionDraft(): ElectionDraftInput {
   return {
     Title: '',
@@ -413,6 +619,7 @@ export function createDefaultElectionDraft(): ElectionDraftInput {
     ExternalReferenceCode: '',
     ElectionClass: ElectionClassProto.OrganizationalRemoteVoting,
     BindingStatus: ElectionBindingStatusProto.Binding,
+    SelectedProfileId: ADMIN_ONLY_PRODUCTION_PROFILE_ID,
     GovernanceMode: ElectionGovernanceModeProto.AdminOnly,
     DisclosureMode: ElectionDisclosureModeProto.FinalResultsOnly,
     ParticipationPrivacyMode:
@@ -434,13 +641,21 @@ export function createDefaultElectionDraft(): ElectionDraftInput {
 export function createDraftFromElectionDetail(detail: GetElectionResponse | null): ElectionDraftInput {
   const draftSnapshot = detail?.LatestDraftSnapshot;
   if (draftSnapshot) {
+    const governanceMode = draftSnapshot.Policy.GovernanceMode;
+    const availableProfiles = getAvailableCeremonyProfiles(detail, governanceMode);
     return {
       Title: draftSnapshot.Metadata.Title,
       ShortDescription: draftSnapshot.Metadata.ShortDescription,
       ExternalReferenceCode: draftSnapshot.Metadata.ExternalReferenceCode,
       ElectionClass: draftSnapshot.Policy.ElectionClass,
       BindingStatus: draftSnapshot.Policy.BindingStatus,
-      GovernanceMode: draftSnapshot.Policy.GovernanceMode,
+      SelectedProfileId: coerceSelectedCeremonyProfileId(
+        draftSnapshot.Policy.BindingStatus,
+        governanceMode,
+        draftSnapshot.Policy.SelectedProfileId || '',
+        availableProfiles
+      ),
+      GovernanceMode: governanceMode,
       DisclosureMode: draftSnapshot.Policy.DisclosureMode,
       ParticipationPrivacyMode: draftSnapshot.Policy.ParticipationPrivacyMode,
       VoteUpdatePolicy: draftSnapshot.Policy.VoteUpdatePolicy,
@@ -461,13 +676,21 @@ export function createDraftFromElectionDetail(detail: GetElectionResponse | null
 
   const election = detail?.Election;
   if (election) {
+    const governanceMode = election.GovernanceMode;
+    const availableProfiles = getAvailableCeremonyProfiles(detail, governanceMode);
     return {
       Title: election.Title,
       ShortDescription: election.ShortDescription,
       ExternalReferenceCode: election.ExternalReferenceCode,
       ElectionClass: election.ElectionClass,
       BindingStatus: election.BindingStatus,
-      GovernanceMode: election.GovernanceMode,
+      SelectedProfileId: coerceSelectedCeremonyProfileId(
+        election.BindingStatus,
+        governanceMode,
+        election.SelectedProfileId || '',
+        availableProfiles
+      ),
+      GovernanceMode: governanceMode,
       DisclosureMode: election.DisclosureMode,
       ParticipationPrivacyMode: election.ParticipationPrivacyMode,
       VoteUpdatePolicy: election.VoteUpdatePolicy,
@@ -489,12 +712,32 @@ export function createDraftFromElectionDetail(detail: GetElectionResponse | null
   return createDefaultElectionDraft();
 }
 
-export function normalizeElectionDraft(draft: ElectionDraftInput): ElectionDraftInput {
+export function normalizeElectionDraft(
+  draft: ElectionDraftInput,
+  availableProfilesOverride?: ElectionCeremonyProfile[]
+): ElectionDraftInput {
+  const availableProfiles =
+    availableProfilesOverride?.length
+      ? availableProfilesOverride
+      : getAvailableCeremonyProfiles(null, draft.GovernanceMode);
+  const selectedProfileId = coerceSelectedCeremonyProfileId(
+    draft.BindingStatus,
+    draft.GovernanceMode,
+    draft.SelectedProfileId,
+    availableProfiles
+  );
+  const selectedProfile = findCeremonyProfileById(
+    availableProfiles,
+    selectedProfileId,
+    draft.GovernanceMode
+  );
+
   return {
     ...draft,
     Title: draft.Title.trim(),
     ShortDescription: draft.ShortDescription.trim(),
     ExternalReferenceCode: draft.ExternalReferenceCode.trim(),
+    SelectedProfileId: selectedProfileId,
     OutcomeRule: {
       ...draft.OutcomeRule,
       TemplateKey: draft.OutcomeRule.TemplateKey.trim(),
@@ -517,7 +760,7 @@ export function normalizeElectionDraft(draft: ElectionDraftInput): ElectionDraft
     AcknowledgedWarningCodes: [...draft.AcknowledgedWarningCodes].sort((left, right) => left - right),
     RequiredApprovalCount:
       draft.GovernanceMode === ElectionGovernanceModeProto.TrusteeThreshold
-        ? draft.RequiredApprovalCount ?? 1
+        ? Math.max(1, selectedProfile?.RequiredApprovalCount ?? draft.RequiredApprovalCount ?? 1)
         : undefined,
   };
 }
@@ -532,6 +775,48 @@ export function getLifecycleLabel(lifecycleState?: ElectionLifecycleStateProto):
 
 export function getBindingLabel(bindingStatus: ElectionBindingStatusProto): string {
   return BINDING_LABELS[bindingStatus];
+}
+
+export function getModeProfileFamilyLabel(bindingStatus: ElectionBindingStatusProto): string {
+  return bindingStatus === ElectionBindingStatusProto.NonBinding
+    ? 'dev/open and non-dev circuits'
+    : 'non-dev circuits';
+}
+
+export function getSelectedProfileFamilyLabel(selectedProfileDevOnly?: boolean): string {
+  if (selectedProfileDevOnly === undefined) {
+    return 'Not recorded';
+  }
+
+  return selectedProfileDevOnly ? 'Dev/open circuit' : 'Non-dev circuit';
+}
+
+export function getSecrecyBoundaryCopy(selectedProfileDevOnly?: boolean): string {
+  if (selectedProfileDevOnly === undefined) {
+    return 'The bound circuit is not recorded on this surface yet. Secrecy claims should be read from the selected or frozen profile once it is available.';
+  }
+
+  return selectedProfileDevOnly
+    ? 'This election uses the explicit open-audit circuit. Readable ballot content may appear where artifact visibility allows, so this path is excluded from secret-ballot claims.'
+    : 'This election uses a protected non-dev circuit. Result and report artifacts should expose aggregate outcomes and circuit metadata, not readable ballot choices.';
+}
+
+export function getGovernancePathLabel(governanceMode: ElectionGovernanceModeProto): string {
+  return governanceMode === ElectionGovernanceModeProto.AdminOnly
+    ? 'Admin-only protected custody path'
+    : 'Trustee-threshold aggregate release path';
+}
+
+export function getCustodyBoundaryCopy(governanceMode: ElectionGovernanceModeProto): string {
+  return governanceMode === ElectionGovernanceModeProto.AdminOnly
+    ? 'Admin-only protected custody keeps tally release bound to the owner-admin protected custody profile. This path does not expose trustee shares, reusable tally private keys, or single-ballot inspection authority.'
+    : 'Trustee-threshold custody requires exact-target aggregate tally release with executor-bound trustee submissions. This path does not expose arbitrary ballot inspection, raw trustee shares on persisted surfaces, or reusable tally private keys.';
+}
+
+export function getModeProfileFreezeCopy(bindingStatus: ElectionBindingStatusProto): string {
+  return bindingStatus === ElectionBindingStatusProto.NonBinding
+    ? 'Non-binding elections may choose either a dev/open circuit or a non-dev circuit. The selected circuit/profile locks before open.'
+    : 'Binding elections may choose only non-dev circuits. The selected circuit/profile locks before open.';
 }
 
 export function getElectionClassLabel(electionClass: ElectionClassProto): string {
@@ -1076,15 +1361,22 @@ export function getLatestFinalizationShareForTrustee(
   );
 }
 
-export function getAllowedCeremonyProfiles(detail: GetElectionResponse | null): ElectionCeremonyProfile[] {
-  return detail?.CeremonyProfiles ?? [];
-}
-
 export function getFixedCeremonyProfileShape(detail: GetElectionResponse | null): {
   trusteeCount: number;
   requiredApprovalCount: number;
 } | null {
-  const profiles = detail?.CeremonyProfiles ?? [];
+  const governanceMode =
+    detail?.LatestDraftSnapshot?.Policy.GovernanceMode ??
+    detail?.Election?.GovernanceMode ??
+    ElectionGovernanceModeProto.AdminOnly;
+  if (governanceMode !== ElectionGovernanceModeProto.TrusteeThreshold) {
+    return null;
+  }
+
+  const profiles = getAvailableCeremonyProfiles(
+    detail,
+    ElectionGovernanceModeProto.TrusteeThreshold
+  );
   if (profiles.length === 0) {
     return null;
   }
@@ -1283,6 +1575,10 @@ export function getDraftSaveValidationErrors(draft: ElectionDraftInput): string[
 
   if (!draft.Title.trim()) {
     errors.push('Election title is required.');
+  }
+
+  if (!draft.SelectedProfileId.trim()) {
+    errors.push('A selected circuit / profile is required.');
   }
 
   if (!draft.ProtocolOmegaVersion.trim()) {

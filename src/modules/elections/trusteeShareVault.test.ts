@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import * as secp256k1 from '@noble/secp256k1';
-import { bytesToBase64, bytesToHex, hexToBytes } from '@/lib/crypto';
+import { bytesToBase64, bytesToHex, eciesEncrypt, hexToBytes } from '@/lib/crypto';
 import {
   createTrusteeShareVaultEnvelope,
   decryptStoredTrusteeShareVaultEnvelope,
   deriveTrusteeCloseCountingShareMaterial,
   extractTrusteeCloseCountingShare,
+  TRUSTEE_CLOSE_COUNTING_SHARE_FORMAT,
+  TRUSTEE_SERVER_RELEASE_PAYLOAD_VERSION,
   TRUSTEE_SHARE_VAULT_MESSAGE_TYPE,
   TRUSTEE_SHARE_VAULT_PAYLOAD_VERSION,
 } from './trusteeShareVault';
@@ -147,5 +149,48 @@ describe('trusteeShareVault', () => {
     expect(first).toEqual(second);
     expect(first.scalarMaterial).toMatch(/^[0-9]+$/);
     expect(first.scalarMaterialHash).toHaveLength(64);
+  });
+
+  it('opens a server-issued trustee release package without requiring the mnemonic-derived inner vault key', async () => {
+    const encryptedPayload = await eciesEncrypt(
+      JSON.stringify({
+        packageVersion: TRUSTEE_SERVER_RELEASE_PAYLOAD_VERSION,
+        materialKind: 'server-issued-release-share',
+        electionId: 'election-1',
+        ceremonyVersionId: 'ceremony-1',
+        trusteeUserAddress: 'trustee-a',
+        shareVersion: 'share-v7',
+        material: {
+          packageKind: 'server-issued-release-share',
+          sessionPurpose: 'close-counting',
+          protocolVersion: 'omega-v1.0.0',
+          profileId: 'dkg-prod-3of5',
+          versionNumber: 7,
+          closeCountingShare: {
+            format: TRUSTEE_CLOSE_COUNTING_SHARE_FORMAT,
+            scalarMaterial: '987654321',
+            scalarMaterialHash: 'feedbeef',
+          },
+        },
+      }),
+      trusteeEncryptionPublicKey
+    );
+    const storedEnvelopePayload = bytesToBase64(
+      new TextEncoder().encode(encryptedPayload)
+    );
+
+    const decrypted = await decryptStoredTrusteeShareVaultEnvelope(
+      storedEnvelopePayload,
+      trusteeEncryptionPrivateKey,
+      []
+    );
+
+    expect(decrypted.packageVersion).toBe(TRUSTEE_SERVER_RELEASE_PAYLOAD_VERSION);
+    expect(decrypted.materialKind).toBe('server-issued-release-share');
+
+    const resolvedShare = extractTrusteeCloseCountingShare(decrypted);
+    expect(resolvedShare.shareVersion).toBe('share-v7');
+    expect(resolvedShare.shareMaterial).toBe('987654321');
+    expect(resolvedShare.shareMaterialHash).toBe('feedbeef');
   });
 });

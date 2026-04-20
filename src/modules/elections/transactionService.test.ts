@@ -85,6 +85,7 @@ describe('transactionService encrypted election envelope helpers', () => {
       ExternalReferenceCode: 'ORG-2026-01',
       ElectionClass: 0,
       BindingStatus: 0,
+      SelectedProfileId: 'dkg-prod-3of5',
       GovernanceMode: 0,
       DisclosureMode: 0,
       ParticipationPrivacyMode: 0,

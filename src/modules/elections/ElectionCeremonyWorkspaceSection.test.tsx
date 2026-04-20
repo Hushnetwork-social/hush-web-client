@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { GetElectionCeremonyActionViewResponse, GetElectionResponse } from '@/lib/grpc';
 import {
+  ElectionBindingStatusProto,
   ElectionCeremonyVersionStatusProto,
   ElectionGovernanceModeProto,
   ElectionLifecycleStateProto,
@@ -12,19 +13,31 @@ import { ElectionCeremonyWorkspaceSection } from './ElectionCeremonyWorkspaceSec
 
 const timestamp = { seconds: 1_713_000_000, nanos: 0 };
 
-function createElectionDetail(): GetElectionResponse {
-  return {
+type ElectionDetailOverrides = Partial<Omit<GetElectionResponse, 'Election'>> & {
+  Election?: Partial<NonNullable<GetElectionResponse['Election']>>;
+};
+
+function createElectionDetail(
+  overrides?: ElectionDetailOverrides,
+): GetElectionResponse {
+  const election = {
+    ElectionId: 'election-1',
+    Title: 'Election with Trustees I',
+    ShortDescription: '',
+    OwnerPublicAddress: 'owner-public-key',
+    LifecycleState: ElectionLifecycleStateProto.Draft,
+    GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+    BindingStatus: ElectionBindingStatusProto.Binding,
+    SelectedProfileId: 'dkg-prod-1of1',
+    SelectedProfileDevOnly: false,
+    RequiredApprovalCount: 1,
+    ...(overrides?.Election ?? {}),
+  };
+
+  const detail: GetElectionResponse = {
     Success: true,
     ErrorMessage: '',
-    Election: {
-      ElectionId: 'election-1',
-      Title: 'Election with Trustees I',
-      ShortDescription: '',
-      OwnerPublicAddress: 'owner-public-key',
-      LifecycleState: ElectionLifecycleStateProto.Draft,
-      GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
-      RequiredApprovalCount: 1,
-    },
+    Election: election,
     CeremonyProfiles: [
       {
         ProfileId: 'dkg-prod-1of1',
@@ -115,6 +128,12 @@ function createElectionDetail(): GetElectionResponse {
       },
     ],
   } as GetElectionResponse;
+
+  return {
+    ...detail,
+    ...overrides,
+    Election: election,
+  };
 }
 
 function createLegacySubmittedElectionDetail(): GetElectionResponse {
@@ -126,6 +145,114 @@ function createLegacySubmittedElectionDetail(): GetElectionResponse {
         ...detail.ActiveCeremonyTrusteeStates[0],
         ShareVersion: '',
       },
+    ],
+  };
+}
+
+function createReadyElectionWithPendingLegacyValidation(): GetElectionResponse {
+  const detail = createElectionDetail({
+    CeremonyVersions: [
+      {
+        Id: 'ceremony-version-1',
+        ElectionId: 'election-1',
+        VersionNumber: 1,
+        ProfileId: 'dkg-prod-3of5',
+        Status: ElectionCeremonyVersionStatusProto.CeremonyVersionReady,
+        TrusteeCount: 5,
+        RequiredApprovalCount: 3,
+        TallyPublicKeyFingerprint: 'fingerprint-1',
+        StartedAt: timestamp,
+        CompletedAt: timestamp,
+        StartedByPublicAddress: 'owner-public-key',
+        IsActive: true,
+      },
+    ],
+  });
+
+  return {
+    ...detail,
+    ActiveCeremonyTrusteeStates: [
+      {
+        ...detail.ActiveCeremonyTrusteeStates[0],
+        TrusteeDisplayName: 'TrusteeOne',
+        TrusteeUserAddress: 'trustee-one',
+        State: ElectionTrusteeCeremonyStateProto.CeremonyStateCompleted,
+        CompletedAt: timestamp,
+      },
+      {
+        ...detail.ActiveCeremonyTrusteeStates[0],
+        Id: 'state-2',
+        TrusteeDisplayName: 'TrusteeThree',
+        TrusteeUserAddress: 'trustee-three',
+        State: ElectionTrusteeCeremonyStateProto.CeremonyStateCompleted,
+        CompletedAt: timestamp,
+      },
+      {
+        ...detail.ActiveCeremonyTrusteeStates[0],
+        Id: 'state-3',
+        TrusteeDisplayName: 'TrusteeFour',
+        TrusteeUserAddress: 'trustee-four',
+        State: ElectionTrusteeCeremonyStateProto.CeremonyStateCompleted,
+        CompletedAt: timestamp,
+      },
+      {
+        ...detail.ActiveCeremonyTrusteeStates[0],
+        Id: 'state-4',
+        TrusteeDisplayName: 'LateTrustee',
+        TrusteeUserAddress: 'trustee-late',
+        State: ElectionTrusteeCeremonyStateProto.CeremonyStateMaterialSubmitted,
+        ShareVersion: 'share-late-v1',
+      },
+    ],
+    TrusteeInvitations: [
+      {
+        ...detail.TrusteeInvitations[0],
+        TrusteeDisplayName: 'TrusteeOne',
+        TrusteeUserAddress: 'trustee-one',
+      },
+      {
+        ...detail.TrusteeInvitations[0],
+        Id: 'invite-2',
+        TrusteeDisplayName: 'TrusteeThree',
+        TrusteeUserAddress: 'trustee-three',
+      },
+      {
+        ...detail.TrusteeInvitations[0],
+        Id: 'invite-3',
+        TrusteeDisplayName: 'TrusteeFour',
+        TrusteeUserAddress: 'trustee-four',
+      },
+      {
+        ...detail.TrusteeInvitations[0],
+        Id: 'invite-4',
+        TrusteeDisplayName: 'LateTrustee',
+        TrusteeUserAddress: 'trustee-late',
+      },
+      {
+        ...detail.TrusteeInvitations[0],
+        Id: 'invite-5',
+        TrusteeDisplayName: 'TrusteeFive',
+        TrusteeUserAddress: 'trustee-five',
+      },
+    ],
+    CeremonyTranscriptEvents: [
+      {
+        Id: 'event-ready',
+        CeremonyVersionId: 'ceremony-version-1',
+        VersionNumber: 1,
+        EventType: 0,
+        ActorPublicAddress: 'owner-public-key',
+        TrusteeUserAddress: '',
+        TrusteeDisplayName: '',
+        TrusteeState: undefined,
+        EventSummary: 'Ceremony version 1 validated every bound trustee package and is ready.',
+        EvidenceReference: '',
+        RestartReason: '',
+        TallyPublicKeyFingerprint: 'fingerprint-1',
+        OccurredAt: { seconds: 1_713_000_050, nanos: 0 },
+        HasTrusteeState: false,
+      },
+      ...detail.CeremonyTranscriptEvents,
     ],
   };
 }
@@ -197,9 +324,11 @@ describe('ElectionCeremonyWorkspaceSection', () => {
     fireEvent.click(screen.getByTestId('elections-ceremony-approve-next'));
 
     expect(
-      await screen.findByText(/This records exactly one approved share toward the 1-share threshold\./i),
+      await screen.findByText(/This marks exactly one bound trustee package complete for the active version\./i),
     ).toBeInTheDocument();
-    expect(screen.getByText(/tally-kc-001-/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/server derives the ceremony tally public key from the recorded trustee commitments/i),
+    ).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('elections-ceremony-validation-confirm-button'));
 
@@ -207,7 +336,7 @@ describe('ElectionCeremonyWorkspaceSection', () => {
       expect(handleCompleteTrustee).toHaveBeenCalledWith(
         'trustee-one',
         'share-v1',
-        expect.stringMatching(/^tally-kc-001-/),
+        null,
       );
     });
   });
@@ -240,5 +369,82 @@ describe('ElectionCeremonyWorkspaceSection', () => {
     ).toBeInTheDocument();
     expect(screen.getByTestId('elections-ceremony-return-next')).toBeInTheDocument();
     expect(screen.queryByTestId('elections-ceremony-approve-next')).not.toBeInTheDocument();
+  });
+
+  it('keeps owner approval available for a ready legacy version that still has incomplete trustee packages', () => {
+    render(
+      <ElectionCeremonyWorkspaceSection
+        detail={createReadyElectionWithPendingLegacyValidation()}
+        actionView={createActionView()}
+        ownerPublicAddress="owner-public-key"
+        isSubmitting={false}
+        isLoadingCeremonyActionView={false}
+        onStart={vi.fn().mockResolvedValue(true)}
+        onRestart={vi.fn().mockResolvedValue(true)}
+        onCompleteTrustee={vi.fn().mockResolvedValue(true)}
+        onRecordValidationFailure={vi.fn().mockResolvedValue(true)}
+      />,
+    );
+
+    expect(screen.getByTestId('elections-ceremony-approve-next')).toBeInTheDocument();
+    expect(screen.getByTestId('elections-ceremony-complete-trustee-late')).toBeInTheDocument();
+    expect(screen.getByText('Validated for active version')).toBeInTheDocument();
+    expect(screen.getAllByText('3 of 5').length).toBeGreaterThan(0);
+    expect(
+      screen.getByText(/Approve the available trustee shares one trustee at a time until all 5 bound trustee packages are completed\./i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Needs new version')).not.toBeInTheDocument();
+  });
+
+  it('shows mode-aware ceremony profile guidance', async () => {
+    render(
+      <ElectionCeremonyWorkspaceSection
+        detail={createElectionDetail({
+          Election: {
+            BindingStatus: ElectionBindingStatusProto.NonBinding,
+            SelectedProfileId: 'dkg-dev-open-1of1',
+            SelectedProfileDevOnly: true,
+          },
+          CeremonyProfiles: [
+            {
+              ProfileId: 'dkg-dev-open-1of1',
+              DisplayName: 'Open Audit 1 of 1',
+              Description: 'Readable ballot audit profile.',
+              ProviderKey: 'provider-dev',
+              ProfileVersion: 'v1',
+              TrusteeCount: 1,
+              RequiredApprovalCount: 1,
+              DevOnly: true,
+              RegisteredAt: timestamp,
+              LastUpdatedAt: timestamp,
+            },
+          ],
+          CeremonyVersions: [],
+          CeremonyTranscriptEvents: [],
+          ActiveCeremonyTrusteeStates: [],
+        })}
+        actionView={createActionView()}
+        ownerPublicAddress="owner-public-key"
+        isSubmitting={false}
+        isLoadingCeremonyActionView={false}
+        onStart={vi.fn().mockResolvedValue(true)}
+        onRestart={vi.fn().mockResolvedValue(true)}
+        onCompleteTrustee={vi.fn().mockResolvedValue(true)}
+        onRecordValidationFailure={vi.fn().mockResolvedValue(true)}
+      />,
+    );
+
+    expect(
+      screen.getByTestId('elections-ceremony-mode-profile-summary'),
+    ).toHaveTextContent('Non-binding election');
+    expect(
+      screen.getByTestId('elections-ceremony-mode-profile-summary'),
+    ).toHaveTextContent('dev/open and non-dev circuits');
+    expect(
+      screen.getByTestId('elections-ceremony-mode-profile-summary'),
+    ).toHaveTextContent('Change the selection in Draft Policy before starting or restarting the ceremony');
+    expect(
+      await screen.findByText(/Current selection: Open Audit 1 of 1\./i),
+    ).toBeInTheDocument();
   });
 });

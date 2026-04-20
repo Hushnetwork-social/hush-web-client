@@ -66,6 +66,7 @@ const { electionsServiceMock, blockchainServiceMock, transactionServiceMock, tru
   trusteeShareVaultMock: {
     createTrusteeShareVaultEnvelope: vi.fn(),
     decryptStoredTrusteeShareVaultEnvelope: vi.fn(),
+    deriveTrusteeCloseCountingPublicCommitment: vi.fn(),
     deriveTrusteeCloseCountingShareMaterial: vi.fn(),
   },
 }));
@@ -132,6 +133,8 @@ vi.mock('./trusteeShareVault', () => ({
     trusteeShareVaultMock.createTrusteeShareVaultEnvelope(...args),
   decryptStoredTrusteeShareVaultEnvelope: (...args: unknown[]) =>
     trusteeShareVaultMock.decryptStoredTrusteeShareVaultEnvelope(...args),
+  deriveTrusteeCloseCountingPublicCommitment: (...args: unknown[]) =>
+    trusteeShareVaultMock.deriveTrusteeCloseCountingPublicCommitment(...args),
   deriveTrusteeCloseCountingShareMaterial: (...args: unknown[]) =>
     trusteeShareVaultMock.deriveTrusteeCloseCountingShareMaterial(...args),
 }));
@@ -412,6 +415,10 @@ describe('TrusteeElectionCeremonyPanel', () => {
       format: 'omega-controlled-threshold-scalar-v1',
       scalarMaterial: '123456789',
       scalarMaterialHash: 'abc123',
+    });
+    trusteeShareVaultMock.deriveTrusteeCloseCountingPublicCommitment.mockReturnValue({
+      X: 'commitment-x',
+      Y: 'commitment-y',
     });
     trusteeShareVaultMock.decryptStoredTrusteeShareVaultEnvelope.mockResolvedValue({
       packageVersion: 'omega-trustee-share-vault-inner-v1',
@@ -830,6 +837,10 @@ describe('TrusteeElectionCeremonyPanel', () => {
         'vault-ciphertext',
         'vault-fingerprint',
         expect.stringContaining('share-kc004'),
+        {
+          X: 'commitment-x',
+          Y: 'commitment-y',
+        },
         'trustee-signing-private-key'
       );
     });

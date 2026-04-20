@@ -11,6 +11,9 @@ import {
 } from '@/lib/grpc';
 import {
   createDraftFromElectionDetail,
+  findCeremonyProfileById,
+  getAllowedCeremonyProfiles,
+  getCustodyBoundaryCopy,
   formatTimestamp,
   getActiveCeremonyVersion,
   getCeremonyVersionStatusLabel,
@@ -18,6 +21,8 @@ import {
   getClosedProgressStatusLabel,
   getDraftOpenValidationErrors,
   getDraftSaveValidationErrors,
+  getGovernanceLabel,
+  getGovernancePathLabel,
   getGovernedActionLabel,
   getGovernedProposalExecutionStatusLabel,
   getPublishedResultNarrative,
@@ -66,6 +71,36 @@ export function OwnerAdminWorkspaceSummary({
   const governanceMode = detail?.Election?.GovernanceMode ?? entry.Election.GovernanceMode;
   const requiredApprovalCount = detail?.Election?.RequiredApprovalCount ?? 0;
   const usesTrustees = governanceMode === ElectionGovernanceModeProto.TrusteeThreshold;
+  const selectedCeremonyProfile = useMemo(() => {
+    if (!usesTrustees) {
+      return null;
+    }
+
+    const profiles = getAllowedCeremonyProfiles(
+      detail,
+      savedDraft.BindingStatus,
+      savedDraft.GovernanceMode
+    );
+
+    return findCeremonyProfileById(
+      profiles,
+      savedDraft.SelectedProfileId,
+      savedDraft.GovernanceMode
+    );
+  }, [
+    detail,
+    savedDraft.BindingStatus,
+    savedDraft.GovernanceMode,
+    savedDraft.SelectedProfileId,
+    usesTrustees,
+  ]);
+  const requiredAcceptedTrusteeCount = Math.max(
+    1,
+    selectedCeremonyProfile?.TrusteeCount ?? requiredApprovalCount ?? 1
+  );
+  const selectedTrusteeRosterLabel = selectedCeremonyProfile
+    ? `${selectedCeremonyProfile.RequiredApprovalCount}-of-${selectedCeremonyProfile.TrusteeCount}`
+    : null;
   const closedOwnerState = useMemo(
     () => getClosedProgressNarrative(entry, 'owner-admin'),
     [entry]
@@ -75,7 +110,7 @@ export function OwnerAdminWorkspaceSummary({
     [entry]
   );
   const hasAcceptedTrusteeRoster =
-    !usesTrustees || acceptedTrustees.length >= Math.max(1, requiredApprovalCount || 1);
+    !usesTrustees || acceptedTrustees.length >= requiredAcceptedTrusteeCount;
   const isCeremonyReady =
     !usesTrustees ||
     activeCeremonyVersion?.Status === ElectionCeremonyVersionStatusProto.CeremonyVersionReady;
@@ -104,14 +139,12 @@ export function OwnerAdminWorkspaceSummary({
             label: 'Accepted trustees',
             isReady: hasAcceptedTrusteeRoster,
             detail: hasAcceptedTrusteeRoster
-              ? `${acceptedTrustees.length} accepted trustee(s) cover the ${Math.max(
-                  1,
-                  requiredApprovalCount || 1
-                )}-of-N threshold.`
-              : `Need at least ${Math.max(
-                  1,
-                  requiredApprovalCount || 1
-                )} accepted trustee(s) before open can proceed.`,
+              ? selectedTrusteeRosterLabel
+                ? `${acceptedTrustees.length} accepted trustee(s) satisfy the selected ${selectedTrusteeRosterLabel} profile roster.`
+                : `${acceptedTrustees.length} accepted trustee(s) satisfy the selected ceremony profile roster.`
+              : selectedTrusteeRosterLabel
+                ? `Need at least ${requiredAcceptedTrusteeCount} accepted trustee(s) to match the selected ${selectedTrusteeRosterLabel} profile before open can proceed.`
+                : `Need at least ${requiredAcceptedTrusteeCount} accepted trustee(s) before open can proceed.`,
           },
           {
             label: 'Key ceremony',
@@ -138,10 +171,9 @@ export function OwnerAdminWorkspaceSummary({
       ...openValidationErrors,
       ...(usesTrustees && !hasAcceptedTrusteeRoster
         ? [
-            `Accepted trustees recorded: ${acceptedTrustees.length} of ${Math.max(
-              1,
-              requiredApprovalCount || 1
-            )}.`,
+            selectedTrusteeRosterLabel
+              ? `Accepted trustees recorded: ${acceptedTrustees.length} of ${requiredAcceptedTrusteeCount} needed for the selected ${selectedTrusteeRosterLabel} profile.`
+              : `Accepted trustees recorded: ${acceptedTrustees.length} of ${requiredAcceptedTrusteeCount}.`,
           ]
         : []),
       ...(usesTrustees && !isCeremonyReady
@@ -251,12 +283,14 @@ export function OwnerAdminWorkspaceSummary({
                 </p>
               </div>
               <div className="rounded-xl border border-hush-bg-light px-3 py-2 text-xs text-hush-text-accent">
-                Trustee-threshold path
+                {getGovernancePathLabel(governanceMode)}
               </div>
             </div>
 
             <div className="mt-4 text-sm text-hush-text-accent">
-              Finalization remains the separate governed step that publishes the official result and final report package.
+              {getCustodyBoundaryCopy(governanceMode)} Finalization remains the separate{' '}
+              {governanceMode === ElectionGovernanceModeProto.AdminOnly ? 'owner' : 'governed'} step
+              that publishes the official result and final report package.
             </div>
           </div>
         </>
@@ -308,7 +342,7 @@ export function OwnerAdminWorkspaceSummary({
                 </p>
               </div>
               <div className="rounded-xl border border-hush-bg-light px-3 py-2 text-xs text-hush-text-accent">
-                {usesTrustees ? 'Trustee-threshold path' : 'Admin-only path'}
+                {getGovernancePathLabel(governanceMode)}
               </div>
             </div>
 
@@ -348,6 +382,11 @@ export function OwnerAdminWorkspaceSummary({
                   : 'The next step is to open the election from the Owner Workspace.'}
               </div>
             )}
+
+            <div className="mt-4 text-sm text-hush-text-accent">
+              {getGovernanceLabel(governanceMode)} uses the FEAT-105 custody boundary from the
+              start: {getCustodyBoundaryCopy(governanceMode)}
+            </div>
           </div>
         </>
       )}

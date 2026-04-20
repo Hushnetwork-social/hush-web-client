@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ArrowLeft, CheckCircle2, Loader2, ShieldAlert } from 'lucide-react';
 import {
   ElectionCloseCountingJobStatusProto,
+  type ElectionFinalizationShare,
   ElectionFinalizationSessionPurposeProto,
   ElectionFinalizationSessionStatusProto,
   ElectionFinalizationShareStatusProto,
@@ -19,6 +20,7 @@ import {
   formatTimestamp,
   getAcceptedFinalizationShareCount,
   getActiveFinalizationSession,
+  getBindingLabel,
   getCloseCountingJobStatusLabel,
   getFinalizationSessionPurposeLabel,
   getFinalizationSessionStatusLabel,
@@ -28,6 +30,8 @@ import {
   getLatestFinalizationReleaseEvidence,
   getLatestFinalizationSession,
   getLatestFinalizationShareForTrustee,
+  getModeProfileFamilyLabel,
+  getSelectedProfileFamilyLabel,
 } from './contracts';
 import {
   decryptStoredTrusteeShareVaultEnvelope,
@@ -66,6 +70,33 @@ type CloseCountingJobState = {
   title: string;
   description: string;
 };
+
+function formatTrusteeReferenceList(
+  trustees:
+    | ReadonlyArray<{
+        TrusteeDisplayName?: string | null;
+        TrusteeUserAddress: string;
+      }>
+    | null
+    | undefined
+): string {
+  if (!trustees || trustees.length === 0) {
+    return 'Not recorded';
+  }
+
+  return trustees
+    .map((trustee) => trustee.TrusteeDisplayName || trustee.TrusteeUserAddress)
+    .join(', ');
+}
+
+function hasAcceptedFinalizationShare(
+  share: ElectionFinalizationShare | null
+): boolean {
+  return (
+    share?.Status ===
+    ElectionFinalizationShareStatusProto.FinalizationShareAccepted
+  );
+}
 
 export function TrusteeElectionFinalizationPanel({
   electionId,
@@ -160,6 +191,23 @@ export function TrusteeElectionFinalizationPanel({
     () => getAcceptedFinalizationShareCount(selectedElection, session?.Id),
     [selectedElection, session?.Id]
   );
+  const eligibleTrusteeCount = session?.EligibleTrustees.length ?? 0;
+  const pendingEligibleTrusteeCount = useMemo(() => {
+    if (!session) {
+      return 0;
+    }
+
+    return session.EligibleTrustees.filter(
+      (trustee) =>
+        !hasAcceptedFinalizationShare(
+          getLatestFinalizationShareForTrustee(
+            selectedElection,
+            trustee.TrusteeUserAddress,
+            session.Id
+          )
+        )
+    ).length;
+  }, [selectedElection, session]);
   const hasRecordedCloseApproval = useMemo(() => {
     if (!closeProposalId) {
       return false;
@@ -183,6 +231,13 @@ export function TrusteeElectionFinalizationPanel({
     Boolean(session) &&
     session!.Status === ElectionFinalizationSessionStatusProto.FinalizationSessionAwaitingShares &&
     !releaseEvidence;
+  const recoverableCloseCountingFailure =
+    Boolean(session) &&
+    isCloseCountingSession &&
+    session!.CloseCountingJobStatus ===
+      ElectionCloseCountingJobStatusProto.CloseCountingJobFailed &&
+    !releaseEvidence &&
+    pendingEligibleTrusteeCount > 0;
   const closeCountingJobState = useMemo<CloseCountingJobState | null>(() => {
     if (!session || !isCloseCountingSession) {
       return null;
@@ -232,12 +287,19 @@ export function TrusteeElectionFinalizationPanel({
             'Release evidence is recorded for this session. Trustee share submission no longer needs any follow-up.',
         };
       case ElectionCloseCountingJobStatusProto.CloseCountingJobFailed:
-        return {
-          tone: 'error',
-          title: 'Executor failed',
-          description:
-            'The bound close-counting job failed. Review the latest failure evidence or retry path before expecting a result.',
-        };
+        return recoverableCloseCountingFailure
+          ? {
+              tone: 'warning',
+              title: 'Executor stalled on the current share set',
+              description:
+                `Threshold is met, but none of the accepted ${session.RequiredShareCount}-share subsets reconstruct the bound tally yet. Pending eligible trustees can still submit on this same session, and the executor will retry automatically after the next accepted share.`,
+            }
+          : {
+              tone: 'error',
+              title: 'Executor failed',
+              description:
+                'The bound close-counting job failed. Review the latest failure evidence or retry path before expecting a result.',
+            };
       case ElectionCloseCountingJobStatusProto.CloseCountingJobSuperseded:
         return {
           tone: 'warning',
@@ -248,7 +310,7 @@ export function TrusteeElectionFinalizationPanel({
       default:
         return null;
     }
-  }, [isCloseCountingSession, session]);
+  }, [isCloseCountingSession, recoverableCloseCountingFailure, session]);
   const vaultShareReady = vaultShareState.status === 'ready';
   const canSubmit =
     Boolean(session) &&
@@ -274,10 +336,10 @@ export function TrusteeElectionFinalizationPanel({
       };
     }
 
-    if (!actorEncryptionPrivateKey || !trusteeMnemonic.length) {
+    if (!actorEncryptionPrivateKey) {
       setVaultShareState({
         status: 'unreadable',
-        detail: 'This device does not have the trustee decryption context required to open the vault.',
+        detail: 'This device does not have the trustee decryption key required to open the private share package.',
       });
       return () => {
         cancelled = true;
@@ -301,7 +363,7 @@ export function TrusteeElectionFinalizationPanel({
         if (!cancelled) {
           setVaultShareState({
             status: 'ready',
-            detail: `Loaded share ${resolvedShare.shareVersion} from your trustee-owned vault.`,
+            detail: `Loaded share ${resolvedShare.shareVersion} from your private trustee package.`,
             shareVersion: resolvedShare.shareVersion,
             shareMaterial: resolvedShare.shareMaterial,
             shareMaterialHash: resolvedShare.shareMaterialHash,
@@ -504,7 +566,9 @@ export function TrusteeElectionFinalizationPanel({
                     Aggregate progress
                   </div>
                   <div className="mt-2 text-sm text-hush-text-primary">
-                    {session ? `${acceptedShareCount} of ${session.RequiredShareCount}` : 'Not available'}
+                    {session
+                      ? `${acceptedShareCount} accepted / ${eligibleTrusteeCount} eligible`
+                      : 'Not available'}
                   </div>
                 </div>
                 <div className={valueWellClass}>
@@ -525,6 +589,73 @@ export function TrusteeElectionFinalizationPanel({
                       : 'Not available'}
                   </div>
                 </div>
+              </div>
+
+              <div
+                className={`mt-5 ${valueWellClass}`}
+                data-testid="trustee-finalization-boundary-context"
+              >
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                  Mode and custody truth
+                </div>
+                <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-hush-text-accent/80">
+                      Election mode
+                    </div>
+                    <div className="mt-1 text-sm text-hush-text-primary">
+                      {getBindingLabel(election.BindingStatus)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-hush-text-accent/80">
+                      Allowed circuit families
+                    </div>
+                    <div className="mt-1 text-sm text-hush-text-primary">
+                      {getModeProfileFamilyLabel(election.BindingStatus)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-hush-text-accent/80">
+                      Selected circuit family
+                    </div>
+                    <div className="mt-1 text-sm text-hush-text-primary">
+                      {getSelectedProfileFamilyLabel(election.SelectedProfileDevOnly)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-hush-text-accent/80">
+                      Bound ceremony profile
+                    </div>
+                    <div className="mt-1 text-sm text-hush-text-primary">
+                      {session?.CeremonySnapshot?.ProfileId || 'Pending bound close-counting session'}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-hush-text-accent/80">
+                      Tally key fingerprint
+                    </div>
+                    <div className="mt-1 break-all font-mono text-sm text-hush-text-primary">
+                      {session?.CeremonySnapshot?.TallyPublicKeyFingerprint ||
+                        'Pending bound close-counting session'}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-hush-text-accent/80">
+                      Executor custody
+                    </div>
+                    <div className="mt-1 text-sm text-hush-text-primary">
+                      {session?.ExecutorSessionPublicKey
+                        ? 'Bound session public key issued'
+                        : 'Pending bound executor session'}
+                    </div>
+                  </div>
+                </div>
+                <p className="mt-4 text-sm leading-7 text-hush-text-accent">
+                  This trustee surface only arms an exact aggregate-tally release for the bound
+                  close-counting session. It does not expose single-ballot decryption authority or
+                  reusable executor key material.
+                </p>
               </div>
 
               <div className="mt-5 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-100">
@@ -567,12 +698,20 @@ export function TrusteeElectionFinalizationPanel({
                   Latest share status: {getFinalizationShareStatusLabel(actorShare.Status)} at{' '}
                   {formatTimestamp(actorShare.SubmittedAt)}
                   {actorShare.FailureReason ? ` - ${actorShare.FailureReason}` : ''}
+                  {recoverableCloseCountingFailure &&
+                  actorShare.Status ===
+                    ElectionFinalizationShareStatusProto.FinalizationShareAccepted
+                    ? ` Pending eligible trustees: ${pendingEligibleTrusteeCount}.`
+                    : ''}
                 </div>
               ) : null}
 
               {releaseEvidence ? (
                 <div className="mt-5 rounded-xl border border-green-500/40 bg-green-500/10 p-4 text-sm text-green-100">
                   Aggregate release evidence was recorded at {formatTimestamp(releaseEvidence.CompletedAt)}.
+                  <div className="mt-2">
+                    Release subset: {formatTrusteeReferenceList(releaseEvidence.AcceptedTrustees)}.
+                  </div>
                 </div>
               ) : null}
             </section>

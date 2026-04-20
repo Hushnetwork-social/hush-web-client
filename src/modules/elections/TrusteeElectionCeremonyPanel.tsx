@@ -18,6 +18,7 @@ import { CeremonyTranscriptPanel } from './CeremonyTranscriptPanel';
 import {
   createTrusteeShareVaultEnvelope,
   decryptStoredTrusteeShareVaultEnvelope,
+  deriveTrusteeCloseCountingPublicCommitment,
   deriveTrusteeCloseCountingShareMaterial,
 } from './trusteeShareVault';
 import { useElectionsStore } from './useElectionsStore';
@@ -187,9 +188,9 @@ export function TrusteeElectionCeremonyPanel({
       };
     }
 
-    if (!actorEncryptionPrivateKey || !trusteeMnemonic.length) {
+    if (!actorEncryptionPrivateKey) {
       setVaultReadStatus('unreadable');
-      setVaultReadDetail('Local trustee decryption material is not available on this device.');
+      setVaultReadDetail('Local trustee decryption key is not available on this device.');
       return () => {
         cancelled = true;
       };
@@ -377,6 +378,9 @@ export function TrusteeElectionCeremonyPanel({
               EncryptedPayload: vaultEnvelope.encryptedPayload,
               PayloadFingerprint: vaultEnvelope.payloadFingerprint,
               ShareVersion: preparedPackage.shareVersion,
+              CloseCountingPublicCommitment: deriveTrusteeCloseCountingPublicCommitment(
+                closeCountingShare.scalarMaterial,
+              ),
             },
             actorEncryptionPublicKey,
             actorEncryptionPrivateKey,

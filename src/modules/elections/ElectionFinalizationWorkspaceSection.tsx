@@ -2,8 +2,15 @@
 
 import { useMemo } from 'react';
 import { CheckCircle2, Lock, ShieldAlert } from 'lucide-react';
-import { ElectionFinalizationShareStatusProto, type GetElectionResponse } from '@/lib/grpc';
 import {
+  ElectionCloseCountingJobStatusProto,
+  ElectionFinalizationSessionPurposeProto,
+  ElectionFinalizationShareStatusProto,
+  ElectionGovernanceModeProto,
+  type GetElectionResponse,
+} from '@/lib/grpc';
+import {
+  getCustodyBoundaryCopy,
   formatArtifactValue,
   formatTimestamp,
   getAcceptedFinalizationShareCount,
@@ -13,6 +20,7 @@ import {
   getFinalizationSessionStatusLabel,
   getFinalizationShareStatusLabel,
   getFinalizationShares,
+  getGovernancePathLabel,
   getLatestFinalizationReleaseEvidence,
   getLatestFinalizationSession,
   type GovernedActionViewState,
@@ -26,10 +34,31 @@ type ElectionFinalizationWorkspaceSectionProps = {
 const sectionClass =
   'rounded-2xl bg-hush-bg-element/95 p-5 shadow-lg shadow-black/10';
 
+function formatTrusteeReferenceList(
+  trustees:
+    | ReadonlyArray<{
+        TrusteeDisplayName?: string | null;
+        TrusteeUserAddress: string;
+      }>
+    | null
+    | undefined
+): string {
+  if (!trustees || trustees.length === 0) {
+    return 'Not recorded';
+  }
+
+  return trustees
+    .map((trustee) => trustee.TrusteeDisplayName || trustee.TrusteeUserAddress)
+    .join(', ');
+}
+
 export function ElectionFinalizationWorkspaceSection({
   detail,
   finalizeActionState,
 }: ElectionFinalizationWorkspaceSectionProps) {
+  const governanceMode =
+    detail?.Election?.GovernanceMode ?? ElectionGovernanceModeProto.AdminOnly;
+  const usesTrustees = governanceMode === ElectionGovernanceModeProto.TrusteeThreshold;
   const session = useMemo(
     () => getActiveFinalizationSession(detail) ?? getLatestFinalizationSession(detail),
     [detail]
@@ -43,6 +72,7 @@ export function ElectionFinalizationWorkspaceSection({
     () => getAcceptedFinalizationShareCount(detail, session?.Id),
     [detail, session?.Id]
   );
+  const eligibleTrusteeCount = session?.EligibleTrustees.length ?? 0;
   const trusteeProgress = useMemo(() => {
     if (!session) {
       return [];
@@ -57,6 +87,17 @@ export function ElectionFinalizationWorkspaceSection({
       };
     });
   }, [session, shares]);
+  const pendingEligibleTrusteeCount = trusteeProgress.filter(
+    ({ latestShare }) =>
+      latestShare?.Status !== ElectionFinalizationShareStatusProto.FinalizationShareAccepted
+  ).length;
+  const recoverableCloseCountingFailure =
+    session?.SessionPurpose ===
+      ElectionFinalizationSessionPurposeProto.FinalizationSessionPurposeCloseCounting &&
+    session.CloseCountingJobStatus ===
+      ElectionCloseCountingJobStatusProto.CloseCountingJobFailed &&
+    !releaseEvidence &&
+    pendingEligibleTrusteeCount > 0;
 
   return (
     <section className={sectionClass} data-testid="elections-finalization-section">
@@ -64,8 +105,9 @@ export function ElectionFinalizationWorkspaceSection({
         <div>
           <h2 className="text-lg font-semibold">Counting And Finalization</h2>
           <p className="mt-1 text-sm text-hush-text-accent">
-            Close-counting share sessions appear before tally readiness, while this view keeps the
-            aggregate-only release boundary for the exact target session.
+            {usesTrustees
+              ? 'Close-counting share sessions appear before tally readiness, while this view keeps the aggregate-only release boundary for the exact target session.'
+              : 'Admin-only finalization keeps the protected custody story visible here so the owner can verify the release boundary without implying ballot inspection authority.'}
           </p>
         </div>
         {session ? (
@@ -73,7 +115,11 @@ export function ElectionFinalizationWorkspaceSection({
             {getFinalizationSessionPurposeLabel(session.SessionPurpose)} |{' '}
             {getFinalizationSessionStatusLabel(session.Status)}
           </div>
-        ) : null}
+        ) : (
+          <div className="rounded-xl border border-hush-purple/30 bg-hush-purple/10 px-3 py-2 text-xs text-hush-text-primary">
+            {getGovernancePathLabel(governanceMode)}
+          </div>
+        )}
       </div>
 
       {!session ? (
@@ -83,9 +129,19 @@ export function ElectionFinalizationWorkspaceSection({
         >
           <div className="flex items-center gap-2 font-medium text-hush-text-primary">
             <Lock className="h-4 w-4" />
-            <span>{finalizeActionState?.label || 'Finalize'} has not created a bound session yet.</span>
+            <span>
+              {usesTrustees
+                ? `${finalizeActionState?.label || 'Finalize'} has not created a bound session yet.`
+                : 'Admin-only protected custody is waiting for the finalization boundary.'}
+            </span>
           </div>
-          <p className="mt-2">{finalizeActionState?.reason || 'The finalization target is not available yet.'}</p>
+          <p className="mt-2">
+            {usesTrustees
+              ? finalizeActionState?.reason || 'The finalization target is not available yet.'
+              : `${getCustodyBoundaryCopy(governanceMode)} ${
+                  finalizeActionState?.reason || 'The finalization target is not available yet.'
+                }`}
+          </p>
         </div>
       ) : (
         <div className="space-y-5" data-testid="elections-finalization-session">
@@ -119,7 +175,7 @@ export function ElectionFinalizationWorkspaceSection({
                 Share progress
               </div>
               <div className="mt-2 text-sm text-hush-text-primary">
-                {acceptedShareCount} of {session.RequiredShareCount}
+                {acceptedShareCount} accepted / {eligibleTrusteeCount} eligible
               </div>
             </div>
             <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
@@ -187,9 +243,15 @@ export function ElectionFinalizationWorkspaceSection({
             <div className="flex items-center justify-between gap-3">
               <div className="text-sm font-semibold text-hush-text-primary">Trustee progress</div>
               <div className="text-xs text-hush-text-accent">
-                {Math.max(session.RequiredShareCount - acceptedShareCount, 0)} shares remaining
+                Threshold: {session.RequiredShareCount} shares
               </div>
             </div>
+
+            {recoverableCloseCountingFailure ? (
+              <div className="mt-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+                Threshold is met, but none of the accepted {session.RequiredShareCount}-share subsets reconstruct the bound tally yet. Pending eligible trustees can still submit on this same session, and the executor will retry automatically after the next accepted share.
+              </div>
+            ) : null}
 
             <div className="mt-4 space-y-3">
               {trusteeProgress.map(({ trustee, latestShare }) => (
@@ -237,6 +299,9 @@ export function ElectionFinalizationWorkspaceSection({
                 {getFinalizationReleaseModeLabel(releaseEvidence.ReleaseMode)} completed with{' '}
                 {releaseEvidence.AcceptedShareCount} accepted trustee shares at{' '}
                 {formatTimestamp(releaseEvidence.CompletedAt)}.
+              </div>
+              <div className="mt-2">
+                Release subset: {formatTrusteeReferenceList(releaseEvidence.AcceptedTrustees)}.
               </div>
             </div>
           ) : null}

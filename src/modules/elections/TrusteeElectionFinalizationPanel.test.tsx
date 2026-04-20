@@ -103,6 +103,8 @@ function createElectionRecord(overrides?: Partial<ElectionRecordView>): Election
     LifecycleState: ElectionLifecycleStateProto.Closed,
     ElectionClass: ElectionClassProto.OrganizationalRemoteVoting,
     BindingStatus: ElectionBindingStatusProto.Binding,
+    SelectedProfileId: 'dkg-prod-3of5',
+    SelectedProfileDevOnly: false,
     GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
     DisclosureMode: ElectionDisclosureModeProto.FinalResultsOnly,
     ParticipationPrivacyMode:
@@ -559,6 +561,97 @@ describe('TrusteeElectionFinalizationPanel', () => {
     expect(screen.getByTestId('trustee-finalization-summary')).toHaveTextContent('Executor job');
   });
 
+  it('shows a recoverable close-counting failure when more eligible trustees can still submit', async () => {
+    const vaultFixture = await createStoredVaultEnvelopeFixture();
+
+    electionsServiceMock.getElection.mockResolvedValue(
+      createElectionResponse({
+        FinalizationSessions: [
+          createFinalizationSession({
+            RequiredShareCount: 2,
+            EligibleTrustees: [
+              {
+                TrusteeUserAddress: 'trustee-a',
+                TrusteeDisplayName: 'Alice Trustee',
+              },
+              {
+                TrusteeUserAddress: 'trustee-b',
+                TrusteeDisplayName: 'Bob Trustee',
+              },
+              {
+                TrusteeUserAddress: 'trustee-c',
+                TrusteeDisplayName: 'Charlie Trustee',
+              },
+            ],
+            CeremonySnapshot: {
+              ...createFinalizationSession().CeremonySnapshot!,
+              TrusteeCount: 3,
+              RequiredApprovalCount: 2,
+              CompletedTrustees: [
+                {
+                  TrusteeUserAddress: 'trustee-a',
+                  TrusteeDisplayName: 'Alice Trustee',
+                },
+                {
+                  TrusteeUserAddress: 'trustee-b',
+                  TrusteeDisplayName: 'Bob Trustee',
+                },
+                {
+                  TrusteeUserAddress: 'trustee-c',
+                  TrusteeDisplayName: 'Charlie Trustee',
+                },
+              ],
+            },
+            CloseCountingJobStatus:
+              ElectionCloseCountingJobStatusProto.CloseCountingJobFailed,
+          }),
+        ],
+        FinalizationShares: [
+          createFinalizationShare({
+            TrusteeUserAddress: 'trustee-a',
+            TrusteeDisplayName: 'Alice Trustee',
+          }),
+          createFinalizationShare({
+            Id: 'finalization-share-2',
+            TrusteeUserAddress: 'trustee-b',
+            TrusteeDisplayName: 'Bob Trustee',
+            ShareIndex: 2,
+            SubmittedAt: { seconds: timestamp.seconds + 90, nanos: 0 },
+          }),
+        ],
+        FinalizationReleaseEvidenceRecords: [],
+      })
+    );
+    electionsServiceMock.getElectionCeremonyActionView.mockResolvedValue(
+      createCeremonyActionViewResponse({
+        SelfVaultEnvelopes: [vaultFixture.envelope],
+      })
+    );
+
+    render(
+      <TrusteeElectionFinalizationPanel
+        electionId="election-1"
+        actorPublicAddress="trustee-a"
+        actorEncryptionPublicKey={trusteeEncryptionPublicKey}
+        actorEncryptionPrivateKey={trusteeEncryptionPrivateKey}
+        actorSigningPrivateKey={trusteeSigningPrivateKey}
+      />
+    );
+
+    expect(await screen.findByTestId('trustee-finalization-executor-state')).toHaveTextContent(
+      'Executor stalled on the current share set'
+    );
+    expect(screen.getByTestId('trustee-finalization-executor-state')).toHaveTextContent(
+      'Pending eligible trustees can still submit on this same session'
+    );
+    expect(screen.getByTestId('trustee-finalization-summary')).toHaveTextContent(
+      '2 accepted / 3 eligible'
+    );
+    expect(screen.getByText(/Latest share status:/)).toHaveTextContent(
+      'Pending eligible trustees: 1'
+    );
+  });
+
   it('shows the waiting threshold state and unlocks the share form when close-counting becomes available', async () => {
     const vaultFixture = await createStoredVaultEnvelopeFixture();
 
@@ -659,6 +752,23 @@ describe('TrusteeElectionFinalizationPanel', () => {
     );
     expect(screen.getByTestId('trustee-finalization-vault-status')).toHaveTextContent('Loaded');
     expect(screen.getByText('Close Counting Share Status')).toBeInTheDocument();
+    expect(screen.getByTestId('trustee-finalization-boundary-context')).toHaveTextContent(
+      'Binding',
+    );
+    expect(screen.getByTestId('trustee-finalization-boundary-context')).toHaveTextContent(
+      'non-dev circuits',
+    );
+    expect(screen.getByTestId('trustee-finalization-boundary-context')).toHaveTextContent('Non-dev circuit');
+    expect(screen.getByTestId('trustee-finalization-boundary-context')).toHaveTextContent('prod-3of5-v1');
+    expect(screen.getByTestId('trustee-finalization-boundary-context')).toHaveTextContent(
+      'tally-fingerprint-1',
+    );
+    expect(screen.getByTestId('trustee-finalization-boundary-context')).toHaveTextContent(
+      'Bound session public key issued',
+    );
+    expect(screen.getByTestId('trustee-finalization-boundary-context')).toHaveTextContent(
+      'exact aggregate-tally release',
+    );
   });
 
   it('blocks non-close-counting share sessions because finalize is approval-only', async () => {

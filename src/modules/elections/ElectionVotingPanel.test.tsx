@@ -27,6 +27,9 @@ import {
   type GetElectionResultViewResponse,
   type GetElectionVotingViewResponse,
 } from '@/lib/grpc';
+import { bytesToBase64 } from '@/lib/crypto';
+import { bigintToBytes, getGenerator } from '@/lib/crypto/reactions/babyjubjub';
+import { serializePoint } from '@/lib/crypto/elections';
 import { ElectionVotingPanel } from './ElectionVotingPanel';
 
 const { electionsServiceMock, blockchainServiceMock, transactionServiceMock } = vi.hoisted(() => ({
@@ -68,6 +71,14 @@ vi.mock('./transactionService', () => ({
 }));
 
 const timestamp = { seconds: 1_774_120_000, nanos: 0 };
+const grpcTallyPublicKey = (() => {
+  const generator = getGenerator();
+  return {
+    X: bytesToBase64(bigintToBytes(generator.x)),
+    Y: bytesToBase64(bigintToBytes(generator.y)),
+  };
+})();
+const serializedTallyPublicKey = serializePoint(getGenerator());
 
 function createElectionRecord(overrides?: Partial<ElectionRecordView>): ElectionRecordView {
   return {
@@ -79,6 +90,8 @@ function createElectionRecord(overrides?: Partial<ElectionRecordView>): Election
     LifecycleState: ElectionLifecycleStateProto.Open,
     ElectionClass: ElectionClassProto.OrganizationalRemoteVoting,
     BindingStatus: ElectionBindingStatusProto.Binding,
+    SelectedProfileId: 'dkg-prod-3of5',
+    SelectedProfileDevOnly: false,
     GovernanceMode: ElectionGovernanceModeProto.AdminOnly,
     DisclosureMode: ElectionDisclosureModeProto.FinalResultsOnly,
     ParticipationPrivacyMode:
@@ -177,6 +190,7 @@ function createVotingViewResponse(
     CeremonyVersionId: 'ceremony-version-5',
     DkgProfileId: 'dkg-profile-1',
     TallyPublicKeyFingerprint: 'tally-fingerprint-9',
+    TallyPublicKey: grpcTallyPublicKey,
     ReceiptId: '',
     AcceptanceId: '',
     ServerProof: '',
@@ -243,8 +257,6 @@ describe('ElectionVotingPanel', () => {
     vi.resetAllMocks();
     window.sessionStorage.clear();
     window.localStorage.clear();
-    process.env.NEXT_PUBLIC_ELECTIONS_ALLOW_DEV_MODE = 'false';
-    delete (window as Window & { __e2e_forceElectionMode?: unknown }).__e2e_forceElectionMode;
     electionsServiceMock.getElection.mockResolvedValue(createElectionResponse());
     electionsServiceMock.getElectionVotingView.mockResolvedValue(createVotingViewResponse());
     electionsServiceMock.getElectionResultView.mockResolvedValue(createResultView());
@@ -256,8 +268,36 @@ describe('ElectionVotingPanel', () => {
     });
   });
 
-  it('shows one submit button and blocks real protected submission in non-dev builds', async () => {
-    electionsServiceMock.getElectionVotingView.mockResolvedValue(createVotingViewResponse());
+  it('submits a binding protected vote from the selected option without leaking plaintext choice fields', async () => {
+    electionsServiceMock.getElectionVotingView
+      .mockResolvedValueOnce(createVotingViewResponse())
+      .mockResolvedValueOnce(
+        createVotingViewResponse({
+          CommitmentRegistered: true,
+          HasCommitmentRegisteredAt: true,
+          CommitmentRegisteredAt: timestamp,
+        }),
+      )
+      .mockResolvedValueOnce(
+        createVotingViewResponse({
+          CommitmentRegistered: true,
+          HasCommitmentRegisteredAt: true,
+          CommitmentRegisteredAt: timestamp,
+          HasAcceptedAt: true,
+          AcceptedAt: timestamp,
+          PersonalParticipationStatus:
+            ElectionParticipationStatusProto.ParticipationCountedAsVoted,
+          ReceiptId: 'receipt-binding-1',
+          AcceptanceId: 'acceptance-binding-1',
+          ServerProof: 'server-proof-binding-1',
+        }),
+      );
+    transactionServiceMock.createRegisterElectionVotingCommitmentTransaction.mockResolvedValue({
+      signedTransaction: 'signed-register-commitment',
+    });
+    transactionServiceMock.createAcceptElectionBallotCastTransaction.mockResolvedValue({
+      signedTransaction: 'signed-binding-cast-transaction',
+    });
 
     render(
       <ElectionVotingPanel
@@ -270,19 +310,11 @@ describe('ElectionVotingPanel', () => {
     );
 
     expect(await screen.findByTestId('voting-ballot-workflow')).toBeInTheDocument();
-    expect(screen.getByTestId('voting-option-option-a')).toBeInTheDocument();
-    expect(screen.getByTestId('voting-option-option-b')).toBeInTheDocument();
     expect(screen.getByTestId('voting-submit')).toBeDisabled();
     expect(screen.getByTestId('voting-submit-panel')).toHaveTextContent(
-      'Submit vote is reserved for the protected production path',
+      'Protected submit is ready on this device',
     );
     expect(screen.getByText('Your vote is not submitted yet')).toBeInTheDocument();
-    expect(screen.getByTestId('voting-summary-section')).toBeInTheDocument();
-    expect(
-      screen.getByTestId('voting-advanced-context-toggle').compareDocumentPosition(
-        screen.getByTestId('voting-summary-toggle'),
-      ) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
 
     fireEvent.click(screen.getByTestId('voting-option-option-a'));
     expect(screen.getByTestId('voting-selected-option-summary')).toHaveTextContent(
@@ -292,23 +324,71 @@ describe('ElectionVotingPanel', () => {
 
     fireEvent.click(screen.getByTestId('voting-submit'));
 
-    expect(
-      await screen.findByText(/Real protected vote submission is not available in this build yet/),
-    ).toBeInTheDocument();
-    expect(
-      transactionServiceMock.createRegisterElectionVotingCommitmentTransaction,
-    ).not.toHaveBeenCalled();
-    expect(
-      transactionServiceMock.createAcceptElectionBallotCastTransaction,
-    ).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(
+        transactionServiceMock.createRegisterElectionVotingCommitmentTransaction,
+      ).toHaveBeenCalled();
+      expect(
+        transactionServiceMock.createAcceptElectionBallotCastTransaction,
+      ).toHaveBeenCalled();
+    });
+
+    const createCastCall =
+      transactionServiceMock.createAcceptElectionBallotCastTransaction.mock.calls[0];
+    const submittedBallotPackage = JSON.parse(createCastCall?.[5] as string);
+    const submittedProofBundle = JSON.parse(createCastCall?.[6] as string);
+    const submittedNullifier = createCastCall?.[7];
+
+    expect(submittedBallotPackage.packageType).toBe('binding-protected-ballot');
+    expect(submittedBallotPackage.profileId).toBe('dkg-profile-1');
+    expect(submittedBallotPackage.selectionCount).toBe(2);
+    expect(submittedBallotPackage.publicKey).toEqual(serializedTallyPublicKey);
+    expect(submittedBallotPackage.ciphertext.c1).toHaveLength(2);
+    expect(submittedBallotPackage.ciphertext.c2).toHaveLength(2);
+    expect(submittedBallotPackage).not.toHaveProperty('optionId');
+    expect(submittedBallotPackage).not.toHaveProperty('optionLabel');
+    expect(submittedBallotPackage).not.toHaveProperty('ballotOrder');
+
+    expect(submittedProofBundle.proofType).toBe('binding-circuit-envelope');
+    expect(submittedProofBundle.proofProfile).toBe('PRODUCTION_LIKE_PROFILE');
+    expect(submittedProofBundle).toMatchObject({
+      ballotPackageHash: expect.any(String),
+      openArtifactId: 'open-artifact-7',
+      eligibleSetHash: 'eligible-set-hash-1',
+      ceremonyVersionId: 'ceremony-version-5',
+      dkgProfileId: 'dkg-profile-1',
+      tallyPublicKeyFingerprint: 'tally-fingerprint-9',
+    });
+    expect(submittedProofBundle).not.toHaveProperty('optionId');
+    expect(submittedProofBundle).not.toHaveProperty('optionLabel');
+    expect(submittedNullifier).toMatch(/^[a-f0-9]{64}$/);
+    expect(blockchainServiceMock.submitTransaction).toHaveBeenCalledTimes(2);
+    expect(await screen.findByTestId('voting-accepted-panel')).toBeInTheDocument();
   });
 
-  it('submits a dev-only election vote from the selected option when dev mode is enabled', async () => {
-    process.env.NEXT_PUBLIC_ELECTIONS_ALLOW_DEV_MODE = 'true';
+  it('submits a protected admin-only ballot on a non-binding election with the production-like proof profile', async () => {
+    const nonBindingProtectedElection = createElectionRecord({
+      BindingStatus: ElectionBindingStatusProto.NonBinding,
+      GovernanceMode: ElectionGovernanceModeProto.AdminOnly,
+      SelectedProfileId: 'admin-prod-1of1',
+      SelectedProfileDevOnly: false,
+    });
+    electionsServiceMock.getElection.mockResolvedValue(
+      createElectionResponse({
+        Election: nonBindingProtectedElection,
+      }),
+    );
     electionsServiceMock.getElectionVotingView
-      .mockResolvedValueOnce(createVotingViewResponse())
       .mockResolvedValueOnce(
         createVotingViewResponse({
+          Election: nonBindingProtectedElection,
+          DkgProfileId: 'admin-prod-1of1',
+        }),
+      )
+      .mockResolvedValueOnce(
+        createVotingViewResponse({
+          Election: nonBindingProtectedElection,
+          DkgProfileId: 'admin-prod-1of1',
           CommitmentRegistered: true,
           HasCommitmentRegisteredAt: true,
           CommitmentRegisteredAt: timestamp,
@@ -316,6 +396,95 @@ describe('ElectionVotingPanel', () => {
       )
       .mockResolvedValueOnce(
         createVotingViewResponse({
+          Election: nonBindingProtectedElection,
+          DkgProfileId: 'admin-prod-1of1',
+          CommitmentRegistered: true,
+          HasCommitmentRegisteredAt: true,
+          CommitmentRegisteredAt: timestamp,
+          HasAcceptedAt: true,
+          AcceptedAt: timestamp,
+          PersonalParticipationStatus:
+            ElectionParticipationStatusProto.ParticipationCountedAsVoted,
+          ReceiptId: 'receipt-admin-protected-1',
+          AcceptanceId: 'acceptance-admin-protected-1',
+          ServerProof: 'server-proof-admin-protected-1',
+        }),
+      );
+    transactionServiceMock.createRegisterElectionVotingCommitmentTransaction.mockResolvedValue({
+      signedTransaction: 'signed-register-commitment',
+    });
+    transactionServiceMock.createAcceptElectionBallotCastTransaction.mockResolvedValue({
+      signedTransaction: 'signed-admin-protected-cast-transaction',
+    });
+
+    render(
+      <ElectionVotingPanel
+        electionId="election-1"
+        actorPublicAddress="actor-public-key"
+        actorEncryptionPublicKey="actor-encryption-public-key"
+        actorEncryptionPrivateKey="actor-encryption-private-key"
+        actorSigningPrivateKey="actor-signing-private-key"
+      />,
+    );
+
+    expect(await screen.findByTestId('voting-submit-panel')).toHaveTextContent(
+      'Protected submit is ready on this device',
+    );
+    expect(screen.getByText('Protected ballot on non-binding election')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('voting-option-option-a'));
+    fireEvent.click(screen.getByTestId('voting-submit'));
+
+    await waitFor(() => {
+      expect(
+        transactionServiceMock.createRegisterElectionVotingCommitmentTransaction,
+      ).toHaveBeenCalled();
+      expect(
+        transactionServiceMock.createAcceptElectionBallotCastTransaction,
+      ).toHaveBeenCalled();
+    });
+
+    const createCastCall =
+      transactionServiceMock.createAcceptElectionBallotCastTransaction.mock.calls[0];
+    const submittedBallotPackage = JSON.parse(createCastCall?.[5] as string);
+    const submittedProofBundle = JSON.parse(createCastCall?.[6] as string);
+
+    expect(submittedBallotPackage.packageType).toBe('binding-protected-ballot');
+    expect(submittedBallotPackage.profileId).toBe('admin-prod-1of1');
+    expect(submittedProofBundle.proofType).toBe('binding-circuit-envelope');
+    expect(submittedProofBundle.proofProfile).toBe('PRODUCTION_LIKE_PROFILE');
+    expect(submittedProofBundle.dkgProfileId).toBe('admin-prod-1of1');
+    expect(await screen.findByTestId('voting-accepted-panel')).toBeInTheDocument();
+  });
+
+  it('submits a non-binding open audit ballot from the selected option', async () => {
+    const nonBindingElection = createElectionRecord({
+      BindingStatus: ElectionBindingStatusProto.NonBinding,
+      SelectedProfileId: 'dkg-dev-3of5',
+      SelectedProfileDevOnly: true,
+    });
+    electionsServiceMock.getElection.mockResolvedValue(
+      createElectionResponse({
+        Election: nonBindingElection,
+      }),
+    );
+    electionsServiceMock.getElectionVotingView
+      .mockResolvedValueOnce(
+        createVotingViewResponse({
+          Election: nonBindingElection,
+        }),
+      )
+      .mockResolvedValueOnce(
+        createVotingViewResponse({
+          Election: nonBindingElection,
+          CommitmentRegistered: true,
+          HasCommitmentRegisteredAt: true,
+          CommitmentRegisteredAt: timestamp,
+        }),
+      )
+      .mockResolvedValueOnce(
+        createVotingViewResponse({
+          Election: nonBindingElection,
           CommitmentRegistered: true,
           HasCommitmentRegisteredAt: true,
           CommitmentRegisteredAt: timestamp,
@@ -346,7 +515,7 @@ describe('ElectionVotingPanel', () => {
     );
 
     expect(await screen.findByTestId('voting-submit-panel')).toHaveTextContent(
-      'Dev-only submit is enabled for this build',
+      'Submit vote will record an open-audit ballot',
     );
 
     fireEvent.click(screen.getByTestId('voting-option-option-a'));
@@ -413,7 +582,6 @@ describe('ElectionVotingPanel', () => {
   });
 
   it('conceals the selected ballot workflow while the submission is still being reconciled', async () => {
-    process.env.NEXT_PUBLIC_ELECTIONS_ALLOW_DEV_MODE = 'true';
     electionsServiceMock.getElectionVotingView
       .mockResolvedValueOnce(createVotingViewResponse())
       .mockResolvedValueOnce(
@@ -644,6 +812,8 @@ describe('ElectionVotingPanel', () => {
         ReceiptId: 'receipt-final-1',
         AcceptanceId: 'acceptance-final-1',
         ServerProof: 'server-proof-final-1',
+        DkgProfileId: 'dkg-prod-3of5',
+        TallyPublicKeyFingerprint: 'binding-fingerprint-panel',
       }),
     );
     electionsServiceMock.getElectionResultView.mockResolvedValue(
@@ -673,10 +843,20 @@ describe('ElectionVotingPanel', () => {
     expect(screen.getByTestId('voting-receipt-verification-dialog')).toHaveTextContent(
       'This accepted vote is included in the finalized counted set used for the official result.'
     );
+    expect(screen.getByTestId('voting-receipt-context')).toHaveTextContent('Binding');
+    expect(screen.getByTestId('voting-receipt-context')).toHaveTextContent(
+      'non-dev circuits',
+    );
+    expect(screen.getByTestId('voting-receipt-context')).toHaveTextContent('dkg-prod-3of5');
+    expect(screen.getByTestId('voting-receipt-context')).toHaveTextContent(
+      'binding-fingerprint-panel',
+    );
+    expect(screen.getByTestId('voting-receipt-context')).toHaveTextContent(
+      'protected non-dev circuit',
+    );
   });
 
-  it('does not persist pending recovery state when dev vote transaction creation fails locally', async () => {
-    process.env.NEXT_PUBLIC_ELECTIONS_ALLOW_DEV_MODE = 'true';
+  it('does not persist pending recovery state when protected vote transaction creation fails locally', async () => {
     electionsServiceMock.getElectionVotingView
       .mockResolvedValueOnce(createVotingViewResponse())
       .mockResolvedValueOnce(

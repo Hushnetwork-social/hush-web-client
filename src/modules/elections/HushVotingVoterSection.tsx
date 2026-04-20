@@ -14,6 +14,7 @@ import {
 import type {
   ElectionHubEntryView,
   GetElectionResultViewResponse,
+  GetElectionVotingViewResponse,
   VerifyElectionReceiptResponse,
 } from '@/lib/grpc';
 import {
@@ -30,6 +31,7 @@ import {
   AvailabilityCard,
   CollapsibleSurfaceSection,
 } from './HushVotingWorkspaceShared';
+import { ElectionReceiptTruthPanel } from './ElectionReceiptTruthPanel';
 
 type ParsedAcceptedBallotReceipt = {
   electionId: string;
@@ -314,6 +316,9 @@ export function VoterWorkspaceSummary({
       ? 'Open ballot workflow'
       : 'Voter Details';
   const [hasAcceptedReceipt, setHasAcceptedReceipt] = useState(false);
+  const [receiptVotingView, setReceiptVotingView] = useState<GetElectionVotingViewResponse | null>(
+    null,
+  );
   const [isReceiptDialogOpen, setIsReceiptDialogOpen] = useState(false);
   const [receiptInput, setReceiptInput] = useState('');
   const [receiptSourceLabel, setReceiptSourceLabel] = useState('');
@@ -333,6 +338,18 @@ export function VoterWorkspaceSummary({
     entry.SuggestedAction === ElectionHubNextActionHintProto.ElectionHubActionVoterClaimIdentity ||
     entry.SuggestedAction === ElectionHubNextActionHintProto.ElectionHubActionVoterCastBallot ||
     (isOpenElection && !hasAcceptedReceipt);
+  const receiptContextBindingStatus =
+    receiptVotingView?.Election?.BindingStatus ?? entry.Election.BindingStatus;
+  const receiptContextSelectedProfileDevOnly =
+    receiptVotingView?.Election?.SelectedProfileDevOnly;
+  const receiptContextProfileId =
+    resultView?.CeremonySnapshot?.ProfileId ?? receiptVotingView?.DkgProfileId;
+  const receiptContextTallyKeyFingerprint =
+    resultView?.CeremonySnapshot?.TallyPublicKeyFingerprint ??
+    receiptVotingView?.TallyPublicKeyFingerprint;
+  const receiptContextOfficialVisibility =
+    resultView?.OfficialResultVisibilityPolicy ??
+    receiptVotingView?.Election?.OfficialResultVisibilityPolicy;
 
   const voterSurfaceSummary = useMemo(() => {
     if (entry.CanClaimIdentity) {
@@ -404,6 +421,7 @@ export function VoterWorkspaceSummary({
     async function loadAcceptedReceiptState(): Promise<void> {
       if (entry.CanClaimIdentity) {
         setHasAcceptedReceipt(false);
+        setReceiptVotingView(null);
         return;
       }
 
@@ -418,9 +436,11 @@ export function VoterWorkspaceSummary({
           return;
         }
 
+        setReceiptVotingView(votingView.Success ? votingView : null);
         setHasAcceptedReceipt(votingView.Success && votingView.HasAcceptedAt);
       } catch {
         if (isActive) {
+          setReceiptVotingView(null);
           setHasAcceptedReceipt(false);
         }
       }
@@ -676,63 +696,83 @@ export function VoterWorkspaceSummary({
               />
 
               {receiptVerification ? (
-                <div
-                  className={`rounded-2xl px-4 py-4 text-sm ${
-                    receiptVerification.tone === 'success'
-                      ? 'border border-green-500/30 bg-green-500/10 text-green-100'
-                      : receiptVerification.tone === 'warning'
-                        ? 'border border-amber-500/30 bg-amber-500/10 text-amber-100'
-                        : 'border border-red-500/30 bg-red-500/10 text-red-100'
-                  }`}
-                  data-testid="hush-voting-receipt-result"
-                >
-                  <div className="font-semibold">{receiptVerification.title}</div>
-                  <div className="mt-2 leading-7">{receiptVerification.detail}</div>
-                  {receiptVerification.statusItems?.length ? (
-                    <div className="mt-4 space-y-3">
-                      {receiptVerification.statusItems.map((item) => (
-                        <div key={item.label} className="flex items-start gap-3">
-                          {item.complete ? (
-                            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-                          ) : (
-                            <Circle className="mt-0.5 h-4 w-4 shrink-0 opacity-80" />
-                          )}
-                          <div className="leading-6">{item.label}</div>
-                        </div>
-                      ))}
+                <div className="space-y-4">
+                  <ElectionReceiptTruthPanel
+                    bindingStatus={receiptContextBindingStatus}
+                    selectedProfileDevOnly={receiptContextSelectedProfileDevOnly}
+                    officialResultVisibilityPolicy={receiptContextOfficialVisibility}
+                    profileId={receiptContextProfileId}
+                    tallyPublicKeyFingerprint={receiptContextTallyKeyFingerprint}
+                    testId="hush-voting-receipt-context"
+                  />
+                  <div
+                    className={`rounded-2xl px-4 py-4 text-sm ${
+                      receiptVerification.tone === 'success'
+                        ? 'border border-green-500/30 bg-green-500/10 text-green-100'
+                        : receiptVerification.tone === 'warning'
+                          ? 'border border-amber-500/30 bg-amber-500/10 text-amber-100'
+                          : 'border border-red-500/30 bg-red-500/10 text-red-100'
+                    }`}
+                    data-testid="hush-voting-receipt-result"
+                  >
+                    <div className="font-semibold">{receiptVerification.title}</div>
+                    <div className="mt-2 leading-7">{receiptVerification.detail}</div>
+                    {receiptVerification.statusItems?.length ? (
+                      <div className="mt-4 space-y-3">
+                        {receiptVerification.statusItems.map((item) => (
+                          <div key={item.label} className="flex items-start gap-3">
+                            {item.complete ? (
+                              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                            ) : (
+                              <Circle className="mt-0.5 h-4 w-4 shrink-0 opacity-80" />
+                            )}
+                            <div className="leading-6">{item.label}</div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                    <div className="mt-3 text-xs uppercase tracking-[0.18em] opacity-80">
+                      Verified at {receiptVerification.verifiedAt}
                     </div>
-                  ) : null}
-                  <div className="mt-3 text-xs uppercase tracking-[0.18em] opacity-80">
-                    Verified at {receiptVerification.verifiedAt}
                   </div>
                 </div>
               ) : (
-                <div className="rounded-2xl bg-hush-bg-element/70 px-4 py-4 text-sm text-hush-text-accent">
-                  <div className="space-y-3">
-                    <div className="flex items-start gap-3">
-                      <Circle className="mt-0.5 h-4 w-4 shrink-0 opacity-80" />
-                      <div>Confirm whether this voter is marked as voted in this election.</div>
-                    </div>
-                    {!showCommitmentFieldInReceiptTemplate ? (
+                <div className="space-y-4">
+                  <ElectionReceiptTruthPanel
+                    bindingStatus={receiptContextBindingStatus}
+                    selectedProfileDevOnly={receiptContextSelectedProfileDevOnly}
+                    officialResultVisibilityPolicy={receiptContextOfficialVisibility}
+                    profileId={receiptContextProfileId}
+                    tallyPublicKeyFingerprint={receiptContextTallyKeyFingerprint}
+                    testId="hush-voting-receipt-context"
+                  />
+                  <div className="rounded-2xl bg-hush-bg-element/70 px-4 py-4 text-sm text-hush-text-accent">
+                    <div className="space-y-3">
                       <div className="flex items-start gap-3">
                         <Circle className="mt-0.5 h-4 w-4 shrink-0 opacity-80" />
-                        <div>Open-election receipts include only the fields needed for this check.</div>
+                        <div>Confirm whether this voter is marked as voted in this election.</div>
                       </div>
-                    ) : null}
-                    {showCommitmentFieldInReceiptTemplate ? (
+                      {!showCommitmentFieldInReceiptTemplate ? (
+                        <div className="flex items-start gap-3">
+                          <Circle className="mt-0.5 h-4 w-4 shrink-0 opacity-80" />
+                          <div>Open-election receipts include only the fields needed for this check.</div>
+                        </div>
+                      ) : null}
+                      {showCommitmentFieldInReceiptTemplate ? (
+                        <div className="flex items-start gap-3">
+                          <Circle className="mt-0.5 h-4 w-4 shrink-0 opacity-80" />
+                          <div>
+                            If this device retained the original receipt, the ballot commitment line is
+                            checked locally as well.
+                          </div>
+                        </div>
+                      ) : null}
                       <div className="flex items-start gap-3">
                         <Circle className="mt-0.5 h-4 w-4 shrink-0 opacity-80" />
                         <div>
-                          If this device retained the original receipt, the ballot commitment line is
-                          checked locally as well.
+                          After finalization, confirm whether the accepted vote is included in the
+                          counted set used for the official result.
                         </div>
-                      </div>
-                    ) : null}
-                    <div className="flex items-start gap-3">
-                      <Circle className="mt-0.5 h-4 w-4 shrink-0 opacity-80" />
-                      <div>
-                        After finalization, confirm whether the accepted vote is included in the
-                        counted set used for the official result.
                       </div>
                     </div>
                   </div>

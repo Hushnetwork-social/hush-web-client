@@ -6,10 +6,13 @@ import {
   eciesDecrypt,
   eciesEncrypt,
 } from '@/lib/crypto';
+import type { ECPoint } from '@/lib/grpc';
 import { BABYJUBJUB } from '@/lib/crypto/reactions/constants';
+import { bigintToBytes, getGenerator, scalarMul } from '@/lib/crypto/reactions/babyjubjub';
 
 export const TRUSTEE_SHARE_VAULT_MESSAGE_TYPE = 'trustee-share-vault-package';
 export const TRUSTEE_SHARE_VAULT_PAYLOAD_VERSION = 'omega-trustee-share-vault-v1';
+export const TRUSTEE_SERVER_RELEASE_PAYLOAD_VERSION = 'omega-trustee-release-share-v1';
 export const TRUSTEE_CLOSE_COUNTING_SHARE_FORMAT = 'omega-controlled-threshold-scalar-v1';
 
 const TRUSTEE_SHARE_VAULT_INNER_VERSION = 'omega-trustee-share-vault-inner-v1';
@@ -20,7 +23,7 @@ const TRUSTEE_CLOSE_COUNTING_SHARE_INFO = new TextEncoder().encode(
   'protocol_omega/trustee_close_counting_scalar/v1'
 );
 
-export type TrusteeShareVaultMaterialKind = 'ceremony-package';
+export type TrusteeShareVaultMaterialKind = 'ceremony-package' | 'server-issued-release-share';
 
 export type TrusteeCloseCountingShareMaterial = {
   format: typeof TRUSTEE_CLOSE_COUNTING_SHARE_FORMAT;
@@ -41,6 +44,15 @@ export type TrusteeCeremonyVaultMaterial = {
   closeCountingShare: TrusteeCloseCountingShareMaterial;
 };
 
+export type TrusteeServerIssuedReleaseMaterial = {
+  packageKind: 'server-issued-release-share';
+  sessionPurpose: 'close-counting';
+  protocolVersion: string;
+  profileId: string;
+  versionNumber: number;
+  closeCountingShare: TrusteeCloseCountingShareMaterial;
+};
+
 export type TrusteeShareVaultInnerPayload = {
   packageVersion: string;
   materialKind: TrusteeShareVaultMaterialKind;
@@ -48,7 +60,7 @@ export type TrusteeShareVaultInnerPayload = {
   ceremonyVersionId: string;
   trusteeUserAddress: string;
   shareVersion: string;
-  material: TrusteeCeremonyVaultMaterial;
+  material: TrusteeCeremonyVaultMaterial | TrusteeServerIssuedReleaseMaterial;
 };
 
 type TrusteeShareVaultOuterEnvelope = {
@@ -59,6 +71,11 @@ type TrusteeShareVaultOuterEnvelope = {
   trusteeUserAddress: string;
   shareVersion: string;
   encryptedInnerPayload: string;
+};
+
+type TrusteeServerIssuedReleaseEnvelope = TrusteeShareVaultInnerPayload & {
+  packageVersion: typeof TRUSTEE_SERVER_RELEASE_PAYLOAD_VERSION;
+  materialKind: 'server-issued-release-share';
 };
 
 export type CreateTrusteeShareVaultEnvelopeParams = {
@@ -93,6 +110,24 @@ export type TrusteeResolvedCloseCountingShare = {
   shareMaterialHash: string;
   shareFormat: typeof TRUSTEE_CLOSE_COUNTING_SHARE_FORMAT;
 };
+
+export function deriveTrusteeCloseCountingPublicCommitment(
+  shareMaterial: string
+): ECPoint {
+  const trimmedShareMaterial = ensureNonEmpty(shareMaterial, 'ScalarMaterial');
+  if (!/^[0-9]+$/.test(trimmedShareMaterial)) {
+    throw new Error('Trustee close-counting share material must be a decimal scalar.');
+  }
+
+  const scalar = BigInt(trimmedShareMaterial) % BABYJUBJUB.order;
+  const normalizedScalar = scalar === 0n ? 1n : scalar;
+  const commitment = scalarMul(getGenerator(), normalizedScalar);
+
+  return {
+    X: bytesToBase64(bigintToBytes(commitment.x)),
+    Y: bytesToBase64(bigintToBytes(commitment.y)),
+  };
+}
 
 function ensureNonEmpty(value: string, fieldName: string): string {
   const trimmed = value.trim();
@@ -300,12 +335,22 @@ export async function decryptStoredTrusteeShareVaultEnvelope(
     serializedCiphertext,
     ensureNonEmpty(trusteeEncryptionPrivateKey, 'TrusteeEncryptionPrivateKey')
   );
-  const outerEnvelope = JSON.parse(outerEnvelopeJson) as TrusteeShareVaultOuterEnvelope;
+  const parsedEnvelope = JSON.parse(outerEnvelopeJson) as
+    | TrusteeShareVaultOuterEnvelope
+    | TrusteeServerIssuedReleaseEnvelope;
 
-  if (outerEnvelope.packageVersion !== TRUSTEE_SHARE_VAULT_PAYLOAD_VERSION) {
-    throw new Error(`Unsupported trustee share vault package version '${outerEnvelope.packageVersion}'.`);
+  if (
+    parsedEnvelope.packageVersion === TRUSTEE_SERVER_RELEASE_PAYLOAD_VERSION &&
+    'material' in parsedEnvelope
+  ) {
+    return parsedEnvelope as TrusteeServerIssuedReleaseEnvelope;
   }
 
+  if (parsedEnvelope.packageVersion !== TRUSTEE_SHARE_VAULT_PAYLOAD_VERSION) {
+    throw new Error(`Unsupported trustee share vault package version '${parsedEnvelope.packageVersion}'.`);
+  }
+
+  const outerEnvelope = parsedEnvelope as TrusteeShareVaultOuterEnvelope;
   const vaultAesKey = await deriveTrusteeShareVaultKey(
     mnemonic,
     outerEnvelope.electionId,

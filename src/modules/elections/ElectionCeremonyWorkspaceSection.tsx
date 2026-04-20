@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { AlertCircle, CheckCircle2, Loader2, RefreshCcw, ShieldAlert } from 'lucide-react';
 import type {
   ElectionCeremonyTrusteeState,
@@ -8,19 +8,25 @@ import type {
   GetElectionResponse,
 } from '@/lib/grpc';
 import {
+  ElectionBindingStatusProto,
   ElectionCeremonyActionTypeProto,
   ElectionCeremonyVersionStatusProto,
+  ElectionGovernanceModeProto,
   ElectionTrusteeCeremonyStateProto,
   ElectionTrusteeInvitationStatusProto,
 } from '@/lib/grpc';
 import {
+  findCeremonyProfileById,
   formatArtifactValue,
   formatTimestamp,
   getActiveCeremonyTrusteeStates,
   getActiveCeremonyVersion,
   getAllowedCeremonyProfiles,
+  getBindingLabel,
   getCeremonyActionViewStates,
   getCeremonyVersionStatusLabel,
+  getModeProfileFamilyLabel,
+  getModeProfileFreezeCopy,
 } from './contracts';
 import { CeremonyTranscriptPanel } from './CeremonyTranscriptPanel';
 
@@ -91,7 +97,9 @@ function getTrusteeLastEventMillis(state: ElectionCeremonyTrusteeState): number 
   );
 }
 
-function getTrusteeProgressView(state: ElectionCeremonyTrusteeState): TrusteeProgressView {
+function getTrusteeProgressView(
+  state: ElectionCeremonyTrusteeState,
+): TrusteeProgressView {
   if (state.State === ElectionTrusteeCeremonyStateProto.CeremonyStateCompleted) {
     return {
       label: 'Step 5 ready: Export share backup',
@@ -177,21 +185,6 @@ function getTrusteeProgressToneClass(tone: TrusteeProgressView['tone']): string 
   }
 }
 
-function buildPreparedOwnerTallyFingerprint(
-  activeVersion: GetElectionResponse['CeremonyVersions'][number] | null
-): string {
-  if (!activeVersion) {
-    return '';
-  }
-
-  const recordedFingerprint = activeVersion.TallyPublicKeyFingerprint?.trim();
-  if (recordedFingerprint) {
-    return recordedFingerprint;
-  }
-
-  return `tally-kc-${String(activeVersion.VersionNumber).padStart(3, '0')}-${activeVersion.Id.slice(0, 12)}`;
-}
-
 export function ElectionCeremonyWorkspaceSection({
   detail,
   actionView,
@@ -204,7 +197,6 @@ export function ElectionCeremonyWorkspaceSection({
   onCompleteTrustee,
   onRecordValidationFailure,
 }: ElectionCeremonyWorkspaceSectionProps) {
-  const [selectedProfileId, setSelectedProfileId] = useState('');
   const [modalMode, setModalMode] = useState<ModalMode>(null);
   const [restartReason, setRestartReason] = useState('Supersede the current version and restart.');
   const [validationModal, setValidationModal] = useState<OwnerValidationModalState>(null);
@@ -213,10 +205,23 @@ export function ElectionCeremonyWorkspaceSection({
   );
   const [validationEvidenceReference, setValidationEvidenceReference] = useState('');
 
-  const allowedProfiles = useMemo(() => getAllowedCeremonyProfiles(detail), [detail]);
+  const governanceMode =
+    detail?.LatestDraftSnapshot?.Policy.GovernanceMode ??
+    detail?.Election?.GovernanceMode ??
+    ElectionGovernanceModeProto.AdminOnly;
+  const allowedProfiles = useMemo(
+    () => getAllowedCeremonyProfiles(detail, undefined, governanceMode),
+    [detail, governanceMode]
+  );
   const activeVersion = useMemo(() => getActiveCeremonyVersion(detail), [detail]);
   const trusteeStates = useMemo(() => getActiveCeremonyTrusteeStates(detail), [detail]);
   const ownerActions = useMemo(() => getCeremonyActionViewStates(actionView, 'owner'), [actionView]);
+  const bindingStatus =
+    detail?.Election?.BindingStatus ?? ElectionBindingStatusProto.Binding;
+  const draftSelectedProfileId =
+    detail?.LatestDraftSnapshot?.Policy.SelectedProfileId ??
+    detail?.Election?.SelectedProfileId ??
+    '';
   const acceptedTrustees = useMemo(
     () =>
       (detail?.TrusteeInvitations ?? []).filter(
@@ -237,14 +242,12 @@ export function ElectionCeremonyWorkspaceSection({
   );
   const legacySubmittedTrusteeCount = submittedTrustees.length - reviewableSubmittedTrusteeCount;
   const queuedSubmittedTrustees = useMemo(
-    () => [...submittedTrustees].sort((left, right) => getTrusteeLastEventMillis(left) - getTrusteeLastEventMillis(right)),
+    () =>
+      [...submittedTrustees].sort(
+        (left, right) => getTrusteeLastEventMillis(left) - getTrusteeLastEventMillis(right)
+      ),
     [submittedTrustees]
   );
-  const nextTrusteeForOwnerAction = useMemo(
-    () => queuedSubmittedTrustees.find((state) => hasApprovalMetadata(state)) ?? queuedSubmittedTrustees[0] ?? null,
-    [queuedSubmittedTrustees]
-  );
-  const isNextOwnerApprovalReady = nextTrusteeForOwnerAction ? hasApprovalMetadata(nextTrusteeForOwnerAction) : false;
   const completedTrusteeCount = useMemo(
     () =>
       trusteeStates.filter(
@@ -252,6 +255,21 @@ export function ElectionCeremonyWorkspaceSection({
       ).length,
     [trusteeStates]
   );
+  const currentTrusteeCount = activeVersion?.TrusteeCount ?? acceptedTrustees.length;
+  const allTrusteePackagesValidated = currentTrusteeCount > 0 && completedTrusteeCount >= currentTrusteeCount;
+  const isCeremonyReady =
+    activeVersion?.Status === ElectionCeremonyVersionStatusProto.CeremonyVersionReady &&
+    allTrusteePackagesValidated;
+  const nextTrusteeForOwnerAction = useMemo(
+    () =>
+      allTrusteePackagesValidated
+        ? null
+        : queuedSubmittedTrustees.find((state) => hasApprovalMetadata(state)) ??
+          queuedSubmittedTrustees[0] ??
+          null,
+    [allTrusteePackagesValidated, queuedSubmittedTrustees]
+  );
+  const isNextOwnerApprovalReady = nextTrusteeForOwnerAction ? hasApprovalMetadata(nextTrusteeForOwnerAction) : false;
   const validationFailedTrusteeCount = useMemo(
     () =>
       trusteeStates.filter(
@@ -260,21 +278,13 @@ export function ElectionCeremonyWorkspaceSection({
     [trusteeStates]
   );
   const needsResubmissionTrusteeCount = legacySubmittedTrusteeCount + validationFailedTrusteeCount;
-  const preparedOwnerTallyFingerprint = useMemo(
-    () => buildPreparedOwnerTallyFingerprint(activeVersion),
-    [activeVersion]
-  );
-
-  useEffect(() => {
-    if (activeVersion?.ProfileId) {
-      setSelectedProfileId(activeVersion.ProfileId);
-      return;
-    }
-
-    if (!selectedProfileId && allowedProfiles.length > 0) {
-      setSelectedProfileId(allowedProfiles[0].ProfileId);
-    }
-  }, [activeVersion?.ProfileId, allowedProfiles, selectedProfileId]);
+  const selectedValidationReachesReadiness =
+    validationModal?.mode === 'complete' &&
+    Boolean(activeVersion) &&
+    completedTrusteeCount + 1 >= (activeVersion?.TrusteeCount ?? Number.MAX_SAFE_INTEGER);
+  const effectiveSelectedProfileId =
+    activeVersion?.ProfileId ??
+    (draftSelectedProfileId || allowedProfiles[0]?.ProfileId || '');
 
   const startAction = ownerActions.find(
     (action) => action.actionType === ElectionCeremonyActionTypeProto.CeremonyActionStartVersion
@@ -292,26 +302,24 @@ export function ElectionCeremonyWorkspaceSection({
       ? 'No active ceremony version exists yet.'
       : pendingSaveAlignmentMessage && restartAction?.status !== 'available'
         ? pendingSaveAlignmentMessage
-      : restartAction?.reason;
-
-  const isCeremonyReady =
-    activeVersion?.Status === ElectionCeremonyVersionStatusProto.CeremonyVersionReady;
-  const isAwaitingOwnerValidation = !isCeremonyReady && submittedTrustees.length > 0;
-  const currentTrusteeCount = activeVersion?.TrusteeCount ?? acceptedTrustees.length;
+        : restartAction?.reason;
+  const isAwaitingOwnerValidation = !allTrusteePackagesValidated && submittedTrustees.length > 0;
   const showsFragilityWarning =
     !!detail?.Election?.RequiredApprovalCount &&
     currentTrusteeCount > 0 &&
     detail.Election.RequiredApprovalCount === currentTrusteeCount;
+  const selectedProfile =
+    findCeremonyProfileById(allowedProfiles, effectiveSelectedProfileId, governanceMode);
 
   const handleConfirm = async () => {
-    if (!selectedProfileId) {
+    if (!effectiveSelectedProfileId) {
       return;
     }
 
     const didSucceed =
       modalMode === 'restart'
-        ? await onRestart(selectedProfileId, restartReason.trim())
-        : await onStart(selectedProfileId);
+        ? await onRestart(effectiveSelectedProfileId, restartReason.trim())
+        : await onStart(effectiveSelectedProfileId);
 
     if (didSucceed) {
       setModalMode(null);
@@ -331,11 +339,6 @@ export function ElectionCeremonyWorkspaceSection({
     });
   };
 
-  const selectedValidationNeedsTallyFingerprint =
-    validationModal?.mode === 'complete' &&
-    activeVersion?.Status === ElectionCeremonyVersionStatusProto.CeremonyVersionInProgress &&
-    completedTrusteeCount + 1 >= (activeVersion?.RequiredApprovalCount ?? Number.MAX_SAFE_INTEGER);
-
   const handleConfirmValidation = async () => {
     if (!validationModal) {
       return;
@@ -351,7 +354,7 @@ export function ElectionCeremonyWorkspaceSection({
       didSucceed = await onCompleteTrustee(
         validationModal.trustee.TrusteeUserAddress,
         shareVersion,
-        selectedValidationNeedsTallyFingerprint ? preparedOwnerTallyFingerprint : null
+        null
       );
     } else {
       if (!validationFailureReason.trim()) {
@@ -437,34 +440,47 @@ export function ElectionCeremonyWorkspaceSection({
           </div>
 
           <div className="rounded-2xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
-            <label className="block text-sm" htmlFor="elections-ceremony-profile-select">
-              <span className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
-                Ceremony profile
-              </span>
-            </label>
-            <select
-              id="elections-ceremony-profile-select"
-              value={selectedProfileId}
-              onChange={(event) => setSelectedProfileId(event.target.value)}
-              disabled={isSubmitting || isLoadingCeremonyActionView || allowedProfiles.length === 0}
-              className="mt-2 w-full rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-3 text-sm outline-none transition-colors focus:border-hush-purple disabled:cursor-not-allowed disabled:text-hush-text-accent"
+            <div
+              className="rounded-xl border border-hush-bg-light bg-hush-bg-dark px-4 py-4"
               data-testid="elections-ceremony-profile-select"
             >
-              {allowedProfiles.length === 0 ? (
-                <option value="">No allowed profiles</option>
-              ) : null}
-              {allowedProfiles.map((profile) => (
-                <option key={profile.ProfileId} value={profile.ProfileId}>
-                  {profile.DisplayName}
-                </option>
-              ))}
-            </select>
-            {selectedProfileId ? (
-              <p className="mt-2 text-sm text-hush-text-accent">
-                {allowedProfiles.find((profile) => profile.ProfileId === selectedProfileId)?.Description
-                  ?? 'Allowed by the current deployment.'}
-              </p>
-            ) : null}
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                Selected circuit / profile
+              </div>
+              <div className="mt-2 text-sm font-medium text-hush-text-primary">
+                {selectedProfile?.DisplayName ||
+                  effectiveSelectedProfileId ||
+                  'No selected circuit/profile'}
+              </div>
+              <div className="mt-2 text-sm text-hush-text-accent">
+                {selectedProfile?.Description ||
+                  'Choose the circuit/profile in Draft Policy, then save the draft before starting the ceremony.'}
+              </div>
+              <div className="mt-3 text-xs text-hush-text-accent">
+                {activeVersion
+                  ? 'The active ceremony version is already locked to this profile.'
+                  : 'Change this in Draft Policy. The ceremony workspace only reflects the currently selected profile.'}
+              </div>
+            </div>
+
+            <div
+              className="mt-4 rounded-xl border border-hush-bg-light/70 bg-hush-bg-element/60 px-4 py-3"
+              data-testid="elections-ceremony-mode-profile-summary"
+            >
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                Mode and profile contract
+              </div>
+              <div className="mt-2 text-sm text-hush-text-primary">
+                {getBindingLabel(bindingStatus)} election.{' '}
+                {getModeProfileFamilyLabel(bindingStatus)} are available for
+                this ceremony path.
+              </div>
+              <div className="mt-2 text-xs text-hush-text-accent">
+                {selectedProfile
+                  ? `Current selection: ${selectedProfile.DisplayName}. Change the selection in Draft Policy before starting or restarting the ceremony. ${getModeProfileFreezeCopy(bindingStatus)}`
+                  : getModeProfileFreezeCopy(bindingStatus)}
+              </div>
+            </div>
 
             <div className="mt-4 flex flex-wrap gap-2">
               <button
@@ -474,7 +490,7 @@ export function ElectionCeremonyWorkspaceSection({
                   isSubmitting ||
                   isLoadingCeremonyActionView ||
                   !!pendingSaveAlignmentMessage ||
-                  !selectedProfileId ||
+                  !effectiveSelectedProfileId ||
                   startAction?.status !== 'available'
                 }
                 className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 disabled:cursor-not-allowed disabled:bg-hush-bg-light disabled:text-hush-text-accent"
@@ -490,7 +506,7 @@ export function ElectionCeremonyWorkspaceSection({
                   isSubmitting ||
                   isLoadingCeremonyActionView ||
                   !!pendingSaveAlignmentMessage ||
-                  !selectedProfileId ||
+                  !effectiveSelectedProfileId ||
                   restartAction?.status !== 'available'
                 }
                 className="inline-flex items-center gap-2 rounded-xl border border-amber-500/40 px-4 py-2 text-sm text-amber-100 transition-colors hover:border-amber-300 disabled:cursor-not-allowed disabled:opacity-50"
@@ -607,10 +623,10 @@ export function ElectionCeremonyWorkspaceSection({
                     </div>
                     <div className="rounded-xl bg-[#151c33] px-3 py-3">
                       <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
-                      Approved toward threshold
+                      Validated for active version
                       </div>
-                    <div className="mt-2 text-sm text-hush-text-primary">
-                      {completedTrusteeCount} of {activeVersion?.RequiredApprovalCount ?? 0}
+                  <div className="mt-2 text-sm text-hush-text-primary">
+                      {completedTrusteeCount} of {activeVersion?.TrusteeCount ?? 0}
                     </div>
                     </div>
                   <div className="rounded-xl bg-[#151c33] px-3 py-3">
@@ -623,8 +639,8 @@ export function ElectionCeremonyWorkspaceSection({
                 <div className="mt-3 text-sm text-hush-text-accent">
                   {reviewableSubmittedTrusteeCount > 0
                     ? needsResubmissionTrusteeCount > 0
-                      ? `${reviewableSubmittedTrusteeCount} trustee package(s) are ready for approval now. ${needsResubmissionTrusteeCount} trustee(s) still need to rerun self-test and resubmit. Owner approval is recorded one trustee at a time until ${activeVersion?.RequiredApprovalCount ?? 0} approved share(s) are recorded. Approving one ready trustee does not change the returned trustees.`
-                      : `Approve the available trustee shares one trustee at a time until ${activeVersion?.RequiredApprovalCount ?? 0} approved share(s) are recorded.`
+                      ? `${reviewableSubmittedTrusteeCount} trustee package(s) are ready for approval now. ${needsResubmissionTrusteeCount} trustee(s) still need to rerun self-test and resubmit. Owner validation is recorded one trustee at a time until all ${activeVersion?.TrusteeCount ?? 0} bound trustee packages are completed. Approving one ready trustee does not change the returned trustees.`
+                      : `Approve the available trustee shares one trustee at a time until all ${activeVersion?.TrusteeCount ?? 0} bound trustee packages are completed.`
                     : 'No trustee is ready for approval yet. Returned trustees must rerun self-test and resubmit before owner approval can continue.'}
                 </div>
 
@@ -646,7 +662,7 @@ export function ElectionCeremonyWorkspaceSection({
                         </div>
                         <div className="mt-1 text-sm text-hush-text-accent">
                           {isNextOwnerApprovalReady
-                            ? `Approving this trustee records 1 approved share toward the ${activeVersion?.RequiredApprovalCount ?? 0}-share threshold. The other returned trustees stay returned until they rerun self-test and resubmit.`
+                            ? `Approving this trustee marks 1 more bound trustee package complete for the active version. The other returned trustees stay returned until they rerun self-test and resubmit.`
                             : 'This submission is missing approval metadata from an older ceremony package format. Step 5 is not the blocker. Request resubmission so the trustee can rerun self-test and submit an approvable package.'}
                         </div>
                       </div>
@@ -704,9 +720,11 @@ export function ElectionCeremonyWorkspaceSection({
                       const progress = getTrusteeProgressView(state);
                       const canApproveTrustee =
                         state.State === ElectionTrusteeCeremonyStateProto.CeremonyStateMaterialSubmitted &&
-                        hasApprovalMetadata(state);
+                        hasApprovalMetadata(state) &&
+                        !allTrusteePackagesValidated;
                       const canRequestResubmission =
-                        state.State === ElectionTrusteeCeremonyStateProto.CeremonyStateMaterialSubmitted;
+                        state.State === ElectionTrusteeCeremonyStateProto.CeremonyStateMaterialSubmitted &&
+                        !allTrusteePackagesValidated;
                       return (
                         <tr key={state.Id}>
                           <td className="py-3 pr-4 text-hush-text-primary">
@@ -812,7 +830,7 @@ export function ElectionCeremonyWorkspaceSection({
                 <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
                   Profile
                 </div>
-                <div className="mt-2 text-sm text-hush-text-primary">{selectedProfileId}</div>
+                <div className="mt-2 text-sm text-hush-text-primary">{effectiveSelectedProfileId}</div>
               </div>
               <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/70 px-4 py-3">
                 <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
@@ -858,7 +876,7 @@ export function ElectionCeremonyWorkspaceSection({
                 onClick={() => void handleConfirm()}
                 disabled={
                   isSubmitting ||
-                  !selectedProfileId ||
+                  !effectiveSelectedProfileId ||
                   (modalMode === 'restart' && restartReason.trim().length === 0)
                 }
                 className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 disabled:cursor-not-allowed disabled:bg-hush-bg-light disabled:text-hush-text-accent"
@@ -882,7 +900,7 @@ export function ElectionCeremonyWorkspaceSection({
             </div>
             <p className="mt-2 text-sm text-hush-text-accent">
               {validationModal.mode === 'complete'
-                ? `Review the recorded metadata, then approve this single trustee share. This records exactly one approved share toward the ${activeVersion?.RequiredApprovalCount ?? 0}-share threshold. Returned trustees stay returned until they resubmit.`
+                ? `Review the recorded metadata, then approve this single trustee share. This marks exactly one bound trustee package complete for the active version. Returned trustees stay returned until they resubmit.`
                 : 'This records a validation failure or missing-package-metadata return and sends the trustee back to the self-test step.'}
             </p>
 
@@ -908,10 +926,10 @@ export function ElectionCeremonyWorkspaceSection({
                   Ceremony outcome
                 </div>
                 <div className="mt-2 text-sm text-hush-text-primary">
-                  {selectedValidationNeedsTallyFingerprint
-                    ? 'This validation reaches readiness'
+                  {selectedValidationReachesReadiness
+                    ? 'This validation completes the version'
                     : validationModal.mode === 'complete'
-                      ? 'Progresses toward readiness'
+                      ? 'Progresses trustee completion'
                       : 'Returns trustee to self-test'}
                 </div>
               </div>
@@ -920,17 +938,12 @@ export function ElectionCeremonyWorkspaceSection({
             {validationModal.mode === 'complete' ? (
               <div className="mt-5 rounded-xl border border-hush-bg-light bg-hush-bg-dark/70 px-4 py-4 text-sm text-hush-text-accent">
                 <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
-                  Prepared tally fingerprint
-                </div>
-                <div className="mt-2 font-mono text-xs text-hush-text-primary">
-                  {selectedValidationNeedsTallyFingerprint
-                    ? preparedOwnerTallyFingerprint
-                    : 'Not required for this validation step'}
+                  Ceremony tally key
                 </div>
                 <div className="mt-2">
-                  {selectedValidationNeedsTallyFingerprint
-                    ? 'This approval crosses the trustee threshold, so the ceremony version will be marked ready with the prepared tally fingerprint.'
-                    : 'The ceremony remains in progress after this validation until enough trustees are completed.'}
+                  {selectedValidationReachesReadiness
+                    ? 'This approval completes the bound trustee set. The server derives the ceremony tally public key from the recorded trustee commitments and marks the version ready.'
+                    : 'The ceremony remains in progress after this validation until every bound trustee package is completed. The tally public key is derived and published automatically only when the full trustee set is complete.'}
                 </div>
               </div>
             ) : (

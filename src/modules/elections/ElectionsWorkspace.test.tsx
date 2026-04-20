@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -48,7 +49,7 @@ import {
 } from "@/lib/grpc";
 import { useBlockchainStore } from "@/modules/blockchain";
 import { ElectionsWorkspace } from "./ElectionsWorkspace";
-import { createDefaultElectionDraft } from "./contracts";
+import { createDefaultElectionDraft, normalizeElectionDraft } from "./contracts";
 import { useElectionsStore } from "./useElectionsStore";
 
 const {
@@ -162,7 +163,7 @@ const timestamp = { seconds: 1_711_410_000, nanos: 0 };
 function createDraftInput(
   overrides?: Partial<ElectionDraftInput>,
 ): ElectionDraftInput {
-  return {
+  return normalizeElectionDraft({
     ...createDefaultElectionDraft(),
     Title: "Board Election",
     ExternalReferenceCode: "ORG-2026-01",
@@ -183,14 +184,20 @@ function createDraftInput(
       },
     ],
     ...overrides,
-  };
+  });
 }
 
 function createElectionRecord(
   lifecycleState: ElectionLifecycleStateProto,
   overrides?: Partial<ElectionRecordView>,
 ): ElectionRecordView {
-  const draft = createDraftInput();
+  const draft = createDraftInput({
+    BindingStatus:
+      overrides?.BindingStatus ?? ElectionBindingStatusProto.Binding,
+    GovernanceMode:
+      overrides?.GovernanceMode ?? ElectionGovernanceModeProto.AdminOnly,
+    SelectedProfileId: overrides?.SelectedProfileId ?? "",
+  });
 
   return {
     ElectionId: "election-1",
@@ -201,6 +208,8 @@ function createElectionRecord(
     LifecycleState: lifecycleState,
     ElectionClass: draft.ElectionClass,
     BindingStatus: draft.BindingStatus,
+    SelectedProfileId: draft.SelectedProfileId,
+    SelectedProfileDevOnly: draft.SelectedProfileId.includes("-dev-"),
     GovernanceMode: draft.GovernanceMode,
     DisclosureMode: draft.DisclosureMode,
     ParticipationPrivacyMode: draft.ParticipationPrivacyMode,
@@ -264,7 +273,15 @@ function createElectionSummary(
 function createDraftSnapshot(
   overrides?: Partial<ElectionDraftSnapshot>,
 ): ElectionDraftSnapshot {
-  const draft = createDraftInput();
+  const policyOverrides = overrides?.Policy;
+  const draft = createDraftInput({
+    BindingStatus:
+      policyOverrides?.BindingStatus ?? ElectionBindingStatusProto.Binding,
+    GovernanceMode:
+      policyOverrides?.GovernanceMode ?? ElectionGovernanceModeProto.AdminOnly,
+    SelectedProfileId: policyOverrides?.SelectedProfileId ?? "",
+    RequiredApprovalCount: policyOverrides?.RequiredApprovalCount,
+  });
 
   return {
     Id: "snapshot-1",
@@ -279,6 +296,8 @@ function createDraftSnapshot(
     Policy: {
       ElectionClass: draft.ElectionClass,
       BindingStatus: draft.BindingStatus,
+      SelectedProfileId: draft.SelectedProfileId,
+      SelectedProfileDevOnly: draft.SelectedProfileId.includes("-dev-"),
       GovernanceMode: draft.GovernanceMode,
       DisclosureMode: draft.DisclosureMode,
       ParticipationPrivacyMode: draft.ParticipationPrivacyMode,
@@ -401,7 +420,7 @@ function createFinalizationSession(
     CeremonySnapshot: {
       CeremonyVersionId: "ceremony-version-1",
       VersionNumber: 1,
-      ProfileId: "prod-3of5-v1",
+      ProfileId: "dkg-prod-3of5",
       TrusteeCount: 3,
       RequiredApprovalCount: 2,
       CompletedTrustees: [
@@ -1221,6 +1240,20 @@ describe("ElectionsWorkspace", () => {
         LatestDraftSnapshot: createDraftSnapshot({
           Options: [...createDraftInput().OwnerOptions, reservedBlankOption],
         }),
+        CeremonyProfiles: [
+          {
+            ProfileId: "admin-prod-1of1",
+            DisplayName: "Admin-only protected circuit",
+            Description: "Admin protected",
+            ProviderKey: "built-in-admin",
+            ProfileVersion: "omega-v1.0.0-admin-prod-1of1",
+            TrusteeCount: 1,
+            RequiredApprovalCount: 1,
+            DevOnly: false,
+            RegisteredAt: timestamp,
+            LastUpdatedAt: timestamp,
+          },
+        ],
       }),
     );
 
@@ -1267,6 +1300,8 @@ describe("ElectionsWorkspace", () => {
     expect(submittedDraft.GovernanceMode).toBe(
       ElectionGovernanceModeProto.TrusteeThreshold,
     );
+    expect(submittedDraft.SelectedProfileId).toBe("dkg-prod-3of5");
+    expect(submittedDraft.RequiredApprovalCount).toBe(3);
     expect(submittedDraft.OwnerOptions).toHaveLength(2);
     expect(
       submittedDraft.OwnerOptions.some(
@@ -1855,7 +1890,7 @@ describe("ElectionsWorkspace", () => {
         LatestDraftSnapshot: createDraftSnapshot({ Policy: thresholdPolicy }),
         CeremonyProfiles: [
           {
-            ProfileId: "prod-3of5-v1",
+            ProfileId: "dkg-prod-3of5",
             DisplayName: "Production-Like 3 of 5",
             Description:
               "Production-like manifest-backed ceremony profile for the initial 3-of-5 trustee rollout over 5 trustees.",
@@ -1999,10 +2034,20 @@ describe("ElectionsWorkspace", () => {
     ).toHaveTextContent("Accepted trustee roster");
     expect(
       screen.getByTestId("elections-ready-to-open-checklist"),
+    ).toHaveTextContent(
+      "Need at least 5 accepted trustee(s) to match the selected 3-of-5 profile.",
+    );
+    expect(
+      screen.getByTestId("elections-ready-to-open-checklist"),
     ).toHaveTextContent("Key ceremony");
     expect(
       await screen.findByTestId("elections-governed-open-readiness"),
     ).toHaveTextContent("Not ready to start the governed open proposal yet.");
+    expect(
+      screen.getByTestId("elections-governed-open-readiness"),
+    ).toHaveTextContent(
+      "Need at least 5 accepted trustee(s) to match the selected 3-of-5 ceremony profile before the governed open proposal can start.",
+    );
     await openOwnerDetailTab("governed");
     expect(
       await screen.findByTestId(
@@ -2083,6 +2128,136 @@ describe("ElectionsWorkspace", () => {
     expect(
       await screen.findByTestId("elections-binding-advisory"),
     ).toHaveTextContent("result is advisory");
+    expect(screen.getByTestId("elections-mode-freeze-summary")).toHaveTextContent(
+      "Non-binding elections may choose either a dev/open circuit or a non-dev circuit",
+    );
+  });
+
+  it("shows the binding mode freeze summary for default binding drafts", async () => {
+    electionsServiceMock.getElectionsByOwner.mockResolvedValueOnce({
+      Elections: [createElectionSummary(ElectionLifecycleStateProto.Draft)],
+    });
+    electionsServiceMock.getElection.mockResolvedValueOnce(createElectionResponse());
+
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />,
+    );
+
+    expect(
+      await screen.findByTestId("elections-mode-freeze-summary"),
+    ).toHaveTextContent("non-dev circuits");
+  });
+
+  it("filters the admin-only circuit catalog by binding status without leaking trustee labels", async () => {
+    electionsServiceMock.getElectionsByOwner.mockResolvedValueOnce({
+      Elections: [createElectionSummary(ElectionLifecycleStateProto.Draft)],
+    });
+    electionsServiceMock.getElection.mockResolvedValueOnce(createElectionResponse());
+
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />,
+    );
+
+    await openOwnerDetailTab("policy");
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Edit draft policy" }),
+    );
+
+    const policyDialog = await screen.findByRole("dialog", {
+      name: "Edit draft policy",
+    });
+    const profileSelect = (await within(policyDialog).findByTestId(
+      "elections-policy-profile-select",
+    )) as HTMLSelectElement;
+    expect(
+      Array.from(profileSelect.options).map((option) => option.textContent?.trim()),
+    ).toEqual(["Admin-only protected circuit"]);
+    expect(screen.getByTestId("elections-mode-freeze-summary")).toHaveTextContent(
+      "non-dev circuits",
+    );
+    expect(screen.queryByText("Production-Like 3 of 5")).not.toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.change(within(policyDialog).getByLabelText("Binding status"), {
+        target: { value: `${ElectionBindingStatusProto.NonBinding}` },
+      });
+    });
+
+    await waitFor(() => {
+      expect(
+        Array.from(profileSelect.options).map((option) => option.textContent?.trim()),
+      ).toEqual([
+        "Admin-only protected circuit",
+        "Admin-only open audit circuit",
+      ]);
+    });
+
+    await act(async () => {
+      fireEvent.change(profileSelect, {
+        target: { value: "admin-dev-1of1" },
+      });
+      fireEvent.click(
+        within(policyDialog).getByRole("button", { name: "Apply policy changes" }),
+      );
+    });
+
+    expect(screen.getByTestId("elections-mode-freeze-summary")).toHaveTextContent(
+      "Non-binding elections may choose either a dev/open circuit or a non-dev circuit",
+    );
+    expect(screen.getByText("Admin-only open audit circuit")).toBeInTheDocument();
+    expect(screen.queryByText("Production-Like 3 of 5")).not.toBeInTheDocument();
+  });
+
+  it("restates the mode/profile contract on the ready-to-open tab", async () => {
+    electionsServiceMock.getElectionsByOwner.mockResolvedValueOnce({
+      Elections: [
+        createElectionSummary(ElectionLifecycleStateProto.Draft, {
+          BindingStatus: ElectionBindingStatusProto.NonBinding,
+        }),
+      ],
+    });
+    electionsServiceMock.getElection.mockResolvedValueOnce(
+      createElectionResponse({
+        Election: createElectionRecord(ElectionLifecycleStateProto.Draft, {
+          BindingStatus: ElectionBindingStatusProto.NonBinding,
+        }),
+        LatestDraftSnapshot: createDraftSnapshot({
+          Policy: {
+            ...createDraftSnapshot().Policy,
+            BindingStatus: ElectionBindingStatusProto.NonBinding,
+          },
+        }),
+      }),
+    );
+
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />,
+    );
+
+    fireEvent.click(await screen.findByTestId("election-summary-election-1"));
+    await openOwnerDetailTab("readiness");
+
+    expect(
+      await screen.findByTestId("elections-open-mode-profile-summary"),
+    ).toHaveTextContent("Non-binding election");
+    expect(
+      screen.getByTestId("elections-open-mode-profile-summary"),
+    ).toHaveTextContent("dev/open and non-dev circuits");
   });
 
   it("shows lifecycle controls and frozen policy for an open election", async () => {
@@ -2762,7 +2937,7 @@ describe("ElectionsWorkspace", () => {
       ],
       CeremonyProfiles: [
         {
-          ProfileId: "prod-3of5-v1",
+          ProfileId: "dkg-prod-3of5",
           DisplayName: "Production 3 of 5",
           Description: "Production rollout profile",
           ProviderKey: "provider-a",
@@ -2782,7 +2957,7 @@ describe("ElectionsWorkspace", () => {
           Id: "ceremony-version-1",
           ElectionId: "election-1",
           VersionNumber: 1,
-          ProfileId: "prod-3of5-v1",
+          ProfileId: "dkg-prod-3of5",
           Status: ElectionCeremonyVersionStatusProto.CeremonyVersionInProgress,
           TrusteeCount: 5,
           RequiredApprovalCount: 3,
@@ -2841,7 +3016,7 @@ describe("ElectionsWorkspace", () => {
         "owner-public-key",
         "owner-encryption-key",
         "owner-encryption-private-key",
-        "prod-3of5-v1",
+        "dkg-prod-3of5",
         "owner-private-key",
       );
     });
@@ -2898,7 +3073,7 @@ describe("ElectionsWorkspace", () => {
       }),
       CeremonyProfiles: [
         {
-          ProfileId: "prod-3of5-v1",
+          ProfileId: "dkg-prod-3of5",
           DisplayName: "Production 3 of 5",
           Description: "Production rollout profile",
           ProviderKey: "provider-a",
@@ -3092,7 +3267,8 @@ describe("ElectionsWorkspace", () => {
     });
     electionsServiceMock.getElection
       .mockResolvedValueOnce(initialElectionResponse)
-      .mockResolvedValueOnce(updatedElectionResponse);
+      .mockResolvedValueOnce(updatedElectionResponse)
+      .mockResolvedValue(updatedElectionResponse);
     electionsServiceMock.getElectionCeremonyActionView.mockResolvedValue(
       createCeremonyActionViewResponse(),
     );
@@ -3724,7 +3900,7 @@ describe("ElectionsWorkspace", () => {
     await openOwnerDetailTab("governed");
     expect(
       await screen.findByTestId("elections-governed-close-share-progress"),
-    ).toHaveTextContent("1 of 2 shares recorded");
+    ).toHaveTextContent("1 accepted / 2 eligible trustees");
     const initialGetElectionCallCount =
       electionsServiceMock.getElection.mock.calls.length;
 
@@ -3742,7 +3918,7 @@ describe("ElectionsWorkspace", () => {
     const closeShareProgress = await screen.findByTestId(
       "elections-governed-close-share-progress",
     );
-    expect(closeShareProgress).toHaveTextContent("2 of 2 shares recorded");
+    expect(closeShareProgress).toHaveTextContent("2 accepted / 2 eligible trustees");
     expect(closeShareProgress).toHaveTextContent("Bob Trustee");
     expect(closeShareProgress).toHaveTextContent("Aggregate tally release completed");
   });
@@ -4103,7 +4279,7 @@ describe("ElectionsWorkspace", () => {
       "elections-governed-close-share-progress",
     );
     expect(closeShareProgress).toHaveTextContent("Close-counting shares");
-    expect(closeShareProgress).toHaveTextContent("1 of 2 shares recorded");
+    expect(closeShareProgress).toHaveTextContent("1 accepted / 2 eligible trustees");
     expect(closeShareProgress).toHaveTextContent("Alice Trustee");
     expect(closeShareProgress).toHaveTextContent("Accepted");
     expect(closeShareProgress).toHaveTextContent("Bob Trustee");
@@ -4192,7 +4368,7 @@ describe("ElectionsWorkspace", () => {
         ],
         CeremonyProfiles: [
           {
-            ProfileId: "prod-3of5-v1",
+            ProfileId: "dkg-prod-3of5",
             DisplayName: "Production 3 of 5",
             Description: "Production rollout profile",
             ProviderKey: "provider-a",
@@ -4304,7 +4480,7 @@ describe("ElectionsWorkspace", () => {
     ).toHaveTextContent("aggregate-tally-1");
     expect(
       screen.getByTestId("elections-finalization-session"),
-    ).toHaveTextContent("1 of 2");
+    ).toHaveTextContent("1 accepted / 2 eligible");
     expect(
       screen.getByTestId("elections-finalization-session"),
     ).toHaveTextContent("Alice Trustee");
@@ -4428,7 +4604,7 @@ describe("ElectionsWorkspace", () => {
       }),
       CeremonyProfiles: [
         {
-          ProfileId: "prod-3of5-v1",
+          ProfileId: "dkg-prod-3of5",
           DisplayName: "Production 3 of 5",
           Description: "Production rollout profile",
           ProviderKey: "provider-a",
@@ -4445,7 +4621,7 @@ describe("ElectionsWorkspace", () => {
           Id: "ceremony-version-1",
           ElectionId: "election-1",
           VersionNumber: 4,
-          ProfileId: "prod-3of5-v1",
+          ProfileId: "dkg-prod-3of5",
           Status: ElectionCeremonyVersionStatusProto.CeremonyVersionInProgress,
           TrusteeCount: 5,
           RequiredApprovalCount: 3,
@@ -4465,7 +4641,7 @@ describe("ElectionsWorkspace", () => {
           Id: "ceremony-version-2",
           ElectionId: "election-1",
           VersionNumber: 5,
-          ProfileId: "prod-3of5-v1",
+          ProfileId: "dkg-prod-3of5",
           Status: ElectionCeremonyVersionStatusProto.CeremonyVersionInProgress,
           TrusteeCount: 5,
           RequiredApprovalCount: 3,
@@ -4535,7 +4711,7 @@ describe("ElectionsWorkspace", () => {
         "owner-public-key",
         "owner-encryption-key",
         "owner-encryption-private-key",
-        "prod-3of5-v1",
+        "dkg-prod-3of5",
         "Supersede the current version and restart.",
         "owner-private-key",
       );

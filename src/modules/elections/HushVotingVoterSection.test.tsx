@@ -1,13 +1,16 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  ElectionBindingStatusProto,
   ElectionClosedProgressStatusProto,
   ElectionHubNextActionHintProto,
   ElectionLifecycleStateProto,
   ElectionParticipationStatusProto,
+  OfficialResultVisibilityPolicyProto,
 } from '@/lib/grpc';
 import { VoterWorkspaceSummary } from './HushVotingVoterSection';
 import {
+  createElectionRecord,
   createHubEntry,
   createResultArtifact,
   createResultView,
@@ -264,6 +267,93 @@ describe('VoterWorkspaceSummary', () => {
     });
   });
 
+  it('shows explicit non-binding mode and circuit truth on the hub receipt verifier', async () => {
+    const entry = createHubEntry(
+      'election-open',
+      ElectionLifecycleStateProto.Open,
+      'Audit Election',
+      {
+        Election: {
+          ...createHubEntry(
+            'election-open',
+            ElectionLifecycleStateProto.Open,
+            'Audit Election',
+          ).Election,
+          BindingStatus: ElectionBindingStatusProto.NonBinding,
+        },
+        ActorRoles: {
+          IsOwnerAdmin: false,
+          IsTrustee: false,
+          IsVoter: true,
+          IsDesignatedAuditor: false,
+        },
+        CanViewParticipantResults: false,
+        CanViewReportPackage: false,
+        CanViewNamedParticipationRoster: false,
+        HasUnofficialResult: false,
+        HasOfficialResult: false,
+      },
+    );
+
+    electionsServiceMock.getElectionVotingView.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      Election: createElectionRecord(
+        'election-open',
+        ElectionLifecycleStateProto.Open,
+        'Audit Election',
+        {
+          BindingStatus: ElectionBindingStatusProto.NonBinding,
+          SelectedProfileId: 'dkg-dev-3of5',
+          SelectedProfileDevOnly: true,
+          OfficialResultVisibilityPolicy:
+            OfficialResultVisibilityPolicyProto.PublicPlaintext,
+        },
+      ),
+      HasAcceptedAt: true,
+      ReceiptId: 'rcpt-open-1',
+      AcceptanceId: 'acceptance-open-1',
+      ServerProof: 'server-proof-open-1',
+      PersonalParticipationStatus: ElectionParticipationStatusProto.ParticipationCountedAsVoted,
+      DkgProfileId: 'dkg-dev-3of5',
+      TallyPublicKeyFingerprint: 'open-audit-fingerprint',
+    });
+
+    render(
+      <VoterWorkspaceSummary
+        entry={entry}
+        actorPublicAddress="actor-address"
+        resultView={null}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('hush-voting-voter-toggle')).toHaveAttribute(
+        'aria-expanded',
+        'false',
+      );
+    });
+    fireEvent.click(screen.getByTestId('hush-voting-voter-toggle'));
+    fireEvent.click(await screen.findByTestId('hush-voting-verify-receipt-trigger'));
+    const receiptContext = await screen.findByTestId('hush-voting-receipt-context');
+
+    expect(receiptContext).toHaveTextContent('Non-binding');
+    expect(receiptContext).toHaveTextContent(
+      'dev/open and non-dev circuits',
+    );
+    expect(receiptContext).toHaveTextContent('Dev/open circuit');
+    expect(receiptContext).toHaveTextContent('dkg-dev-3of5');
+    expect(receiptContext).toHaveTextContent(
+      'open-audit-fingerprint',
+    );
+    expect(receiptContext).toHaveTextContent(
+      'Public plaintext',
+    );
+    expect(receiptContext).toHaveTextContent(
+      'explicit open-audit circuit',
+    );
+  });
+
   it('confirms the finalized counted set for a verified voter receipt once the official result is sealed', async () => {
     const entry = createHubEntry(
       'election-final',
@@ -293,11 +383,25 @@ describe('VoterWorkspaceSummary', () => {
     electionsServiceMock.getElectionVotingView.mockResolvedValue({
       Success: true,
       ErrorMessage: '',
+      Election: createElectionRecord(
+        'election-final',
+        ElectionLifecycleStateProto.Finalized,
+        'Annual Elections 2026',
+        {
+          BindingStatus: ElectionBindingStatusProto.Binding,
+          SelectedProfileId: 'dkg-prod-3of5',
+          SelectedProfileDevOnly: false,
+          OfficialResultVisibilityPolicy:
+            OfficialResultVisibilityPolicyProto.PublicPlaintext,
+        },
+      ),
       HasAcceptedAt: true,
       ReceiptId: 'rcpt-final-1',
       AcceptanceId: 'acceptance-final-1',
       ServerProof: 'server-proof-final-1',
       PersonalParticipationStatus: ElectionParticipationStatusProto.ParticipationCountedAsVoted,
+      DkgProfileId: 'dkg-prod-3of5',
+      TallyPublicKeyFingerprint: 'binding-fingerprint-final',
     });
     electionsServiceMock.verifyElectionReceipt.mockResolvedValue({
       Success: true,
@@ -360,6 +464,18 @@ describe('VoterWorkspaceSummary', () => {
     );
     expect(screen.getByTestId('hush-voting-receipt-result')).toHaveTextContent(
       'The ballot commitment line is independently confirmed on this device.'
+    );
+    expect(screen.getByTestId('hush-voting-receipt-context')).toHaveTextContent('Binding');
+    expect(screen.getByTestId('hush-voting-receipt-context')).toHaveTextContent(
+      'non-dev circuits',
+    );
+    expect(screen.getByTestId('hush-voting-receipt-context')).toHaveTextContent('Non-dev circuit');
+    expect(screen.getByTestId('hush-voting-receipt-context')).toHaveTextContent('dkg-prod-3of5');
+    expect(screen.getByTestId('hush-voting-receipt-context')).toHaveTextContent(
+      'binding-fingerprint-final',
+    );
+    expect(screen.getByTestId('hush-voting-receipt-context')).toHaveTextContent(
+      'protected non-dev circuit',
     );
   });
 

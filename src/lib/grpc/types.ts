@@ -316,6 +316,8 @@ export interface ECPoint {
   Y: string;  // Base64 encoded 32 bytes (big-endian)
 }
 
+export type ElectionCurvePoint = ECPoint;
+
 // Submit Reaction
 export interface SubmitReactionRequest {
   FeedId: string;                    // Base64 encoded 16 bytes (UUID)
@@ -1069,6 +1071,8 @@ export interface ElectionMetadata {
 export interface ElectionFrozenPolicy {
   ElectionClass: ElectionClassProto;
   BindingStatus: ElectionBindingStatusProto;
+  SelectedProfileId: string;
+  SelectedProfileDevOnly: boolean;
   GovernanceMode: ElectionGovernanceModeProto;
   DisclosureMode: ElectionDisclosureModeProto;
   ParticipationPrivacyMode: ParticipationPrivacyModeProto;
@@ -1115,6 +1119,7 @@ export interface ElectionCeremonyBindingSnapshot {
   RequiredApprovalCount: number;
   CompletedTrustees: ElectionTrusteeReference[];
   TallyPublicKeyFingerprint: string;
+  TallyPublicKey?: ElectionCurvePoint;
 }
 
 export interface ElectionCeremonyVersion {
@@ -1132,6 +1137,7 @@ export interface ElectionCeremonyVersion {
   SupersededAt?: GrpcTimestamp;
   SupersededReason: string;
   TallyPublicKeyFingerprint: string;
+  TallyPublicKey?: ElectionCurvePoint;
 }
 
 export interface ElectionCeremonyTranscriptEvent {
@@ -1367,6 +1373,8 @@ export interface ElectionRecordView {
   LifecycleState: ElectionLifecycleStateProto;
   ElectionClass: ElectionClassProto;
   BindingStatus: ElectionBindingStatusProto;
+  SelectedProfileId: string;
+  SelectedProfileDevOnly: boolean;
   GovernanceMode: ElectionGovernanceModeProto;
   DisclosureMode: ElectionDisclosureModeProto;
   ParticipationPrivacyMode: ParticipationPrivacyModeProto;
@@ -1504,6 +1512,7 @@ export interface ElectionDraftInput {
   ExternalReferenceCode: string;
   ElectionClass: ElectionClassProto;
   BindingStatus: ElectionBindingStatusProto;
+  SelectedProfileId: string;
   GovernanceMode: ElectionGovernanceModeProto;
   DisclosureMode: ElectionDisclosureModeProto;
   ParticipationPrivacyMode: ParticipationPrivacyModeProto;
@@ -1595,6 +1604,7 @@ export interface SubmitElectionCeremonyMaterialRequest {
   EncryptedPayload: string;
   PayloadFingerprint: string;
   ShareVersion: string;
+  CloseCountingPublicCommitment?: ECPoint | null;
 }
 
 export interface RecordElectionCeremonyValidationFailureRequest {
@@ -1612,7 +1622,7 @@ export interface CompleteElectionCeremonyTrusteeRequest {
   ActorPublicAddress: string;
   TrusteeUserAddress: string;
   ShareVersion: string;
-  TallyPublicKeyFingerprint: string;
+  TallyPublicKeyFingerprint?: string | null;
 }
 
 export interface SubmitElectionFinalizationShareRequest {
@@ -1823,6 +1833,7 @@ export interface GetElectionResultViewResponse {
   CanRetryFailedPackageFinalization: boolean;
   LatestReportPackage?: ElectionReportPackageSummaryView;
   VisibleReportArtifacts: ElectionReportArtifactView[];
+  CeremonySnapshot?: ElectionCeremonyBindingSnapshot;
 }
 
 export interface GetElectionCeremonyActionViewRequest {
@@ -2076,6 +2087,7 @@ export interface GetElectionVotingViewResponse {
   CeremonyVersionId: string;
   DkgProfileId: string;
   TallyPublicKeyFingerprint: string;
+  TallyPublicKey?: ElectionCurvePoint;
   ReceiptId: string;
   AcceptanceId: string;
   ServerProof: string;

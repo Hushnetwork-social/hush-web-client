@@ -28,7 +28,15 @@ import {
 import {
   formatArtifactValue,
   formatTimestamp,
+  getBindingLabel,
   getClosedProgressStatusLabel,
+  getCustodyBoundaryCopy,
+  getGovernanceLabel,
+  getGovernancePathLabel,
+  getModeProfileFamilyLabel,
+  getOfficialResultVisibilityLabel,
+  getSelectedProfileFamilyLabel,
+  getSecrecyBoundaryCopy,
 } from './contracts';
 
 type ElectionResultArtifactsSectionProps = {
@@ -400,8 +408,11 @@ export function ElectionResultArtifactsSection({
   const unofficialResult = showResults && !officialResult ? resultView?.UnofficialResult : null;
   const latestReportPackage = resultView?.LatestReportPackage;
   const visibleReportArtifacts = resultView?.VisibleReportArtifacts ?? [];
+  const ceremonySnapshot = resultView?.CeremonySnapshot;
   const closedProgressStatus =
     resultView?.ClosedProgressStatus ?? election.ClosedProgressStatus;
+  const officialVisibilityPolicy =
+    resultView?.OfficialResultVisibilityPolicy ?? election.OfficialResultVisibilityPolicy;
   const hasResultArtifacts = Boolean(unofficialResult || officialResult);
   const hasReportPackage = Boolean(
     showReportPackage && resultView?.CanViewReportPackage && latestReportPackage
@@ -424,6 +435,103 @@ export function ElectionResultArtifactsSection({
 
   return (
     <div className="space-y-5" data-testid="election-results-section">
+      <section className={sectionClass} data-testid="election-artifact-context">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+              Artifact context
+            </div>
+            <h2 className="mt-2 text-xl font-semibold text-hush-text-primary">
+              Mode and circuit truth
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
+              Later artifacts must keep the election mode, bound profile context, and secrecy
+              boundary explicit so auditors and operators do not have to reconstruct that contract
+              externally.
+            </p>
+          </div>
+          <div className="rounded-xl bg-hush-purple/20 px-3 py-2 text-xs text-hush-text-primary shadow-sm shadow-black/10">
+            {getBindingLabel(election.BindingStatus)}
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-7">
+          <div className="rounded-2xl bg-violet-500/12 p-4">
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+              Election mode
+            </div>
+            <div className="mt-2 text-sm font-medium text-hush-text-primary">
+              {getBindingLabel(election.BindingStatus)}
+            </div>
+          </div>
+          <div className="rounded-2xl bg-sky-500/12 p-4">
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+              Governance path
+            </div>
+            <div className="mt-2 text-sm font-medium text-hush-text-primary">
+              {getGovernancePathLabel(election.GovernanceMode)}
+            </div>
+            <div className="mt-2 text-xs text-hush-text-accent">
+              {getGovernanceLabel(election.GovernanceMode)}
+            </div>
+          </div>
+          <div className="rounded-2xl bg-sky-500/12 p-4">
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+              Allowed circuit families
+            </div>
+            <div className="mt-2 text-sm font-medium text-hush-text-primary">
+              {getModeProfileFamilyLabel(election.BindingStatus)}
+            </div>
+          </div>
+          <div className="rounded-2xl bg-indigo-500/12 p-4">
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+              Selected circuit family
+            </div>
+            <div className="mt-2 text-sm font-medium text-hush-text-primary">
+              {getSelectedProfileFamilyLabel(election.SelectedProfileDevOnly)}
+            </div>
+          </div>
+          <div className="rounded-2xl bg-emerald-500/12 p-4">
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+              Bound ceremony profile
+            </div>
+            <div className="mt-2 text-sm font-medium text-hush-text-primary">
+              {ceremonySnapshot?.ProfileId || 'Not recorded'}
+            </div>
+            {ceremonySnapshot ? (
+              <div className="mt-2 text-xs text-hush-text-accent">
+                Threshold {ceremonySnapshot.RequiredApprovalCount} of {ceremonySnapshot.TrusteeCount}
+              </div>
+            ) : null}
+          </div>
+          <div className="rounded-2xl bg-amber-500/12 p-4">
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+              Tally key fingerprint
+            </div>
+            <div className="mt-2 font-mono text-sm text-hush-text-primary">
+              {formatArtifactValue(ceremonySnapshot?.TallyPublicKeyFingerprint)}
+            </div>
+          </div>
+          <div className="rounded-2xl bg-cyan-500/12 p-4">
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+              Official visibility
+            </div>
+            <div className="mt-2 text-sm font-medium text-hush-text-primary">
+              {getOfficialResultVisibilityLabel(officialVisibilityPolicy)}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
+          <div className="rounded-2xl bg-black/20 p-4 text-sm text-hush-text-accent">
+            {getSecrecyBoundaryCopy(election.SelectedProfileDevOnly)}
+          </div>
+          <div className="rounded-2xl bg-sky-500/10 p-4 text-sm text-hush-text-accent">
+            {getCustodyBoundaryCopy(election.GovernanceMode)}
+          </div>
+        </div>
+      </section>
+
       {hasReportPackage && latestReportPackage ? (
         <section
           id="hush-voting-report-package"
@@ -496,6 +604,27 @@ export function ElectionResultArtifactsSection({
                 {latestReportPackage.ArtifactCount} stored artifacts
               </div>
             </div>
+          </div>
+
+          <div
+            className="rounded-2xl bg-black/20 p-4 text-sm text-hush-text-accent"
+            data-testid="report-package-boundary-context"
+          >
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+              Package boundary truth
+            </div>
+            <div className="mt-2 text-hush-text-primary">
+              {getBindingLabel(election.BindingStatus)} · {getGovernancePathLabel(election.GovernanceMode)}
+            </div>
+            <div className="mt-2">
+              Allowed circuit families: {getModeProfileFamilyLabel(election.BindingStatus)}.
+              {' '}Selected circuit family: {getSelectedProfileFamilyLabel(election.SelectedProfileDevOnly)}.
+              {ceremonySnapshot?.ProfileId
+                ? ` Bound ceremony profile: ${ceremonySnapshot.ProfileId}.`
+                : ' Bound ceremony profile is not recorded on this surface.'}
+            </div>
+            <div className="mt-2">{getSecrecyBoundaryCopy(election.SelectedProfileDevOnly)}</div>
+            <div className="mt-2">{getCustodyBoundaryCopy(election.GovernanceMode)}</div>
           </div>
 
           {latestReportPackage.FailureReason ? (
@@ -578,9 +707,9 @@ export function ElectionResultArtifactsSection({
           <div className="flex items-start gap-3">
             <KeyRound className="mt-0.5 h-5 w-5 text-hush-purple" />
             <div>
-              Participant-encrypted artifacts are readable in this view because your actor is part
-              of the election. Public readers only see official plaintext results when the election
-              policy allows it.
+              {election.SelectedProfileDevOnly
+                ? 'You can inspect these artifacts because your actor is part of the election. The selected open-audit circuit remains intentionally readable where artifact visibility allows it.'
+                : 'Participant-encrypted artifacts are readable in this view because your actor is part of the election. Public readers only see official plaintext results when the election policy allows it.'}
             </div>
           </div>
         </section>

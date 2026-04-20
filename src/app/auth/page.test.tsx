@@ -245,6 +245,37 @@ describe("AuthPage", () => {
     });
   });
 
+  it("submits the backup import form without clicking the import button", async () => {
+    returnToParam = "/social/post/post-enter";
+
+    render(<AuthPage />);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Import Keys" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Backup File" }));
+
+    const backupFile = new File(["backup"], "backup.dat", { type: "application/octet-stream" });
+    Object.defineProperty(backupFile, "arrayBuffer", {
+      value: vi.fn(async () => new TextEncoder().encode("backup").buffer),
+    });
+
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(fileInput, {
+      target: {
+        files: [backupFile],
+      },
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("Enter backup password"), {
+      target: { value: "secret-password" },
+    });
+
+    fireEvent.submit(screen.getByTestId("auth-backup-import-form"));
+
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith("/social/post/post-enter");
+    });
+  });
+
   it("falls back safely to feeds home when the return target is invalid", async () => {
     returnToParam = "https://example.com/social/post/post-999";
 

@@ -25,6 +25,21 @@ import {
 
 export const timestamp = { seconds: 1_711_410_000, nanos: 0 };
 
+function getDefaultSelectedProfileId(
+  governanceMode: ElectionGovernanceModeProto,
+  bindingStatus: ElectionBindingStatusProto
+): string {
+  if (governanceMode === ElectionGovernanceModeProto.TrusteeThreshold) {
+    return bindingStatus === ElectionBindingStatusProto.NonBinding
+      ? 'dkg-dev-3of5'
+      : 'dkg-prod-3of5';
+  }
+
+  return bindingStatus === ElectionBindingStatusProto.NonBinding
+    ? 'admin-dev-1of1'
+    : 'admin-prod-1of1';
+}
+
 export function createSummary(
   electionId: string,
   lifecycleState: ElectionLifecycleStateProto,
@@ -76,6 +91,16 @@ export function createElectionRecord(
   title: string,
   overrides?: Partial<ElectionRecordView>
 ): ElectionRecordView {
+  const governanceMode =
+    overrides?.GovernanceMode ?? ElectionGovernanceModeProto.AdminOnly;
+  const bindingStatus =
+    overrides?.BindingStatus ?? ElectionBindingStatusProto.Binding;
+  const selectedProfileId =
+    overrides?.SelectedProfileId ??
+    getDefaultSelectedProfileId(governanceMode, bindingStatus);
+  const selectedProfileDevOnly =
+    overrides?.SelectedProfileDevOnly ?? selectedProfileId.includes('-dev-');
+
   return {
     ElectionId: electionId,
     Title: title,
@@ -84,8 +109,10 @@ export function createElectionRecord(
     ExternalReferenceCode: 'ORG-2026-01',
     LifecycleState: lifecycleState,
     ElectionClass: 0,
-    BindingStatus: ElectionBindingStatusProto.Binding,
-    GovernanceMode: ElectionGovernanceModeProto.AdminOnly,
+    BindingStatus: bindingStatus,
+    SelectedProfileId: selectedProfileId,
+    SelectedProfileDevOnly: selectedProfileDevOnly,
+    GovernanceMode: governanceMode,
     DisclosureMode: 0,
     ParticipationPrivacyMode: 0,
     VoteUpdatePolicy: 0,

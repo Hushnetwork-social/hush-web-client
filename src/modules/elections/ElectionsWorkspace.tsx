@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type { FormEvent, ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   ArrowLeft,
@@ -21,6 +21,8 @@ import {
 } from "lucide-react";
 import {
   ElectionBindingStatusProto,
+  ElectionCloseCountingJobStatusProto,
+  ElectionFinalizationShareStatusProto,
   ElectionFinalizationSessionPurposeProto,
   ElectionFinalizationSessionStatusProto,
   ElectionTrusteeCeremonyStateProto,
@@ -39,6 +41,7 @@ import { identityService } from "@/lib/grpc/services/identity";
 import { useBlockchainStore } from "@/modules/blockchain";
 import {
   BINDING_OPTIONS,
+  coerceSelectedCeremonyProfileId,
   GOVERNANCE_OPTIONS,
   OUTCOME_RULE_OPTIONS,
   WARNING_CHOICES,
@@ -50,10 +53,12 @@ import {
   createDraftFromElectionDetail,
   createElectionOption,
   createOutcomeRuleForKind,
+  findCeremonyProfileById,
   formatArtifactValue,
   formatTimestamp,
   getAcceptedFinalizationShareCount,
   getActiveCeremonyVersion,
+  getAllowedCeremonyProfiles,
   getBindingLabel,
   getFixedCeremonyProfileShape,
   getDisclosureModeLabel,
@@ -78,6 +83,9 @@ import {
   getReportingPolicyLabel,
   getRequiredOpenWarningCodes,
   getReviewWindowPolicyLabel,
+  getModeProfileFamilyLabel,
+  getModeProfileFreezeCopy,
+  getSelectedProfileFamilyLabel,
   getSummaryBadge,
   getUnsupportedDraftValueMessages,
   getVoteUpdatePolicyLabel,
@@ -107,6 +115,24 @@ type FixedPolicyItem = {
   note: string;
 };
 
+function formatTrusteeReferenceList(
+  trustees:
+    | ReadonlyArray<{
+        TrusteeDisplayName?: string | null;
+        TrusteeUserAddress: string;
+      }>
+    | null
+    | undefined,
+): string {
+  if (!trustees || trustees.length === 0) {
+    return "Not recorded";
+  }
+
+  return trustees
+    .map((trustee) => trustee.TrusteeDisplayName || trustee.TrusteeUserAddress)
+    .join(", ");
+}
+
 type OwnerEditorOverlayId =
   | "metadata"
   | "policy"
@@ -124,6 +150,7 @@ type MetadataEditorState = {
 
 type PolicyEditorState = {
   bindingStatus: ElectionBindingStatusProto;
+  selectedProfileId: string;
   governanceMode: ElectionGovernanceModeProto;
   outcomeRuleKind: OutcomeRuleKindProto;
 };
@@ -162,7 +189,9 @@ function getDefaultOwnerWorkspaceTabId({
   return canEditDraft ? "save" : "lifecycle";
 }
 
-function buildFixedPolicyItems(draft: ElectionDraftInput): FixedPolicyItem[] {
+function buildFixedPolicyItems(
+  draft: ElectionDraftInput,
+): FixedPolicyItem[] {
   return [
     {
       label: "Election class",
@@ -272,14 +301,22 @@ function OwnerEditorOverlay({
   applyDisabled?: boolean;
   maxWidthClass?: string;
 }) {
+  const titleId = useId();
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
       <div
         className={`w-full ${maxWidthClass} max-h-[88vh] overflow-y-auto rounded-3xl border border-hush-bg-light bg-hush-bg-element p-6 shadow-2xl shadow-black/30`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
       >
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h3 className="text-xl font-semibold text-hush-text-primary">
+            <h3
+              id={titleId}
+              className="text-xl font-semibold text-hush-text-primary"
+            >
               {title}
             </h3>
             <p className="mt-2 text-sm text-hush-text-accent">{description}</p>
@@ -463,10 +500,15 @@ export function ElectionsWorkspace({
     externalReferenceCode: "",
     shortDescription: "",
   });
-  const [policyEditor, setPolicyEditor] = useState<PolicyEditorState>({
-    bindingStatus: ElectionBindingStatusProto.Binding,
-    governanceMode: ElectionGovernanceModeProto.AdminOnly,
-    outcomeRuleKind: OutcomeRuleKindProto.SingleWinner,
+  const [policyEditor, setPolicyEditor] = useState<PolicyEditorState>(() => {
+    const defaultDraft = createDefaultElectionDraft();
+
+    return {
+      bindingStatus: defaultDraft.BindingStatus,
+      selectedProfileId: defaultDraft.SelectedProfileId,
+      governanceMode: defaultDraft.GovernanceMode,
+      outcomeRuleKind: defaultDraft.OutcomeRule.Kind,
+    };
   });
   const [optionsEditor, setOptionsEditor] = useState<
     ElectionDraftInput["OwnerOptions"]
@@ -610,6 +652,22 @@ export function ElectionsWorkspace({
         ) ?? null,
     }));
   }, [activeCloseCountingSession, closeCountingShares]);
+  const closeCountingEligibleTrusteeCount =
+    activeCloseCountingSession?.EligibleTrustees.length ?? 0;
+  const closeCountingPendingEligibleTrusteeCount = useMemo(
+    () =>
+      closeCountingTrusteeProgress.filter(
+        ({ latestShare }) =>
+          latestShare?.Status !==
+          ElectionFinalizationShareStatusProto.FinalizationShareAccepted,
+      ).length,
+    [closeCountingTrusteeProgress],
+  );
+  const recoverableCloseCountingFailure =
+    activeCloseCountingSession?.CloseCountingJobStatus ===
+      ElectionCloseCountingJobStatusProto.CloseCountingJobFailed &&
+    !closeCountingReleaseEvidence &&
+    closeCountingPendingEligibleTrusteeCount > 0;
   const activeCeremonyTrusteeStates = useMemo(
     () => selectedElection?.ActiveCeremonyTrusteeStates ?? [],
     [selectedElection?.ActiveCeremonyTrusteeStates],
@@ -617,6 +675,46 @@ export function ElectionsWorkspace({
   const fixedCeremonyProfileShape = useMemo(
     () => getFixedCeremonyProfileShape(selectedElection ?? null),
     [selectedElection],
+  );
+  const availableCeremonyProfiles = useMemo(
+    () =>
+      getAllowedCeremonyProfiles(
+        selectedElection ?? null,
+        undefined,
+        draft.GovernanceMode,
+      ),
+    [draft.GovernanceMode, selectedElection],
+  );
+  const selectedDraftProfile = useMemo(
+    () =>
+      findCeremonyProfileById(
+        availableCeremonyProfiles,
+        draft.SelectedProfileId,
+        draft.GovernanceMode,
+      ),
+    [availableCeremonyProfiles, draft.GovernanceMode, draft.SelectedProfileId],
+  );
+  const compatiblePolicyEditorProfiles = useMemo(
+    () =>
+      getAllowedCeremonyProfiles(
+        selectedElection ?? null,
+        policyEditor.bindingStatus,
+        policyEditor.governanceMode,
+      ),
+    [policyEditor.bindingStatus, policyEditor.governanceMode, selectedElection],
+  );
+  const selectedPolicyEditorProfile = useMemo(
+    () =>
+      findCeremonyProfileById(
+        compatiblePolicyEditorProfiles,
+        policyEditor.selectedProfileId,
+        policyEditor.governanceMode,
+      ),
+    [
+      compatiblePolicyEditorProfiles,
+      policyEditor.governanceMode,
+      policyEditor.selectedProfileId,
+    ],
   );
   const fixedTrusteeApprovalCount =
     fixedCeremonyProfileShape?.requiredApprovalCount ?? null;
@@ -697,7 +795,8 @@ export function ElectionsWorkspace({
   const requiredWarningCodeKey = requiredWarningCodes.join(",");
 
   const fixedPolicyItems = useMemo<FixedPolicyItem[]>(
-    () => buildFixedPolicyItems(draft),
+    () =>
+      buildFixedPolicyItems(draft),
     [draft],
   );
   const baselineDraft = useMemo(
@@ -853,8 +952,19 @@ export function ElectionsWorkspace({
     election?.GovernanceMode !== ElectionGovernanceModeProto.TrusteeThreshold;
   const requiredTrusteeCountForOpen = Math.max(
     1,
-    draft.RequiredApprovalCount || 1,
+    selectedDraftProfile?.TrusteeCount ??
+      fixedCeremonyTrusteeCount ??
+      draft.RequiredApprovalCount ??
+      1,
   );
+  const selectedTrusteeRosterLabel =
+    usesTrusteeThreshold && selectedDraftProfile
+      ? `${selectedDraftProfile.RequiredApprovalCount}-of-${selectedDraftProfile.TrusteeCount}`
+      : usesTrusteeThreshold &&
+          fixedTrusteeApprovalCount &&
+          fixedCeremonyTrusteeCount
+        ? `${fixedTrusteeApprovalCount}-of-${fixedCeremonyTrusteeCount}`
+        : null;
   const hasAcceptedTrusteesForOpen =
     !usesTrusteeThreshold ||
     acceptedTrusteeCount >= requiredTrusteeCountForOpen;
@@ -907,7 +1017,9 @@ export function ElectionsWorkspace({
     }
     if (!hasAcceptedTrusteesForOpen) {
       issues.push(
-        `Need at least ${requiredTrusteeCountForOpen} accepted trustee(s) before the governed open proposal can start.`,
+        selectedTrusteeRosterLabel
+          ? `Need at least ${requiredTrusteeCountForOpen} accepted trustee(s) to match the selected ${selectedTrusteeRosterLabel} ceremony profile before the governed open proposal can start.`
+          : `Need at least ${requiredTrusteeCountForOpen} accepted trustee(s) before the governed open proposal can start.`,
       );
     }
     if (!isKeyCeremonyReady) {
@@ -931,6 +1043,7 @@ export function ElectionsWorkspace({
     openValidationErrors.length,
     requiredTrusteeCountForOpen,
     saveValidationErrors.length,
+    selectedTrusteeRosterLabel,
     usesTrusteeThreshold,
   ]);
   const isGovernedOpenWorkflowReady =
@@ -976,8 +1089,12 @@ export function ElectionsWorkspace({
               label: "Accepted trustee roster",
               isReady: hasAcceptedTrusteesForOpen,
               detail: hasAcceptedTrusteesForOpen
-                ? `${acceptedTrusteeCount} accepted trustee(s) cover the ${requiredTrusteeCountForOpen}-of-N threshold.`
-                : `Need at least ${requiredTrusteeCountForOpen} accepted trustee(s).`,
+                ? selectedTrusteeRosterLabel
+                  ? `${acceptedTrusteeCount} accepted trustee(s) satisfy the selected ${selectedTrusteeRosterLabel} profile roster.`
+                  : `${acceptedTrusteeCount} accepted trustee(s) satisfy the selected ceremony profile roster.`
+                : selectedTrusteeRosterLabel
+                  ? `Need at least ${requiredTrusteeCountForOpen} accepted trustee(s) to match the selected ${selectedTrusteeRosterLabel} profile.`
+                  : `Need at least ${requiredTrusteeCountForOpen} accepted trustee(s).`,
             },
             {
               label: "Key ceremony",
@@ -1017,6 +1134,7 @@ export function ElectionsWorkspace({
       openValidationErrors.length,
       requiredTrusteeCountForOpen,
       saveValidationErrors.length,
+      selectedTrusteeRosterLabel,
       usesTrusteeThreshold,
     ],
   );
@@ -1361,7 +1479,10 @@ export function ElectionsWorkspace({
   };
 
   const handleSaveDraft = async () => {
-    const normalizedDraft = normalizeElectionDraft(draft);
+    const normalizedDraft = normalizeElectionDraft(
+      draft,
+      availableCeremonyProfiles,
+    );
     setDraft(normalizedDraft);
 
     const reason = snapshotReason.trim();
@@ -1410,6 +1531,7 @@ export function ElectionsWorkspace({
   const openPolicyOverlay = () => {
     setPolicyEditor({
       bindingStatus: draft.BindingStatus,
+      selectedProfileId: draft.SelectedProfileId,
       governanceMode: draft.GovernanceMode,
       outcomeRuleKind: draft.OutcomeRule.Kind,
     });
@@ -1417,6 +1539,17 @@ export function ElectionsWorkspace({
   };
 
   const applyPolicyChanges = () => {
+    const nextSelectedProfileId = coerceSelectedCeremonyProfileId(
+      policyEditor.bindingStatus,
+      policyEditor.governanceMode,
+      policyEditor.selectedProfileId,
+      compatiblePolicyEditorProfiles,
+    );
+    const nextSelectedProfile = findCeremonyProfileById(
+      compatiblePolicyEditorProfiles,
+      nextSelectedProfileId,
+      policyEditor.governanceMode,
+    );
     setDraft((current) => {
       const governanceUpdated = applyGovernanceModeDefaults(
         current,
@@ -1425,7 +1558,18 @@ export function ElectionsWorkspace({
       return {
         ...governanceUpdated,
         BindingStatus: policyEditor.bindingStatus,
+        SelectedProfileId: nextSelectedProfileId,
         OutcomeRule: createOutcomeRuleForKind(policyEditor.outcomeRuleKind),
+        RequiredApprovalCount:
+          policyEditor.governanceMode ===
+          ElectionGovernanceModeProto.TrusteeThreshold
+            ? Math.max(
+                1,
+                nextSelectedProfile?.RequiredApprovalCount ??
+                  governanceUpdated.RequiredApprovalCount ??
+                  1,
+              )
+            : undefined,
       };
     });
     setActiveOverlay(null);
@@ -1761,7 +1905,7 @@ export function ElectionsWorkspace({
         CeremonyVersionId: activeCeremonyVersion.Id,
         TrusteeUserAddress: trusteeUserAddress,
         ShareVersion: shareVersion,
-        TallyPublicKeyFingerprint: tallyPublicKeyFingerprint ?? "",
+        TallyPublicKeyFingerprint: tallyPublicKeyFingerprint ?? null,
       },
       ownerEncryptionPublicKey ?? "",
       ownerEncryptionPrivateKey ?? "",
@@ -1989,6 +2133,14 @@ export function ElectionsWorkspace({
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-3">
+                  <div
+                    className="rounded-xl bg-hush-bg-dark/80 px-3 py-2 text-xs text-hush-text-accent"
+                    data-testid="elections-mode-freeze-summary"
+                  >
+                    {selectedDraftProfile
+                      ? `${selectedDraftProfile.DisplayName}. ${getModeProfileFreezeCopy(draft.BindingStatus)}`
+                      : getModeProfileFreezeCopy(draft.BindingStatus)}
+                  </div>
                   {draft.BindingStatus ===
                     ElectionBindingStatusProto.NonBinding && (
                     <div
@@ -2297,6 +2449,23 @@ export function ElectionsWorkspace({
               onAction={canEditDraft ? openWarningsOverlay : undefined}
               dataTestId="elections-open-preparation-overview"
             >
+              <div
+                className="mb-5 rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4"
+                data-testid="elections-open-mode-profile-summary"
+              >
+                <div className="text-sm font-semibold">Mode and profile contract</div>
+                <div className="mt-3 text-sm text-hush-text-primary">
+                  {getBindingLabel(draft.BindingStatus)} election.{" "}
+                  {getModeProfileFamilyLabel(draft.BindingStatus)} are valid for
+                  this open path.
+                </div>
+                <div className="mt-2 text-sm text-hush-text-accent">
+                  {selectedDraftProfile
+                    ? `Selected circuit: ${selectedDraftProfile.DisplayName}. ${getModeProfileFreezeCopy(draft.BindingStatus)}`
+                    : getModeProfileFreezeCopy(draft.BindingStatus)}
+                </div>
+              </div>
+
               <div
                 className="mb-5 rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4"
                 data-testid="elections-ready-to-open-checklist"
@@ -2712,7 +2881,7 @@ export function ElectionsWorkspace({
               onAction={canEditDraft ? openPolicyOverlay : undefined}
               dataTestId="elections-policy-overview"
             >
-              <div className="grid gap-4 md:grid-cols-3">
+              <div className="grid gap-4 md:grid-cols-4">
                 <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
                   <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
                     Binding status
@@ -2727,6 +2896,17 @@ export function ElectionsWorkspace({
                   </div>
                   <div className="mt-2 text-sm font-medium text-hush-text-primary">
                     {getGovernanceLabel(draft.GovernanceMode)}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
+                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                    Selected circuit
+                  </div>
+                  <div className="mt-2 text-sm font-medium text-hush-text-primary">
+                    {selectedDraftProfile?.DisplayName || draft.SelectedProfileId || "Not set"}
+                  </div>
+                  <div className="mt-2 text-xs text-hush-text-accent">
+                    {getSelectedProfileFamilyLabel(selectedDraftProfile?.DevOnly)}
                   </div>
                 </div>
                 <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
@@ -3362,7 +3542,7 @@ export function ElectionsWorkspace({
                                 </div>
                                 <div className="text-xs text-hush-text-accent">
                                   {activeCloseCountingSession
-                                    ? `${closeCountingAcceptedShareCount} of ${activeCloseCountingSession.RequiredShareCount} shares recorded`
+                                    ? `${closeCountingAcceptedShareCount} accepted / ${closeCountingEligibleTrusteeCount} eligible trustees`
                                     : closeProposalExecuted
                                       ? "Indexing share session"
                                       : "Waiting for close threshold"}
@@ -3371,9 +3551,11 @@ export function ElectionsWorkspace({
 
                               <div className="mt-2 text-xs text-hush-text-accent">
                                 {closeCountingReleaseEvidence
-                                  ? `Aggregate tally release completed at ${formatTimestamp(closeCountingReleaseEvidence.CompletedAt)}.`
-                                  : activeCloseCountingSession
-                                    ? `Session status: ${getFinalizationSessionStatusLabel(activeCloseCountingSession.Status)}. Trustees listed below show who has already submitted the bound tally share.`
+                                  ? `Aggregate tally release completed at ${formatTimestamp(closeCountingReleaseEvidence.CompletedAt)}. Release subset: ${formatTrusteeReferenceList(closeCountingReleaseEvidence.AcceptedTrustees)}.`
+                                  : activeCloseCountingSession && recoverableCloseCountingFailure
+                                    ? `Session status: ${getFinalizationSessionStatusLabel(activeCloseCountingSession.Status)}. Threshold is met, but none of the accepted ${activeCloseCountingSession.RequiredShareCount}-share subsets reconstruct the bound tally yet. Pending eligible trustees can still submit on this same session, and the executor retries automatically after the next accepted share.`
+                                    : activeCloseCountingSession
+                                      ? `Session status: ${getFinalizationSessionStatusLabel(activeCloseCountingSession.Status)}. Trustees listed below show who has already submitted the bound tally share. Threshold: ${activeCloseCountingSession.RequiredShareCount} shares.`
                                     : closeProposalExecuted
                                       ? "Close reached threshold. The server is creating the bound close-counting session now."
                                       : "Share submission does not begin until close reaches trustee threshold."}
@@ -3774,14 +3956,25 @@ export function ElectionsWorkspace({
                     </span>
                     <select
                       value={policyEditor.bindingStatus}
-                      onChange={(event) =>
+                      onChange={(event) => {
+                        const nextBindingStatus = Number(
+                          event.target.value,
+                        ) as ElectionBindingStatusProto;
                         setPolicyEditor((current) => ({
                           ...current,
-                          bindingStatus: Number(
-                            event.target.value,
-                          ) as ElectionBindingStatusProto,
-                        }))
-                      }
+                          bindingStatus: nextBindingStatus,
+                          selectedProfileId: coerceSelectedCeremonyProfileId(
+                            nextBindingStatus,
+                            current.governanceMode,
+                            current.selectedProfileId,
+                            getAllowedCeremonyProfiles(
+                              selectedElection ?? null,
+                              undefined,
+                              current.governanceMode,
+                            ),
+                          ),
+                        }));
+                      }}
                       className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-2 text-sm outline-none transition-colors focus:border-hush-purple"
                     >
                       {BINDING_OPTIONS.map((option) => (
@@ -3792,20 +3985,85 @@ export function ElectionsWorkspace({
                     </select>
                   </label>
 
+                  <div className="rounded-2xl bg-hush-bg-dark/80 px-4 py-3 text-sm text-hush-text-accent md:col-span-2">
+                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                      Mode and profile freeze
+                    </div>
+                    <p
+                      className="mt-2 leading-6 text-hush-text-primary"
+                      data-testid="elections-policy-mode-freeze-note"
+                    >
+                      {getModeProfileFreezeCopy(policyEditor.bindingStatus)}
+                    </p>
+                    <p className="mt-2 text-xs text-hush-text-accent">
+                      FEAT-105 keeps the existing draft workflow, but the election mode and selected circuit/profile must be settled before the election opens.
+                    </p>
+                  </div>
+
+                  <label className="text-sm md:col-span-3">
+                    <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                      Circuit / profile
+                    </span>
+                    <select
+                      value={coerceSelectedCeremonyProfileId(
+                        policyEditor.bindingStatus,
+                        policyEditor.governanceMode,
+                        policyEditor.selectedProfileId,
+                        compatiblePolicyEditorProfiles,
+                      )}
+                      onChange={(event) =>
+                        setPolicyEditor((current) => ({
+                          ...current,
+                          selectedProfileId: event.target.value,
+                        }))
+                      }
+                      className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-2 text-sm outline-none transition-colors focus:border-hush-purple"
+                      data-testid="elections-policy-profile-select"
+                    >
+                      {compatiblePolicyEditorProfiles.map((profile) => (
+                        <option key={profile.ProfileId} value={profile.ProfileId}>
+                          {profile.DisplayName}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="mt-2 rounded-2xl bg-hush-bg-dark/80 px-4 py-3 text-sm text-hush-text-accent">
+                      <div className="text-hush-text-primary">
+                        {selectedPolicyEditorProfile?.Description ||
+                          "Select the circuit/profile that this election will freeze before open."}
+                      </div>
+                      <div className="mt-2 text-xs text-hush-text-accent">
+                        {selectedPolicyEditorProfile
+                          ? `Selected family: ${getSelectedProfileFamilyLabel(selectedPolicyEditorProfile.DevOnly)}.`
+                          : "A selected circuit/profile is required before save and open."}
+                      </div>
+                    </div>
+                  </label>
+
                   <label className="text-sm">
                     <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
                       Governance mode
                     </span>
                     <select
                       value={policyEditor.governanceMode}
-                      onChange={(event) =>
+                      onChange={(event) => {
+                        const nextGovernanceMode = Number(
+                          event.target.value,
+                        ) as ElectionGovernanceModeProto;
                         setPolicyEditor((current) => ({
                           ...current,
-                          governanceMode: Number(
-                            event.target.value,
-                          ) as ElectionGovernanceModeProto,
-                        }))
-                      }
+                          governanceMode: nextGovernanceMode,
+                          selectedProfileId: coerceSelectedCeremonyProfileId(
+                            current.bindingStatus,
+                            nextGovernanceMode,
+                            current.selectedProfileId,
+                            getAllowedCeremonyProfiles(
+                              selectedElection ?? null,
+                              undefined,
+                              nextGovernanceMode,
+                            ),
+                          ),
+                        }));
+                      }}
                       className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-2 text-sm outline-none transition-colors focus:border-hush-purple"
                     >
                       {GOVERNANCE_OPTIONS.map((option) => (

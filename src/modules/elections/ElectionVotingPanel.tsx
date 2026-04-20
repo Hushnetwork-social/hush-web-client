@@ -17,8 +17,17 @@ import {
   ShieldCheck,
   X,
 } from 'lucide-react';
-import { generateGuid } from '@/lib/crypto';
+import { base64ToBytes, generateGuid } from '@/lib/crypto';
 import {
+  FEAT107_CIRCUIT_VERSION_BY_PROFILE,
+  FEAT107_PROOF_PROFILES,
+  encryptOneHotElectionBallot,
+  serializePoint,
+  serializeVectorCiphertext,
+} from '@/lib/crypto/elections';
+import { bytesToBigint, type Point } from '@/lib/crypto/reactions/babyjubjub';
+import {
+  ElectionBindingStatusProto,
   ElectionLifecycleStateProto,
   ElectionParticipationStatusProto,
   ElectionVotingRightStatusProto,
@@ -35,6 +44,7 @@ import {
   createAcceptElectionBallotCastTransaction,
   createRegisterElectionVotingCommitmentTransaction,
 } from './transactionService';
+import { ElectionReceiptTruthPanel } from './ElectionReceiptTruthPanel';
 import { ElectionResultArtifactsSection } from './ElectionResultArtifactsSection';
 import { getLifecycleLabel } from './contracts';
 
@@ -92,10 +102,6 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function isElectionDevModeAllowed(): boolean {
-  return process.env.NEXT_PUBLIC_ELECTIONS_ALLOW_DEV_MODE === 'true';
-}
-
 function shouldIncludeReceiptCommitment(
   lifecycleState?: ElectionLifecycleStateProto,
 ): boolean {
@@ -103,18 +109,6 @@ function shouldIncludeReceiptCommitment(
     lifecycleState === ElectionLifecycleStateProto.Closed ||
     lifecycleState === ElectionLifecycleStateProto.Finalized
   );
-}
-
-function getForcedE2EElectionMode(): 'dev' | 'non-dev' | null {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
-  const forcedMode = (window as Window & {
-    __e2e_forceElectionMode?: unknown;
-  }).__e2e_forceElectionMode;
-
-  return forcedMode === 'dev' || forcedMode === 'non-dev' ? forcedMode : null;
 }
 
 async function waitForVotingViewMatch(
@@ -355,6 +349,126 @@ async function buildElectionDevModeArtifacts({
       tallyPublicKeyFingerprint,
     }),
     ballotNullifier,
+  };
+}
+
+async function deriveControlledScalarSeed(...parts: string[]): Promise<bigint> {
+  const digest = await hashText(parts.join(':'));
+  return BigInt(`0x${digest || '1'}`);
+}
+
+function grpcPointToElectionPoint(point: { X?: string; Y?: string } | null | undefined): Point {
+  if (!point?.X || !point?.Y) {
+    throw new Error('The ceremony tally public key is missing from the voting boundary context.');
+  }
+
+  return {
+    x: bytesToBigint(base64ToBytes(point.X)),
+    y: bytesToBigint(base64ToBytes(point.Y)),
+  };
+}
+
+function resolveCircuitVersionForDkgProfile(dkgProfileId: string): string {
+  return dkgProfileId.toLowerCase().includes('dev')
+    ? FEAT107_CIRCUIT_VERSION_BY_PROFILE.DEV_SMOKE_PROFILE
+    : FEAT107_CIRCUIT_VERSION_BY_PROFILE.PRODUCTION_LIKE_PROFILE;
+}
+
+function resolveProofProfileForDkgProfile(dkgProfileId: string): string {
+  return dkgProfileId.toLowerCase().includes('dev')
+    ? FEAT107_PROOF_PROFILES.DEV_SMOKE_PROFILE
+    : FEAT107_PROOF_PROFILES.PRODUCTION_LIKE_PROFILE;
+}
+
+async function buildBindingProtectedBallotArtifacts({
+  electionId,
+  selectedOption,
+  selectedOptionIndex,
+  selectionCount,
+  openArtifactId,
+  eligibleSetHash,
+  ceremonyVersionId,
+  dkgProfileId,
+  tallyPublicKey,
+  tallyPublicKeyFingerprint,
+}: {
+  electionId: string;
+  selectedOption: {
+    OptionId: string;
+    DisplayLabel: string;
+  };
+  selectedOptionIndex: number;
+  selectionCount: number;
+  openArtifactId: string;
+  eligibleSetHash: string;
+  ceremonyVersionId: string;
+  dkgProfileId: string;
+  tallyPublicKey: Point;
+  tallyPublicKeyFingerprint: string;
+}): Promise<CastDraft & { commitmentHash: string }> {
+  const artifactSeed = generateGuid();
+  const profileId = dkgProfileId;
+  const proofProfile = resolveProofProfileForDkgProfile(dkgProfileId);
+  const circuitVersion = resolveCircuitVersionForDkgProfile(dkgProfileId);
+  const { ciphertext } = encryptOneHotElectionBallot(selectedOptionIndex, tallyPublicKey, {
+    nonceSeed: await deriveControlledScalarSeed(
+      'feat105-binding-ballot-nonces-v1',
+      electionId,
+      selectedOption.OptionId,
+      artifactSeed,
+      openArtifactId,
+      ceremonyVersionId,
+      dkgProfileId,
+    ),
+    selectionCount,
+  });
+
+  const encryptedBallotPackage = JSON.stringify({
+    version: 'omega-binding-ballot-v1',
+    packageType: 'binding-protected-ballot',
+    electionId,
+    profileId,
+    circuitVersion,
+    publicKey: serializePoint(tallyPublicKey),
+    selectionCount,
+    ciphertext: serializeVectorCiphertext(ciphertext),
+  });
+  const ballotPackageHash = await hashText(encryptedBallotPackage);
+
+  return {
+    commitmentHash: await hashText(
+      [
+        'feat105-binding-commitment-v1',
+        electionId,
+        openArtifactId,
+        ceremonyVersionId,
+        artifactSeed,
+        ballotPackageHash,
+      ].join(':'),
+    ),
+    encryptedBallotPackage,
+    proofBundle: JSON.stringify({
+      version: 'omega-binding-proof-v1',
+      proofType: 'binding-circuit-envelope',
+      proofProfile,
+      circuitVersion,
+      artifactShape: 'opaque-one-hot-elgamal',
+      ballotPackageHash,
+      openArtifactId,
+      eligibleSetHash,
+      ceremonyVersionId,
+      dkgProfileId,
+      tallyPublicKeyFingerprint,
+    }),
+    ballotNullifier: await hashText(
+      [
+        'feat105-binding-nullifier-v1',
+        electionId,
+        openArtifactId,
+        artifactSeed,
+        ballotPackageHash,
+      ].join(':'),
+    ),
   };
 }
 
@@ -865,6 +979,24 @@ export function ElectionVotingPanel({
     votingView?.DkgProfileId &&
     votingView?.TallyPublicKeyFingerprint
   );
+  const bindingStatus =
+    election?.BindingStatus ?? votingView?.Election?.BindingStatus ?? ElectionBindingStatusProto.Binding;
+  const activeProfileId =
+    votingView?.DkgProfileId ??
+    resultView?.CeremonySnapshot?.ProfileId ??
+    election?.SelectedProfileId;
+  const selectedProfileDevOnly =
+    election?.SelectedProfileDevOnly ??
+    detail?.LatestDraftSnapshot?.Policy.SelectedProfileDevOnly ??
+    detail?.CeremonyProfiles?.find((profile) => profile.ProfileId === activeProfileId)?.DevOnly;
+  const receiptContextProfileId =
+    resultView?.CeremonySnapshot?.ProfileId ?? votingView?.DkgProfileId;
+  const receiptContextTallyKeyFingerprint =
+    resultView?.CeremonySnapshot?.TallyPublicKeyFingerprint ??
+    votingView?.TallyPublicKeyFingerprint;
+  const receiptContextOfficialVisibility =
+    resultView?.OfficialResultVisibilityPolicy ?? election?.OfficialResultVisibilityPolicy;
+  const usesOpenAuditBallotPath = selectedProfileDevOnly === true;
   const ballotOptions = useMemo(
     () =>
       (election?.Options ?? [])
@@ -934,31 +1066,48 @@ export function ElectionVotingPanel({
     !isAccepted &&
     !pendingSubmission &&
     !isSubmissionInFlight;
-  const forcedElectionMode = getForcedE2EElectionMode();
-  const electionDevModeEnabled =
-    forcedElectionMode === 'dev' ||
-    (forcedElectionMode !== 'non-dev' && isElectionDevModeAllowed());
   const commitmentStatusValue = isCommitmentRegistered
     ? 'Registered'
-    : electionDevModeEnabled
+    : usesOpenAuditBallotPath
       ? 'Created during submit'
-      : 'Created by production circuit';
+      : 'Created by protected circuit';
   const finalSubmitStatusValue = pendingSubmission
     ? 'Pending chain check'
     : selectedBallotOption
-      ? electionDevModeEnabled
-        ? 'Ready to submit'
-        : 'Waiting for production circuit'
+      ? 'Ready to submit'
       : 'Choose an option first';
   const submitButtonDisabled =
     !selectedBallotOption || !!pendingSubmission || isSubmittingCommitment || isSubmittingCast;
   const shouldShowSubmissionPrivacyPanel =
     (isSubmissionInFlight || !!pendingSubmission) && !isAccepted;
   const submissionPrivacyStatus = isSubmittingCommitment
-    ? 'Preparing protected ballot'
+    ? usesOpenAuditBallotPath
+      ? 'Preparing open-audit ballot'
+      : 'Preparing protected ballot'
     : isSubmittingCast
       ? 'Waiting for acceptance receipt'
       : submissionStatusLabel;
+  const ballotTransportLabel = usesOpenAuditBallotPath
+    ? 'Open-audit ballot'
+    : bindingStatus === ElectionBindingStatusProto.NonBinding
+      ? 'Protected ballot on non-binding election'
+      : 'Protected ballot';
+  const votePreparationCopy = usesOpenAuditBallotPath
+    ? 'Choosing a ballot option here prepares a local preview. Submit vote will record the explicit open-ballot audit artifact for this selected open-audit circuit.'
+    : bindingStatus === ElectionBindingStatusProto.NonBinding
+      ? 'Choosing a ballot option here prepares a local preview. This non-binding election still uses a protected non-dev circuit, so submit vote will generate the protected ballot package and opaque proof envelope on this device.'
+      : 'Choosing a ballot option here prepares a local preview. Submit vote will generate the protected ballot package and opaque proof envelope on this device.';
+  const submitPanelTitle = usesOpenAuditBallotPath
+    ? 'Submit vote will record an open-audit ballot'
+    : 'Protected submit is ready on this device';
+  const submitPanelBody = usesOpenAuditBallotPath
+    ? 'This election keeps the canonical workflow but uses the selected open-audit circuit. The recorded artifact stays intentionally readable for audit and customer review.'
+    : bindingStatus === ElectionBindingStatusProto.NonBinding
+      ? 'This non-binding election still freezes the same lifecycle and audit boundaries, but the selected circuit is protected and keeps ballot content opaque on persisted surfaces.'
+      : 'The raw manual commitment and proof fields stay hidden from voters. Submit vote now sends an opaque ballot package and proof envelope instead of the old plaintext binding artifact.';
+  const submitPanelClass = usesOpenAuditBallotPath
+    ? 'border-amber-500/30 bg-amber-500/10 text-amber-100'
+    : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100';
 
   useEffect(() => {
     if (shouldExpandSnapshotByDefault) {
@@ -1178,19 +1327,11 @@ export function ElectionVotingPanel({
     }
   }
 
-  async function handleSubmitDevOnlyVote(): Promise<void> {
-    if (!electionDevModeEnabled) {
-      setFeedback({
-        tone: 'error',
-        message: 'Election dev mode is disabled for this build.',
-      });
-      return;
-    }
-
+  async function handleSubmitNonBindingOpenVote(): Promise<void> {
     if (!selectedBallotOption) {
       setFeedback({
         tone: 'error',
-        message: 'Choose a ballot option before submitting the dev-only vote.',
+        message: 'Choose a ballot option before submitting the open ballot.',
       });
       return;
     }
@@ -1205,7 +1346,7 @@ export function ElectionVotingPanel({
     }
 
     try {
-      const devArtifacts = await buildElectionDevModeArtifacts({
+      const openBallotArtifacts = await buildElectionDevModeArtifacts({
         electionId,
         selectedOption: selectedBallotOption,
         openArtifactId: votingView.OpenArtifactId,
@@ -1216,7 +1357,7 @@ export function ElectionVotingPanel({
       });
 
       if (!isCommitmentRegistered) {
-        const commitmentAccepted = await submitCommitmentHash(devArtifacts.commitmentHash, {
+        const commitmentAccepted = await submitCommitmentHash(openBallotArtifacts.commitmentHash, {
           showSuccessFeedback: false,
         });
         if (!commitmentAccepted) {
@@ -1225,9 +1366,9 @@ export function ElectionVotingPanel({
       }
 
       await submitCastDraft({
-        encryptedBallotPackage: devArtifacts.encryptedBallotPackage,
-        proofBundle: devArtifacts.proofBundle,
-        ballotNullifier: devArtifacts.ballotNullifier,
+        encryptedBallotPackage: openBallotArtifacts.encryptedBallotPackage,
+        proofBundle: openBallotArtifacts.proofBundle,
+        ballotNullifier: openBallotArtifacts.ballotNullifier,
       });
     } catch (error) {
       setFeedback({
@@ -1235,7 +1376,76 @@ export function ElectionVotingPanel({
         message:
           error instanceof Error
             ? error.message
-            : 'Failed to prepare the dev-only election vote.',
+            : 'Failed to prepare the non-binding open ballot.',
+      });
+    }
+  }
+
+  async function handleSubmitBindingProtectedVote(): Promise<void> {
+    if (!selectedBallotOption) {
+      setFeedback({
+        tone: 'error',
+        message: 'Choose a ballot option before submitting the protected ballot.',
+      });
+      return;
+    }
+
+    if (!votingView || !hasBoundaryContext) {
+      logVotingBoundaryContext('submit-blocked', electionId, detail, votingView);
+      setFeedback({
+        tone: 'error',
+        message: 'The election boundary context is incomplete.',
+      });
+      return;
+    }
+
+    const selectedOptionIndex = ballotOptions.findIndex(
+      (option) => option.OptionId === selectedBallotOption.OptionId,
+    );
+    if (selectedOptionIndex < 0) {
+      setFeedback({
+        tone: 'error',
+        message: 'The selected ballot option is no longer available.',
+      });
+      return;
+    }
+
+    try {
+      const tallyPublicKey = grpcPointToElectionPoint(votingView.TallyPublicKey);
+      const protectedArtifacts = await buildBindingProtectedBallotArtifacts({
+        electionId,
+        selectedOption: selectedBallotOption,
+        selectedOptionIndex,
+        selectionCount: ballotOptions.length,
+        openArtifactId: votingView.OpenArtifactId,
+        eligibleSetHash: votingView.EligibleSetHash,
+        ceremonyVersionId: votingView.CeremonyVersionId,
+        dkgProfileId: votingView.DkgProfileId,
+        tallyPublicKey,
+        tallyPublicKeyFingerprint: votingView.TallyPublicKeyFingerprint,
+      });
+
+      if (!isCommitmentRegistered) {
+        const commitmentAccepted = await submitCommitmentHash(protectedArtifacts.commitmentHash, {
+          showSuccessFeedback: false,
+        });
+        if (!commitmentAccepted) {
+          return;
+        }
+      }
+
+      await submitCastDraft({
+        encryptedBallotPackage: protectedArtifacts.encryptedBallotPackage,
+        proofBundle: protectedArtifacts.proofBundle,
+        ballotNullifier: protectedArtifacts.ballotNullifier,
+      });
+    } catch (error) {
+      setFeedback({
+        tone: 'error',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Failed to prepare the protected binding ballot.',
       });
     }
   }
@@ -1249,16 +1459,12 @@ export function ElectionVotingPanel({
       return;
     }
 
-    if (!electionDevModeEnabled) {
-      setFeedback({
-        tone: 'error',
-        message:
-          'Real protected vote submission is not available in this build yet.',
-      });
+    if (usesOpenAuditBallotPath) {
+      await handleSubmitNonBindingOpenVote();
       return;
     }
 
-    await handleSubmitDevOnlyVote();
+    await handleSubmitBindingProtectedVote();
   }
 
   async function handleCheckStatusAgain(): Promise<void> {
@@ -1673,7 +1879,7 @@ export function ElectionVotingPanel({
                 value={commitmentStatusValue}
               />
               <WorkflowStatusCard
-                label="Final submit"
+                label={ballotTransportLabel}
                 value={finalSubmitStatusValue}
               />
             </div>
@@ -1754,29 +1960,23 @@ export function ElectionVotingPanel({
             <div className="mt-4 rounded-2xl border border-blue-500/30 bg-blue-500/10 px-4 py-4 text-sm text-blue-100">
               <div className="font-semibold">Your vote is not submitted yet</div>
               <div className="mt-2 leading-6 text-blue-100/90">
-                {electionDevModeEnabled
-                  ? 'Choosing a ballot option here prepares a local ballot preview. Submit vote will generate the dev-only commitment and protected ballot package automatically for this test build.'
-                  : 'Choosing a ballot option here prepares a local ballot preview. Submit vote is the correct action, but the real protected production-circuit path is not connected in this build yet.'}
+                {votePreparationCopy}
               </div>
             </div>
 
             <div
-              className={`mt-4 rounded-2xl border px-4 py-4 text-sm ${
-                electionDevModeEnabled
-                  ? 'border-amber-500/30 bg-amber-500/10 text-amber-100'
-                  : 'border-hush-bg-light bg-hush-bg-dark/72 text-hush-text-primary'
-              }`}
+              className={`mt-4 rounded-2xl border px-4 py-4 text-sm ${submitPanelClass}`}
               data-testid="voting-submit-panel"
             >
               <div className="font-semibold">
-                {electionDevModeEnabled
-                  ? 'Dev-only submit is enabled for this build'
-                  : 'Submit vote is reserved for the protected production path'}
+                {submitPanelTitle}
               </div>
-              <div className={`mt-2 leading-6 ${electionDevModeEnabled ? 'text-amber-100/90' : 'text-hush-text-accent'}`}>
-                {electionDevModeEnabled
-                  ? 'For automated tests and controlled demos, Submit vote will generate deterministic dev-only election artifacts from the selected option on this device. Never enable this in production.'
-                  : 'The raw manual commitment and proof fields are intentionally hidden from voters. Submit vote will connect to the protected production path in a later build.'}
+              <div
+                className={`mt-2 leading-6 ${
+                  usesOpenAuditBallotPath ? 'text-amber-100/90' : 'text-emerald-100/90'
+                }`}
+              >
+                {submitPanelBody}
               </div>
               <div className="mt-4 flex justify-end">
                 <button
@@ -2015,7 +2215,18 @@ export function ElectionVotingPanel({
                 </div>
               </div>
 
-              <div className="mt-6 rounded-2xl bg-hush-bg-element/70 px-5 py-4 text-sm text-hush-text-accent">
+              <div className="mt-6">
+                <ElectionReceiptTruthPanel
+                  bindingStatus={bindingStatus}
+                  selectedProfileDevOnly={selectedProfileDevOnly}
+                  officialResultVisibilityPolicy={receiptContextOfficialVisibility}
+                  profileId={receiptContextProfileId}
+                  tallyPublicKeyFingerprint={receiptContextTallyKeyFingerprint}
+                  testId="voting-receipt-context"
+                />
+              </div>
+
+              <div className="mt-4 rounded-2xl bg-hush-bg-element/70 px-5 py-4 text-sm text-hush-text-accent">
                 {receiptVerification.statusItems?.length ? (
                   <div className="space-y-3">
                     {receiptVerification.statusItems.map((item) => (
