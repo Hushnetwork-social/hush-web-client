@@ -160,7 +160,7 @@ export function parseGrpcWebResponse(responseBytes: Uint8Array): ParsedGrpcWebRe
           trailers[key] = value;
         }
       }
-    } else if (flag === 0 && messageLength > 0 && !messageBytes) {
+    } else if (flag === 0 && !messageBytes) {
       messageBytes = frameBytes;
     }
 

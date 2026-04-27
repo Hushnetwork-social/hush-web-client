@@ -230,6 +230,48 @@ describe('POST /api/elections/query', () => {
     );
   });
 
+  it('accepts empty successful protobuf responses without trying fallback endpoints', async () => {
+    vi.stubEnv('GRPC_SERVER_URL', 'http://host.docker.internal:14666');
+    parseGrpcWebResponseMock.mockReturnValue({
+      messageBytes: new Uint8Array(),
+      trailers: { 'grpc-status': '0' },
+    });
+    const { POST } = await import('./route');
+    const signedHeaders = await createElectionQueryAuthHeaders(
+      'GetElectionsByOwner',
+      {
+        OwnerPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+      },
+      TEST_CREDENTIALS
+    );
+
+    const response = await POST(
+      new Request('http://localhost/api/elections/query', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...signedHeaders,
+        },
+        body: JSON.stringify({
+          method: 'GetElectionsByOwner',
+          request: {
+            OwnerPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+          },
+        }),
+      }) as never
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://host.docker.internal:14666/rpcHush.HushElections/GetElectionsByOwner',
+      expect.objectContaining({
+        headers: expect.objectContaining(signedHeaders),
+      })
+    );
+    expect(decodeMock).toHaveBeenCalledWith(new Uint8Array());
+  });
+
   it('still allows public unsigned election queries', async () => {
     const { POST } = await import('./route');
 
