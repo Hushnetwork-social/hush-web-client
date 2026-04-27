@@ -234,14 +234,22 @@ jobs:
         run: |
           # Find the MSI file
           echo "Searching for MSI file..."
-          find src-tauri/target ../../.tauri-target -name "*.msi" 2>/dev/null || echo "No MSI files found"
+          SEARCH_ROOTS=()
+          [ -d src-tauri/target ] && SEARCH_ROOTS+=(src-tauri/target)
+          [ -d ../../.tauri-target ] && SEARCH_ROOTS+=(../../.tauri-target)
 
-          MSI_FILE=$(find src-tauri/target ../../.tauri-target -name "*.msi" 2>/dev/null | head -1)
+          if [ ${#SEARCH_ROOTS[@]} -eq 0 ]; then
+            echo "No Tauri target directories found!"
+            exit 1
+          fi
+
+          find "${SEARCH_ROOTS[@]}" -name "*.msi"
+          MSI_FILE=$(find "${SEARCH_ROOTS[@]}" -name "*.msi" | head -1)
 
           if [ -z "$MSI_FILE" ]; then
             echo "MSI file not found!"
             echo "Listing target directory structure:"
-            find src-tauri/target ../../.tauri-target -type d -name "bundle" 2>/dev/null | head -10
+            find "${SEARCH_ROOTS[@]}" -type d -name "bundle" | head -10
             exit 1
           fi
 
