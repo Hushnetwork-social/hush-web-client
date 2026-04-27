@@ -71,8 +71,13 @@ jobs:
 
       - name: Setup Android NDK
         run: |
-          sdkmanager --install "ndk;27.0.11902837"
-          echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.11902837" >> $GITHUB_ENV
+          NDK_VERSION="27.0.11902837"
+          NDK_PATH="$ANDROID_HOME/ndk/${NDK_VERSION}"
+          sdkmanager --install "ndk;${NDK_VERSION}"
+          echo "NDK_HOME=${NDK_PATH}" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=${NDK_PATH}" >> $GITHUB_ENV
+          echo "ANDROID_NDK_ROOT=${NDK_PATH}" >> $GITHUB_ENV
+          echo "ANDROID_NDK_VERSION=${NDK_VERSION}" >> $GITHUB_ENV
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -180,7 +185,7 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          npm run tauri android build -- --apk --ci
+          npm run tauri android build -- --apk --ci --target aarch64
           echo "Android APK built"
 
       - name: Cleanup keystore
