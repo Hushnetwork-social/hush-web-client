@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import protobuf from 'protobufjs';
 import { NextRequest, NextResponse } from 'next/server';
@@ -138,20 +139,32 @@ function getForwardedElectionQueryHeaders(headers: Headers): Record<string, stri
   return forwarded;
 }
 
+function resolveFirstExistingPath(label: string, candidates: string[]): string {
+  const resolvedCandidates = candidates.map((candidate) => path.resolve(candidate));
+  const match = resolvedCandidates.find((candidate) => existsSync(candidate));
+
+  if (!match) {
+    throw new Error(`Unable to resolve ${label}. Checked: ${resolvedCandidates.join(', ')}`);
+  }
+
+  return match;
+}
+
 function getProtoPaths() {
   const workspaceRoot = path.resolve(process.cwd(), '..');
+  const webClientProtoRoot = path.join(process.cwd(), 'src', 'lib', 'grpc', 'protos');
+  const deployedProtoRoot = path.join(process.cwd(), 'protos');
+
   return {
-    electionsProtoPath: path.join(workspaceRoot, 'hush-server-node', 'Protos', 'hushElections.proto'),
-    timestampProtoPath: path.join(
-      process.cwd(),
-      'src',
-      'lib',
-      'grpc',
-      'protos',
-      'google',
-      'protobuf',
-      'timestamp.proto'
-    ),
+    electionsProtoPath: resolveFirstExistingPath('hushElections.proto', [
+      path.join(webClientProtoRoot, 'hushElections.proto'),
+      path.join(deployedProtoRoot, 'hushElections.proto'),
+      path.join(workspaceRoot, 'hush-server-node', 'Protos', 'hushElections.proto'),
+    ]),
+    timestampProtoPath: resolveFirstExistingPath('google/protobuf/timestamp.proto', [
+      path.join(webClientProtoRoot, 'google', 'protobuf', 'timestamp.proto'),
+      path.join(deployedProtoRoot, 'google', 'protobuf', 'timestamp.proto'),
+    ]),
   };
 }
 

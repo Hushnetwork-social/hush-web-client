@@ -60,6 +60,7 @@ RUN addgroup --system --gid 1001 nodejs \
 COPY --chown=nextjs:nodejs --from=builder /app/public ./public
 COPY --chown=nextjs:nodejs --from=builder /app/.next/standalone ./
 COPY --chown=nextjs:nodejs --from=builder /app/.next/static ./.next/static
+COPY --chown=nextjs:nodejs --from=builder /app/src/lib/grpc/protos ./src/lib/grpc/protos
 
 USER nextjs
 

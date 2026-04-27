@@ -137,6 +137,10 @@ describe('POST /api/elections/query', () => {
         bytes: String,
       })
     );
+    expect(loadMock).toHaveBeenCalledWith(
+      expect.stringMatching(/src[\\/]lib[\\/]grpc[\\/]protos[\\/]hushElections\.proto$/),
+      { keepCase: true }
+    );
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(
       'http://localhost:4666/rpcHush.HushElections/GetElectionEnvelopeAccess',
