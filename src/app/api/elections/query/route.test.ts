@@ -53,6 +53,7 @@ const TEST_CREDENTIALS = {
 describe('POST /api/elections/query', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
     vi.stubGlobal('fetch', fetchMock);
     loadMock.mockResolvedValue(undefined);
     lookupTypeMock.mockReturnValue({
@@ -186,6 +187,43 @@ describe('POST /api/elections/query', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(
       'http://localhost:4666/rpcHush.HushElections/SearchElectionDirectory',
+      expect.objectContaining({
+        headers: expect.objectContaining(signedHeaders),
+      })
+    );
+  });
+
+  it('uses the explicit gRPC server URL for signed election queries', async () => {
+    vi.stubEnv('GRPC_SERVER_URL', 'https://api.hushnetwork.social');
+    const { POST } = await import('./route');
+    const signedHeaders = await createElectionQueryAuthHeaders(
+      'GetElectionHubView',
+      {
+        ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+      },
+      TEST_CREDENTIALS
+    );
+
+    const response = await POST(
+      new Request('http://localhost/api/elections/query', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...signedHeaders,
+        },
+        body: JSON.stringify({
+          method: 'GetElectionHubView',
+          request: {
+            ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+          },
+        }),
+      }) as never
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.hushnetwork.social/rpcHush.HushElections/GetElectionHubView',
       expect.objectContaining({
         headers: expect.objectContaining(signedHeaders),
       })

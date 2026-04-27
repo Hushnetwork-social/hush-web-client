@@ -11,6 +11,7 @@ import {
 
 const SERVICE_NAME = 'rpcHush.HushElections';
 const PACKAGE_NAME = 'rpcHush';
+const DEFAULT_PUBLIC_GRPC_URL = 'https://api.hushnetwork.social';
 const ALLOWED_METHODS = new Set([
   'GetElectionOpenReadiness',
   'GetElection',
@@ -39,23 +40,42 @@ function createGrpcFrame(messageBytes: Uint8Array): Uint8Array {
   return frame;
 }
 
+type GrpcUrlCandidate = {
+  explicit: boolean;
+  url: string;
+};
+
 function getGrpcUrlCandidates(forwardedHeaders: Record<string, string>): string[] {
   const candidates = [
-    process.env.GRPC_SERVER_URL,
-    process.env.NEXT_PUBLIC_GRPC_URL,
-    'http://localhost:4666',
-    'https://api.hushnetwork.social',
+    { explicit: true, url: process.env.GRPC_SERVER_URL },
+    { explicit: true, url: process.env.NEXT_PUBLIC_GRPC_URL },
+    { explicit: false, url: 'http://localhost:4666' },
+    { explicit: false, url: DEFAULT_PUBLIC_GRPC_URL },
   ];
+  const isSignedForwardedQuery = Object.keys(forwardedHeaders).length > 0;
+  const seen = new Set<string>();
 
   return candidates
-    .filter((value): value is string => !!value)
-    .map((value) => value.trim())
-    .filter((value) =>
-      Object.keys(forwardedHeaders).length === 0 ||
-      value !== 'https://api.hushnetwork.social'
+    .filter((candidate): candidate is GrpcUrlCandidate & { url: string } => !!candidate.url)
+    .map((candidate) => ({
+      ...candidate,
+      url: candidate.url.trim(),
+    }))
+    .filter((candidate) => candidate.url.length > 0)
+    .filter((candidate) =>
+      !isSignedForwardedQuery ||
+      candidate.explicit ||
+      candidate.url !== DEFAULT_PUBLIC_GRPC_URL
     )
-    .filter((value) => value.length > 0)
-    .filter((value, index, values) => values.indexOf(value) === index);
+    .filter((candidate) => {
+      if (seen.has(candidate.url)) {
+        return false;
+      }
+
+      seen.add(candidate.url);
+      return true;
+    })
+    .map((candidate) => candidate.url);
 }
 
 async function grpcCallWithFallback(
@@ -119,7 +139,8 @@ async function grpcCallWithFallback(
         messageBytes: parsedResponse.messageBytes,
       };
     } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      lastError = new Error(`gRPC upstream at ${grpcUrl} unreachable for ${method}: ${message}`);
       console.warn(`[API] Election query proxy upstream unreachable at ${grpcUrl}:`, lastError);
     }
   }
