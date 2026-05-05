@@ -6,6 +6,8 @@ import type {
   ElectionResultArtifact,
   ElectionProtocolPackageBindingView,
   ElectionSummary,
+  ElectionVerificationPackageExportAvailabilityView,
+  ElectionVerificationPackageStatusView,
   GetElectionHubViewResponse,
   GetElectionResponse,
   GetElectionResultViewResponse,
@@ -21,6 +23,10 @@ import {
   ElectionReportPackageStatusProto,
   ElectionResultArtifactKindProto,
   ElectionResultArtifactVisibilityProto,
+  ElectionVerificationPackageBlockerProto,
+  ElectionVerificationPackageStatusProto,
+  ElectionVerificationPackageViewProto,
+  ElectionVerifierOverallStatusProto,
   OfficialResultVisibilityPolicyProto,
   ProtocolPackageAccessLocationKindProto,
   ProtocolPackageApprovalStatusProto,
@@ -328,6 +334,61 @@ export function createReportArtifact(
     Content: '# Final manifest',
     PairedArtifactId: '',
     RecordedAt: timestamp,
+    ...overrides,
+  };
+}
+
+export function createVerificationPackageAvailability(
+  overrides?: Partial<ElectionVerificationPackageExportAvailabilityView>
+): ElectionVerificationPackageExportAvailabilityView {
+  return {
+    PackageView: ElectionVerificationPackageViewProto.VerificationPackagePublicAnonymous,
+    VerifierProfileId: 'public_anonymous_v1',
+    IsAvailable: true,
+    Blocker: ElectionVerificationPackageBlockerProto.VerificationPackageBlockerNone,
+    BlockerCode: '',
+    Message: 'Public anonymous verification package export is available.',
+    PackageId: 'HushElectionPackage-election-1-public',
+    PackageHash: 'd'.repeat(64),
+    CanRetry: false,
+    ...overrides,
+  };
+}
+
+export function createVerificationPackageStatus(
+  overrides?: Partial<ElectionVerificationPackageStatusView>
+): ElectionVerificationPackageStatusView {
+  return {
+    ElectionId: 'election-1',
+    ActorPublicAddress: 'actor-address',
+    IsVisible: true,
+    Status: ElectionVerificationPackageStatusProto.VerificationPackageReady,
+    StatusMessage: 'Verification package export is available.',
+    PublicPackage: createVerificationPackageAvailability(),
+    RestrictedPackage: createVerificationPackageAvailability({
+      PackageView: ElectionVerificationPackageViewProto.VerificationPackageRestrictedOwnerAuditor,
+      VerifierProfileId: 'restricted_owner_auditor_v1',
+      Message: 'Restricted owner/auditor verification package export is available.',
+      PackageId: 'HushElectionPackage-election-1-restricted',
+      PackageHash: 'e'.repeat(64),
+    }),
+    ProtocolPackageBinding: createProtocolPackageBinding({
+      PackageApprovalStatus: ProtocolPackageApprovalStatusProto.DraftPrivate,
+      Status: ProtocolPackageBindingStatusProto.Sealed,
+      HasSealedAt: true,
+      SealedAt: timestamp,
+    }),
+    LastVerifierResult: {
+      OverallStatus: ElectionVerifierOverallStatusProto.ElectionVerifierNotAvailable,
+      VerifierVersion: '',
+      PackageHash: '',
+      PassedCount: 0,
+      WarningCount: 0,
+      FailedCount: 0,
+      NotApplicableCount: 0,
+      Message: 'No verifier output has been recorded for this package.',
+      HasVerifiedAt: false,
+    },
     ...overrides,
   };
 }

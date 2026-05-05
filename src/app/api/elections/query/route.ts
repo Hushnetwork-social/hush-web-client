@@ -22,6 +22,8 @@ const ALLOWED_METHODS = new Set([
   'VerifyElectionReceipt',
   'GetElectionEnvelopeAccess',
   'GetElectionResultView',
+  'GetElectionVerificationPackageStatus',
+  'ExportElectionVerificationPackage',
   'GetElectionReportAccessGrants',
   'GetElectionCeremonyActionView',
   'GetElectionsByOwner',

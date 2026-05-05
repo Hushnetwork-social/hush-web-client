@@ -11,6 +11,7 @@ import {
   AvailabilityCard,
   CollapsibleSurfaceSection,
 } from './HushVotingWorkspaceShared';
+import { VerificationPackageStatusSection } from './VerificationPackageStatusSection';
 
 type ArtifactsWorkspaceSummaryProps = {
   entry: ElectionHubEntryView;
@@ -102,6 +103,14 @@ export function ArtifactsWorkspaceSummary({
           <div className="rounded-2xl bg-hush-bg-dark/60 px-4 py-3 text-sm text-hush-text-accent">
             Loading artifact and report-package details for this actor.
           </div>
+        ) : null}
+
+        {resultView?.VerificationPackageStatus?.IsVisible ? (
+          <VerificationPackageStatusSection
+            electionId={entry.Election.ElectionId}
+            actorPublicAddress={resultView.ActorPublicAddress}
+            status={resultView.VerificationPackageStatus}
+          />
         ) : null}
 
         {detail?.Election ? (

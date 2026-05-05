@@ -926,6 +926,43 @@ export enum ProtocolPackageBindingSourceProto {
   MigrationBackfill = 3,
 }
 
+export enum ElectionVerificationPackageViewProto {
+  VerificationPackagePublicAnonymous = 0,
+  VerificationPackageRestrictedOwnerAuditor = 1,
+}
+
+export enum ElectionVerificationArtifactVisibilityProto {
+  VerificationArtifactPublic = 0,
+  VerificationArtifactRestricted = 1,
+}
+
+export enum ElectionVerificationPackageStatusProto {
+  VerificationPackageNotVisible = 0,
+  VerificationPackageNotFinalized = 1,
+  VerificationPackageMissing = 2,
+  VerificationPackageProtocolRefsBlocked = 3,
+  VerificationPackageExportFailed = 4,
+  VerificationPackageReady = 5,
+}
+
+export enum ElectionVerificationPackageBlockerProto {
+  VerificationPackageBlockerNone = 0,
+  VerificationPackageBlockerNotVisible = 1,
+  VerificationPackageBlockerNotFinalized = 2,
+  VerificationPackageBlockerMissingPackage = 3,
+  VerificationPackageBlockerProtocolRefs = 4,
+  VerificationPackageBlockerUnauthorized = 5,
+  VerificationPackageBlockerProfileMismatch = 6,
+  VerificationPackageBlockerExportFailed = 7,
+}
+
+export enum ElectionVerifierOverallStatusProto {
+  ElectionVerifierPass = 0,
+  ElectionVerifierWarn = 1,
+  ElectionVerifierFail = 2,
+  ElectionVerifierNotAvailable = 3,
+}
+
 export enum ElectionClosedProgressStatusProto {
   ClosedProgressNone = 0,
   ClosedProgressWaitingForTrusteeShares = 1,
@@ -1434,6 +1471,50 @@ export interface ElectionProtocolPackageBindingView {
   SourceBlockId: string;
 }
 
+export interface ElectionVerificationPackageExportAvailabilityView {
+  PackageView: ElectionVerificationPackageViewProto;
+  VerifierProfileId: string;
+  IsAvailable: boolean;
+  Blocker: ElectionVerificationPackageBlockerProto;
+  BlockerCode: string;
+  Message: string;
+  PackageId: string;
+  PackageHash: string;
+  CanRetry: boolean;
+}
+
+export interface ElectionVerifierResultSummaryView {
+  OverallStatus: ElectionVerifierOverallStatusProto;
+  VerifierVersion: string;
+  PackageHash: string;
+  PassedCount: number;
+  WarningCount: number;
+  FailedCount: number;
+  NotApplicableCount: number;
+  Message: string;
+  VerifiedAt?: GrpcTimestamp;
+  HasVerifiedAt: boolean;
+}
+
+export interface ElectionVerificationPackageStatusView {
+  ElectionId: string;
+  ActorPublicAddress: string;
+  IsVisible: boolean;
+  Status: ElectionVerificationPackageStatusProto;
+  StatusMessage: string;
+  PublicPackage?: ElectionVerificationPackageExportAvailabilityView;
+  RestrictedPackage?: ElectionVerificationPackageExportAvailabilityView;
+  ProtocolPackageBinding?: ElectionProtocolPackageBindingView;
+  LastVerifierResult?: ElectionVerifierResultSummaryView;
+}
+
+export interface ElectionVerificationPackageFileView {
+  RelativePath: string;
+  MediaType: string;
+  Visibility: ElectionVerificationArtifactVisibilityProto;
+  Content: Uint8Array | string;
+}
+
 export interface ElectionRecordView {
   ElectionId: string;
   Title: string;
@@ -1885,6 +1966,17 @@ export interface GetElectionResultViewRequest {
   ActorPublicAddress: string;
 }
 
+export interface GetElectionVerificationPackageStatusRequest {
+  ElectionId: string;
+  ActorPublicAddress: string;
+}
+
+export interface ExportElectionVerificationPackageRequest {
+  ElectionId: string;
+  ActorPublicAddress: string;
+  PackageView: ElectionVerificationPackageViewProto;
+}
+
 export interface GetElectionReportAccessGrantsRequest {
   ElectionId: string;
   ActorPublicAddress: string;
@@ -1905,6 +1997,28 @@ export interface GetElectionResultViewResponse {
   VisibleReportArtifacts: ElectionReportArtifactView[];
   CeremonySnapshot?: ElectionCeremonyBindingSnapshot;
   ProtocolPackageBinding?: ElectionProtocolPackageBindingView;
+  VerificationPackageStatus?: ElectionVerificationPackageStatusView;
+}
+
+export interface GetElectionVerificationPackageStatusResponse {
+  Success: boolean;
+  ErrorMessage: string;
+  ElectionId: string;
+  ActorPublicAddress: string;
+  Status?: ElectionVerificationPackageStatusView;
+}
+
+export interface ExportElectionVerificationPackageResponse {
+  Success: boolean;
+  ErrorMessage: string;
+  ElectionId: string;
+  ActorPublicAddress: string;
+  PackageView: ElectionVerificationPackageViewProto;
+  Blocker: ElectionVerificationPackageBlockerProto;
+  ResultCode: string;
+  PackageId: string;
+  PackageHash: string;
+  Files: ElectionVerificationPackageFileView[];
 }
 
 export interface GetElectionCeremonyActionViewRequest {

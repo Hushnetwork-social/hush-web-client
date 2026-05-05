@@ -198,6 +198,108 @@ describe('electionsService query proxy', () => {
     expect(response.ReceiptMatchesAcceptedCheckoff).toBe(true);
   });
 
+  it('posts verification package status queries to the server-side proxy', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          Success: true,
+          ErrorMessage: '',
+          ElectionId: 'election-finalized',
+          ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+          Status: {
+            ElectionId: 'election-finalized',
+            ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+            IsVisible: true,
+            Status: 5,
+          },
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+    );
+
+    const response = await electionsService.getElectionVerificationPackageStatus({
+      ElectionId: 'election-finalized',
+      ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/elections/query', {
+      method: 'POST',
+      headers: expect.objectContaining({
+        'Content-Type': 'application/json',
+        'x-hush-election-query-signatory': TEST_CREDENTIALS.signingPublicKey,
+        'x-hush-election-query-signed-at': expect.any(String),
+        'x-hush-election-query-signature': expect.any(String),
+      }),
+      body: JSON.stringify({
+        method: 'GetElectionVerificationPackageStatus',
+        request: {
+          ElectionId: 'election-finalized',
+          ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+        },
+      }),
+    });
+    expect(response.Success).toBe(true);
+    expect(response.Status?.IsVisible).toBe(true);
+  });
+
+  it('posts verification package export queries to the server-side proxy', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          Success: true,
+          ErrorMessage: '',
+          ElectionId: 'election-finalized',
+          ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+          PackageView: 0,
+          Blocker: 0,
+          ResultCode: '',
+          PackageId: 'HushElectionPackage-election-finalized',
+          PackageHash: 'a'.repeat(64),
+          Files: [],
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+    );
+
+    const response = await electionsService.exportElectionVerificationPackage({
+      ElectionId: 'election-finalized',
+      ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+      PackageView: 0,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/elections/query', {
+      method: 'POST',
+      headers: expect.objectContaining({
+        'Content-Type': 'application/json',
+        'x-hush-election-query-signatory': TEST_CREDENTIALS.signingPublicKey,
+        'x-hush-election-query-signed-at': expect.any(String),
+        'x-hush-election-query-signature': expect.any(String),
+      }),
+      body: JSON.stringify({
+        method: 'ExportElectionVerificationPackage',
+        request: {
+          ElectionId: 'election-finalized',
+          ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+          PackageView: 0,
+        },
+      }),
+    });
+    expect(response.Success).toBe(true);
+    expect(response.PackageHash).toBe('a'.repeat(64));
+  });
+
   it('allows unsigned public election reads when no actor credentials are present', async () => {
     const fetchMock = vi.mocked(fetch);
     useAppStore.setState({ credentials: null });
