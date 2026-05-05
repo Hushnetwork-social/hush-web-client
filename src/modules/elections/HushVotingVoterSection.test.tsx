@@ -267,6 +267,55 @@ describe('VoterWorkspaceSummary', () => {
     });
   });
 
+  it('projects SP-04 ceremony state without voter-facing protocol package refs', async () => {
+    const entry = createHubEntry(
+      'election-open',
+      ElectionLifecycleStateProto.Open,
+      'Annual Elections 2026',
+      {
+        ActorRoles: {
+          IsOwnerAdmin: false,
+          IsTrustee: false,
+          IsVoter: true,
+          IsDesignatedAuditor: false,
+        },
+        SuggestedAction: ElectionHubNextActionHintProto.ElectionHubActionVoterCastBallot,
+        SuggestedActionReason: 'The election is open.',
+        CanViewNamedParticipationRoster: false,
+        CanViewReportPackage: false,
+        CanViewParticipantResults: true,
+        HasUnofficialResult: false,
+        HasOfficialResult: false,
+      },
+    );
+
+    electionsServiceMock.getElectionVotingView.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      HasAcceptedAt: false,
+      ReceiptId: '',
+      AcceptanceId: '',
+      ServerProof: '',
+      PersonalParticipationStatus: ElectionParticipationStatusProto.ParticipationDidNotVote,
+      Sp04Required: true,
+      ChallengeSatisfied: false,
+      Sp04BlockerMessage: 'Challenge required before cast',
+    });
+
+    render(
+      <VoterWorkspaceSummary
+        entry={entry}
+        actorPublicAddress="actor-address"
+        resultView={null}
+      />,
+    );
+
+    expect(await screen.findByTestId('hush-voting-sp04-voter-summary')).toHaveTextContent(
+      'Challenge required before cast',
+    );
+    expect(screen.queryByText(/Protocol package/i)).not.toBeInTheDocument();
+  });
+
   it('shows explicit non-binding mode and circuit truth on the hub receipt verifier', async () => {
     const entry = createHubEntry(
       'election-open',
