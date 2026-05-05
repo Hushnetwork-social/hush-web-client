@@ -791,6 +791,84 @@ export async function createRegisterElectionVotingCommitmentTransaction(
   };
 }
 
+export async function createRegisterPreparedBallotCommitmentTransaction(
+  electionId: string,
+  actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
+  preparedBallotId: string,
+  preparedBallotHash: string,
+  ballotDefinitionVersion: number,
+  ballotDefinitionHash: string,
+  ceremonyProfileId: string,
+  proofStatementId: string,
+  signingPrivateKeyHex: string,
+): Promise<{ signedTransaction: string }> {
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<RegisterPreparedBallotCommitmentActionPayload>(
+      electionId,
+      actorPublicAddress,
+      actorPublicEncryptAddress,
+      actorPrivateEncryptKeyHex,
+      ENCRYPTED_ELECTION_ACTION_TYPES.REGISTER_PREPARED_BALLOT_COMMITMENT,
+      {
+        ActorPublicAddress: actorPublicAddress,
+        PreparedBallotId: preparedBallotId,
+        PreparedBallotHash: preparedBallotHash,
+        BallotDefinitionVersion: ballotDefinitionVersion,
+        BallotDefinitionHash: ballotDefinitionHash,
+        CeremonyProfileId: ceremonyProfileId,
+        ProofStatementId: proofStatementId,
+      },
+      signingPrivateKeyHex,
+      {
+        forceFreshEnvelopeAccess: true,
+      }
+    );
+
+  return {
+    signedTransaction: encryptedEnvelope.signedTransaction,
+  };
+}
+
+export async function createSpoilPreparedBallotTransaction(
+  electionId: string,
+  actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
+  preparedBallotId: string,
+  preparedBallotHash: string,
+  spoiledTranscriptHash: string,
+  spoilRecordHash: string,
+  localVerifierVersion: string,
+  signingPrivateKeyHex: string,
+): Promise<{ signedTransaction: string }> {
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<SpoilPreparedBallotActionPayload>(
+      electionId,
+      actorPublicAddress,
+      actorPublicEncryptAddress,
+      actorPrivateEncryptKeyHex,
+      ENCRYPTED_ELECTION_ACTION_TYPES.SPOIL_PREPARED_BALLOT,
+      {
+        ActorPublicAddress: actorPublicAddress,
+        PreparedBallotId: preparedBallotId,
+        PreparedBallotHash: preparedBallotHash,
+        SpoiledTranscriptHash: spoiledTranscriptHash,
+        SpoilRecordHash: spoilRecordHash,
+        LocalVerifierVersion: localVerifierVersion,
+      },
+      signingPrivateKeyHex,
+      {
+        forceFreshEnvelopeAccess: true,
+      }
+    );
+
+  return {
+    signedTransaction: encryptedEnvelope.signedTransaction,
+  };
+}
+
 export async function createAcceptElectionBallotCastTransaction(
   electionId: string,
   actorPublicAddress: string,
@@ -806,6 +884,14 @@ export async function createAcceptElectionBallotCastTransaction(
   dkgProfileId: string,
   tallyPublicKeyFingerprint: string,
   signingPrivateKeyHex: string,
+  sp04?: {
+    preparedBallotId: string;
+    preparedBallotHash: string;
+    receiptCommitment: string;
+    receiptCommitmentScheme: string;
+    ballotDefinitionVersion: number;
+    ballotDefinitionHash: string;
+  },
 ): Promise<{ signedTransaction: string }> {
   const encryptedEnvelope =
     await createEncryptedElectionEnvelopeTransaction<AcceptElectionBallotCastActionPayload>(
@@ -825,6 +911,12 @@ export async function createAcceptElectionBallotCastTransaction(
         CeremonyVersionId: ceremonyVersionId,
         DkgProfileId: dkgProfileId,
         TallyPublicKeyFingerprint: tallyPublicKeyFingerprint,
+        PreparedBallotId: sp04?.preparedBallotId,
+        PreparedBallotHash: sp04?.preparedBallotHash,
+        ReceiptCommitment: sp04?.receiptCommitment,
+        ReceiptCommitmentScheme: sp04?.receiptCommitmentScheme,
+        BallotDefinitionVersion: sp04?.ballotDefinitionVersion,
+        BallotDefinitionHash: sp04?.ballotDefinitionHash,
       },
       signingPrivateKeyHex,
       {

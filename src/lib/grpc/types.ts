@@ -2050,23 +2050,11 @@ export interface GetElectionVotingViewRequest {
 export interface VerifyElectionReceiptRequest {
   ElectionId: string;
   ActorPublicAddress: string;
-  ReceiptId: string;
-  AcceptanceId: string;
-  ServerProof: string;
-  BallotDefinitionVersion?: number;
-  BallotDefinitionHash?: Uint8Array | string;
-  BallotDefinitionSealedAt?: GrpcTimestamp;
-  HasBallotDefinitionSealedAt?: boolean;
-  BallotDefinitionMutationPolicy?: BallotDefinitionMutationPolicyProto;
-  Sp04Required?: boolean;
-  CeremonyProfileId?: string;
-  PreparedBallotId?: string;
-  PreparedBallotHash?: string;
-  PreparedBallotState?: PreparedBallotStateProto;
-  PreparedBallotExpiresAt?: GrpcTimestamp;
-  HasPreparedBallotExpiresAt?: boolean;
+  ReceiptId?: string;
+  AcceptanceId?: string;
+  ServerProof?: string;
   ReceiptCommitment?: string;
-  ReceiptCommitmentScheme?: string;
+  PreparedBallotId?: string;
 }
 
 export interface VerifyElectionReceiptResponse {
@@ -2082,6 +2070,11 @@ export interface VerifyElectionReceiptResponse {
   VerifiedReceiptId: string;
   VerifiedAcceptanceId: string;
   VerifiedServerProof: string;
+  HasBoundReceipt: boolean;
+  ReceiptCommitmentInAcceptedSet: boolean;
+  VerifiedReceiptCommitment: string;
+  VerifiedReceiptCommitmentScheme: string;
+  VerifiedPreparedBallotId: string;
 }
 
 export interface GetElectionEnvelopeAccessRequest {
@@ -2415,6 +2408,27 @@ export interface GetElectionVotingViewResponse {
   ReceiptId: string;
   AcceptanceId: string;
   ServerProof: string;
+  BallotDefinitionVersion: number;
+  BallotDefinitionHash?: Uint8Array | string;
+  BallotDefinitionSealedAt?: GrpcTimestamp;
+  HasBallotDefinitionSealedAt: boolean;
+  BallotDefinitionMutationPolicy: BallotDefinitionMutationPolicyProto;
+  Sp04Required: boolean;
+  CeremonyProfileId: string;
+  PreparedBallotId: string;
+  PreparedBallotHash: string;
+  PreparedBallotState: PreparedBallotStateProto;
+  PreparedBallotExpiresAt?: GrpcTimestamp;
+  HasPreparedBallotExpiresAt: boolean;
+  ReceiptCommitment: string;
+  ReceiptCommitmentScheme: string;
+  PreparedBallotPrecommittedAt?: GrpcTimestamp;
+  HasPreparedBallotPrecommittedAt: boolean;
+  RequiredChallengeCount: number;
+  SpoiledPackageCount: number;
+  ChallengeSatisfied: boolean;
+  Sp04BlockerCode: string;
+  Sp04BlockerMessage: string;
 }
 
 export interface GetElectionsByOwnerResponse {
