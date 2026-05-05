@@ -11,6 +11,10 @@ import type {
   GetElectionReportAccessGrantsResponse,
   GetElectionResultViewRequest,
   GetElectionResultViewResponse,
+  GetElectionVerificationPackageStatusRequest,
+  GetElectionVerificationPackageStatusResponse,
+  ExportElectionVerificationPackageRequest,
+  ExportElectionVerificationPackageResponse,
   VerifyElectionReceiptRequest,
   VerifyElectionReceiptResponse,
   GetElectionVotingViewRequest,
@@ -159,6 +163,24 @@ export const electionsService = {
       'GetElectionResultView',
       request
     );
+  },
+
+  async getElectionVerificationPackageStatus(
+    request: GetElectionVerificationPackageStatusRequest
+  ): Promise<GetElectionVerificationPackageStatusResponse> {
+    return proxyElectionQuery<
+      GetElectionVerificationPackageStatusRequest,
+      GetElectionVerificationPackageStatusResponse
+    >('GetElectionVerificationPackageStatus', request);
+  },
+
+  async exportElectionVerificationPackage(
+    request: ExportElectionVerificationPackageRequest
+  ): Promise<ExportElectionVerificationPackageResponse> {
+    return proxyElectionQuery<
+      ExportElectionVerificationPackageRequest,
+      ExportElectionVerificationPackageResponse
+    >('ExportElectionVerificationPackage', request);
   },
 
   async getElectionReportAccessGrants(
