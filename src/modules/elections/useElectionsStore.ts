@@ -7,6 +7,7 @@ import {
   ElectionGovernedActionTypeProto,
   ElectionGovernedProposalExecutionStatusProto,
   ElectionLifecycleStateProto,
+  ProtocolPackageBindingStatusProto,
   ElectionTrusteeCeremonyStateProto,
   type GetElectionHubViewResponse,
   type SubmitElectionFinalizationShareRequest,
@@ -50,6 +51,7 @@ import {
   createJoinElectionCeremonyTransaction,
   createOpenElectionTransaction,
   createPublishElectionCeremonyTransportKeyTransaction,
+  createRefreshProtocolPackageBindingTransaction,
   createRejectElectionTrusteeInvitationTransaction,
   createRecordElectionCeremonySelfTestSuccessTransaction,
   createRecordElectionCeremonyShareExportTransaction,
@@ -148,6 +150,11 @@ interface ElectionsState {
   updateDraft: (
     draft: ElectionDraftInput,
     snapshotReason: string,
+    ownerPublicEncryptAddress: string,
+    ownerPrivateEncryptKeyHex: string,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
+  refreshProtocolPackageBinding: (
     ownerPublicEncryptAddress: string,
     ownerPrivateEncryptKeyHex: string,
     signingPrivateKeyHex: string
@@ -1042,6 +1049,99 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     } catch (error) {
       set({
         feedback: buildThrownErrorFeedback(error, 'Failed to update election draft.'),
+      });
+      return false;
+    } finally {
+      set({ isSubmitting: false });
+    }
+  },
+
+  refreshProtocolPackageBinding: async (
+    ownerPublicEncryptAddress,
+    ownerPrivateEncryptKeyHex,
+    signingPrivateKeyHex
+  ) => {
+    const electionId = get().selectedElectionId;
+    const ownerPublicAddress = get().ownerPublicAddress;
+
+    if (
+      !electionId ||
+      !ownerPublicAddress ||
+      !ownerPublicEncryptAddress ||
+      !ownerPrivateEncryptKeyHex ||
+      !signingPrivateKeyHex
+    ) {
+      set({
+        feedback: {
+          tone: 'error',
+          message: !electionId || !ownerPublicAddress
+            ? 'No draft election is selected.'
+            : 'Owner signing or encryption credentials are missing.',
+          details: [],
+        },
+      });
+      return false;
+    }
+
+    set({
+      isSubmitting: true,
+      feedback: null,
+      error: null,
+    });
+
+    try {
+      const { signedTransaction } = await createRefreshProtocolPackageBindingTransaction(
+        electionId,
+        ownerPublicAddress,
+        ownerPublicEncryptAddress,
+        ownerPrivateEncryptKeyHex,
+        signingPrivateKeyHex
+      );
+      const submitResult = await submitTransaction(signedTransaction);
+
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit protocol package refresh transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Protocol package refresh submitted.',
+          details: [
+            'Waiting for block confirmation before the latest approved package refs appear in readiness.',
+          ],
+        },
+      });
+
+      const indexedElection = await waitForIndexedElectionMatch(
+        electionId,
+        (response) =>
+          response.ProtocolPackageBinding?.Status === ProtocolPackageBindingStatusProto.Latest
+      );
+
+      if (!indexedElection?.Success || !indexedElection.Election) {
+        return false;
+      }
+
+      await get().loadElection(electionId);
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Protocol package refs refreshed.',
+          details: [],
+        },
+      });
+      return true;
+    } catch (error) {
+      set({
+        feedback: buildThrownErrorFeedback(error, 'Failed to refresh protocol package refs.'),
       });
       return false;
     } finally {

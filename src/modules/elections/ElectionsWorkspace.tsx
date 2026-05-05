@@ -32,6 +32,7 @@ import {
   ElectionGovernanceModeProto,
   ElectionGovernedProposalExecutionStatusProto,
   type Identity,
+  ProtocolPackageBindingStatusProto,
   type ResolveElectionTrusteeInvitationRequest,
   ElectionTrusteeInvitationStatusProto,
   ElectionWarningCodeProto,
@@ -80,6 +81,7 @@ import {
   getLatestFinalizationReleaseEvidence,
   getOutcomeRuleLabel,
   getParticipationPrivacyLabel,
+  getProtocolPackageBindingPresentation,
   getReportingPolicyLabel,
   getRequiredOpenWarningCodes,
   getReviewWindowPolicyLabel,
@@ -98,6 +100,7 @@ import { DesignatedAuditorGrantManager } from "./DesignatedAuditorGrantManager";
 import { ElectionCeremonyWorkspaceSection } from "./ElectionCeremonyWorkspaceSection";
 import { ElectionEligibilityWorkspaceSection } from "./ElectionEligibilityWorkspaceSection";
 import { ElectionFinalizationWorkspaceSection } from "./ElectionFinalizationWorkspaceSection";
+import { ProtocolPackageBindingPanel } from "./ProtocolPackageBindingPanel";
 import { useElectionsStore } from "./useElectionsStore";
 
 type ElectionsWorkspaceProps = {
@@ -465,6 +468,7 @@ export function ElectionsWorkspace({
     openElection,
     openReadiness,
     recordElectionCeremonyValidationFailure,
+    refreshProtocolPackageBinding,
     reset,
     revokeInvitation,
     selectedElection,
@@ -987,6 +991,21 @@ export function ElectionsWorkspace({
     unsupportedMessages.length === 0 &&
     saveValidationErrors.length === 0 &&
     openValidationErrors.length === 0;
+  const protocolPackageBinding =
+    openReadiness?.ProtocolPackageBinding ?? selectedElection?.ProtocolPackageBinding ?? null;
+  const protocolPackagePresentation = useMemo(
+    () =>
+      getProtocolPackageBindingPresentation(
+        protocolPackageBinding,
+        openReadiness?.ProtocolPackageBindingStatus ?? ProtocolPackageBindingStatusProto.Missing,
+        openReadiness?.ProtocolPackageBindingMessage
+      ),
+    [
+      openReadiness?.ProtocolPackageBindingMessage,
+      openReadiness?.ProtocolPackageBindingStatus,
+      protocolPackageBinding,
+    ]
+  );
   const canCloseSelectedElection = canCloseElection(election);
   const canFinalizeSelectedElection = canFinalizeElection(election);
   const governedOpenPrerequisiteIssues = useMemo(() => {
@@ -1015,6 +1034,9 @@ export function ElectionsWorkspace({
         "Acknowledge the required warnings before starting the governed open proposal.",
       );
     }
+    if (protocolPackagePresentation.openBlocked) {
+      issues.push(protocolPackagePresentation.description);
+    }
     if (!hasAcceptedTrusteesForOpen) {
       issues.push(
         selectedTrusteeRosterLabel
@@ -1041,6 +1063,8 @@ export function ElectionsWorkspace({
     isKeyCeremonyReady,
     missingRequiredWarningCodes.length,
     openValidationErrors.length,
+    protocolPackagePresentation.description,
+    protocolPackagePresentation.openBlocked,
     requiredTrusteeCountForOpen,
     saveValidationErrors.length,
     selectedTrusteeRosterLabel,
@@ -1082,6 +1106,11 @@ export function ElectionsWorkspace({
           missingRequiredWarningCodes.length === 0
             ? "All warning acknowledgements required for open are selected."
             : "Review and acknowledge the required warnings before open.",
+      },
+      {
+        label: "Protocol package refs",
+        isReady: !protocolPackagePresentation.openBlocked,
+        detail: protocolPackagePresentation.description,
       },
       ...(usesTrusteeThreshold
         ? [
@@ -1132,6 +1161,8 @@ export function ElectionsWorkspace({
       missingRequiredWarningCodes.length,
       openReadiness?.IsReadyToOpen,
       openValidationErrors.length,
+      protocolPackagePresentation.description,
+      protocolPackagePresentation.openBlocked,
       requiredTrusteeCountForOpen,
       saveValidationErrors.length,
       selectedTrusteeRosterLabel,
@@ -1319,18 +1350,38 @@ export function ElectionsWorkspace({
   }, [loadReportAccessGrants, ownerPublicAddress, selectedElectionId]);
 
   useEffect(() => {
-    if (!selectedElectionId || !election || !canOpenSelectedElection) {
+    if (!selectedElectionId || !election || !canEditDraft || saveValidationErrors.length > 0) {
       return;
     }
 
     void loadOpenReadiness(requiredWarningCodes);
   }, [
-    canOpenSelectedElection,
+    canEditDraft,
     election,
     loadOpenReadiness,
     requiredWarningCodeKey,
     requiredWarningCodes,
+    saveValidationErrors.length,
     selectedElectionId,
+  ]);
+
+  const handleRefreshProtocolPackageBinding = useCallback(async () => {
+    const refreshed = await refreshProtocolPackageBinding(
+      ownerEncryptionPublicKey ?? "",
+      ownerEncryptionPrivateKey ?? "",
+      ownerSigningPrivateKey
+    );
+
+    if (refreshed) {
+      await loadOpenReadiness(requiredWarningCodes);
+    }
+  }, [
+    loadOpenReadiness,
+    ownerEncryptionPrivateKey,
+    ownerEncryptionPublicKey,
+    ownerSigningPrivateKey,
+    refreshProtocolPackageBinding,
+    requiredWarningCodes,
   ]);
 
   useEffect(() => {
@@ -2494,6 +2545,22 @@ export function ElectionsWorkspace({
                   ))}
                 </div>
               </div>
+
+              {selectedElectionId ? (
+                <div className="mb-5">
+                  <ProtocolPackageBindingPanel
+                    binding={protocolPackageBinding}
+                    fallbackStatus={
+                      openReadiness?.ProtocolPackageBindingStatus ??
+                      ProtocolPackageBindingStatusProto.Missing
+                    }
+                    fallbackMessage={openReadiness?.ProtocolPackageBindingMessage}
+                    onRefresh={canEditDraft ? handleRefreshProtocolPackageBinding : undefined}
+                    refreshDisabled={isSubmitting || !canEditDraft}
+                    testId="elections-protocol-package-readiness"
+                  />
+                </div>
+              ) : null}
 
               <div className="grid gap-4 lg:grid-cols-2">
                 <div
@@ -3874,6 +3941,16 @@ export function ElectionsWorkspace({
                   )}
                 </div>
               </div>
+
+              {selectedElection?.ProtocolPackageBinding ? (
+                <div className="mt-5">
+                  <ProtocolPackageBindingPanel
+                    binding={selectedElection.ProtocolPackageBinding}
+                    mode="evidence"
+                    testId="elections-protocol-package-sealed-refs"
+                  />
+                </div>
+              ) : null}
               </section>
             )}
 

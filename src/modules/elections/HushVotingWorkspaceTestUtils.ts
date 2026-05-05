@@ -4,6 +4,7 @@ import type {
   ElectionReportArtifactView,
   ElectionReportPackageSummaryView,
   ElectionResultArtifact,
+  ElectionProtocolPackageBindingView,
   ElectionSummary,
   GetElectionHubViewResponse,
   GetElectionResponse,
@@ -21,9 +22,59 @@ import {
   ElectionResultArtifactKindProto,
   ElectionResultArtifactVisibilityProto,
   OfficialResultVisibilityPolicyProto,
+  ProtocolPackageAccessLocationKindProto,
+  ProtocolPackageApprovalStatusProto,
+  ProtocolPackageBindingSourceProto,
+  ProtocolPackageBindingStatusProto,
+  ProtocolPackageExternalReviewStatusProto,
 } from '@/lib/grpc';
 
 export const timestamp = { seconds: 1_711_410_000, nanos: 0 };
+
+export function createProtocolPackageBinding(
+  overrides?: Partial<ElectionProtocolPackageBindingView>
+): ElectionProtocolPackageBindingView {
+  return {
+    Id: 'protocol-package-binding-1',
+    ElectionId: 'election-1',
+    PackageId: 'omega-hushvoting-v1',
+    PackageVersion: 'v1.0.0',
+    SelectedProfileId: 'dkg-prod-3of5',
+    SpecPackageHash: 'a'.repeat(64),
+    ProofPackageHash: 'b'.repeat(64),
+    ReleaseManifestHash: 'c'.repeat(64),
+    SpecAccessLocations: [
+      {
+        LocationKind: ProtocolPackageAccessLocationKindProto.PublicWebsite,
+        Label: 'Public spec package',
+        Location:
+          'https://www.hushnetwork.social/protocol-omega/hushvoting-v1/v1.0.0/spec.zip',
+        ContentHash: 'a'.repeat(64),
+      },
+    ],
+    ProofAccessLocations: [
+      {
+        LocationKind: ProtocolPackageAccessLocationKindProto.PublicWebsite,
+        Label: 'Public proof package',
+        Location:
+          'https://www.hushnetwork.social/protocol-omega/hushvoting-v1/v1.0.0/proof.zip',
+        ContentHash: 'b'.repeat(64),
+      },
+    ],
+    PackageApprovalStatus: ProtocolPackageApprovalStatusProto.ApprovedInternal,
+    Status: ProtocolPackageBindingStatusProto.Latest,
+    Source: ProtocolPackageBindingSourceProto.CatalogSelection,
+    DraftRevision: 2,
+    BoundAt: timestamp,
+    HasSealedAt: false,
+    BoundByPublicAddress: 'actor-address',
+    ExternalReviewStatus: ProtocolPackageExternalReviewStatusProto.NotReviewed,
+    SourceTransactionId: '',
+    SourceBlockHeight: 0,
+    SourceBlockId: '',
+    ...overrides,
+  };
+}
 
 function getDefaultSelectedProfileId(
   governanceMode: ElectionGovernanceModeProto,

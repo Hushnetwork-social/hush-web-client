@@ -38,6 +38,7 @@ import {
   getSelectedProfileFamilyLabel,
   getSecrecyBoundaryCopy,
 } from './contracts';
+import { ProtocolPackageBindingPanel } from './ProtocolPackageBindingPanel';
 
 type ElectionResultArtifactsSectionProps = {
   election?: ElectionRecordView;
@@ -626,6 +627,14 @@ export function ElectionResultArtifactsSection({
             <div className="mt-2">{getSecrecyBoundaryCopy(election.SelectedProfileDevOnly)}</div>
             <div className="mt-2">{getCustodyBoundaryCopy(election.GovernanceMode)}</div>
           </div>
+
+          {resultView?.ProtocolPackageBinding ? (
+            <ProtocolPackageBindingPanel
+              binding={resultView.ProtocolPackageBinding}
+              mode="evidence"
+              testId="report-package-protocol-package-refs"
+            />
+          ) : null}
 
           {latestReportPackage.FailureReason ? (
             <div className="rounded-xl bg-red-500/12 p-4 text-sm text-red-100">

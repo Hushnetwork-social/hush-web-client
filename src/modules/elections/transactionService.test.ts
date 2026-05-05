@@ -18,6 +18,7 @@ import {
   createElectionReportAccessGrantTransaction,
   createElectionTrusteeInvitationTransaction,
   createOpenElectionTransaction,
+  createRefreshProtocolPackageBindingTransaction,
   createRejectElectionTrusteeInvitationTransaction,
   createSubmitElectionFinalizationShareTransaction,
 } from './transactionService';
@@ -563,6 +564,72 @@ describe('transactionService encrypted election envelope helpers', () => {
     expect(decryptedPayload.ActionPayload.ActorPublicAddress).toBe(ownerSigningPublicKey);
     expect(decryptedPayload.ActionPayload.RequiredWarningCodes).toEqual([1, 2]);
     expect(decryptedPayload.ActionPayload.TrusteePolicyExecutionReference).toBe('trustee-policy-ref');
+  });
+
+  it('creates an encrypted protocol-package refresh envelope for the owner actor', async () => {
+    const ownerSigningPrivateKeyHex = '1111111111111111111111111111111111111111111111111111111111111111';
+    const ownerEncryptionPrivateKeyHex = '2222222222222222222222222222222222222222222222222222222222222222';
+    const nodeEncryptionPrivateKeyHex = '3333333333333333333333333333333333333333333333333333333333333333';
+    const electionPrivateKeyHex = '5555555555555555555555555555555555555555555555555555555555555555';
+    const ownerSigningPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(ownerSigningPrivateKeyHex), true),
+    );
+    const ownerEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(ownerEncryptionPrivateKeyHex), true),
+    );
+    const nodeEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(nodeEncryptionPrivateKeyHex), true),
+    );
+    const actorEncryptedElectionPrivateKey = await eciesEncrypt(
+      electionPrivateKeyHex,
+      ownerEncryptionPublicKey,
+    );
+
+    blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
+      NodePublicEncryptAddress: nodeEncryptionPublicKey,
+      ElectionEnvelopeVersion: 'election-envelope-v2.1',
+    });
+    electionsServiceMock.getElectionEnvelopeAccess.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      ActorEncryptedElectionPrivateKey: actorEncryptedElectionPrivateKey,
+    });
+
+    const { signedTransaction } = await createRefreshProtocolPackageBindingTransaction(
+      'election-123',
+      ownerSigningPublicKey,
+      ownerEncryptionPublicKey,
+      ownerEncryptionPrivateKeyHex,
+      ownerSigningPrivateKeyHex,
+    );
+
+    const parsedTransaction = JSON.parse(signedTransaction) as {
+      PayloadKind: string;
+      Payload: {
+        ActorEncryptedElectionPrivateKey: string;
+        EncryptedPayload: string;
+      };
+    };
+
+    expect(parsedTransaction.PayloadKind).toBe(ENCRYPTED_ELECTION_ENVELOPE_PAYLOAD_KIND);
+
+    const actorElectionPrivateKey = await eciesDecrypt(
+      parsedTransaction.Payload.ActorEncryptedElectionPrivateKey,
+      ownerEncryptionPrivateKeyHex,
+    );
+    const decryptedPayloadJson = await eciesDecrypt(
+      parsedTransaction.Payload.EncryptedPayload,
+      actorElectionPrivateKey,
+    );
+    const decryptedPayload = JSON.parse(decryptedPayloadJson) as {
+      ActionType: string;
+      ActionPayload: {
+        ActorPublicAddress: string;
+      };
+    };
+
+    expect(decryptedPayload.ActionType).toBe('refresh_protocol_package_binding');
+    expect(decryptedPayload.ActionPayload.ActorPublicAddress).toBe(ownerSigningPublicKey);
   });
 
   it('creates an encrypted governed-approval envelope for a trustee actor', async () => {

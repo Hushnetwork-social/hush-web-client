@@ -33,6 +33,7 @@ import {
   CollapsibleSurfaceSection,
   getLatestProposal,
 } from './HushVotingWorkspaceShared';
+import { ProtocolPackageBindingPanel } from './ProtocolPackageBindingPanel';
 
 type OwnerAdminWorkspaceSummaryProps = {
   entry: ElectionHubEntryView;
@@ -293,6 +294,14 @@ export function OwnerAdminWorkspaceSummary({
               that publishes the official result and final report package.
             </div>
           </div>
+
+          {detail?.ProtocolPackageBinding ? (
+            <ProtocolPackageBindingPanel
+              binding={detail.ProtocolPackageBinding}
+              mode="evidence"
+              testId="owner-admin-protocol-package-evidence"
+            />
+          ) : null}
         </>
       ) : (
         <>
@@ -368,6 +377,13 @@ export function OwnerAdminWorkspaceSummary({
                 </div>
               ))}
             </div>
+
+            {detail ? (
+              <ProtocolPackageBindingPanel
+                binding={detail.ProtocolPackageBinding}
+                testId="owner-admin-protocol-package-readiness"
+              />
+            ) : null}
 
             {readinessBlockers.length > 0 ? (
               <ul className="mt-4 list-disc space-y-1 pl-5 text-sm text-hush-text-accent">

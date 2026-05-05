@@ -26,11 +26,13 @@ import {
   OfficialResultVisibilityPolicyProto,
   OutcomeRuleKindProto,
   ParticipationPrivacyModeProto,
+  ProtocolPackageBindingStatusProto,
   ReportingPolicyProto,
   ReviewWindowPolicyProto,
   VoteUpdatePolicyProto,
 } from '@/lib/grpc';
 import { ElectionResultArtifactsSection } from './ElectionResultArtifactsSection';
+import { createProtocolPackageBinding } from './HushVotingWorkspaceTestUtils';
 
 const timestamp = { seconds: 1_774_120_000, nanos: 0 };
 
@@ -480,6 +482,32 @@ describe('ElectionResultArtifactsSection', () => {
     );
     expect(screen.getByTestId('report-package-boundary-context')).toHaveTextContent('Non-dev circuit');
     expect(screen.getByTestId('report-package-boundary-context')).toHaveTextContent('dkg-prod-3of5');
+  });
+
+  it('includes sealed Protocol Omega package refs inside the visible report package evidence', () => {
+    render(
+      <ElectionResultArtifactsSection
+        election={createElectionRecord()}
+        resultView={createResultView({
+          CeremonySnapshot: createCeremonySnapshot(),
+          CanViewReportPackage: true,
+          LatestReportPackage: createReportPackage(),
+          ProtocolPackageBinding: createProtocolPackageBinding({
+            Status: ProtocolPackageBindingStatusProto.Sealed,
+            HasSealedAt: true,
+            SealedAt: timestamp,
+          }),
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('report-package-protocol-package-refs')).toHaveTextContent(
+      'Sealed at open'
+    );
+    expect(screen.getByTestId('report-package-protocol-package-refs')).toHaveTextContent(
+      'aaaaaaaaaaaa...aaaaaaaa'
+    );
+    expect(screen.queryByTestId('protocol-package-refresh')).not.toBeInTheDocument();
   });
 
   it('falls back to the persisted election closed-progress status when result view is unavailable', () => {
