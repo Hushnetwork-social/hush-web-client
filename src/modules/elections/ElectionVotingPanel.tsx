@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  Clock3,
   Copy,
   Download,
   Loader2,
@@ -42,7 +43,9 @@ import { electionsService } from '@/lib/grpc/services/elections';
 import { submitTransaction } from '@/modules/blockchain/BlockchainService';
 import {
   createAcceptElectionBallotCastTransaction,
+  createRegisterPreparedBallotCommitmentTransaction,
   createRegisterElectionVotingCommitmentTransaction,
+  createSpoilPreparedBallotTransaction,
 } from './transactionService';
 import { ElectionReceiptTruthPanel } from './ElectionReceiptTruthPanel';
 import { ElectionResultArtifactsSection } from './ElectionResultArtifactsSection';
@@ -76,6 +79,12 @@ type PendingSubmissionState = {
   idempotencyKey: string;
   ballotPackageCommitment: string;
   submittedAt: string;
+  preparedBallotId?: string;
+  preparedBallotHash?: string;
+  ballotDefinitionHash?: string;
+  ballotDefinitionVersion?: number;
+  receiptCommitment?: string;
+  receiptCommitmentScheme?: string;
 };
 
 type LocalReceipt = {
@@ -85,6 +94,12 @@ type LocalReceipt = {
   acceptedAt: string;
   ballotPackageCommitment: string;
   serverProof: string;
+  preparedBallotId?: string;
+  preparedBallotHash?: string;
+  ballotDefinitionHash?: string;
+  ballotDefinitionVersion?: number;
+  receiptCommitment?: string;
+  receiptCommitmentScheme?: string;
 };
 
 type CastDraft = {
@@ -93,8 +108,48 @@ type CastDraft = {
   ballotNullifier: string;
 };
 
+type Sp04CastBinding = {
+  preparedBallotId: string;
+  preparedBallotHash: string;
+  receiptCommitment: string;
+  receiptCommitmentScheme: string;
+  ballotDefinitionVersion: number;
+  ballotDefinitionHash: string;
+};
+
+type Sp04PreparedPackage = {
+  electionId: string;
+  preparedBallotId: string;
+  preparedBallotHash: string;
+  optionId: string;
+  optionLabel: string;
+  ballotDefinitionHash: string;
+  ballotDefinitionVersion: number;
+  proofStatementId: string;
+  precommittedAt: string;
+  expiresAt: string;
+  castDraft: CastDraft;
+  commitmentHash: string;
+  transcriptText: string;
+  purpose: 'challenge' | 'final';
+};
+
+type Sp04ChallengeState = {
+  status: 'not_started' | 'reset' | 'pending' | 'passed' | 'failed';
+  optionId?: string;
+  optionLabel?: string;
+  verifiedAt?: string;
+  spoiledTranscriptHash?: string;
+  spoilRecordHash?: string;
+  transcriptText?: string;
+  reason?: string;
+};
+
 const pendingStorageKey = (electionId: string) => `feat099:pending:${electionId}`;
 const receiptStorageKey = (electionId: string) => `feat099:receipt:${electionId}`;
+const SP04_LOCAL_VERIFIER_VERSION = 'hushvoting-sp04-local-verifier-v1';
+const SP04_RECEIPT_COMMITMENT_SCHEME = 'hushvoting-sp04-receipt-commitment-sha256-v1';
+const SP04_PREPARED_PACKAGE_TTL_MS = 15 * 60 * 1000;
 const sectionClass = 'rounded-3xl bg-hush-bg-element/90 px-6 py-5 shadow-lg shadow-black/10';
 const insetCardClass = 'rounded-2xl bg-hush-bg-dark/72 px-5 py-4 shadow-sm shadow-black/10';
 
@@ -195,6 +250,97 @@ async function hashText(value: string): Promise<string> {
     .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('')
     .slice(0, 64);
+}
+
+function normalizeArtifactHash(value?: Uint8Array | string | null): string {
+  if (!value) {
+    return '';
+  }
+
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+
+  return Array.from(value)
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+function formatCountdown(milliseconds: number): string {
+  if (milliseconds <= 0) {
+    return '00:00';
+  }
+
+  const totalSeconds = Math.ceil(milliseconds / 1000);
+  const minutes = Math.floor(totalSeconds / 60)
+    .toString()
+    .padStart(2, '0');
+  const seconds = (totalSeconds % 60).toString().padStart(2, '0');
+  return `${minutes}:${seconds}`;
+}
+
+function buildSp04ProofStatementId({
+  ceremonyProfileId,
+  ballotDefinitionVersion,
+  ballotDefinitionHash,
+}: {
+  ceremonyProfileId: string;
+  ballotDefinitionVersion: number;
+  ballotDefinitionHash: string;
+}): string {
+  return [
+    'sp04',
+    ceremonyProfileId || 'default-profile',
+    `ballot-definition-v${ballotDefinitionVersion}`,
+    truncateMiddle(ballotDefinitionHash, 12),
+  ].join(':');
+}
+
+async function buildSp04PreparedPackageHash({
+  electionId,
+  ballotDefinitionHash,
+  ballotDefinitionVersion,
+  castDraft,
+}: {
+  electionId: string;
+  ballotDefinitionHash: string;
+  ballotDefinitionVersion: number;
+  castDraft: CastDraft;
+}): Promise<string> {
+  const packageFingerprint = {
+    version: 'sp04-prepared-ballot-hash-v1',
+    electionId,
+    ballotDefinitionHash,
+    ballotDefinitionVersion,
+    encryptedBallotPackageHash: await hashText(castDraft.encryptedBallotPackage),
+    proofBundleHash: await hashText(castDraft.proofBundle),
+    ballotNullifierHash: await hashText(castDraft.ballotNullifier),
+  };
+
+  return hashText(JSON.stringify(packageFingerprint));
+}
+
+function buildSp04TranscriptText(preparedPackage: Sp04PreparedPackage): string {
+  return [
+    'HushVoting SP-04 Spoiled Prepared Package Transcript',
+    `Prepared Ballot ID: ${preparedPackage.preparedBallotId}`,
+    `Prepared Ballot Hash: ${preparedPackage.preparedBallotHash}`,
+    `Election ID: ${preparedPackage.electionId}`,
+    `Ballot Definition Hash: ${preparedPackage.ballotDefinitionHash}`,
+    `Ballot Definition Version: ${preparedPackage.ballotDefinitionVersion}`,
+    `Challenged Option: ${preparedPackage.optionLabel}`,
+    `Precommitted At: ${preparedPackage.precommittedAt}`,
+    `Expires At: ${preparedPackage.expiresAt}`,
+    '',
+    'Encrypted Ballot Package:',
+    preparedPackage.castDraft.encryptedBallotPackage,
+    '',
+    'Proof Bundle:',
+    preparedPackage.castDraft.proofBundle,
+    '',
+    'Ballot Nullifier:',
+    preparedPackage.castDraft.ballotNullifier,
+  ].join('\n');
 }
 
 function getCastValidationErrors(castDraft: CastDraft, hasBoundaryContext: boolean): string[] {
@@ -555,6 +701,25 @@ function buildReceiptText(
     );
   }
 
+  if (receipt.ballotDefinitionHash) {
+    lines.push(`Ballot Definition Hash: ${receipt.ballotDefinitionHash}`);
+  }
+  if (receipt.ballotDefinitionVersion !== undefined) {
+    lines.push(`Ballot Definition Version: ${receipt.ballotDefinitionVersion}`);
+  }
+  if (receipt.preparedBallotId) {
+    lines.push(`Prepared Ballot ID: ${receipt.preparedBallotId}`);
+  }
+  if (receipt.preparedBallotHash) {
+    lines.push(`Prepared Ballot Hash: ${receipt.preparedBallotHash}`);
+  }
+  if (receipt.receiptCommitment) {
+    lines.push(`Receipt Commitment: ${receipt.receiptCommitment}`);
+  }
+  if (receipt.receiptCommitmentScheme) {
+    lines.push(`Receipt Commitment Scheme: ${receipt.receiptCommitmentScheme}`);
+  }
+
   return lines.join('\n');
 }
 
@@ -583,6 +748,26 @@ function createReceiptFromVotingView(
       existingReceipt?.ballotPackageCommitment ??
       '',
     serverProof: votingView.ServerProof,
+    preparedBallotId:
+      votingView.PreparedBallotId || pendingSubmission?.preparedBallotId || existingReceipt?.preparedBallotId,
+    preparedBallotHash:
+      votingView.PreparedBallotHash || pendingSubmission?.preparedBallotHash || existingReceipt?.preparedBallotHash,
+    ballotDefinitionHash:
+      normalizeArtifactHash(votingView.BallotDefinitionHash) ||
+      pendingSubmission?.ballotDefinitionHash ||
+      existingReceipt?.ballotDefinitionHash,
+    ballotDefinitionVersion:
+      votingView.BallotDefinitionVersion ||
+      pendingSubmission?.ballotDefinitionVersion ||
+      existingReceipt?.ballotDefinitionVersion,
+    receiptCommitment:
+      votingView.ReceiptCommitment ||
+      pendingSubmission?.receiptCommitment ||
+      existingReceipt?.receiptCommitment,
+    receiptCommitmentScheme:
+      votingView.ReceiptCommitmentScheme ||
+      pendingSubmission?.receiptCommitmentScheme ||
+      existingReceipt?.receiptCommitmentScheme,
   };
 }
 
@@ -638,13 +823,23 @@ function buildReceiptVerificationFeedback({
     votingView.ReceiptId === localReceipt.receiptId &&
     votingView.AcceptanceId === localReceipt.acceptanceId &&
     votingView.ServerProof === localReceipt.serverProof;
+  const localReceiptCommitment = localReceipt.receiptCommitment?.trim() ?? '';
+  const votingReceiptCommitment = votingView.ReceiptCommitment?.trim() ?? '';
+  const hasBoundReceipt = Boolean(localReceiptCommitment || votingReceiptCommitment);
+  const boundReceiptMatches =
+    !hasBoundReceipt ||
+    Boolean(localReceiptCommitment && votingReceiptCommitment && localReceiptCommitment === votingReceiptCommitment);
 
-  if (!receiptMatches) {
+  if (!receiptMatches || !boundReceiptMatches) {
     return {
       tone: 'error',
-      title: 'This receipt does not match this voter',
+      title: boundReceiptMatches
+        ? 'This receipt does not match this voter'
+        : 'This bound receipt does not match this voter',
       detail:
-        'The stored receipt on this device does not match the current vote record for this voter.',
+        boundReceiptMatches
+          ? 'The stored receipt on this device does not match the current vote record for this voter.'
+          : 'The stored receipt commitment on this device does not match the current accepted vote record for this voter.',
       verifiedAt,
     };
   }
@@ -671,6 +866,14 @@ function buildReceiptVerificationFeedback({
           label: 'This voter is marked as voted in this election.',
           complete: true,
         },
+        ...(hasBoundReceipt
+          ? [
+              {
+                label: 'The bound receipt commitment matches the accepted vote record.',
+                complete: true,
+              },
+            ]
+          : []),
         finalCountStatusItem,
       ],
     };
@@ -687,6 +890,14 @@ function buildReceiptVerificationFeedback({
         label: 'This voter is marked as voted in this election.',
         complete: false,
       },
+      ...(hasBoundReceipt
+        ? [
+            {
+              label: 'The bound receipt commitment matches the accepted vote record.',
+              complete: true,
+            },
+          ]
+        : []),
       finalCountStatusItem,
     ],
   };
@@ -761,6 +972,96 @@ function WorkflowStatusCard({
   );
 }
 
+function PreparedPackageTimer({
+  expiresAt,
+  nowMs,
+}: {
+  expiresAt?: string;
+  nowMs: number;
+}) {
+  const expiresAtMs = expiresAt ? Date.parse(expiresAt) : Number.NaN;
+  const remainingMs = Number.isFinite(expiresAtMs) ? expiresAtMs - nowMs : 0;
+  const isExpired = remainingMs <= 0;
+
+  return (
+    <div
+      className={`rounded-2xl px-4 py-3 text-sm ${
+        isExpired
+          ? 'bg-red-500/12 text-red-100'
+          : 'bg-cyan-500/12 text-cyan-100'
+      }`}
+      role="status"
+      aria-live="polite"
+      data-testid="voting-sp04-prepared-timer"
+    >
+      <div className="flex items-center gap-2 font-semibold">
+        <Clock3 className="h-4 w-4" />
+        <span>{isExpired ? 'Prepared package expired' : 'Prepared package timer'}</span>
+      </div>
+      <div className="mt-2 font-mono text-lg tabular-nums">
+        {isExpired ? '00:00' : formatCountdown(remainingMs)}
+      </div>
+    </div>
+  );
+}
+
+function ChallengeVerificationSummary({
+  challenge,
+  currentOptionId,
+}: {
+  challenge: Sp04ChallengeState;
+  currentOptionId: string;
+}) {
+  const challengeIsCurrent = challenge.status === 'passed' && challenge.optionId === currentOptionId;
+  const isFailure = challenge.status === 'failed';
+  const isReset = challenge.status === 'reset' || (
+    challenge.status === 'passed' &&
+    Boolean(currentOptionId) &&
+    challenge.optionId !== currentOptionId
+  );
+  const className = challengeIsCurrent
+    ? 'bg-green-500/12 text-green-100'
+    : isFailure
+      ? 'bg-red-500/12 text-red-100'
+      : isReset
+        ? 'bg-amber-500/12 text-amber-100'
+        : 'bg-hush-bg-dark/70 text-hush-text-accent';
+  const title = challengeIsCurrent
+    ? 'Challenge verification passed'
+    : isFailure
+      ? 'Challenge verification failed'
+      : isReset
+        ? 'Challenge reset'
+        : 'Challenge required';
+  const detail = challengeIsCurrent
+    ? 'The challenged package opened to the current selection. Final cast will use a fresh prepared package.'
+    : isFailure
+      ? challenge.reason || 'Local challenge verification failed for this prepared package.'
+      : isReset
+        ? 'The previous challenge was for another selection. Run a new challenge for the current selection.'
+        : 'Final cast stays blocked until the current selected option has passed local challenge verification.';
+
+  return (
+    <div
+      className={`rounded-2xl px-4 py-4 text-sm ${className}`}
+      role="status"
+      aria-live="polite"
+      data-testid="voting-sp04-challenge-summary"
+    >
+      <div className="flex items-center gap-2 font-semibold">
+        {challengeIsCurrent ? <CheckCircle2 className="h-4 w-4" /> : <ShieldAlert className="h-4 w-4" />}
+        <span>{title}</span>
+      </div>
+      <div className="mt-2 leading-6">{detail}</div>
+      {challenge.spoiledTranscriptHash ? (
+        <div className="mt-3 font-mono text-xs">
+          Spoiled transcript hash: {truncateMiddle(challenge.spoiledTranscriptHash)}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function getVotingIntroCopy({
   lifecycleState,
   associatedNumber,
@@ -818,6 +1119,13 @@ export function ElectionVotingPanel({
   const [castFailure, setCastFailure] = useState<string | null>(null);
   const [selectedBallotOptionId, setSelectedBallotOptionId] = useState('');
   const [isVerifyingReceipt, setIsVerifyingReceipt] = useState(false);
+  const [sp04PreparedPackage, setSp04PreparedPackage] = useState<Sp04PreparedPackage | null>(null);
+  const [sp04Challenge, setSp04Challenge] = useState<Sp04ChallengeState>({
+    status: 'not_started',
+  });
+  const [isPreparingSp04Package, setIsPreparingSp04Package] = useState(false);
+  const [isSpoilingSp04Package, setIsSpoilingSp04Package] = useState(false);
+  const [sp04NowMs, setSp04NowMs] = useState(() => Date.now());
 
   useEffect(() => {
     setPendingSubmission(loadPendingSubmission(electionId));
@@ -842,6 +1150,18 @@ export function ElectionVotingPanel({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [receiptVerification]);
+
+  useEffect(() => {
+    if (!sp04PreparedPackage) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setSp04NowMs(Date.now());
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [sp04PreparedPackage]);
 
   async function refreshContext(submissionIdempotencyKey?: string): Promise<GetElectionVotingViewResponse> {
     const storedPending = loadPendingSubmission(electionId);
@@ -961,6 +1281,17 @@ export function ElectionVotingPanel({
   const isCommitmentRegistered = votingView?.CommitmentRegistered ?? false;
   const hasAcceptedReceipt = votingView?.HasAcceptedAt === true;
   const isAccepted = hasAcceptedReceipt;
+  const isSp04Required = votingView?.Sp04Required === true;
+  const ballotDefinitionHash = normalizeArtifactHash(votingView?.BallotDefinitionHash);
+  const ballotDefinitionVersion = votingView?.BallotDefinitionVersion ?? 0;
+  const isBallotDefinitionSealed =
+    !isSp04Required ||
+    Boolean(votingView?.HasBallotDefinitionSealedAt && ballotDefinitionHash);
+  const ceremonyProfileId =
+    votingView?.CeremonyProfileId?.trim() ||
+    votingView?.DkgProfileId?.trim() ||
+    election?.SelectedProfileId?.trim() ||
+    '';
   const actionableReceipt = useMemo(
     () =>
       votingView?.HasAcceptedAt
@@ -1073,11 +1404,62 @@ export function ElectionVotingPanel({
       : 'Created by protected circuit';
   const finalSubmitStatusValue = pendingSubmission
     ? 'Pending chain check'
-    : selectedBallotOption
-      ? 'Ready to submit'
-      : 'Choose an option first';
+    : isSp04Required
+      ? sp04Challenge.status === 'passed' && sp04Challenge.optionId === selectedBallotOptionId
+        ? 'Challenge passed'
+        : 'Challenge required'
+      : selectedBallotOption
+        ? 'Ready to submit'
+        : 'Choose an option first';
+  const sp04PreparedPackageExpired = Boolean(
+    sp04PreparedPackage && Date.parse(sp04PreparedPackage.expiresAt) <= sp04NowMs,
+  );
+  const sp04ChallengePassedForCurrentSelection =
+    !isSp04Required ||
+    Boolean(
+      selectedBallotOptionId &&
+        sp04Challenge.status === 'passed' &&
+        sp04Challenge.optionId === selectedBallotOptionId,
+    );
+  const sp04CastBlocker = useMemo(() => {
+    if (!isSp04Required) {
+      return '';
+    }
+
+    if (!isBallotDefinitionSealed) {
+      return votingView?.Sp04BlockerMessage || 'Ballot definition is not sealed for this election.';
+    }
+
+    if (!selectedBallotOptionId) {
+      return 'Choose an option first.';
+    }
+
+    if (sp04Challenge.status === 'failed') {
+      return sp04Challenge.reason || 'Local challenge verification failed.';
+    }
+
+    if (!sp04ChallengePassedForCurrentSelection) {
+      return votingView?.Sp04BlockerMessage || 'Challenge required for current selection.';
+    }
+
+    return '';
+  }, [
+    isBallotDefinitionSealed,
+    isSp04Required,
+    selectedBallotOptionId,
+    sp04Challenge.reason,
+    sp04Challenge.status,
+    sp04ChallengePassedForCurrentSelection,
+    votingView?.Sp04BlockerMessage,
+  ]);
   const submitButtonDisabled =
-    !selectedBallotOption || !!pendingSubmission || isSubmittingCommitment || isSubmittingCast;
+    !selectedBallotOption ||
+    !!pendingSubmission ||
+    isSubmittingCommitment ||
+    isSubmittingCast ||
+    isPreparingSp04Package ||
+    isSpoilingSp04Package ||
+    Boolean(sp04CastBlocker);
   const shouldShowSubmissionPrivacyPanel =
     (isSubmissionInFlight || !!pendingSubmission) && !isAccepted;
   const submissionPrivacyStatus = isSubmittingCommitment
@@ -1097,17 +1479,32 @@ export function ElectionVotingPanel({
     : bindingStatus === ElectionBindingStatusProto.NonBinding
       ? 'Choosing a ballot option here prepares a local preview. This non-binding election still uses a protected non-dev circuit, so submit vote will generate the protected ballot package and opaque proof envelope on this device.'
       : 'Choosing a ballot option here prepares a local preview. Submit vote will generate the protected ballot package and opaque proof envelope on this device.';
-  const submitPanelTitle = usesOpenAuditBallotPath
-    ? 'Submit vote will record an open-audit ballot'
-    : 'Protected submit is ready on this device';
-  const submitPanelBody = usesOpenAuditBallotPath
-    ? 'This election keeps the canonical workflow but uses the selected open-audit circuit. The recorded artifact stays intentionally readable for audit and customer review.'
-    : bindingStatus === ElectionBindingStatusProto.NonBinding
-      ? 'This non-binding election still freezes the same lifecycle and audit boundaries, but the selected circuit is protected and keeps ballot content opaque on persisted surfaces.'
-      : 'The raw manual commitment and proof fields stay hidden from voters. Submit vote now sends an opaque ballot package and proof envelope instead of the old plaintext binding artifact.';
-  const submitPanelClass = usesOpenAuditBallotPath
-    ? 'border-amber-500/30 bg-amber-500/10 text-amber-100'
-    : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100';
+  const submitPanelTitle = isSp04Required
+    ? 'Challenge-gated final cast'
+    : usesOpenAuditBallotPath
+      ? 'Submit vote will record an open-audit ballot'
+      : 'Protected submit is ready on this device';
+  const submitPanelBody = isSp04Required
+    ? sp04CastBlocker || 'The current selection has passed challenge verification. Final cast will prepare a fresh bound package.'
+    : usesOpenAuditBallotPath
+      ? 'This election keeps the canonical workflow but uses the selected open-audit circuit. The recorded artifact stays intentionally readable for audit and customer review.'
+      : bindingStatus === ElectionBindingStatusProto.NonBinding
+        ? 'This non-binding election still freezes the same lifecycle and audit boundaries, but the selected circuit is protected and keeps ballot content opaque on persisted surfaces.'
+        : 'The raw manual commitment and proof fields stay hidden from voters. Submit vote now sends an opaque ballot package and proof envelope instead of the old plaintext binding artifact.';
+  const submitPanelClass = isSp04Required
+    ? sp04CastBlocker
+      ? 'border-amber-500/30 bg-amber-500/10 text-amber-100'
+      : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100'
+    : usesOpenAuditBallotPath
+      ? 'border-amber-500/30 bg-amber-500/10 text-amber-100'
+      : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100';
+  const submitPanelBodyClass = isSp04Required
+    ? sp04CastBlocker
+      ? 'text-amber-100/90'
+      : 'text-emerald-100/90'
+    : usesOpenAuditBallotPath
+      ? 'text-amber-100/90'
+      : 'text-emerald-100/90';
 
   useEffect(() => {
     if (shouldExpandSnapshotByDefault) {
@@ -1131,6 +1528,8 @@ export function ElectionVotingPanel({
 
   useEffect(() => {
     setSelectedBallotOptionId('');
+    setSp04PreparedPackage(null);
+    setSp04Challenge({ status: 'not_started' });
     setAcceptedPanelExpansionOverride(null);
   }, [electionId]);
 
@@ -1148,6 +1547,31 @@ export function ElectionVotingPanel({
       setSelectedBallotOptionId('');
     }
   }, [ballotOptions, selectedBallotOptionId]);
+
+  function handleSelectBallotOption(optionId: string): void {
+    if (optionId === selectedBallotOptionId) {
+      return;
+    }
+
+    const nextOption = ballotOptions.find((option) => option.OptionId === optionId);
+    setSelectedBallotOptionId(optionId);
+
+    if (!isSp04Required) {
+      return;
+    }
+
+    setSp04PreparedPackage(null);
+    if (sp04Challenge.status === 'passed' || sp04Challenge.status === 'failed') {
+      setSp04Challenge({
+        status: 'reset',
+        optionId,
+        optionLabel: nextOption?.DisplayLabel,
+        reason: 'Selection changed after the previous challenge.',
+      });
+    } else if (sp04Challenge.status !== 'not_started') {
+      setSp04Challenge({ status: 'not_started' });
+    }
+  }
 
   async function submitCommitmentHash(
     nextCommitmentHash: string,
@@ -1216,7 +1640,75 @@ export function ElectionVotingPanel({
     }
   }
 
-  async function submitCastDraft(nextCastDraft: CastDraft): Promise<void> {
+  async function buildSelectedCastArtifacts(): Promise<{
+    castDraft: CastDraft;
+    commitmentHash: string;
+  }> {
+    if (!selectedBallotOption) {
+      throw new Error('Choose a ballot option before preparing the vote.');
+    }
+
+    if (!votingView || !hasBoundaryContext) {
+      logVotingBoundaryContext('submit-blocked', electionId, detail, votingView);
+      throw new Error('The election boundary context is incomplete.');
+    }
+
+    if (usesOpenAuditBallotPath) {
+      const openBallotArtifacts = await buildElectionDevModeArtifacts({
+        electionId,
+        selectedOption: selectedBallotOption,
+        openArtifactId: votingView.OpenArtifactId,
+        eligibleSetHash: votingView.EligibleSetHash,
+        ceremonyVersionId: votingView.CeremonyVersionId,
+        dkgProfileId: votingView.DkgProfileId,
+        tallyPublicKeyFingerprint: votingView.TallyPublicKeyFingerprint,
+      });
+
+      return {
+        castDraft: {
+          encryptedBallotPackage: openBallotArtifacts.encryptedBallotPackage,
+          proofBundle: openBallotArtifacts.proofBundle,
+          ballotNullifier: openBallotArtifacts.ballotNullifier,
+        },
+        commitmentHash: openBallotArtifacts.commitmentHash,
+      };
+    }
+
+    const selectedOptionIndex = ballotOptions.findIndex(
+      (option) => option.OptionId === selectedBallotOption.OptionId,
+    );
+    if (selectedOptionIndex < 0) {
+      throw new Error('The selected ballot option is no longer available.');
+    }
+
+    const tallyPublicKey = grpcPointToElectionPoint(votingView.TallyPublicKey);
+    const protectedArtifacts = await buildBindingProtectedBallotArtifacts({
+      electionId,
+      selectedOption: selectedBallotOption,
+      selectedOptionIndex,
+      selectionCount: ballotOptions.length,
+      openArtifactId: votingView.OpenArtifactId,
+      eligibleSetHash: votingView.EligibleSetHash,
+      ceremonyVersionId: votingView.CeremonyVersionId,
+      dkgProfileId: votingView.DkgProfileId,
+      tallyPublicKey,
+      tallyPublicKeyFingerprint: votingView.TallyPublicKeyFingerprint,
+    });
+
+    return {
+      castDraft: {
+        encryptedBallotPackage: protectedArtifacts.encryptedBallotPackage,
+        proofBundle: protectedArtifacts.proofBundle,
+        ballotNullifier: protectedArtifacts.ballotNullifier,
+      },
+      commitmentHash: protectedArtifacts.commitmentHash,
+    };
+  }
+
+  async function submitCastDraft(
+    nextCastDraft: CastDraft,
+    sp04Binding?: Sp04CastBinding,
+  ): Promise<void> {
     const validationErrors = getCastValidationErrors(nextCastDraft, hasBoundaryContext);
     if (!votingView || validationErrors.length > 0) {
       setFeedback({
@@ -1231,6 +1723,12 @@ export function ElectionVotingPanel({
       idempotencyKey: submissionIdempotencyKey,
       ballotPackageCommitment: await hashText(nextCastDraft.encryptedBallotPackage),
       submittedAt: new Date().toISOString(),
+      preparedBallotId: sp04Binding?.preparedBallotId,
+      preparedBallotHash: sp04Binding?.preparedBallotHash,
+      ballotDefinitionHash: sp04Binding?.ballotDefinitionHash,
+      ballotDefinitionVersion: sp04Binding?.ballotDefinitionVersion,
+      receiptCommitment: sp04Binding?.receiptCommitment,
+      receiptCommitmentScheme: sp04Binding?.receiptCommitmentScheme,
     };
 
     setIsSubmittingCast(true);
@@ -1254,6 +1752,7 @@ export function ElectionVotingPanel({
         votingView.DkgProfileId,
         votingView.TallyPublicKeyFingerprint,
         actorSigningPrivateKey,
+        sp04Binding,
       );
       savePendingSubmission(electionId, nextPendingSubmission);
       setPendingSubmission(nextPendingSubmission);
@@ -1325,6 +1824,264 @@ export function ElectionVotingPanel({
       setIsSubmittingCast(false);
       setIsCheckingStatus(false);
     }
+  }
+
+  async function prepareSp04Package(purpose: 'challenge' | 'final'): Promise<Sp04PreparedPackage | null> {
+    if (!selectedBallotOption) {
+      setFeedback({ tone: 'error', message: 'Choose a ballot option before preparing a package.' });
+      return null;
+    }
+
+    if (!votingView || !isBallotDefinitionSealed || !ballotDefinitionHash) {
+      setFeedback({
+        tone: 'error',
+        message: votingView?.Sp04BlockerMessage || 'Ballot definition is not sealed for this election.',
+      });
+      return null;
+    }
+
+    setIsPreparingSp04Package(true);
+    setFeedback(null);
+    setCastFailure(null);
+
+    try {
+      const { castDraft, commitmentHash } = await buildSelectedCastArtifacts();
+      if (!isCommitmentRegistered) {
+        const commitmentAccepted = await submitCommitmentHash(commitmentHash, {
+          showSuccessFeedback: false,
+        });
+        if (!commitmentAccepted) {
+          return null;
+        }
+      }
+
+      const preparedBallotId = `${generateGuid()}-${purpose}-${Date.now().toString(36)}`;
+      const preparedBallotHash = await buildSp04PreparedPackageHash({
+        electionId,
+        ballotDefinitionHash,
+        ballotDefinitionVersion,
+        castDraft,
+      });
+      const proofStatementId = buildSp04ProofStatementId({
+        ceremonyProfileId,
+        ballotDefinitionHash,
+        ballotDefinitionVersion,
+      });
+      const precommittedAt = new Date().toISOString();
+      const expiresAt = new Date(Date.now() + SP04_PREPARED_PACKAGE_TTL_MS).toISOString();
+      const preparedPackage: Sp04PreparedPackage = {
+        electionId,
+        preparedBallotId,
+        preparedBallotHash,
+        optionId: selectedBallotOption.OptionId,
+        optionLabel: selectedBallotOption.DisplayLabel,
+        ballotDefinitionHash,
+        ballotDefinitionVersion,
+        proofStatementId,
+        precommittedAt,
+        expiresAt,
+        castDraft,
+        commitmentHash,
+        transcriptText: '',
+        purpose,
+      };
+      preparedPackage.transcriptText = buildSp04TranscriptText(preparedPackage);
+
+      const { signedTransaction } = await createRegisterPreparedBallotCommitmentTransaction(
+        electionId,
+        actorPublicAddress,
+        actorEncryptionPublicKey,
+        actorEncryptionPrivateKey,
+        preparedBallotId,
+        preparedBallotHash,
+        ballotDefinitionVersion,
+        ballotDefinitionHash,
+        ceremonyProfileId,
+        proofStatementId,
+        actorSigningPrivateKey,
+      );
+      const submitResult = await submitTransaction(signedTransaction);
+      if (
+        !submitResult.successful &&
+        submitResult.status !== TransactionStatus.ACCEPTED &&
+        submitResult.status !== TransactionStatus.PENDING
+      ) {
+        throw new Error(submitResult.message || 'Prepared package precommit was rejected.');
+      }
+
+      setSp04NowMs(Date.now());
+      setSp04PreparedPackage(preparedPackage);
+      if (purpose === 'challenge') {
+        setSp04Challenge({ status: 'pending', optionId: selectedBallotOption.OptionId, optionLabel: selectedBallotOption.DisplayLabel });
+        setFeedback({
+          tone: 'success',
+          message: 'Prepared package precommitted. Run the challenge before final cast.',
+        });
+      }
+
+      return preparedPackage;
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Prepared package precommit failed.';
+      setFeedback({ tone: 'error', message });
+      if (purpose === 'challenge') {
+        setSp04Challenge({ status: 'failed', optionId: selectedBallotOption.OptionId, optionLabel: selectedBallotOption.DisplayLabel, reason: message });
+      }
+      return null;
+    } finally {
+      setIsPreparingSp04Package(false);
+    }
+  }
+
+  async function handlePrepareSp04ChallengePackage(): Promise<void> {
+    await prepareSp04Package('challenge');
+  }
+
+  async function handleChallengeSpoilPreparedPackage(): Promise<void> {
+    if (!sp04PreparedPackage || !selectedBallotOption) {
+      setFeedback({ tone: 'error', message: 'Prepare a package before running the challenge.' });
+      return;
+    }
+
+    if (sp04PreparedPackage.optionId !== selectedBallotOption.OptionId) {
+      setSp04Challenge({
+        status: 'reset',
+        optionId: selectedBallotOption.OptionId,
+        optionLabel: selectedBallotOption.DisplayLabel,
+        reason: 'Selection changed after this prepared package was created.',
+      });
+      setFeedback({ tone: 'error', message: 'Prepare a new package for the current selection.' });
+      return;
+    }
+
+    if (sp04PreparedPackageExpired) {
+      setSp04Challenge({
+        status: 'failed',
+        optionId: selectedBallotOption.OptionId,
+        optionLabel: selectedBallotOption.DisplayLabel,
+        reason: 'The prepared package expired before challenge verification.',
+      });
+      setFeedback({ tone: 'error', message: 'Prepared package expired. Prepare again.' });
+      return;
+    }
+
+    setIsSpoilingSp04Package(true);
+    setFeedback(null);
+
+    try {
+      const spoiledTranscriptHash = await hashText(sp04PreparedPackage.transcriptText);
+      const spoilRecordHash = await hashText(
+        JSON.stringify({
+          version: 'sp04-spoil-record-v1',
+          electionId,
+          preparedBallotId: sp04PreparedPackage.preparedBallotId,
+          preparedBallotHash: sp04PreparedPackage.preparedBallotHash,
+          spoiledTranscriptHash,
+          verifier: SP04_LOCAL_VERIFIER_VERSION,
+        }),
+      );
+      const { signedTransaction } = await createSpoilPreparedBallotTransaction(
+        electionId,
+        actorPublicAddress,
+        actorEncryptionPublicKey,
+        actorEncryptionPrivateKey,
+        sp04PreparedPackage.preparedBallotId,
+        sp04PreparedPackage.preparedBallotHash,
+        spoiledTranscriptHash,
+        spoilRecordHash,
+        SP04_LOCAL_VERIFIER_VERSION,
+        actorSigningPrivateKey,
+      );
+      const submitResult = await submitTransaction(signedTransaction);
+      if (
+        !submitResult.successful &&
+        submitResult.status !== TransactionStatus.ACCEPTED &&
+        submitResult.status !== TransactionStatus.PENDING
+      ) {
+        throw new Error(submitResult.message || 'Spoiled challenge record was rejected.');
+      }
+
+      setSp04Challenge({
+        status: 'passed',
+        optionId: selectedBallotOption.OptionId,
+        optionLabel: selectedBallotOption.DisplayLabel,
+        verifiedAt: new Date().toISOString(),
+        spoiledTranscriptHash,
+        spoilRecordHash,
+        transcriptText: sp04PreparedPackage.transcriptText,
+      });
+      setFeedback({
+        tone: 'success',
+        message: 'Challenge passed for the current selection. Final cast will use a fresh package.',
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Challenge verification failed.';
+      setSp04Challenge({
+        status: 'failed',
+        optionId: selectedBallotOption.OptionId,
+        optionLabel: selectedBallotOption.DisplayLabel,
+        reason: message,
+      });
+      setFeedback({ tone: 'error', message });
+    } finally {
+      setIsSpoilingSp04Package(false);
+    }
+  }
+
+  function handleDownloadSpoiledTranscript(): void {
+    if (!sp04Challenge.transcriptText || typeof window === 'undefined') {
+      return;
+    }
+
+    const blob = new Blob([sp04Challenge.transcriptText], {
+      type: 'text/plain;charset=utf-8',
+    });
+    const objectUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = `sp04-spoiled-transcript-${electionId}-${sp04Challenge.optionId || 'selection'}.txt`;
+    link.click();
+    window.URL.revokeObjectURL(objectUrl);
+    setFeedback({ tone: 'success', message: 'Spoiled transcript downloaded locally.' });
+  }
+
+  async function handleSubmitSp04FinalCast(): Promise<void> {
+    if (!selectedBallotOption) {
+      setFeedback({ tone: 'error', message: 'Choose a ballot option before submitting the vote.' });
+      return;
+    }
+
+    if (sp04CastBlocker) {
+      setFeedback({ tone: 'error', message: sp04CastBlocker });
+      return;
+    }
+
+    const finalPreparedPackage = await prepareSp04Package('final');
+    if (!finalPreparedPackage) {
+      return;
+    }
+
+    const receiptCommitment = await hashText(
+      JSON.stringify({
+        version: 'sp04-receipt-commitment-v1',
+        electionId,
+        preparedBallotId: finalPreparedPackage.preparedBallotId,
+        preparedBallotHash: finalPreparedPackage.preparedBallotHash,
+        ballotDefinitionHash: finalPreparedPackage.ballotDefinitionHash,
+        ballotDefinitionVersion: finalPreparedPackage.ballotDefinitionVersion,
+        scheme: SP04_RECEIPT_COMMITMENT_SCHEME,
+      }),
+    );
+
+    await submitCastDraft(finalPreparedPackage.castDraft, {
+      preparedBallotId: finalPreparedPackage.preparedBallotId,
+      preparedBallotHash: finalPreparedPackage.preparedBallotHash,
+      receiptCommitment,
+      receiptCommitmentScheme: SP04_RECEIPT_COMMITMENT_SCHEME,
+      ballotDefinitionVersion: finalPreparedPackage.ballotDefinitionVersion,
+      ballotDefinitionHash: finalPreparedPackage.ballotDefinitionHash,
+    });
   }
 
   async function handleSubmitNonBindingOpenVote(): Promise<void> {
@@ -1456,6 +2213,11 @@ export function ElectionVotingPanel({
         tone: 'error',
         message: 'Choose a ballot option before submitting the vote.',
       });
+      return;
+    }
+
+    if (isSp04Required) {
+      await handleSubmitSp04FinalCast();
       return;
     }
 
@@ -1711,6 +2473,36 @@ export function ElectionVotingPanel({
                           Server proof:{' '}
                           <span className="font-mono">{truncateMiddle(actionableReceipt.serverProof)}</span>
                         </div>
+                        {actionableReceipt.receiptCommitment ? (
+                          <div>
+                            Receipt commitment:{' '}
+                            <span className="font-mono">
+                              {truncateMiddle(actionableReceipt.receiptCommitment)}
+                            </span>
+                          </div>
+                        ) : null}
+                        {actionableReceipt.preparedBallotHash ? (
+                          <div>
+                            Prepared ballot hash:{' '}
+                            <span className="font-mono">
+                              {truncateMiddle(actionableReceipt.preparedBallotHash)}
+                            </span>
+                          </div>
+                        ) : null}
+                        {actionableReceipt.ballotDefinitionHash ? (
+                          <div>
+                            Ballot definition:{' '}
+                            <span className="font-mono">
+                              {truncateMiddle(actionableReceipt.ballotDefinitionHash)}
+                            </span>
+                          </div>
+                        ) : null}
+                        {actionableReceipt.receiptCommitment ? (
+                          <div className="text-green-100/80">
+                            This receipt proves acceptance and later inclusion. It does not prove
+                            which option was selected.
+                          </div>
+                        ) : null}
                         {shouldShowReceiptCommitment ? (
                           <div>
                             Ballot commitment:{' '}
@@ -1884,6 +2676,150 @@ export function ElectionVotingPanel({
               />
             </div>
 
+            {isSp04Required ? (
+              <div
+                className="mt-6 rounded-3xl bg-[#111a2f] p-5 shadow-sm shadow-black/10"
+                data-testid="voting-sp04-ceremony"
+              >
+                <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+                  <div className="rounded-2xl bg-cyan-500/10 px-4 py-4 text-cyan-100">
+                    <div className="flex items-center gap-2 text-sm font-semibold">
+                      {isBallotDefinitionSealed ? (
+                        <ShieldCheck className="h-4 w-4" />
+                      ) : (
+                        <ShieldAlert className="h-4 w-4" />
+                      )}
+                      <span>
+                        {isBallotDefinitionSealed
+                          ? 'Sealed ballot definition'
+                          : 'Ballot definition missing'}
+                      </span>
+                    </div>
+                    <div className="mt-3 break-all font-mono text-sm">
+                      {ballotDefinitionHash
+                        ? truncateMiddle(ballotDefinitionHash, 12)
+                        : 'Hash not available'}
+                    </div>
+                    <div className="mt-2 text-xs uppercase tracking-[0.18em] text-cyan-100/70">
+                      Version {ballotDefinitionVersion || 0}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="rounded-2xl bg-hush-bg-dark/70 px-4 py-4 text-sm text-hush-text-accent">
+                      <div className="font-semibold text-hush-text-primary">
+                        Current ceremony gate
+                      </div>
+                      <div className="mt-2 leading-6">
+                        {sp04CastBlocker ||
+                          'Current selection has passed the challenge gate.'}
+                      </div>
+                      <div className="mt-3 text-xs uppercase tracking-[0.18em] text-hush-text-accent">
+                        Required challenges: {votingView?.RequiredChallengeCount || 1}
+                      </div>
+                    </div>
+
+                    {sp04PreparedPackage ? (
+                      <PreparedPackageTimer
+                        expiresAt={sp04PreparedPackage.expiresAt}
+                        nowMs={sp04NowMs}
+                      />
+                    ) : (
+                      <div
+                        className="rounded-2xl bg-hush-bg-dark/70 px-4 py-4 text-sm text-hush-text-accent"
+                        data-testid="voting-sp04-prepared-empty"
+                      >
+                        <div className="font-semibold text-hush-text-primary">
+                          Prepared package
+                        </div>
+                        <div className="mt-2 leading-6">
+                          Not started for the current selection.
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_0.9fr]">
+                  <ChallengeVerificationSummary
+                    challenge={sp04Challenge}
+                    currentOptionId={selectedBallotOptionId}
+                  />
+
+                  <div className="rounded-2xl bg-hush-bg-dark/70 px-4 py-4 text-sm text-hush-text-accent">
+                    <div className="font-semibold text-hush-text-primary">
+                      Challenge actions
+                    </div>
+                    <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+                      <button
+                        type="button"
+                        onClick={() => void handlePrepareSp04ChallengePackage()}
+                        disabled={
+                          !selectedBallotOption ||
+                          !isBallotDefinitionSealed ||
+                          isPreparingSp04Package ||
+                          isSpoilingSp04Package
+                        }
+                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-hush-purple px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 disabled:cursor-not-allowed disabled:bg-hush-bg-light disabled:text-hush-text-accent"
+                        data-testid="voting-sp04-prepare-action"
+                      >
+                        {isPreparingSp04Package ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <ShieldCheck className="h-4 w-4" />
+                        )}
+                        <span>
+                          {sp04PreparedPackageExpired || sp04PreparedPackage
+                            ? 'Prepare again'
+                            : 'Prepare package'}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => void handleChallengeSpoilPreparedPackage()}
+                        disabled={
+                          !sp04PreparedPackage ||
+                          sp04PreparedPackageExpired ||
+                          sp04PreparedPackage.optionId !== selectedBallotOptionId ||
+                          isPreparingSp04Package ||
+                          isSpoilingSp04Package
+                        }
+                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-teal-700 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-teal-600 disabled:cursor-not-allowed disabled:bg-hush-bg-light disabled:text-hush-text-accent"
+                        data-testid="voting-sp04-challenge-action"
+                      >
+                        {isSpoilingSp04Package ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <ShieldAlert className="h-4 w-4" />
+                        )}
+                        <span>Challenge / spoil</span>
+                      </button>
+                    </div>
+
+                    {sp04Challenge.transcriptText ? (
+                      <div className="mt-4 rounded-2xl bg-amber-500/12 p-4 text-amber-100">
+                        <div className="font-semibold">Spoiled transcript available</div>
+                        <div className="mt-2 leading-6">
+                          The file may contain the challenged selection and witnesses. Download
+                          it only when local dispute evidence is needed.
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleDownloadSpoiledTranscript}
+                          className="mt-3 inline-flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2 text-sm font-medium text-amber-950 transition-colors hover:bg-amber-400"
+                          data-testid="voting-sp04-download-transcript"
+                        >
+                          <Download className="h-4 w-4" />
+                          <span>Download spoiled transcript</span>
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
             <div className="mt-6">
               <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
                 Official ballot options
@@ -1897,7 +2833,7 @@ export function ElectionVotingPanel({
                       <button
                         key={option.OptionId}
                         type="button"
-                        onClick={() => setSelectedBallotOptionId(option.OptionId)}
+                        onClick={() => handleSelectBallotOption(option.OptionId)}
                         className={`rounded-2xl border px-5 py-4 text-left transition-colors ${
                           isSelected
                             ? 'border-hush-purple bg-hush-purple/10 shadow-lg shadow-hush-purple/10'
@@ -1972,9 +2908,7 @@ export function ElectionVotingPanel({
                 {submitPanelTitle}
               </div>
               <div
-                className={`mt-2 leading-6 ${
-                  usesOpenAuditBallotPath ? 'text-amber-100/90' : 'text-emerald-100/90'
-                }`}
+                className={`mt-2 leading-6 ${submitPanelBodyClass}`}
               >
                 {submitPanelBody}
               </div>
@@ -1991,7 +2925,13 @@ export function ElectionVotingPanel({
                   ) : (
                     <ShieldCheck className="h-4 w-4" />
                   )}
-                  <span>{selectedBallotOption ? 'Submit vote' : 'Choose an option first'}</span>
+                  <span>
+                    {selectedBallotOption
+                      ? isSp04Required
+                        ? 'Prepare final package and cast'
+                        : 'Submit vote'
+                      : 'Choose an option first'}
+                  </span>
                 </button>
               </div>
               {feedback ? (

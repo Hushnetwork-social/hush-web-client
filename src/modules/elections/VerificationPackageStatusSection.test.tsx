@@ -178,6 +178,34 @@ describe('VerificationPackageStatusSection', () => {
     expect(screen.getByText('22 passed, 2 warnings, 0 failed')).toBeInTheDocument();
   });
 
+  it('shows SP-04 evidence counts inside the existing package section', () => {
+    render(
+      <VerificationPackageStatusSection
+        electionId="election-1"
+        actorPublicAddress="actor-address"
+        status={createVerificationPackageStatus({
+          Sp04Evidence: {
+            EvidenceExpected: true,
+            PublicEvidenceAvailable: true,
+            RestrictedEvidenceAvailable: true,
+            PreparedPackageCount: 184,
+            SpoiledPackageCount: 92,
+            AcceptedBoundReceiptCount: 92,
+            ReceiptCommitmentSetHash: 'a'.repeat(64),
+            Message: 'SP-04 evidence present in public and restricted package views.',
+          },
+        })}
+      />
+    );
+
+    const evidence = screen.getByTestId('verification-package-sp04-evidence');
+    expect(evidence).toHaveTextContent('SP-04 evidence');
+    expect(evidence).toHaveTextContent('SP-04 evidence present');
+    expect(evidence).toHaveTextContent('184');
+    expect(evidence).toHaveTextContent('92');
+    expect(screen.getByRole('button', { name: 'Download restricted package' })).toBeEnabled();
+  });
+
   it.each([
     [
       ElectionVerifierOverallStatusProto.ElectionVerifierPass,

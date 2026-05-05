@@ -815,6 +815,55 @@ export enum ElectionCastAcceptanceFailureReasonProto {
   CastAcceptanceFailureReasonWrongElectionContext = 9,
   CastAcceptanceFailureReasonClosePersisted = 10,
   CastAcceptanceFailureReasonAlreadyVoted = 11,
+  CastAcceptanceFailureReasonPreparedBallotMissing = 12,
+  CastAcceptanceFailureReasonPreparedBallotHashMismatch = 13,
+  CastAcceptanceFailureReasonPreparedBallotExpired = 14,
+  CastAcceptanceFailureReasonPreparedBallotAlreadySpoiled = 15,
+  CastAcceptanceFailureReasonPreparedBallotAlreadyCast = 16,
+  CastAcceptanceFailureReasonChallengeRequiredBeforeCast = 17,
+  CastAcceptanceFailureReasonBallotDefinitionHashMismatch = 18,
+  CastAcceptanceFailureReasonReceiptCommitmentMissing = 19,
+  CastAcceptanceFailureReasonUnsupportedCeremonyProfile = 20,
+}
+
+export enum PreparedBallotCommitmentFailureReasonProto {
+  PreparedBallotCommitmentFailureReasonNone = 0,
+  PreparedBallotCommitmentFailureReasonValidationFailed = 1,
+  PreparedBallotCommitmentFailureReasonNotFound = 2,
+  PreparedBallotCommitmentFailureReasonNotLinked = 3,
+  PreparedBallotCommitmentFailureReasonNotActive = 4,
+  PreparedBallotCommitmentFailureReasonCommitmentMissing = 5,
+  PreparedBallotCommitmentFailureReasonElectionNotOpen = 6,
+  PreparedBallotCommitmentFailureReasonBallotDefinitionHashMismatch = 7,
+  PreparedBallotCommitmentFailureReasonUnsupportedCeremonyProfile = 8,
+  PreparedBallotCommitmentFailureReasonDuplicatePreparedBallot = 9,
+  PreparedBallotCommitmentFailureReasonClosePersisted = 10,
+}
+
+export enum SpoilPreparedBallotFailureReasonProto {
+  SpoilPreparedBallotFailureReasonNone = 0,
+  SpoilPreparedBallotFailureReasonValidationFailed = 1,
+  SpoilPreparedBallotFailureReasonNotFound = 2,
+  SpoilPreparedBallotFailureReasonNotLinked = 3,
+  SpoilPreparedBallotFailureReasonNotActive = 4,
+  SpoilPreparedBallotFailureReasonPreparedBallotMissing = 5,
+  SpoilPreparedBallotFailureReasonPreparedBallotHashMismatch = 6,
+  SpoilPreparedBallotFailureReasonPreparedBallotExpired = 7,
+  SpoilPreparedBallotFailureReasonPreparedBallotAlreadySpoiled = 8,
+  SpoilPreparedBallotFailureReasonPreparedBallotAlreadyCast = 9,
+  SpoilPreparedBallotFailureReasonElectionNotOpen = 10,
+  SpoilPreparedBallotFailureReasonClosePersisted = 11,
+}
+
+export enum BallotDefinitionMutationPolicyProto {
+  BallotDefinitionImmutableAfterOpen = 0,
+}
+
+export enum PreparedBallotStateProto {
+  PreparedBallotPrepared = 0,
+  PreparedBallotSpoiled = 1,
+  PreparedBallotCast = 2,
+  PreparedBallotExpired = 3,
 }
 
 export enum ElectionVotingSubmissionStatusProto {
@@ -1506,6 +1555,18 @@ export interface ElectionVerificationPackageStatusView {
   RestrictedPackage?: ElectionVerificationPackageExportAvailabilityView;
   ProtocolPackageBinding?: ElectionProtocolPackageBindingView;
   LastVerifierResult?: ElectionVerifierResultSummaryView;
+  Sp04Evidence?: ElectionSp04EvidenceStatusView;
+}
+
+export interface ElectionSp04EvidenceStatusView {
+  EvidenceExpected: boolean;
+  PublicEvidenceAvailable: boolean;
+  RestrictedEvidenceAvailable: boolean;
+  PreparedPackageCount: number;
+  SpoiledPackageCount: number;
+  AcceptedBoundReceiptCount: number;
+  ReceiptCommitmentSetHash: string;
+  Message: string;
 }
 
 export interface ElectionVerificationPackageFileView {
@@ -1556,6 +1617,12 @@ export interface ElectionRecordView {
   ClosedProgressStatus: ElectionClosedProgressStatusProto;
   UnofficialResultArtifactId: string;
   OfficialResultArtifactId: string;
+  BallotDefinitionVersion?: number;
+  BallotDefinitionHash?: Uint8Array | string;
+  BallotDefinitionSealedAt?: GrpcTimestamp;
+  HasBallotDefinitionSealedAt?: boolean;
+  BallotDefinitionMutationPolicy?: BallotDefinitionMutationPolicyProto;
+  HasBallotDefinitionSeal?: boolean;
 }
 
 export interface ElectionSummary {
@@ -1876,6 +1943,50 @@ export interface RegisterElectionVotingCommitmentResponse {
   HasCommitmentRegisteredAt: boolean;
 }
 
+export interface RegisterPreparedBallotCommitmentRequest {
+  ElectionId: string;
+  ActorPublicAddress: string;
+  PreparedBallotId: string;
+  PreparedBallotHash: string;
+  BallotDefinitionVersion: number;
+  BallotDefinitionHash: Uint8Array | string;
+  CeremonyProfileId: string;
+  ProofStatementId: string;
+}
+
+export interface RegisterPreparedBallotCommitmentResponse {
+  Success: boolean;
+  FailureReason: PreparedBallotCommitmentFailureReasonProto;
+  ErrorMessage: string;
+  Election?: ElectionRecordView;
+  SelfRosterEntry?: ElectionRosterEntryView;
+  PreparedBallotId: string;
+  PreparedBallotHash: string;
+  PrecommittedAt?: GrpcTimestamp;
+  ExpiresAt?: GrpcTimestamp;
+}
+
+export interface SpoilPreparedBallotRequest {
+  ElectionId: string;
+  ActorPublicAddress: string;
+  PreparedBallotId: string;
+  PreparedBallotHash: string;
+  SpoiledTranscriptHash: string;
+  SpoilRecordHash: string;
+  LocalVerifierVersion: string;
+}
+
+export interface SpoilPreparedBallotResponse {
+  Success: boolean;
+  FailureReason: SpoilPreparedBallotFailureReasonProto;
+  ErrorMessage: string;
+  Election?: ElectionRecordView;
+  SelfRosterEntry?: ElectionRosterEntryView;
+  PreparedBallotId: string;
+  PreparedBallotState: PreparedBallotStateProto;
+  SpoiledAt?: GrpcTimestamp;
+}
+
 export interface AcceptElectionBallotCastRequest {
   ElectionId: string;
   ActorPublicAddress: string;
@@ -1888,6 +1999,12 @@ export interface AcceptElectionBallotCastRequest {
   CeremonyVersionId: string;
   DkgProfileId: string;
   TallyPublicKeyFingerprint: string;
+  PreparedBallotId?: string;
+  PreparedBallotHash?: string;
+  ReceiptCommitment?: string;
+  ReceiptCommitmentScheme?: string;
+  BallotDefinitionVersion?: number;
+  BallotDefinitionHash?: Uint8Array | string;
 }
 
 export interface AcceptElectionBallotCastResponse {
@@ -1899,6 +2016,9 @@ export interface AcceptElectionBallotCastResponse {
   PersonalParticipationStatus: ElectionParticipationStatusProto;
   AcceptedAt?: GrpcTimestamp;
   HasAcceptedAt: boolean;
+  PreparedBallotId?: string;
+  ReceiptCommitment?: string;
+  ReceiptCommitmentScheme?: string;
 }
 
 export interface GetElectionRequest {
@@ -1930,9 +2050,11 @@ export interface GetElectionVotingViewRequest {
 export interface VerifyElectionReceiptRequest {
   ElectionId: string;
   ActorPublicAddress: string;
-  ReceiptId: string;
-  AcceptanceId: string;
-  ServerProof: string;
+  ReceiptId?: string;
+  AcceptanceId?: string;
+  ServerProof?: string;
+  ReceiptCommitment?: string;
+  PreparedBallotId?: string;
 }
 
 export interface VerifyElectionReceiptResponse {
@@ -1948,6 +2070,11 @@ export interface VerifyElectionReceiptResponse {
   VerifiedReceiptId: string;
   VerifiedAcceptanceId: string;
   VerifiedServerProof: string;
+  HasBoundReceipt: boolean;
+  ReceiptCommitmentInAcceptedSet: boolean;
+  VerifiedReceiptCommitment: string;
+  VerifiedReceiptCommitmentScheme: string;
+  VerifiedPreparedBallotId: string;
 }
 
 export interface GetElectionEnvelopeAccessRequest {
@@ -2281,6 +2408,27 @@ export interface GetElectionVotingViewResponse {
   ReceiptId: string;
   AcceptanceId: string;
   ServerProof: string;
+  BallotDefinitionVersion: number;
+  BallotDefinitionHash?: Uint8Array | string;
+  BallotDefinitionSealedAt?: GrpcTimestamp;
+  HasBallotDefinitionSealedAt: boolean;
+  BallotDefinitionMutationPolicy: BallotDefinitionMutationPolicyProto;
+  Sp04Required: boolean;
+  CeremonyProfileId: string;
+  PreparedBallotId: string;
+  PreparedBallotHash: string;
+  PreparedBallotState: PreparedBallotStateProto;
+  PreparedBallotExpiresAt?: GrpcTimestamp;
+  HasPreparedBallotExpiresAt: boolean;
+  ReceiptCommitment: string;
+  ReceiptCommitmentScheme: string;
+  PreparedBallotPrecommittedAt?: GrpcTimestamp;
+  HasPreparedBallotPrecommittedAt: boolean;
+  RequiredChallengeCount: number;
+  SpoiledPackageCount: number;
+  ChallengeSatisfied: boolean;
+  Sp04BlockerCode: string;
+  Sp04BlockerMessage: string;
 }
 
 export interface GetElectionsByOwnerResponse {

@@ -171,6 +171,23 @@ function getDisabledExportLabel(
   return availability.Message || availability.BlockerCode || 'Export is currently blocked.';
 }
 
+function getSp04EvidenceAccent(status: ElectionVerificationPackageStatusView): string {
+  const evidence = status.Sp04Evidence;
+  if (!evidence) {
+    return 'text-hush-text-accent';
+  }
+
+  if (!evidence.EvidenceExpected) {
+    return 'text-hush-text-accent';
+  }
+
+  if (evidence.PublicEvidenceAvailable && evidence.RestrictedEvidenceAvailable) {
+    return 'text-green-100';
+  }
+
+  return 'text-amber-100';
+}
+
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';
   const chunkSize = 0x8000;
@@ -352,6 +369,63 @@ export function VerificationPackageStatusSection({
           accentClass={getAvailabilityAccent(status.RestrictedPackage)}
         />
       </div>
+
+      {status.Sp04Evidence ? (
+        <div
+          className="mt-5 rounded-2xl bg-hush-bg-dark/70 p-4"
+          data-testid="verification-package-sp04-evidence"
+        >
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                SP-04 evidence
+              </div>
+              <div className={`mt-2 text-sm font-semibold ${getSp04EvidenceAccent(status)}`}>
+                {status.Sp04Evidence.Message ||
+                  (status.Sp04Evidence.EvidenceExpected
+                    ? 'Challenge/spoil evidence expected for this package.'
+                    : 'Challenge/spoil evidence is not expected for this profile.')}
+              </div>
+            </div>
+            <div className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-2xl bg-black/20 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Prepared
+                </div>
+                <div className="mt-2 text-sm font-semibold text-hush-text-primary">
+                  {status.Sp04Evidence.PreparedPackageCount}
+                </div>
+              </div>
+              <div className="rounded-2xl bg-black/20 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Spoiled
+                </div>
+                <div className="mt-2 text-sm font-semibold text-hush-text-primary">
+                  {status.Sp04Evidence.SpoiledPackageCount}
+                </div>
+              </div>
+              <div className="rounded-2xl bg-black/20 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Receipts
+                </div>
+                <div className="mt-2 text-sm font-semibold text-hush-text-primary">
+                  {status.Sp04Evidence.AcceptedBoundReceiptCount}
+                </div>
+              </div>
+              <div className="rounded-2xl bg-black/20 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Set hash
+                </div>
+                <div className="mt-2 break-all font-mono text-xs text-hush-text-primary">
+                  {status.Sp04Evidence.ReceiptCommitmentSetHash
+                    ? formatArtifactValue(status.Sp04Evidence.ReceiptCommitmentSetHash)
+                    : 'Not available'}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="mt-5 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
         <div className="rounded-2xl bg-hush-bg-dark/70 p-4">

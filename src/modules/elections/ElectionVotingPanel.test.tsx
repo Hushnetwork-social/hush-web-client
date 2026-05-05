@@ -43,6 +43,8 @@ const { electionsServiceMock, blockchainServiceMock, transactionServiceMock } = 
   },
   transactionServiceMock: {
     createRegisterElectionVotingCommitmentTransaction: vi.fn(),
+    createRegisterPreparedBallotCommitmentTransaction: vi.fn(),
+    createSpoilPreparedBallotTransaction: vi.fn(),
     createAcceptElectionBallotCastTransaction: vi.fn(),
   },
 }));
@@ -66,6 +68,10 @@ vi.mock('@/modules/blockchain/BlockchainService', () => ({
 vi.mock('./transactionService', () => ({
   createRegisterElectionVotingCommitmentTransaction: (...args: unknown[]) =>
     transactionServiceMock.createRegisterElectionVotingCommitmentTransaction(...args),
+  createRegisterPreparedBallotCommitmentTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createRegisterPreparedBallotCommitmentTransaction(...args),
+  createSpoilPreparedBallotTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createSpoilPreparedBallotTransaction(...args),
   createAcceptElectionBallotCastTransaction: (...args: unknown[]) =>
     transactionServiceMock.createAcceptElectionBallotCastTransaction(...args),
 }));
@@ -194,6 +200,24 @@ function createVotingViewResponse(
     ReceiptId: '',
     AcceptanceId: '',
     ServerProof: '',
+    BallotDefinitionVersion: 0,
+    BallotDefinitionHash: '',
+    HasBallotDefinitionSealedAt: false,
+    BallotDefinitionMutationPolicy: 0,
+    Sp04Required: false,
+    CeremonyProfileId: '',
+    PreparedBallotId: '',
+    PreparedBallotHash: '',
+    PreparedBallotState: 0,
+    HasPreparedBallotExpiresAt: false,
+    ReceiptCommitment: '',
+    ReceiptCommitmentScheme: '',
+    HasPreparedBallotPrecommittedAt: false,
+    RequiredChallengeCount: 0,
+    SpoiledPackageCount: 0,
+    ChallengeSatisfied: false,
+    Sp04BlockerCode: '',
+    Sp04BlockerMessage: '',
     ...overrides,
   };
 }
@@ -265,6 +289,18 @@ describe('ElectionVotingPanel', () => {
       message: 'Accepted',
       status: TransactionStatus.ACCEPTED,
       validationCode: '',
+    });
+    transactionServiceMock.createRegisterElectionVotingCommitmentTransaction.mockResolvedValue({
+      signedTransaction: 'signed-register-commitment',
+    });
+    transactionServiceMock.createRegisterPreparedBallotCommitmentTransaction.mockResolvedValue({
+      signedTransaction: 'signed-register-prepared',
+    });
+    transactionServiceMock.createSpoilPreparedBallotTransaction.mockResolvedValue({
+      signedTransaction: 'signed-spoil-prepared',
+    });
+    transactionServiceMock.createAcceptElectionBallotCastTransaction.mockResolvedValue({
+      signedTransaction: 'signed-cast-transaction',
     });
   });
 
@@ -731,6 +767,130 @@ describe('ElectionVotingPanel', () => {
         'This voter is marked as voted',
       );
     });
+  });
+
+  it('gates SP-04 final cast until the current selection challenge passes', async () => {
+    electionsServiceMock.getElectionVotingView.mockResolvedValue(
+      createVotingViewResponse({
+        CommitmentRegistered: true,
+        HasCommitmentRegisteredAt: true,
+        CommitmentRegisteredAt: timestamp,
+        Sp04Required: true,
+        BallotDefinitionVersion: 1,
+        BallotDefinitionHash: 'ballot-definition-hash-1',
+        HasBallotDefinitionSealedAt: true,
+        RequiredChallengeCount: 1,
+        ChallengeSatisfied: false,
+      }),
+    );
+
+    render(
+      <ElectionVotingPanel
+        electionId="election-1"
+        actorPublicAddress="actor-public-key"
+        actorEncryptionPublicKey="actor-encryption-public-key"
+        actorEncryptionPrivateKey="actor-encryption-private-key"
+        actorSigningPrivateKey="actor-signing-private-key"
+      />,
+    );
+
+    expect(await screen.findByTestId('voting-sp04-ceremony')).toHaveTextContent(
+      'Sealed ballot definition',
+    );
+    fireEvent.click(screen.getByTestId('voting-option-option-a'));
+
+    expect(screen.getByTestId('voting-submit')).toBeDisabled();
+    expect(screen.getByTestId('voting-submit-panel')).toHaveTextContent(
+      'Challenge required for current selection',
+    );
+
+    fireEvent.click(screen.getByTestId('voting-sp04-prepare-action'));
+
+    await waitFor(() => {
+      expect(
+        transactionServiceMock.createRegisterPreparedBallotCommitmentTransaction,
+      ).toHaveBeenCalled();
+    });
+    expect(screen.getByTestId('voting-sp04-prepared-timer')).toHaveTextContent(
+      'Prepared package timer',
+    );
+    expect(screen.getByTestId('voting-sp04-prepared-timer')).toHaveAttribute('role', 'status');
+    expect(screen.getByTestId('voting-sp04-prepared-timer')).toHaveAttribute(
+      'aria-live',
+      'polite',
+    );
+
+    fireEvent.click(screen.getByTestId('voting-sp04-challenge-action'));
+
+    await waitFor(() => {
+      expect(transactionServiceMock.createSpoilPreparedBallotTransaction).toHaveBeenCalled();
+      expect(screen.getByTestId('voting-sp04-challenge-summary')).toHaveTextContent(
+        'Challenge verification passed',
+      );
+    });
+    expect(screen.getByTestId('voting-sp04-challenge-summary')).toHaveAttribute('role', 'status');
+    expect(screen.getByTestId('voting-sp04-challenge-summary')).toHaveAttribute(
+      'aria-live',
+      'polite',
+    );
+    expect(screen.getByTestId('voting-sp04-download-transcript')).toBeInTheDocument();
+    expect(screen.getByTestId('voting-submit')).toBeEnabled();
+
+    fireEvent.click(screen.getByTestId('voting-option-option-b'));
+
+    expect(screen.getByTestId('voting-sp04-challenge-summary')).toHaveTextContent(
+      'Challenge reset',
+    );
+    expect(screen.getByTestId('voting-submit')).toBeDisabled();
+  });
+
+  it('shows safe bound receipt fields without returning to the selected choice', async () => {
+    electionsServiceMock.getElectionVotingView.mockResolvedValue(
+      createVotingViewResponse({
+        CommitmentRegistered: true,
+        HasCommitmentRegisteredAt: true,
+        CommitmentRegisteredAt: timestamp,
+        HasAcceptedAt: true,
+        AcceptedAt: timestamp,
+        PersonalParticipationStatus:
+          ElectionParticipationStatusProto.ParticipationCountedAsVoted,
+        ReceiptId: 'receipt-bound-1',
+        AcceptanceId: 'acceptance-bound-1',
+        ServerProof: 'server-proof-bound-1',
+        Sp04Required: true,
+        BallotDefinitionVersion: 1,
+        BallotDefinitionHash: 'ballot-definition-hash-1',
+        HasBallotDefinitionSealedAt: true,
+        PreparedBallotId: 'prepared-final-1',
+        PreparedBallotHash: 'prepared-final-hash-1',
+        ReceiptCommitment: 'receipt-commitment-1',
+        ReceiptCommitmentScheme: 'hushvoting-sp04-receipt-commitment-sha256-v1',
+      }),
+    );
+
+    render(
+      <ElectionVotingPanel
+        electionId="election-1"
+        actorPublicAddress="actor-public-key"
+        actorEncryptionPublicKey="actor-encryption-public-key"
+        actorEncryptionPrivateKey="actor-encryption-private-key"
+        actorSigningPrivateKey="actor-signing-private-key"
+      />,
+    );
+
+    expect(await screen.findByTestId('voting-accepted-panel')).toHaveTextContent(
+      'Receipt commitment',
+    );
+    expect(screen.getByTestId('voting-accepted-panel')).toHaveTextContent(
+      'Prepared ballot hash',
+    );
+    expect(screen.getByTestId('voting-accepted-panel')).toHaveTextContent(
+      'Ballot definition',
+    );
+    expect(screen.getByTestId('voting-accepted-panel')).toHaveTextContent(
+      'does not prove',
+    );
+    expect(screen.queryByText('Candidate A')).not.toBeInTheDocument();
   });
 
   it('moves published results above the voter diagnostics and keeps the secondary sections collapsed', async () => {

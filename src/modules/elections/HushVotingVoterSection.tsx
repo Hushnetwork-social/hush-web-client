@@ -39,6 +39,11 @@ type ParsedAcceptedBallotReceipt = {
   acceptanceId: string;
   serverProof: string;
   ballotPackageCommitment?: string;
+  preparedBallotId?: string;
+  preparedBallotHash?: string;
+  receiptCommitment?: string;
+  receiptCommitmentScheme?: string;
+  ballotDefinitionHash?: string;
 };
 
 type HubReceiptVerificationFeedback = {
@@ -68,6 +73,11 @@ function parseAcceptedBallotReceipt(receiptText: string): {
   const receiptId = readField('Receipt ID');
   const acceptanceId = readField('Acceptance ID');
   const ballotPackageCommitment = readField('Ballot Package Commitment');
+  const preparedBallotId = readField('Prepared Ballot ID');
+  const preparedBallotHash = readField('Prepared Ballot Hash');
+  const receiptCommitment = readField('Receipt Commitment');
+  const receiptCommitmentScheme = readField('Receipt Commitment Scheme');
+  const ballotDefinitionHash = readField('Ballot Definition Hash');
   const serverProof = readField('Server Proof');
 
   if (!electionId || !receiptId || !acceptanceId || !serverProof) {
@@ -88,27 +98,41 @@ function parseAcceptedBallotReceipt(receiptText: string): {
         ballotPackageCommitment !== '(not retained on this device)'
           ? ballotPackageCommitment
           : undefined,
+      preparedBallotId: preparedBallotId || undefined,
+      preparedBallotHash: preparedBallotHash || undefined,
+      receiptCommitment: receiptCommitment || undefined,
+      receiptCommitmentScheme: receiptCommitmentScheme || undefined,
+      ballotDefinitionHash: ballotDefinitionHash || undefined,
     },
   };
 }
 
-function loadRetainedReceiptCommitment(electionId: string): string {
+function loadRetainedReceiptCommitment(electionId: string): {
+  ballotPackageCommitment: string;
+  receiptCommitment: string;
+} {
   if (typeof window === 'undefined') {
-    return '';
+    return { ballotPackageCommitment: '', receiptCommitment: '' };
   }
 
   const storageKey = `feat099:receipt:${electionId}`;
   const rawValue =
     window.localStorage.getItem(storageKey) ?? window.sessionStorage.getItem(storageKey);
   if (!rawValue) {
-    return '';
+    return { ballotPackageCommitment: '', receiptCommitment: '' };
   }
 
   try {
-    const parsed = JSON.parse(rawValue) as { ballotPackageCommitment?: string };
-    return parsed.ballotPackageCommitment?.trim() ?? '';
+    const parsed = JSON.parse(rawValue) as {
+      ballotPackageCommitment?: string;
+      receiptCommitment?: string;
+    };
+    return {
+      ballotPackageCommitment: parsed.ballotPackageCommitment?.trim() ?? '',
+      receiptCommitment: parsed.receiptCommitment?.trim() ?? '',
+    };
   } catch {
-    return '';
+    return { ballotPackageCommitment: '', receiptCommitment: '' };
   }
 }
 
@@ -151,7 +175,9 @@ function buildHubReceiptVerificationFeedbackFromResponse(
   response: VerifyElectionReceiptResponse,
   resultView: GetElectionResultViewResponse | null,
   ballotPackageCommitment?: string,
-  retainedBallotPackageCommitment?: string
+  retainedBallotPackageCommitment?: string,
+  receiptCommitment?: string,
+  retainedReceiptCommitment?: string,
 ): HubReceiptVerificationFeedback {
   const verifiedAt = new Date().toLocaleString();
   const finalCountStatusItem = buildCountedSetStatusItem({
@@ -170,6 +196,22 @@ function buildHubReceiptVerificationFeedbackFromResponse(
     hasProvidedCommitment &&
     hasRetainedCommitment &&
     ballotPackageCommitment === retainedBallotPackageCommitment;
+  const hasProvidedBoundReceipt = Boolean(receiptCommitment);
+  const hasRetainedBoundReceipt = Boolean(retainedReceiptCommitment);
+  const serverConfirmedBoundReceipt =
+    response.HasBoundReceipt &&
+    response.ReceiptCommitmentInAcceptedSet &&
+    (!receiptCommitment || response.VerifiedReceiptCommitment === receiptCommitment);
+  const boundReceiptMatchesRetainedRecord =
+    hasProvidedBoundReceipt &&
+    hasRetainedBoundReceipt &&
+    receiptCommitment === retainedReceiptCommitment;
+  const boundReceiptStatusItem = response.HasBoundReceipt || hasProvidedBoundReceipt
+    ? {
+        label: 'The bound receipt commitment is confirmed in the accepted set.',
+        complete: serverConfirmedBoundReceipt,
+      }
+    : null;
   const commitmentStatusItem = requiresCommitmentConfirmation
     ? {
         label: 'The ballot commitment line is independently confirmed on this device.',
@@ -227,7 +269,30 @@ function buildHubReceiptVerificationFeedbackFromResponse(
           complete: response.ParticipationCountedAsVoted,
         },
         finalCountStatusItem,
+        ...(boundReceiptStatusItem ? [boundReceiptStatusItem] : []),
         ...(commitmentStatusItem ? [commitmentStatusItem] : []),
+      ],
+    };
+  }
+
+  if (
+    hasProvidedBoundReceipt &&
+    hasRetainedBoundReceipt &&
+    !boundReceiptMatchesRetainedRecord
+  ) {
+    return {
+      tone: 'error',
+      title: 'Bound receipt does not match this device record',
+      detail:
+        'The pasted Receipt Commitment does not match the receipt retained on this device for this accepted vote.',
+      verifiedAt,
+      statusItems: [
+        {
+          label: 'This voter is marked as voted in this election.',
+          complete: response.ParticipationCountedAsVoted,
+        },
+        ...(boundReceiptStatusItem ? [boundReceiptStatusItem] : []),
+        finalCountStatusItem,
       ],
     };
   }
@@ -257,6 +322,7 @@ function buildHubReceiptVerificationFeedbackFromResponse(
           label: 'This voter is marked as voted in this election.',
           complete: response.ParticipationCountedAsVoted,
         },
+        ...(boundReceiptStatusItem ? [boundReceiptStatusItem] : []),
         finalCountStatusItem,
         ...(commitmentStatusItem ? [commitmentStatusItem] : []),
       ],
@@ -279,6 +345,14 @@ function buildHubReceiptVerificationFeedbackFromResponse(
         label: 'This voter is marked as voted in this election.',
         complete: response.ParticipationCountedAsVoted,
       },
+      ...(boundReceiptStatusItem
+        ? [
+            {
+              ...boundReceiptStatusItem,
+              complete: serverConfirmedBoundReceipt,
+            },
+          ]
+        : []),
       finalCountStatusItem,
       ...(commitmentStatusItem
         ? [
@@ -350,6 +424,16 @@ export function VoterWorkspaceSummary({
   const receiptContextOfficialVisibility =
     resultView?.OfficialResultVisibilityPolicy ??
     receiptVotingView?.Election?.OfficialResultVisibilityPolicy;
+  const sp04CeremonyValue = receiptVotingView?.Sp04Required
+    ? receiptVotingView.ChallengeSatisfied
+      ? 'Challenge satisfied'
+      : receiptVotingView.Sp04BlockerMessage || 'Challenge required before cast'
+    : 'Standard cast path';
+  const sp04CeremonyAccent = receiptVotingView?.Sp04Required
+    ? receiptVotingView.ChallengeSatisfied
+      ? 'text-green-100'
+      : 'text-amber-100'
+    : undefined;
 
   const voterSurfaceSummary = useMemo(() => {
     if (entry.CanClaimIdentity) {
@@ -516,20 +600,29 @@ export function VoterWorkspaceSummary({
 
     setIsVerifyingReceipt(true);
     try {
-      const retainedBallotPackageCommitment = loadRetainedReceiptCommitment(entry.Election.ElectionId);
-      const verification = await electionsService.verifyElectionReceipt({
+      const retainedCommitments = loadRetainedReceiptCommitment(entry.Election.ElectionId);
+      const verificationRequest = {
         ElectionId: entry.Election.ElectionId,
         ActorPublicAddress: actorPublicAddress,
         ReceiptId: parsed.receipt.receiptId,
         AcceptanceId: parsed.receipt.acceptanceId,
         ServerProof: parsed.receipt.serverProof,
-      });
+        ...(parsed.receipt.receiptCommitment
+          ? { ReceiptCommitment: parsed.receipt.receiptCommitment }
+          : {}),
+        ...(parsed.receipt.preparedBallotId
+          ? { PreparedBallotId: parsed.receipt.preparedBallotId }
+          : {}),
+      };
+      const verification = await electionsService.verifyElectionReceipt(verificationRequest);
       setReceiptVerification(
         buildHubReceiptVerificationFeedbackFromResponse(
           verification,
           resultView,
           parsed.receipt.ballotPackageCommitment,
-          retainedBallotPackageCommitment,
+          retainedCommitments.ballotPackageCommitment,
+          parsed.receipt.receiptCommitment,
+          retainedCommitments.receiptCommitment,
         ),
       );
     } catch (error) {
@@ -605,6 +698,23 @@ export function VoterWorkspaceSummary({
           accentClass={entry.HasOfficialResult || entry.HasUnofficialResult ? 'text-green-100' : undefined}
         />
       </div>
+
+      {receiptVotingView?.Sp04Required ? (
+        <div
+          className="mt-4 rounded-2xl bg-hush-bg-dark/70 p-4"
+          data-testid="hush-voting-sp04-voter-summary"
+        >
+          <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+            Voter ceremony
+          </div>
+          <div className={`mt-2 text-sm font-semibold ${sp04CeremonyAccent ?? 'text-hush-text-primary'}`}>
+            {sp04CeremonyValue}
+          </div>
+          <div className="mt-2 text-sm leading-6 text-hush-text-accent">
+            Receipt and inclusion checks stay in this voter surface after a ballot is accepted.
+          </div>
+        </div>
+      ) : null}
 
       {isReceiptDialogOpen ? (
         <div
