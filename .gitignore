@@ -73,3 +73,8 @@ $RECYCLE.BIN/
 /.generated/
 .tmp-esm.wtns
 /tmp-tailwind-output.css
+
+## Protocol Omega package artifacts
+# Product repositories resolve these from hush-documents during Debug/Release builds.
+/public/protocol-omega/
+/public/ProtocolPackages/

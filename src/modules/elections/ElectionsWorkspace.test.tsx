@@ -15,6 +15,7 @@ import type {
   ElectionCommandResponse,
   ElectionDraftInput,
   ElectionDraftSnapshot,
+  ElectionProtocolPackageBindingView,
   ElectionRecordView,
   ElectionSummary,
   GetElectionCeremonyActionViewResponse,
@@ -43,6 +44,11 @@ import {
   EligibilitySourceTypeProto,
   OutcomeRuleKindProto,
   ParticipationPrivacyModeProto,
+  ProtocolPackageAccessLocationKindProto,
+  ProtocolPackageApprovalStatusProto,
+  ProtocolPackageBindingSourceProto,
+  ProtocolPackageBindingStatusProto,
+  ProtocolPackageExternalReviewStatusProto,
   ReportingPolicyProto,
   ReviewWindowPolicyProto,
   VoteUpdatePolicyProto,
@@ -91,6 +97,7 @@ const {
       createRevokeElectionTrusteeInvitationTransaction: vi.fn(),
       createRestartElectionCeremonyTransaction: vi.fn(),
       createRetryElectionGovernedProposalExecutionTransaction: vi.fn(),
+      createRefreshProtocolPackageBindingTransaction: vi.fn(),
       createStartElectionCeremonyTransaction: vi.fn(),
       createStartElectionGovernedProposalTransaction: vi.fn(),
       createSubmitElectionFinalizationShareTransaction: vi.fn(),
@@ -144,6 +151,10 @@ vi.mock("./transactionService", () => ({
     transactionServiceMock.createRetryElectionGovernedProposalExecutionTransaction(
       ...args,
     ),
+  createRefreshProtocolPackageBindingTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createRefreshProtocolPackageBindingTransaction(
+      ...args,
+    ),
   createStartElectionCeremonyTransaction: (...args: unknown[]) =>
     transactionServiceMock.createStartElectionCeremonyTransaction(...args),
   createStartElectionGovernedProposalTransaction: (...args: unknown[]) =>
@@ -159,6 +170,51 @@ vi.mock("./transactionService", () => ({
 }));
 
 const timestamp = { seconds: 1_711_410_000, nanos: 0 };
+
+function createProtocolPackageBinding(
+  overrides?: Partial<ElectionProtocolPackageBindingView>,
+): ElectionProtocolPackageBindingView {
+  return {
+    Id: "protocol-package-binding-1",
+    ElectionId: "election-1",
+    PackageId: "omega-hushvoting-v1",
+    PackageVersion: "v1.0.0",
+    SelectedProfileId: "dkg-prod-3of5",
+    SpecPackageHash: "a".repeat(64),
+    ProofPackageHash: "b".repeat(64),
+    ReleaseManifestHash: "c".repeat(64),
+    SpecAccessLocations: [
+      {
+        LocationKind: ProtocolPackageAccessLocationKindProto.PublicWebsite,
+        Label: "Public spec package",
+        Location:
+          "https://www.hushnetwork.social/protocol-omega/hushvoting-v1/v1.0.0/spec.zip",
+        ContentHash: "a".repeat(64),
+      },
+    ],
+    ProofAccessLocations: [
+      {
+        LocationKind: ProtocolPackageAccessLocationKindProto.PublicWebsite,
+        Label: "Public proof package",
+        Location:
+          "https://www.hushnetwork.social/protocol-omega/hushvoting-v1/v1.0.0/proof.zip",
+        ContentHash: "b".repeat(64),
+      },
+    ],
+    PackageApprovalStatus: ProtocolPackageApprovalStatusProto.ApprovedInternal,
+    Status: ProtocolPackageBindingStatusProto.Latest,
+    Source: ProtocolPackageBindingSourceProto.CatalogSelection,
+    DraftRevision: 1,
+    BoundAt: timestamp,
+    HasSealedAt: false,
+    BoundByPublicAddress: "owner-public-key",
+    ExternalReviewStatus: ProtocolPackageExternalReviewStatusProto.NotReviewed,
+    SourceTransactionId: "",
+    SourceBlockHeight: 0,
+    SourceBlockId: "",
+    ...overrides,
+  };
+}
 
 function createDraftInput(
   overrides?: Partial<ElectionDraftInput>,
@@ -533,6 +589,8 @@ function createReadinessResponse(
     ValidationErrors: [],
     RequiredWarningCodes: [],
     MissingWarningAcknowledgements: [],
+    ProtocolPackageBindingStatus: ProtocolPackageBindingStatusProto.Latest,
+    ProtocolPackageBindingMessage: "",
     ...overrides,
   };
 }
@@ -641,6 +699,11 @@ describe("ElectionsWorkspace", () => {
     transactionServiceMock.createRetryElectionGovernedProposalExecutionTransaction.mockResolvedValue(
       {
         signedTransaction: "signed-retry-governed-proposal-transaction",
+      },
+    );
+    transactionServiceMock.createRefreshProtocolPackageBindingTransaction.mockResolvedValue(
+      {
+        signedTransaction: "signed-refresh-protocol-package-transaction",
       },
     );
     transactionServiceMock.createOpenElectionTransaction.mockResolvedValue({
@@ -2260,6 +2323,203 @@ describe("ElectionsWorkspace", () => {
     ).toHaveTextContent("dev/open and non-dev circuits");
   });
 
+  it("shows stale protocol package refs on readiness and refreshes them through blockchain submission", async () => {
+    const staleBinding = createProtocolPackageBinding({
+      PackageVersion: "v0.9.0",
+      Status: ProtocolPackageBindingStatusProto.Stale,
+    });
+    const latestBinding = createProtocolPackageBinding({
+      PackageVersion: "v1.0.0",
+      Status: ProtocolPackageBindingStatusProto.Latest,
+    });
+    const draftElection = createElectionRecord(ElectionLifecycleStateProto.Draft);
+
+    electionsServiceMock.getElectionsByOwner.mockResolvedValueOnce({
+      Elections: [createElectionSummary(ElectionLifecycleStateProto.Draft)],
+    });
+    electionsServiceMock.getElection
+      .mockResolvedValueOnce(
+        createElectionResponse({
+          Election: draftElection,
+          LatestDraftSnapshot: createDraftSnapshot(),
+          ProtocolPackageBinding: staleBinding,
+        }),
+      )
+      .mockResolvedValue(
+        createElectionResponse({
+          Election: draftElection,
+          LatestDraftSnapshot: createDraftSnapshot(),
+          ProtocolPackageBinding: latestBinding,
+        }),
+      );
+    electionsServiceMock.getElectionOpenReadiness
+      .mockResolvedValueOnce(
+        createReadinessResponse({
+          IsReadyToOpen: false,
+          ProtocolPackageBinding: staleBinding,
+          ProtocolPackageBindingStatus: ProtocolPackageBindingStatusProto.Stale,
+          ProtocolPackageBindingMessage:
+            "Refresh to the latest approved Protocol Omega package before opening.",
+        }),
+      )
+      .mockResolvedValue(
+        createReadinessResponse({
+          IsReadyToOpen: true,
+          ProtocolPackageBinding: latestBinding,
+          ProtocolPackageBindingStatus: ProtocolPackageBindingStatusProto.Latest,
+          ProtocolPackageBindingMessage:
+            "Compatible package refs are ready and will be sealed when the election opens.",
+        }),
+      );
+
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />,
+    );
+
+    fireEvent.click(await screen.findByTestId("election-summary-election-1"));
+    await openOwnerDetailTab("readiness");
+
+    expect(
+      await screen.findByTestId("elections-protocol-package-readiness"),
+    ).toHaveTextContent("Stale package refs");
+    expect(screen.getByTestId("elections-ready-to-open-checklist")).toHaveTextContent(
+      "Protocol package refs",
+    );
+    expect(screen.getByTestId("elections-ready-to-open-checklist")).toHaveTextContent(
+      "Refresh to the latest approved Protocol Omega package before opening.",
+    );
+
+    fireEvent.click(
+      within(screen.getByTestId("elections-protocol-package-readiness")).getByTestId(
+        "protocol-package-refresh",
+      ),
+    );
+
+    await waitFor(() => {
+      expect(
+        transactionServiceMock.createRefreshProtocolPackageBindingTransaction,
+      ).toHaveBeenCalledWith(
+        "election-1",
+        "owner-public-key",
+        "owner-encryption-key",
+        "owner-encryption-private-key",
+        "owner-private-key",
+      );
+    });
+    expect(blockchainServiceMock.submitTransaction).toHaveBeenCalledWith(
+      "signed-refresh-protocol-package-transaction",
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("elections-protocol-package-readiness")).toHaveTextContent(
+        "Latest approved",
+      );
+    });
+  });
+
+  it("uses stale protocol package refs as the governed-open blocker when trustee readiness is otherwise clear", async () => {
+    const staleBinding = createProtocolPackageBinding({
+      Status: ProtocolPackageBindingStatusProto.Stale,
+    });
+    const trusteeDraft = createElectionRecord(ElectionLifecycleStateProto.Draft, {
+      GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+      RequiredApprovalCount: 3,
+      SelectedProfileId: "dkg-prod-3of5",
+    });
+    const acceptedTrustees = ["a", "b", "c", "d", "e"].map((suffix) => ({
+      Id: `invite-${suffix}`,
+      ElectionId: "election-1",
+      TrusteeUserAddress: `trustee-${suffix}`,
+      TrusteeDisplayName: `Trustee ${suffix.toUpperCase()}`,
+      InvitedByPublicAddress: "owner-public-key",
+      LinkedMessageId: `message-${suffix}`,
+      Status: ElectionTrusteeInvitationStatusProto.Accepted,
+      SentAtDraftRevision: 1,
+      SentAt: timestamp,
+    }));
+
+    electionsServiceMock.getElectionsByOwner.mockResolvedValueOnce({
+      Elections: [
+        createElectionSummary(ElectionLifecycleStateProto.Draft, {
+          GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+        }),
+      ],
+    });
+    electionsServiceMock.getElection.mockResolvedValueOnce(
+      createElectionResponse({
+        Election: trusteeDraft,
+        LatestDraftSnapshot: createDraftSnapshot({
+          Policy: {
+            ...createDraftSnapshot().Policy,
+            GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+            RequiredApprovalCount: 3,
+            ReviewWindowPolicy:
+              ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+          },
+        }),
+        TrusteeInvitations: acceptedTrustees,
+        CeremonyVersions: [
+          {
+            Id: "ceremony-ready",
+            ElectionId: "election-1",
+            VersionNumber: 1,
+            ProfileId: "dkg-prod-3of5",
+            TrusteeCount: 5,
+            RequiredApprovalCount: 3,
+            Status: ElectionCeremonyVersionStatusProto.CeremonyVersionReady,
+            StartedAt: timestamp,
+            StartedByPublicAddress: "owner-public-key",
+            TallyPublicKeyFingerprint: "fingerprint-1",
+          },
+        ],
+        ProtocolPackageBinding: staleBinding,
+      }),
+    );
+    electionsServiceMock.getElectionOpenReadiness.mockResolvedValue(
+      createReadinessResponse({
+        IsReadyToOpen: false,
+        ProtocolPackageBinding: staleBinding,
+        ProtocolPackageBindingStatus: ProtocolPackageBindingStatusProto.Stale,
+        ProtocolPackageBindingMessage:
+          "Refresh to the latest approved Protocol Omega package before the governed open proposal.",
+      }),
+    );
+
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />,
+    );
+
+    await openOwnerDetailTab("readiness");
+    expect(
+      await screen.findByTestId("elections-governed-open-readiness"),
+    ).toHaveTextContent(
+      "Refresh to the latest approved Protocol Omega package before the governed open proposal.",
+    );
+
+    await openOwnerDetailTab("governed");
+    expect(
+      await screen.findByTestId(
+        `elections-governed-card-${ElectionGovernedActionTypeProto.Open}`,
+      ),
+    ).toHaveTextContent(
+      "Refresh to the latest approved Protocol Omega package before the governed open proposal.",
+    );
+    expect(
+      screen.queryByTestId(
+        `elections-governed-start-${ElectionGovernedActionTypeProto.Open}`,
+      ),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows lifecycle controls and frozen policy for an open election", async () => {
     const openElection = createElectionRecord(
       ElectionLifecycleStateProto.Open,
@@ -2330,6 +2590,11 @@ describe("ElectionsWorkspace", () => {
             RecordedByPublicAddress: "owner-public-key",
           },
         ],
+        ProtocolPackageBinding: createProtocolPackageBinding({
+          Status: ProtocolPackageBindingStatusProto.Sealed,
+          HasSealedAt: true,
+          SealedAt: timestamp,
+        }),
       }),
     );
 
@@ -2369,6 +2634,9 @@ describe("ElectionsWorkspace", () => {
       "Low anonymity set",
     );
     expect(screen.getByText("Boundary artifacts")).toBeInTheDocument();
+    expect(screen.getByTestId("elections-protocol-package-sealed-refs")).toHaveTextContent(
+      "Sealed at open",
+    );
   });
 
   it("opens an election through blockchain submission and waits for the open boundary readback", async () => {

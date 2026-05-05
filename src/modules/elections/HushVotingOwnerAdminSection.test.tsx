@@ -11,6 +11,7 @@ import {
   EligibilityMutationPolicyProto,
   EligibilitySourceTypeProto,
   ParticipationPrivacyModeProto,
+  ProtocolPackageBindingStatusProto,
   ReportingPolicyProto,
   ReviewWindowPolicyProto,
   VoteUpdatePolicyProto,
@@ -20,6 +21,7 @@ import {
   createDetail,
   createElectionRecord,
   createHubEntry,
+  createProtocolPackageBinding,
   createSummary,
   timestamp,
 } from './HushVotingWorkspaceTestUtils';
@@ -104,6 +106,11 @@ describe('OwnerAdminWorkspaceSummary', () => {
             TallyPublicKeyFingerprint: 'fingerprint-1',
           },
         ],
+        ProtocolPackageBinding: createProtocolPackageBinding({
+          ElectionId: 'election-owner',
+          PackageVersion: 'v0.9.0',
+          Status: ProtocolPackageBindingStatusProto.Stale,
+        }),
       }
     );
 
@@ -125,6 +132,10 @@ describe('OwnerAdminWorkspaceSummary', () => {
     );
     expect(screen.getByTestId('hush-voting-section-owner-admin')).toHaveTextContent('Key ceremony');
     expect(screen.getByTestId('hush-voting-section-owner-admin')).toHaveTextContent('1 accepted | 1 pending');
+    expect(screen.getByTestId('owner-admin-protocol-package-readiness')).toHaveTextContent(
+      'Stale package refs'
+    );
+    expect(screen.getByTestId('owner-admin-protocol-package-readiness')).toHaveTextContent('v0.9.0');
   });
 
   it('summarizes the owner state as ready when saved draft, roster, and ceremony are clear', () => {
@@ -307,6 +318,12 @@ describe('OwnerAdminWorkspaceSummary', () => {
                 ElectionClosedProgressStatusProto.ClosedProgressWaitingForTrusteeShares,
             }
           ),
+          ProtocolPackageBinding: createProtocolPackageBinding({
+            ElectionId: 'election-closed',
+            Status: ProtocolPackageBindingStatusProto.Sealed,
+            HasSealedAt: true,
+            SealedAt: timestamp,
+          }),
         })}
       />
     );
@@ -323,6 +340,9 @@ describe('OwnerAdminWorkspaceSummary', () => {
     );
     expect(screen.getByTestId('hush-voting-section-owner-admin')).toHaveTextContent(
       'Pending finalization'
+    );
+    expect(screen.getByTestId('owner-admin-protocol-package-evidence')).toHaveTextContent(
+      'Sealed at open'
     );
   });
 

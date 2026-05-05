@@ -888,6 +888,44 @@ export enum ElectionReportAccessGrantRoleProto {
   ReportAccessGrantDesignatedAuditor = 0,
 }
 
+export enum ProtocolPackageApprovalStatusProto {
+  DraftPrivate = 0,
+  ApprovedInternal = 1,
+  Retired = 2,
+}
+
+export enum ProtocolPackageExternalReviewStatusProto {
+  NotReviewed = 0,
+  ReviewRequested = 1,
+  ReviewInProgress = 2,
+  ReviewedWithFindings = 3,
+  ReviewedAccepted = 4,
+}
+
+export enum ProtocolPackageAccessLocationKindProto {
+  PublicWebsite = 0,
+  AuditorWelcomePackage = 1,
+  ReviewerPortal = 2,
+  ControlledDownload = 3,
+  Repository = 4,
+}
+
+export enum ProtocolPackageBindingStatusProto {
+  Missing = 0,
+  Latest = 1,
+  Stale = 2,
+  Incompatible = 3,
+  Sealed = 4,
+  ReferenceOnly = 5,
+}
+
+export enum ProtocolPackageBindingSourceProto {
+  CatalogSelection = 0,
+  OwnerRefresh = 1,
+  SealedAtOpen = 2,
+  MigrationBackfill = 3,
+}
+
 export enum ElectionClosedProgressStatusProto {
   ClosedProgressNone = 0,
   ClosedProgressWaitingForTrusteeShares = 1,
@@ -1364,6 +1402,38 @@ export interface ElectionReportArtifactView {
   RecordedAt: GrpcTimestamp;
 }
 
+export interface ProtocolPackageAccessLocationView {
+  LocationKind: ProtocolPackageAccessLocationKindProto;
+  Label: string;
+  Location: string;
+  ContentHash: string;
+}
+
+export interface ElectionProtocolPackageBindingView {
+  Id: string;
+  ElectionId: string;
+  PackageId: string;
+  PackageVersion: string;
+  SelectedProfileId: string;
+  SpecPackageHash: string;
+  ProofPackageHash: string;
+  ReleaseManifestHash: string;
+  SpecAccessLocations: ProtocolPackageAccessLocationView[];
+  ProofAccessLocations: ProtocolPackageAccessLocationView[];
+  PackageApprovalStatus: ProtocolPackageApprovalStatusProto;
+  Status: ProtocolPackageBindingStatusProto;
+  Source: ProtocolPackageBindingSourceProto;
+  DraftRevision: number;
+  BoundAt: GrpcTimestamp;
+  SealedAt?: GrpcTimestamp;
+  HasSealedAt: boolean;
+  BoundByPublicAddress: string;
+  ExternalReviewStatus: ProtocolPackageExternalReviewStatusProto;
+  SourceTransactionId: string;
+  SourceBlockHeight: number;
+  SourceBlockId: string;
+}
+
 export interface ElectionRecordView {
   ElectionId: string;
   Title: string;
@@ -1834,6 +1904,7 @@ export interface GetElectionResultViewResponse {
   LatestReportPackage?: ElectionReportPackageSummaryView;
   VisibleReportArtifacts: ElectionReportArtifactView[];
   CeremonySnapshot?: ElectionCeremonyBindingSnapshot;
+  ProtocolPackageBinding?: ElectionProtocolPackageBindingView;
 }
 
 export interface GetElectionCeremonyActionViewRequest {
@@ -1997,6 +2068,7 @@ export interface ElectionCommandResponse {
   FinalizationSession?: ElectionFinalizationSession;
   FinalizationShare?: ElectionFinalizationShare;
   FinalizationReleaseEvidence?: ElectionFinalizationReleaseEvidence;
+  ProtocolPackageBinding?: ElectionProtocolPackageBindingView;
 }
 
 export interface GetElectionOpenReadinessResponse {
@@ -2005,6 +2077,9 @@ export interface GetElectionOpenReadinessResponse {
   RequiredWarningCodes: ElectionWarningCodeProto[];
   MissingWarningAcknowledgements: ElectionWarningCodeProto[];
   CeremonySnapshot?: ElectionCeremonyBindingSnapshot;
+  ProtocolPackageBinding?: ElectionProtocolPackageBindingView;
+  ProtocolPackageBindingStatus: ProtocolPackageBindingStatusProto;
+  ProtocolPackageBindingMessage: string;
 }
 
 export interface GetElectionResponse {
@@ -2025,6 +2100,7 @@ export interface GetElectionResponse {
   FinalizationShares?: ElectionFinalizationShare[];
   FinalizationReleaseEvidenceRecords?: ElectionFinalizationReleaseEvidence[];
   ResultArtifacts?: ElectionResultArtifact[];
+  ProtocolPackageBinding?: ElectionProtocolPackageBindingView;
 }
 
 export interface SearchElectionDirectoryResponse {

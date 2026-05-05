@@ -28,6 +28,7 @@ import {
   ElectionGovernanceModeProto,
   ElectionLifecycleStateProto,
   type ElectionOption,
+  type ElectionProtocolPackageBindingView,
   type ElectionRecordView,
   type ElectionSummary,
   ElectionTrusteeCeremonyStateProto,
@@ -40,6 +41,9 @@ import {
   OfficialResultVisibilityPolicyProto,
   OutcomeRuleKindProto,
   ParticipationPrivacyModeProto,
+  ProtocolPackageApprovalStatusProto,
+  ProtocolPackageBindingStatusProto,
+  ProtocolPackageExternalReviewStatusProto,
   ReportingPolicyProto,
   ReviewWindowPolicyProto,
   VoteUpdatePolicyProto,
@@ -906,6 +910,82 @@ export interface GovernedActionViewState extends GovernedProposalProgress {
   proposal: ElectionGovernedProposal | null;
 }
 
+export type ProtocolPackageBindingTone = 'success' | 'warning' | 'error' | 'neutral';
+
+export interface ProtocolPackageBindingPresentation {
+  status: ProtocolPackageBindingStatusProto;
+  label: string;
+  tone: ProtocolPackageBindingTone;
+  description: string;
+  openBlocked: boolean;
+  version: string;
+  specHashShort: string;
+  proofHashShort: string;
+  releaseHashShort: string;
+  specHashFull: string;
+  proofHashFull: string;
+  releaseHashFull: string;
+  approvalLabel: string;
+  externalReviewLabel: string;
+}
+
+const PROTOCOL_PACKAGE_STATUS_COPY: Record<
+  ProtocolPackageBindingStatusProto,
+  Pick<ProtocolPackageBindingPresentation, 'label' | 'tone' | 'description' | 'openBlocked'>
+> = {
+  [ProtocolPackageBindingStatusProto.Missing]: {
+    label: 'Missing package refs',
+    tone: 'error',
+    description: 'Opening is blocked until the latest approved Protocol Omega package is selected.',
+    openBlocked: true,
+  },
+  [ProtocolPackageBindingStatusProto.Latest]: {
+    label: 'Latest approved',
+    tone: 'success',
+    description: 'Compatible package refs are ready and will be sealed when the election opens.',
+    openBlocked: false,
+  },
+  [ProtocolPackageBindingStatusProto.Stale]: {
+    label: 'Stale package refs',
+    tone: 'warning',
+    description: 'Opening is blocked until the owner refreshes to the latest approved compatible package.',
+    openBlocked: true,
+  },
+  [ProtocolPackageBindingStatusProto.Incompatible]: {
+    label: 'Incompatible package refs',
+    tone: 'error',
+    description: 'Opening is blocked because the selected profile no longer matches the package refs.',
+    openBlocked: true,
+  },
+  [ProtocolPackageBindingStatusProto.Sealed]: {
+    label: 'Sealed at open',
+    tone: 'neutral',
+    description: 'These package refs are immutable evidence for this election.',
+    openBlocked: false,
+  },
+  [ProtocolPackageBindingStatusProto.ReferenceOnly]: {
+    label: 'Reference only',
+    tone: 'warning',
+    description:
+      'These refs were backfilled for inspection and must not be treated as refs sealed during opening.',
+    openBlocked: true,
+  },
+};
+
+const PROTOCOL_PACKAGE_APPROVAL_LABELS: Record<ProtocolPackageApprovalStatusProto, string> = {
+  [ProtocolPackageApprovalStatusProto.DraftPrivate]: 'Draft/private',
+  [ProtocolPackageApprovalStatusProto.ApprovedInternal]: 'Approved internal',
+  [ProtocolPackageApprovalStatusProto.Retired]: 'Retired',
+};
+
+const PROTOCOL_PACKAGE_EXTERNAL_REVIEW_LABELS: Record<ProtocolPackageExternalReviewStatusProto, string> = {
+  [ProtocolPackageExternalReviewStatusProto.NotReviewed]: 'Not externally reviewed',
+  [ProtocolPackageExternalReviewStatusProto.ReviewRequested]: 'External review requested',
+  [ProtocolPackageExternalReviewStatusProto.ReviewInProgress]: 'External review in progress',
+  [ProtocolPackageExternalReviewStatusProto.ReviewedWithFindings]: 'Reviewed with findings',
+  [ProtocolPackageExternalReviewStatusProto.ReviewedAccepted]: 'External review accepted',
+};
+
 function timestampToMilliseconds(timestamp?: GrpcTimestamp): number {
   if (!timestamp) {
     return 0;
@@ -958,6 +1038,66 @@ export function formatArtifactValue(value?: unknown): string {
   }
 
   return `${normalizedValue.slice(0, 12)}...${normalizedValue.slice(-8)}`;
+}
+
+export function shortenProtocolPackageHash(value?: string | null): string {
+  const normalizedValue = value?.trim() ?? '';
+  if (!normalizedValue) {
+    return 'Not recorded';
+  }
+
+  if (normalizedValue.length <= 24) {
+    return normalizedValue;
+  }
+
+  return `${normalizedValue.slice(0, 12)}...${normalizedValue.slice(-8)}`;
+}
+
+export function getProtocolPackageApprovalLabel(status?: ProtocolPackageApprovalStatusProto): string {
+  return status === undefined
+    ? 'Unknown approval status'
+    : PROTOCOL_PACKAGE_APPROVAL_LABELS[status] ?? 'Unknown approval status';
+}
+
+export function getProtocolPackageExternalReviewLabel(
+  status?: ProtocolPackageExternalReviewStatusProto
+): string {
+  return status === undefined
+    ? 'Unknown external review status'
+    : PROTOCOL_PACKAGE_EXTERNAL_REVIEW_LABELS[status] ?? 'Unknown external review status';
+}
+
+export function getProtocolPackageBindingStatusLabel(
+  status: ProtocolPackageBindingStatusProto
+): string {
+  return PROTOCOL_PACKAGE_STATUS_COPY[status]?.label ?? 'Unknown package state';
+}
+
+export function getProtocolPackageBindingPresentation(
+  binding?: ElectionProtocolPackageBindingView | null,
+  fallbackStatus: ProtocolPackageBindingStatusProto = ProtocolPackageBindingStatusProto.Missing,
+  fallbackMessage?: string | null
+): ProtocolPackageBindingPresentation {
+  const status = binding?.Status ?? fallbackStatus;
+  const copy = PROTOCOL_PACKAGE_STATUS_COPY[status] ?? PROTOCOL_PACKAGE_STATUS_COPY[ProtocolPackageBindingStatusProto.Missing];
+  const fallbackText = fallbackMessage?.trim();
+
+  return {
+    status,
+    label: copy.label,
+    tone: copy.tone,
+    description: fallbackText || copy.description,
+    openBlocked: copy.openBlocked,
+    version: binding?.PackageVersion || 'Not selected',
+    specHashShort: shortenProtocolPackageHash(binding?.SpecPackageHash),
+    proofHashShort: shortenProtocolPackageHash(binding?.ProofPackageHash),
+    releaseHashShort: shortenProtocolPackageHash(binding?.ReleaseManifestHash),
+    specHashFull: binding?.SpecPackageHash || '',
+    proofHashFull: binding?.ProofPackageHash || '',
+    releaseHashFull: binding?.ReleaseManifestHash || '',
+    approvalLabel: getProtocolPackageApprovalLabel(binding?.PackageApprovalStatus),
+    externalReviewLabel: getProtocolPackageExternalReviewLabel(binding?.ExternalReviewStatus),
+  };
 }
 
 export function getGovernedActionLabel(actionType: ElectionGovernedActionTypeProto): string {

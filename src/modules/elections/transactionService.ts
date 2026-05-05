@@ -92,6 +92,10 @@ export interface UpdateElectionDraftActionPayload {
   Draft: ElectionDraftInput;
 }
 
+export interface RefreshProtocolPackageBindingActionPayload {
+  ActorPublicAddress: string;
+}
+
 export interface ElectionRosterImportItemPayload {
   OrganizationVoterId: string;
   ContactType: number;
@@ -375,6 +379,7 @@ export interface FinalizeElectionPayload {
 const ENCRYPTED_ELECTION_ACTION_TYPES = {
   CREATE_DRAFT: 'create_draft',
   UPDATE_DRAFT: 'update_draft',
+  REFRESH_PROTOCOL_PACKAGE_BINDING: 'refresh_protocol_package_binding',
   IMPORT_ROSTER: 'import_roster',
   CLAIM_ROSTER_ENTRY: 'claim_roster_entry',
   ACTIVATE_ROSTER_ENTRY: 'activate_roster_entry',
@@ -612,6 +617,30 @@ export async function createUpdateElectionDraftTransaction(
       ActorPublicAddress: actorPublicAddress,
       SnapshotReason: snapshotReason,
       Draft: draft,
+    },
+    signingPrivateKeyHex,
+  );
+
+  return {
+    signedTransaction: encryptedEnvelope.signedTransaction,
+  };
+}
+
+export async function createRefreshProtocolPackageBindingTransaction(
+  electionId: string,
+  actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
+  signingPrivateKeyHex: string,
+): Promise<{ signedTransaction: string }> {
+  const encryptedEnvelope = await createEncryptedElectionEnvelopeTransaction<RefreshProtocolPackageBindingActionPayload>(
+    electionId,
+    actorPublicAddress,
+    actorPublicEncryptAddress,
+    actorPrivateEncryptKeyHex,
+    ENCRYPTED_ELECTION_ACTION_TYPES.REFRESH_PROTOCOL_PACKAGE_BINDING,
+    {
+      ActorPublicAddress: actorPublicAddress,
     },
     signingPrivateKeyHex,
   );

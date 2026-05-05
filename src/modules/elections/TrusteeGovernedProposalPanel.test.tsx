@@ -32,6 +32,7 @@ const { electionsServiceMock, blockchainServiceMock, transactionServiceMock } = 
   },
   transactionServiceMock: {
     createApproveElectionGovernedProposalTransaction: vi.fn(),
+    createRefreshProtocolPackageBindingTransaction: vi.fn(),
     createSubmitElectionFinalizationShareTransaction: vi.fn(),
   },
 }));
@@ -47,6 +48,8 @@ vi.mock('@/modules/blockchain/BlockchainService', () => ({
 vi.mock('./transactionService', () => ({
   createApproveElectionGovernedProposalTransaction: (...args: unknown[]) =>
     transactionServiceMock.createApproveElectionGovernedProposalTransaction(...args),
+  createRefreshProtocolPackageBindingTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createRefreshProtocolPackageBindingTransaction(...args),
   createSubmitElectionFinalizationShareTransaction: (...args: unknown[]) =>
     transactionServiceMock.createSubmitElectionFinalizationShareTransaction(...args),
 }));
