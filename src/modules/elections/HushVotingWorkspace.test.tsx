@@ -16,6 +16,7 @@ import {
   createReportPackage,
   createResultArtifact,
   createResultView,
+  createVerificationPackageStatus,
   timestamp,
 } from './HushVotingWorkspaceTestUtils';
 import { useElectionsStore } from './useElectionsStore';
@@ -406,6 +407,10 @@ describe('HushVotingWorkspace', () => {
         LatestReportPackage: createReportPackage(),
         OfficialResult: createResultArtifact(),
         VisibleReportArtifacts: [createReportArtifact()],
+        VerificationPackageStatus: createVerificationPackageStatus({
+          ElectionId: 'election-mixed',
+          ActorPublicAddress: 'actor-address',
+        }),
       })
     );
 
@@ -472,6 +477,12 @@ describe('HushVotingWorkspace', () => {
       ElectionId: 'election-mixed',
       ActorPublicAddress: 'actor-address',
     });
+
+    fireEvent.click(screen.getByTestId('hush-voting-artifacts-toggle'));
+
+    expect(await screen.findByTestId('verification-package-status-section')).toHaveTextContent(
+      'Independent election-record export'
+    );
   });
 
   it('promotes the official result from finalized detail artifacts when hub state lags behind', async () => {
