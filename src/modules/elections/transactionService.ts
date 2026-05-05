@@ -124,6 +124,25 @@ export interface RegisterElectionVotingCommitmentActionPayload {
   CommitmentHash: string;
 }
 
+export interface RegisterPreparedBallotCommitmentActionPayload {
+  ActorPublicAddress: string;
+  PreparedBallotId: string;
+  PreparedBallotHash: string;
+  BallotDefinitionVersion: number;
+  BallotDefinitionHash: string;
+  CeremonyProfileId: string;
+  ProofStatementId: string;
+}
+
+export interface SpoilPreparedBallotActionPayload {
+  ActorPublicAddress: string;
+  PreparedBallotId: string;
+  PreparedBallotHash: string;
+  SpoiledTranscriptHash: string;
+  SpoilRecordHash: string;
+  LocalVerifierVersion: string;
+}
+
 export interface AcceptElectionBallotCastActionPayload {
   ActorPublicAddress: string;
   IdempotencyKey: string;
@@ -135,6 +154,12 @@ export interface AcceptElectionBallotCastActionPayload {
   CeremonyVersionId: string;
   DkgProfileId: string;
   TallyPublicKeyFingerprint: string;
+  PreparedBallotId?: string;
+  PreparedBallotHash?: string;
+  ReceiptCommitment?: string;
+  ReceiptCommitmentScheme?: string;
+  BallotDefinitionVersion?: number;
+  BallotDefinitionHash?: string;
 }
 
 export interface StartElectionCeremonyActionPayload {
@@ -384,6 +409,8 @@ const ENCRYPTED_ELECTION_ACTION_TYPES = {
   CLAIM_ROSTER_ENTRY: 'claim_roster_entry',
   ACTIVATE_ROSTER_ENTRY: 'activate_roster_entry',
   REGISTER_VOTING_COMMITMENT: 'register_voting_commitment',
+  REGISTER_PREPARED_BALLOT_COMMITMENT: 'register_prepared_ballot_commitment',
+  SPOIL_PREPARED_BALLOT: 'spoil_prepared_ballot',
   ACCEPT_BALLOT_CAST: 'accept_ballot_cast',
   INVITE_TRUSTEE: 'invite_trustee',
   CREATE_REPORT_ACCESS_GRANT: 'create_report_access_grant',
