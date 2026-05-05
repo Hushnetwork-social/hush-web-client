@@ -990,6 +990,8 @@ function PreparedPackageTimer({
           ? 'bg-red-500/12 text-red-100'
           : 'bg-cyan-500/12 text-cyan-100'
       }`}
+      role="status"
+      aria-live="polite"
       data-testid="voting-sp04-prepared-timer"
     >
       <div className="flex items-center gap-2 font-semibold">
@@ -1040,7 +1042,12 @@ function ChallengeVerificationSummary({
         : 'Final cast stays blocked until the current selected option has passed local challenge verification.';
 
   return (
-    <div className={`rounded-2xl px-4 py-4 text-sm ${className}`} data-testid="voting-sp04-challenge-summary">
+    <div
+      className={`rounded-2xl px-4 py-4 text-sm ${className}`}
+      role="status"
+      aria-live="polite"
+      data-testid="voting-sp04-challenge-summary"
+    >
       <div className="flex items-center gap-2 font-semibold">
         {challengeIsCurrent ? <CheckCircle2 className="h-4 w-4" /> : <ShieldAlert className="h-4 w-4" />}
         <span>{title}</span>

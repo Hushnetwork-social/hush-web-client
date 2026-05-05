@@ -814,6 +814,11 @@ describe('ElectionVotingPanel', () => {
     expect(screen.getByTestId('voting-sp04-prepared-timer')).toHaveTextContent(
       'Prepared package timer',
     );
+    expect(screen.getByTestId('voting-sp04-prepared-timer')).toHaveAttribute('role', 'status');
+    expect(screen.getByTestId('voting-sp04-prepared-timer')).toHaveAttribute(
+      'aria-live',
+      'polite',
+    );
 
     fireEvent.click(screen.getByTestId('voting-sp04-challenge-action'));
 
@@ -823,6 +828,11 @@ describe('ElectionVotingPanel', () => {
         'Challenge verification passed',
       );
     });
+    expect(screen.getByTestId('voting-sp04-challenge-summary')).toHaveAttribute('role', 'status');
+    expect(screen.getByTestId('voting-sp04-challenge-summary')).toHaveAttribute(
+      'aria-live',
+      'polite',
+    );
     expect(screen.getByTestId('voting-sp04-download-transcript')).toBeInTheDocument();
     expect(screen.getByTestId('voting-submit')).toBeEnabled();
 
