@@ -59,8 +59,8 @@ function getStatusCopy(statusValue: ElectionVerificationPackageStatusProto): {
   switch (statusValue) {
     case ElectionVerificationPackageStatusProto.VerificationPackageReady:
       return {
-        label: 'Package ready',
-        body: 'Independent election-record export is available for this finalized election.',
+        label: 'Export available',
+        body: 'A local election-record verifier export can be generated for this finalized election.',
         className: 'bg-green-500/12 text-green-100',
       };
     case ElectionVerificationPackageStatusProto.VerificationPackageNotFinalized:
@@ -291,7 +291,7 @@ export function VerificationPackageStatusSection({
       setExportState({
         packageView,
         tone: 'success',
-        message: `${PACKAGE_VIEW_LABELS[packageView]} verification package ready.`,
+        message: `${PACKAGE_VIEW_LABELS[packageView]} verification package download prepared.`,
         packageHash: response.PackageHash,
       });
     } catch (error) {

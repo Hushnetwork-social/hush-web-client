@@ -38,7 +38,7 @@ describe('VerificationPackageStatusSection', () => {
     vi.unstubAllGlobals();
   });
 
-  it('renders ready package status, DraftPrivate refs, and not-available verifier status', () => {
+  it('renders available package export status, DraftPrivate refs, and not-available verifier status', () => {
     render(
       <VerificationPackageStatusSection
         electionId="election-1"
@@ -50,7 +50,7 @@ describe('VerificationPackageStatusSection', () => {
     expect(screen.getByTestId('verification-package-status-section')).toHaveTextContent(
       'Independent election-record export'
     );
-    expect(screen.getByText('Package ready')).toBeInTheDocument();
+    expect(screen.getByText('Export available')).toBeInTheDocument();
     expect(screen.getByText('Verifier: not available')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Download public package' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Download restricted package' })).toBeEnabled();
@@ -149,7 +149,7 @@ describe('VerificationPackageStatusSection', () => {
         PackageView: ElectionVerificationPackageViewProto.VerificationPackagePublicAnonymous,
       });
     });
-    expect(screen.getByText('public verification package ready.')).toBeInTheDocument();
+    expect(screen.getByText('public verification package download prepared.')).toBeInTheDocument();
   });
 
   it('renders warning verifier state with text, not only color', () => {
