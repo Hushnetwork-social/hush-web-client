@@ -239,6 +239,46 @@ describe('VerificationPackageStatusSection', () => {
     expect(evidence).toHaveTextContent('90');
   });
 
+  it('shows SP-06 trustee control evidence and CTRL result inside the existing package section', () => {
+    render(
+      <VerificationPackageStatusSection
+        electionId="election-1"
+        actorPublicAddress="auditor-address"
+        status={createVerificationPackageStatus({
+          Sp06Evidence: {
+            EvidenceExpected: true,
+            PublicEvidenceAvailable: true,
+            RestrictedEvidenceAvailable: true,
+            ControlDomainProfileId: 'high_assurance_independent_trustees_v1',
+            ControlDomainProfileVersion: 'v1',
+            ThresholdProfileId: 'dkg-prod-3of5',
+            TrusteeCount: 5,
+            TrusteeThreshold: 3,
+            AcceptedBeforeOpenCount: 5,
+            CompleteEvidenceCount: 5,
+            MissingEvidenceCount: 0,
+            StaleEvidenceCount: 0,
+            IncompatibleEvidenceCount: 0,
+            AcceptedReleaseArtifactCount: 4,
+            MissingReleaseArtifactCount: 1,
+            RejectedReleaseArtifactCount: 0,
+            LatestCtrlResultCode: 'CTRL-001',
+            Blockers: [],
+            Message: 'SP-06 trustee evidence is complete and exportable.',
+          },
+        })}
+      />
+    );
+
+    const evidence = screen.getByTestId('verification-package-sp06-evidence');
+    expect(evidence).toHaveTextContent('SP-06 trustee control');
+    expect(evidence).toHaveTextContent('SP-06 trustee evidence is complete');
+    expect(evidence).toHaveTextContent('CTRL-001');
+    expect(evidence).toHaveTextContent('high_assurance_independent_trustees_v1 v1');
+    expect(evidence).toHaveTextContent('3 of 5');
+    expect(evidence).toHaveTextContent('4 accepted');
+  });
+
   it.each([
     [
       ElectionVerifierOverallStatusProto.ElectionVerifierPass,

@@ -365,6 +365,9 @@ function createDraftSnapshot(
       ProtocolOmegaVersion: draft.ProtocolOmegaVersion,
       ReportingPolicy: draft.ReportingPolicy,
       ReviewWindowPolicy: draft.ReviewWindowPolicy,
+      ControlDomainProfileId: policyOverrides?.ControlDomainProfileId,
+      ControlDomainProfileVersion: policyOverrides?.ControlDomainProfileVersion,
+      ThresholdProfileId: policyOverrides?.ThresholdProfileId,
       RequiredApprovalCount: draft.RequiredApprovalCount,
     },
     Options: draft.OwnerOptions,
@@ -593,6 +596,20 @@ function createReadinessResponse(
     ProtocolPackageBindingMessage: "",
     ...overrides,
   };
+}
+
+function createAcceptedTrusteeInvitations() {
+  return ["a", "b", "c", "d", "e"].map((suffix) => ({
+    Id: `invite-${suffix}`,
+    ElectionId: "election-1",
+    TrusteeUserAddress: `trustee-${suffix}`,
+    TrusteeDisplayName: `Trustee ${suffix.toUpperCase()}`,
+    InvitedByPublicAddress: "owner-public-key",
+    LinkedMessageId: `message-${suffix}`,
+    Status: ElectionTrusteeInvitationStatusProto.Accepted,
+    SentAtDraftRevision: 1,
+    SentAt: timestamp,
+  }));
 }
 
 async function openOwnerDetailTab(tabId: string) {
@@ -2419,6 +2436,234 @@ describe("ElectionsWorkspace", () => {
         "Latest approved",
       );
     });
+  });
+
+  it("shows missing SP-06 trustee-domain evidence as an open blocker", async () => {
+    const protocolBinding = createProtocolPackageBinding();
+    const trusteeDraft = createElectionRecord(ElectionLifecycleStateProto.Draft, {
+      GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+      RequiredApprovalCount: 3,
+      SelectedProfileId: "dkg-prod-3of5",
+      ControlDomainProfileId: "high_assurance_independent_trustees_v1",
+      ControlDomainProfileVersion: "v1",
+      ThresholdProfileId: "dkg-prod-3of5",
+    });
+
+    electionsServiceMock.getElectionsByOwner.mockResolvedValueOnce({
+      Elections: [
+        createElectionSummary(ElectionLifecycleStateProto.Draft, {
+          GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+        }),
+      ],
+    });
+    electionsServiceMock.getElection.mockResolvedValueOnce(
+      createElectionResponse({
+        Election: trusteeDraft,
+        LatestDraftSnapshot: createDraftSnapshot({
+          Policy: {
+            ...createDraftSnapshot().Policy,
+            GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+            SelectedProfileId: "dkg-prod-3of5",
+            RequiredApprovalCount: 3,
+            ReviewWindowPolicy:
+              ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+            ControlDomainProfileId: "high_assurance_independent_trustees_v1",
+            ControlDomainProfileVersion: "v1",
+            ThresholdProfileId: "dkg-prod-3of5",
+          },
+        }),
+        TrusteeInvitations: createAcceptedTrusteeInvitations(),
+        CeremonyVersions: [
+          {
+            Id: "ceremony-ready",
+            ElectionId: "election-1",
+            VersionNumber: 1,
+            ProfileId: "dkg-prod-3of5",
+            TrusteeCount: 5,
+            RequiredApprovalCount: 3,
+            Status: ElectionCeremonyVersionStatusProto.CeremonyVersionReady,
+            StartedAt: timestamp,
+            StartedByPublicAddress: "owner-public-key",
+            TallyPublicKeyFingerprint: "fingerprint-1",
+          },
+        ],
+        ProtocolPackageBinding: protocolBinding,
+      }),
+    );
+    electionsServiceMock.getElectionOpenReadiness.mockResolvedValue(
+      createReadinessResponse({
+        IsReadyToOpen: false,
+        ProtocolPackageBinding: protocolBinding,
+        Sp06Evidence: {
+          EvidenceExpected: true,
+          PublicEvidenceAvailable: false,
+          RestrictedEvidenceAvailable: false,
+          ControlDomainProfileId: "high_assurance_independent_trustees_v1",
+          ControlDomainProfileVersion: "v1",
+          ThresholdProfileId: "dkg-prod-3of5",
+          TrusteeCount: 5,
+          TrusteeThreshold: 3,
+          AcceptedBeforeOpenCount: 5,
+          CompleteEvidenceCount: 4,
+          MissingEvidenceCount: 1,
+          StaleEvidenceCount: 0,
+          IncompatibleEvidenceCount: 0,
+          AcceptedReleaseArtifactCount: 0,
+          MissingReleaseArtifactCount: 0,
+          RejectedReleaseArtifactCount: 0,
+          LatestCtrlResultCode: "CTRL-OPEN-MISSING",
+          Blockers: [
+            {
+              Code: "CTRL-OPEN-MISSING",
+              Message: "Trustee trustee-e has no custody/domain evidence.",
+              TrusteeRef: "trustee-e",
+              BlocksOpen: true,
+              BlocksFinalization: false,
+            },
+          ],
+          Message: "One trustee control-domain evidence item is missing.",
+        },
+      }),
+    );
+
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />,
+    );
+
+    await openOwnerDetailTab("readiness");
+
+    expect(
+      await screen.findByTestId("elections-sp06-control-domain-readiness"),
+    ).toHaveTextContent("high_assurance_independent_trustees_v1 v1");
+    expect(screen.getByTestId("elections-sp06-control-domain-readiness")).toHaveTextContent(
+      "3 of 5",
+    );
+    expect(screen.getByTestId("elections-sp06-control-domain-readiness")).toHaveTextContent(
+      "Trustee trustee-e has no custody/domain evidence.",
+    );
+    expect(screen.getByTestId("elections-ready-to-open-checklist")).toHaveTextContent(
+      "Trustee control-domain evidence",
+    );
+    expect(
+      await screen.findByTestId("elections-governed-open-readiness"),
+    ).toHaveTextContent("Trustee trustee-e has no custody/domain evidence.");
+  });
+
+  it("shows incompatible SP-06 trustee profile evidence as an open blocker", async () => {
+    const protocolBinding = createProtocolPackageBinding();
+    const trusteeDraft = createElectionRecord(ElectionLifecycleStateProto.Draft, {
+      GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+      RequiredApprovalCount: 3,
+      SelectedProfileId: "dkg-prod-3of5",
+      ControlDomainProfileId: "high_assurance_independent_trustees_v1",
+      ControlDomainProfileVersion: "v1",
+      ThresholdProfileId: "dkg-prod-3of5",
+    });
+
+    electionsServiceMock.getElectionsByOwner.mockResolvedValueOnce({
+      Elections: [
+        createElectionSummary(ElectionLifecycleStateProto.Draft, {
+          GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+        }),
+      ],
+    });
+    electionsServiceMock.getElection.mockResolvedValueOnce(
+      createElectionResponse({
+        Election: trusteeDraft,
+        LatestDraftSnapshot: createDraftSnapshot({
+          Policy: {
+            ...createDraftSnapshot().Policy,
+            GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+            SelectedProfileId: "dkg-prod-3of5",
+            RequiredApprovalCount: 3,
+            ReviewWindowPolicy:
+              ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+            ControlDomainProfileId: "high_assurance_independent_trustees_v1",
+            ControlDomainProfileVersion: "v1",
+            ThresholdProfileId: "dkg-prod-3of5",
+          },
+        }),
+        TrusteeInvitations: createAcceptedTrusteeInvitations(),
+        CeremonyVersions: [
+          {
+            Id: "ceremony-ready",
+            ElectionId: "election-1",
+            VersionNumber: 1,
+            ProfileId: "dkg-prod-3of5",
+            TrusteeCount: 5,
+            RequiredApprovalCount: 3,
+            Status: ElectionCeremonyVersionStatusProto.CeremonyVersionReady,
+            StartedAt: timestamp,
+            StartedByPublicAddress: "owner-public-key",
+            TallyPublicKeyFingerprint: "fingerprint-1",
+          },
+        ],
+        ProtocolPackageBinding: protocolBinding,
+      }),
+    );
+    electionsServiceMock.getElectionOpenReadiness.mockResolvedValue(
+      createReadinessResponse({
+        IsReadyToOpen: false,
+        ProtocolPackageBinding: protocolBinding,
+        Sp06Evidence: {
+          EvidenceExpected: true,
+          PublicEvidenceAvailable: false,
+          RestrictedEvidenceAvailable: false,
+          ControlDomainProfileId: "high_assurance_independent_trustees_v1",
+          ControlDomainProfileVersion: "v1",
+          ThresholdProfileId: "dkg-prod-3of5",
+          TrusteeCount: 5,
+          TrusteeThreshold: 3,
+          AcceptedBeforeOpenCount: 5,
+          CompleteEvidenceCount: 4,
+          MissingEvidenceCount: 0,
+          StaleEvidenceCount: 0,
+          IncompatibleEvidenceCount: 1,
+          AcceptedReleaseArtifactCount: 0,
+          MissingReleaseArtifactCount: 0,
+          RejectedReleaseArtifactCount: 0,
+          LatestCtrlResultCode: "CTRL-PROFILE-MISMATCH",
+          Blockers: [
+            {
+              Code: "CTRL-PROFILE-MISMATCH",
+              Message: "Trustee trustee-c evidence targets a different ceremony profile.",
+              TrusteeRef: "trustee-c",
+              BlocksOpen: true,
+              BlocksFinalization: false,
+            },
+          ],
+          Message: "One trustee control-domain evidence item is incompatible.",
+        },
+      }),
+    );
+
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />,
+    );
+
+    await openOwnerDetailTab("readiness");
+
+    expect(
+      await screen.findByTestId("elections-sp06-control-domain-readiness"),
+    ).toHaveTextContent("CTRL-PROFILE-MISMATCH");
+    expect(screen.getByTestId("elections-sp06-control-domain-readiness")).toHaveTextContent(
+      "Trustee trustee-c evidence targets a different ceremony profile.",
+    );
+    expect(
+      await screen.findByTestId("elections-governed-open-readiness"),
+    ).toHaveTextContent(
+      "Trustee trustee-c evidence targets a different ceremony profile.",
+    );
   });
 
   it("uses stale protocol package refs as the governed-open blocker when trustee readiness is otherwise clear", async () => {
@@ -4748,7 +4993,10 @@ describe("ElectionsWorkspace", () => {
     ).toHaveTextContent("aggregate-tally-1");
     expect(
       screen.getByTestId("elections-finalization-session"),
-    ).toHaveTextContent("1 accepted / 2 eligible");
+    ).toHaveTextContent("2 accepted / 2 expected");
+    expect(
+      screen.getByTestId("elections-finalization-session"),
+    ).toHaveTextContent("Trustee threshold satisfied");
     expect(
       screen.getByTestId("elections-finalization-session"),
     ).toHaveTextContent("Alice Trustee");

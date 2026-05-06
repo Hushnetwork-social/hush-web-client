@@ -43,6 +43,7 @@ import {
 } from './trusteeShareVault';
 import { TrusteeElectionFinalizationPanel } from './TrusteeElectionFinalizationPanel';
 import { useElectionsStore } from './useElectionsStore';
+import { createProtocolPackageBinding } from './HushVotingWorkspaceTestUtils';
 
 const { electionsServiceMock, blockchainServiceMock, transactionServiceMock } = vi.hoisted(() => ({
   electionsServiceMock: {
@@ -155,6 +156,10 @@ function createElectionRecord(overrides?: Partial<ElectionRecordView>): Election
     OpenArtifactId: 'open-artifact',
     CloseArtifactId: 'close-artifact',
     FinalizeArtifactId: '',
+    BallotDefinitionVersion: 1,
+    BallotDefinitionHash: 'ballot-definition-hash-1',
+    HasBallotDefinitionSealedAt: true,
+    BallotDefinitionSealedAt: timestamp,
     ...overrides,
   };
 }
@@ -205,6 +210,14 @@ function createFinalizationSession(
     CloseCountingJobStatus: ElectionCloseCountingJobStatusProto.CloseCountingJobAwaitingShares,
     ExecutorSessionPublicKey: 'executor-session-public-key-1',
     ExecutorKeyAlgorithm: 'ecies-secp256k1-v1',
+    ControlDomainProfileId: 'high_assurance_independent_trustees_v1',
+    ControlDomainProfileVersion: 'v1',
+    ThresholdProfileId: 'dkg-prod-3of5',
+    TrusteeCount: 3,
+    TrusteeThreshold: 2,
+    AcceptedReleaseArtifactCount: 0,
+    MissingReleaseArtifactCount: 2,
+    RejectedReleaseArtifactCount: 0,
     Status: ElectionFinalizationSessionStatusProto.FinalizationSessionAwaitingShares,
     CreatedAt: timestamp,
     CreatedByPublicAddress: 'owner-public-key',
@@ -297,6 +310,11 @@ function createElectionResponse(overrides?: Partial<GetElectionResponse>): GetEl
     FinalizationSessions: [createFinalizationSession()],
     FinalizationShares: [],
     FinalizationReleaseEvidenceRecords: [],
+    ProtocolPackageBinding: createProtocolPackageBinding({
+      ElectionId: 'election-1',
+      PackageVersion: 'v1.1.2',
+      ReleaseManifestHash: 'f'.repeat(64),
+    }),
     ...overrides,
   };
 }
@@ -468,6 +486,20 @@ describe('TrusteeElectionFinalizationPanel', () => {
       'border-hush-bg-light'
     );
     expect(screen.getByTestId('trustee-finalization-panel')).toHaveTextContent('Share index 1');
+    expect(screen.getByTestId('trustee-finalization-exact-target')).toHaveTextContent('election-1');
+    expect(screen.getByTestId('trustee-finalization-exact-target')).toHaveTextContent(
+      'finalization-session-1'
+    );
+    expect(screen.getByTestId('trustee-finalization-exact-target')).toHaveTextContent(
+      'ballot-definition-hash-1'
+    );
+    expect(screen.getByTestId('trustee-finalization-exact-target')).toHaveTextContent('v1.1.2');
+    expect(screen.getByTestId('trustee-finalization-exact-target')).toHaveTextContent(
+      'high_assurance_independent_trustees_v1 v1'
+    );
+    expect(screen.getByTestId('trustee-finalization-exact-target')).toHaveTextContent(
+      'SP-06 threshold: 0 accepted, 2 missing, 0 rejected; requires 2 of 3.'
+    );
 
     await waitFor(() => {
       expect(screen.getByTestId('trustee-finalization-vault-status')).toHaveTextContent('Loaded');
@@ -653,6 +685,165 @@ describe('TrusteeElectionFinalizationPanel', () => {
     expect(screen.getByText(/Latest share status:/)).toHaveTextContent(
       'Pending eligible trustees: 1'
     );
+  });
+
+  it('keeps missing non-required trustees visible after the SP-06 threshold is satisfied', async () => {
+    const vaultFixture = await createStoredVaultEnvelopeFixture();
+
+    electionsServiceMock.getElection.mockResolvedValue(
+      createElectionResponse({
+        FinalizationSessions: [
+          createFinalizationSession({
+            TrusteeCount: 5,
+            TrusteeThreshold: 3,
+            RequiredShareCount: 3,
+            AcceptedReleaseArtifactCount: 4,
+            MissingReleaseArtifactCount: 1,
+            RejectedReleaseArtifactCount: 0,
+            EligibleTrustees: ['a', 'b', 'c', 'd', 'e'].map((suffix) => ({
+              TrusteeUserAddress: `trustee-${suffix}`,
+              TrusteeDisplayName: `Trustee ${suffix.toUpperCase()}`,
+            })),
+            CeremonySnapshot: {
+              ...createFinalizationSession().CeremonySnapshot!,
+              TrusteeCount: 5,
+              RequiredApprovalCount: 3,
+            },
+          }),
+        ],
+        FinalizationShares: [
+          createFinalizationShare({
+            TrusteeUserAddress: 'trustee-a',
+            TrusteeDisplayName: 'Trustee A',
+          }),
+          createFinalizationShare({
+            Id: 'finalization-share-2',
+            TrusteeUserAddress: 'trustee-b',
+            TrusteeDisplayName: 'Trustee B',
+            ShareIndex: 2,
+          }),
+          createFinalizationShare({
+            Id: 'finalization-share-3',
+            TrusteeUserAddress: 'trustee-c',
+            TrusteeDisplayName: 'Trustee C',
+            ShareIndex: 3,
+          }),
+          createFinalizationShare({
+            Id: 'finalization-share-4',
+            TrusteeUserAddress: 'trustee-d',
+            TrusteeDisplayName: 'Trustee D',
+            ShareIndex: 4,
+          }),
+        ],
+      })
+    );
+    electionsServiceMock.getElectionCeremonyActionView.mockResolvedValue(
+      createCeremonyActionViewResponse({
+        SelfVaultEnvelopes: [vaultFixture.envelope],
+      })
+    );
+
+    render(
+      <TrusteeElectionFinalizationPanel
+        electionId="election-1"
+        actorPublicAddress="trustee-a"
+        actorEncryptionPublicKey={trusteeEncryptionPublicKey}
+        actorEncryptionPrivateKey={trusteeEncryptionPrivateKey}
+        actorSigningPrivateKey={trusteeSigningPrivateKey}
+      />
+    );
+
+    expect(await screen.findByTestId('trustee-finalization-exact-target')).toHaveTextContent(
+      'Threshold met with missing evidence visible'
+    );
+    expect(screen.getByTestId('trustee-finalization-exact-target')).toHaveTextContent(
+      'SP-06 threshold: 4 accepted, 1 missing, 0 rejected; requires 3 of 5.'
+    );
+    expect(screen.getByTestId('trustee-finalization-summary')).toHaveTextContent(
+      '4 accepted / 5 eligible'
+    );
+  });
+
+  it('shows rejected artifact recovery detail without exposing private share material', async () => {
+    const vaultFixture = await createStoredVaultEnvelopeFixture();
+
+    electionsServiceMock.getElection.mockResolvedValue(
+      createElectionResponse({
+        FinalizationSessions: [
+          createFinalizationSession({
+            TrusteeCount: 5,
+            TrusteeThreshold: 3,
+            RequiredShareCount: 3,
+            AcceptedReleaseArtifactCount: 3,
+            MissingReleaseArtifactCount: 1,
+            RejectedReleaseArtifactCount: 1,
+            EligibleTrustees: ['a', 'b', 'c', 'd', 'e'].map((suffix) => ({
+              TrusteeUserAddress: `trustee-${suffix}`,
+              TrusteeDisplayName: `Trustee ${suffix.toUpperCase()}`,
+            })),
+            CeremonySnapshot: {
+              ...createFinalizationSession().CeremonySnapshot!,
+              TrusteeCount: 5,
+              RequiredApprovalCount: 3,
+            },
+          }),
+        ],
+        FinalizationShares: [
+          createFinalizationShare({
+            Status: ElectionFinalizationShareStatusProto.FinalizationShareRejected,
+            FailureCode: 'wrong_tally_target',
+            FailureReason: 'The submitted artifact targets a different tally hash.',
+          }),
+          createFinalizationShare({
+            Id: 'finalization-share-2',
+            TrusteeUserAddress: 'trustee-b',
+            TrusteeDisplayName: 'Trustee B',
+            ShareIndex: 2,
+          }),
+          createFinalizationShare({
+            Id: 'finalization-share-3',
+            TrusteeUserAddress: 'trustee-c',
+            TrusteeDisplayName: 'Trustee C',
+            ShareIndex: 3,
+          }),
+          createFinalizationShare({
+            Id: 'finalization-share-4',
+            TrusteeUserAddress: 'trustee-d',
+            TrusteeDisplayName: 'Trustee D',
+            ShareIndex: 4,
+          }),
+        ],
+      })
+    );
+    electionsServiceMock.getElectionCeremonyActionView.mockResolvedValue(
+      createCeremonyActionViewResponse({
+        SelfVaultEnvelopes: [vaultFixture.envelope],
+      })
+    );
+
+    render(
+      <TrusteeElectionFinalizationPanel
+        electionId="election-1"
+        actorPublicAddress="trustee-a"
+        actorEncryptionPublicKey={trusteeEncryptionPublicKey}
+        actorEncryptionPrivateKey={trusteeEncryptionPrivateKey}
+        actorSigningPrivateKey={trusteeSigningPrivateKey}
+      />
+    );
+
+    expect(await screen.findByText(/Latest share status:/)).toHaveTextContent(
+      'wrong_tally_target'
+    );
+    expect(screen.getByText(/Latest share status:/)).toHaveTextContent(
+      'The submitted artifact targets a different tally hash.'
+    );
+    expect(screen.getByText(/Latest share status:/)).toHaveTextContent(
+      'Recovery: reload the exact target refs'
+    );
+    expect(screen.getByTestId('trustee-finalization-exact-target')).toHaveTextContent(
+      'SP-06 threshold: 3 accepted, 1 missing, 1 rejected; requires 3 of 5.'
+    );
+    expect(screen.queryByText(vaultFixture.shareMaterial)).not.toBeInTheDocument();
   });
 
   it('shows the waiting threshold state and unlocks the share form when close-counting becomes available', async () => {

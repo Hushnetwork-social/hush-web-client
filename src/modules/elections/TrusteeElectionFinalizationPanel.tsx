@@ -32,6 +32,7 @@ import {
   getLatestFinalizationShareForTrustee,
   getModeProfileFamilyLabel,
   getSelectedProfileFamilyLabel,
+  shortenProtocolPackageHash,
 } from './contracts';
 import {
   decryptStoredTrusteeShareVaultEnvelope,
@@ -145,6 +146,7 @@ export function TrusteeElectionFinalizationPanel({
     () => getLatestFinalizationReleaseEvidence(selectedElection, session?.Id),
     [selectedElection, session?.Id]
   );
+  const protocolPackageBinding = selectedElection?.ProtocolPackageBinding ?? null;
   const actorShare = useMemo(
     () => getLatestFinalizationShareForTrustee(selectedElection, actorPublicAddress, session?.Id),
     [actorPublicAddress, selectedElection, session?.Id]
@@ -205,9 +207,39 @@ export function TrusteeElectionFinalizationPanel({
             trustee.TrusteeUserAddress,
             session.Id
           )
-        )
+      )
     ).length;
   }, [selectedElection, session]);
+  const expectedTrusteeCount = session?.TrusteeCount ?? eligibleTrusteeCount;
+  const requiredTrusteeThreshold = session?.TrusteeThreshold ?? session?.RequiredShareCount ?? 0;
+  const rejectedReleaseArtifactCount =
+    session?.RejectedReleaseArtifactCount ??
+    (selectedElection?.FinalizationShares ?? []).filter(
+      (share) =>
+        share.FinalizationSessionId === session?.Id &&
+        share.Status ===
+          ElectionFinalizationShareStatusProto.FinalizationShareRejected
+    ).length;
+  const acceptedReleaseArtifactCount =
+    session?.AcceptedReleaseArtifactCount ?? releaseEvidence?.AcceptedShareCount ?? acceptedShareCount;
+  const missingReleaseArtifactCount =
+    session?.MissingReleaseArtifactCount ??
+    Math.max(0, expectedTrusteeCount - acceptedReleaseArtifactCount - rejectedReleaseArtifactCount);
+  const belowTrusteeThreshold =
+    Boolean(session) &&
+    requiredTrusteeThreshold > 0 &&
+    acceptedReleaseArtifactCount < requiredTrusteeThreshold;
+  const missingNonRequiredTrusteesVisible =
+    Boolean(session) &&
+    !belowTrusteeThreshold &&
+    missingReleaseArtifactCount > 0;
+  const protocolPackageRef = protocolPackageBinding
+    ? `${protocolPackageBinding.PackageVersion} | ${shortenProtocolPackageHash(
+        protocolPackageBinding.ReleaseManifestHash ||
+          protocolPackageBinding.SpecPackageHash ||
+          protocolPackageBinding.ProofPackageHash,
+      )}`
+    : 'Not recorded';
   const hasRecordedCloseApproval = useMemo(() => {
     if (!closeProposalId) {
       return false;
@@ -593,6 +625,124 @@ export function TrusteeElectionFinalizationPanel({
 
               <div
                 className={`mt-5 ${valueWellClass}`}
+                data-testid="trustee-finalization-exact-target"
+              >
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                      Exact target refs
+                    </div>
+                    <p className="mt-2 text-sm text-hush-text-accent">
+                      These refs are the public context for the trustee release artifact. They bind
+                      this device to one election, one session, one sealed ballot definition, and
+                      one aggregate tally.
+                    </p>
+                  </div>
+                  <div
+                    className={`inline-flex items-center gap-2 self-start rounded-full px-3 py-1 text-xs font-semibold ${
+                      belowTrusteeThreshold
+                        ? 'bg-red-500/12 text-red-100'
+                        : missingNonRequiredTrusteesVisible || rejectedReleaseArtifactCount > 0
+                          ? 'bg-amber-500/12 text-amber-100'
+                          : 'bg-green-500/12 text-green-100'
+                    }`}
+                  >
+                    {belowTrusteeThreshold
+                      ? 'Fail closed'
+                      : missingNonRequiredTrusteesVisible
+                        ? 'Threshold met with missing evidence visible'
+                        : 'Threshold state ready'}
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-hush-text-accent/80">
+                      Election id
+                    </div>
+                    <div className="mt-1 break-all font-mono text-sm text-hush-text-primary">
+                      {formatArtifactValue(election.ElectionId)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-hush-text-accent/80">
+                      Session id
+                    </div>
+                    <div className="mt-1 break-all font-mono text-sm text-hush-text-primary">
+                      {session ? formatArtifactValue(session.Id) : 'Not available'}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-hush-text-accent/80">
+                      Ballot definition hash
+                    </div>
+                    <div className="mt-1 break-all font-mono text-sm text-hush-text-primary">
+                      {formatArtifactValue(election.BallotDefinitionHash)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-hush-text-accent/80">
+                      Protocol package ref
+                    </div>
+                    <div className="mt-1 break-all font-mono text-sm text-hush-text-primary">
+                      {protocolPackageRef}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-hush-text-accent/80">
+                      Accepted ballot set
+                    </div>
+                    <div className="mt-1 break-all font-mono text-sm text-hush-text-primary">
+                      {session ? formatArtifactValue(session.AcceptedBallotSetHash) : 'Not available'}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-hush-text-accent/80">
+                      Final encrypted tally
+                    </div>
+                    <div className="mt-1 break-all font-mono text-sm text-hush-text-primary">
+                      {session ? formatArtifactValue(session.FinalEncryptedTallyHash) : 'Not available'}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-hush-text-accent/80">
+                      Control domain
+                    </div>
+                    <div className="mt-1 text-sm text-hush-text-primary">
+                      {session?.ControlDomainProfileId
+                        ? `${session.ControlDomainProfileId}${
+                            session.ControlDomainProfileVersion
+                              ? ` ${session.ControlDomainProfileVersion}`
+                              : ''
+                          }`
+                        : 'Not recorded'}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-hush-text-accent/80">
+                      Artifact status
+                    </div>
+                    <div className="mt-1 text-sm text-hush-text-primary">
+                      {actorShare
+                        ? getFinalizationShareStatusLabel(actorShare.Status)
+                        : eligibleTrustee
+                          ? 'Missing'
+                          : 'Not in trustee roster'}
+                    </div>
+                  </div>
+                </div>
+
+                {session ? (
+                  <div className="mt-4 text-sm text-hush-text-accent">
+                    SP-06 threshold: {acceptedReleaseArtifactCount} accepted,{' '}
+                    {missingReleaseArtifactCount} missing, {rejectedReleaseArtifactCount} rejected;
+                    requires {requiredTrusteeThreshold} of {expectedTrusteeCount}.
+                  </div>
+                ) : null}
+              </div>
+
+              <div
+                className={`mt-5 ${valueWellClass}`}
                 data-testid="trustee-finalization-boundary-context"
               >
                 <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
@@ -697,12 +847,21 @@ export function TrusteeElectionFinalizationPanel({
                 >
                   Latest share status: {getFinalizationShareStatusLabel(actorShare.Status)} at{' '}
                   {formatTimestamp(actorShare.SubmittedAt)}
-                  {actorShare.FailureReason ? ` - ${actorShare.FailureReason}` : ''}
+                  {actorShare.FailureCode ? ` - ${actorShare.FailureCode}` : ''}
+                  {actorShare.FailureReason ? `: ${actorShare.FailureReason}` : ''}
                   {recoverableCloseCountingFailure &&
                   actorShare.Status ===
                     ElectionFinalizationShareStatusProto.FinalizationShareAccepted
                     ? ` Pending eligible trustees: ${pendingEligibleTrusteeCount}.`
                     : ''}
+                  {actorShare.Status ===
+                  ElectionFinalizationShareStatusProto.FinalizationShareRejected ? (
+                    <div className="mt-2">
+                      Recovery: reload the exact target refs, rebuild the release artifact from
+                      the current trustee vault, and submit again only if the session id and tally
+                      hashes match.
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
 

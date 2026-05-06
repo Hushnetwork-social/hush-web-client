@@ -1229,6 +1229,9 @@ export interface ElectionFrozenPolicy {
   CheckoffVisibilityPolicy?: ElectionCheckoffVisibilityPolicyProto;
   ActorLinkMultiplicityPolicy?: ElectionActorLinkMultiplicityPolicyProto;
   ContactCodeProviderReadiness?: ElectionContactCodeProviderReadinessProto;
+  ControlDomainProfileId?: string;
+  ControlDomainProfileVersion?: string;
+  ThresholdProfileId?: string;
   OutcomeRule: OutcomeRule;
   ApprovedClientApplications: ApprovedClientApplication[];
   ProtocolOmegaVersion: string;
@@ -1390,6 +1393,14 @@ export interface ElectionFinalizationSession {
   CloseCountingJobStatus: ElectionCloseCountingJobStatusProto;
   ExecutorSessionPublicKey: string;
   ExecutorKeyAlgorithm: string;
+  ControlDomainProfileId?: string;
+  ControlDomainProfileVersion?: string;
+  ThresholdProfileId?: string;
+  TrusteeCount?: number;
+  TrusteeThreshold?: number;
+  AcceptedReleaseArtifactCount?: number;
+  MissingReleaseArtifactCount?: number;
+  RejectedReleaseArtifactCount?: number;
 }
 
 export interface ElectionFinalizationShare {
@@ -1583,6 +1594,7 @@ export interface ElectionVerificationPackageStatusView {
   LastVerifierResult?: ElectionVerifierResultSummaryView;
   Sp04Evidence?: ElectionSp04EvidenceStatusView;
   Sp05Evidence?: ElectionSp05EvidenceStatusView;
+  Sp06Evidence?: ElectionSp06EvidenceStatusView;
 }
 
 export interface ElectionSp04EvidenceStatusView {
@@ -1610,6 +1622,36 @@ export interface ElectionSp05EvidenceStatusView {
   CommitmentTreeRoot: string;
   LatestEliResultCode: string;
   Message: string;
+}
+
+export interface ElectionSp06EvidenceStatusView {
+  EvidenceExpected: boolean;
+  PublicEvidenceAvailable: boolean;
+  RestrictedEvidenceAvailable: boolean;
+  ControlDomainProfileId: string;
+  ControlDomainProfileVersion: string;
+  ThresholdProfileId: string;
+  TrusteeCount: number;
+  TrusteeThreshold: number;
+  AcceptedBeforeOpenCount: number;
+  CompleteEvidenceCount: number;
+  MissingEvidenceCount: number;
+  StaleEvidenceCount: number;
+  IncompatibleEvidenceCount: number;
+  AcceptedReleaseArtifactCount: number;
+  MissingReleaseArtifactCount: number;
+  RejectedReleaseArtifactCount: number;
+  LatestCtrlResultCode: string;
+  Blockers: ElectionSp06ReadinessBlockerView[];
+  Message: string;
+}
+
+export interface ElectionSp06ReadinessBlockerView {
+  Code: string;
+  Message: string;
+  TrusteeRef: string;
+  BlocksOpen: boolean;
+  BlocksFinalization: boolean;
 }
 
 export interface ElectionRosterImportEvidenceView {
@@ -1664,6 +1706,9 @@ export interface ElectionRecordView {
   CheckoffVisibilityPolicy?: ElectionCheckoffVisibilityPolicyProto;
   ActorLinkMultiplicityPolicy?: ElectionActorLinkMultiplicityPolicyProto;
   ContactCodeProviderReadiness?: ElectionContactCodeProviderReadinessProto;
+  ControlDomainProfileId?: string;
+  ControlDomainProfileVersion?: string;
+  ThresholdProfileId?: string;
   OutcomeRule: OutcomeRule;
   ApprovedClientApplications: ApprovedClientApplication[];
   ProtocolOmegaVersion: string;
@@ -2396,6 +2441,7 @@ export interface GetElectionOpenReadinessResponse {
   ProtocolPackageBinding?: ElectionProtocolPackageBindingView;
   ProtocolPackageBindingStatus: ProtocolPackageBindingStatusProto;
   ProtocolPackageBindingMessage: string;
+  Sp06Evidence?: ElectionSp06EvidenceStatusView;
 }
 
 export interface GetElectionResponse {

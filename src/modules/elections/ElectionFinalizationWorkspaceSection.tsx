@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from 'react';
-import { CheckCircle2, Lock, ShieldAlert } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Lock, ShieldAlert, TriangleAlert } from 'lucide-react';
 import {
   ElectionCloseCountingJobStatusProto,
   ElectionFinalizationSessionPurposeProto,
@@ -52,6 +52,19 @@ function formatTrusteeReferenceList(
     .join(', ');
 }
 
+function getTrusteeReleaseArtifactClass(
+  status?: ElectionFinalizationShareStatusProto
+): string {
+  switch (status) {
+    case ElectionFinalizationShareStatusProto.FinalizationShareAccepted:
+      return 'bg-green-500/10 text-green-100';
+    case ElectionFinalizationShareStatusProto.FinalizationShareRejected:
+      return 'bg-red-500/10 text-red-100';
+    default:
+      return 'bg-amber-500/10 text-amber-100';
+  }
+}
+
 export function ElectionFinalizationWorkspaceSection({
   detail,
   finalizeActionState,
@@ -91,6 +104,27 @@ export function ElectionFinalizationWorkspaceSection({
     ({ latestShare }) =>
       latestShare?.Status !== ElectionFinalizationShareStatusProto.FinalizationShareAccepted
   ).length;
+  const expectedTrusteeCount = session?.TrusteeCount ?? eligibleTrusteeCount;
+  const requiredTrusteeThreshold = session?.TrusteeThreshold ?? session?.RequiredShareCount ?? 0;
+  const rejectedReleaseArtifactCount =
+    session?.RejectedReleaseArtifactCount ??
+    shares.filter(
+      (share) =>
+        share.Status ===
+        ElectionFinalizationShareStatusProto.FinalizationShareRejected
+    ).length;
+  const acceptedReleaseArtifactCount =
+    session?.AcceptedReleaseArtifactCount ?? releaseEvidence?.AcceptedShareCount ?? acceptedShareCount;
+  const missingReleaseArtifactCount =
+    session?.MissingReleaseArtifactCount ??
+    Math.max(0, expectedTrusteeCount - acceptedReleaseArtifactCount - rejectedReleaseArtifactCount);
+  const thresholdSatisfied =
+    !usesTrustees ||
+    requiredTrusteeThreshold <= 0 ||
+    acceptedReleaseArtifactCount >= requiredTrusteeThreshold;
+  const belowTrusteeThreshold = usesTrustees && Boolean(session) && !thresholdSatisfied;
+  const missingNonRequiredTrusteesVisible =
+    usesTrustees && thresholdSatisfied && missingReleaseArtifactCount > 0;
   const recoverableCloseCountingFailure =
     session?.SessionPurpose ===
       ElectionFinalizationSessionPurposeProto.FinalizationSessionPurposeCloseCounting &&
@@ -175,7 +209,7 @@ export function ElectionFinalizationWorkspaceSection({
                 Share progress
               </div>
               <div className="mt-2 text-sm text-hush-text-primary">
-                {acceptedShareCount} accepted / {eligibleTrusteeCount} eligible
+                {acceptedReleaseArtifactCount} accepted / {expectedTrusteeCount} expected
               </div>
             </div>
             <div className="rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
@@ -187,6 +221,44 @@ export function ElectionFinalizationWorkspaceSection({
               </div>
             </div>
           </div>
+
+          {usesTrustees ? (
+            <div
+              className={`rounded-2xl p-4 text-sm ${
+                belowTrusteeThreshold
+                  ? 'bg-red-500/12 text-red-100'
+                  : missingNonRequiredTrusteesVisible || rejectedReleaseArtifactCount > 0
+                    ? 'bg-amber-500/12 text-amber-100'
+                    : 'bg-green-500/12 text-green-100'
+              }`}
+              data-testid="elections-finalization-sp06-threshold"
+            >
+              <div className="flex items-start gap-3">
+                {belowTrusteeThreshold ? (
+                  <AlertCircle className="mt-0.5 h-5 w-5" />
+                ) : missingNonRequiredTrusteesVisible || rejectedReleaseArtifactCount > 0 ? (
+                  <TriangleAlert className="mt-0.5 h-5 w-5" />
+                ) : (
+                  <CheckCircle2 className="mt-0.5 h-5 w-5" />
+                )}
+                <div>
+                  <div className="font-semibold">
+                    {belowTrusteeThreshold
+                      ? 'Fail closed: trustee threshold not met'
+                      : missingNonRequiredTrusteesVisible
+                        ? 'Threshold satisfied with missing non-required trustee evidence visible'
+                        : 'Trustee threshold satisfied'}
+                  </div>
+                  <div className="mt-2">
+                    SP-06 expects {requiredTrusteeThreshold} of {expectedTrusteeCount} accepted
+                    trustee release artifact(s). Current state: {acceptedReleaseArtifactCount}
+                    accepted, {missingReleaseArtifactCount} missing, {rejectedReleaseArtifactCount}
+                    rejected.
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
             <div className="rounded-2xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">
@@ -210,10 +282,32 @@ export function ElectionFinalizationWorkspaceSection({
                 </div>
                 <div>
                   <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                    Control domain
+                  </div>
+                  <div className="mt-1 text-sm text-hush-text-primary">
+                    {session.ControlDomainProfileId
+                      ? `${session.ControlDomainProfileId}${
+                          session.ControlDomainProfileVersion
+                            ? ` ${session.ControlDomainProfileVersion}`
+                            : ''
+                        }`
+                      : 'Not recorded'}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                    Threshold profile
+                  </div>
+                  <div className="mt-1 text-sm text-hush-text-primary">
+                    {session.ThresholdProfileId || 'Not recorded'}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
                     Threshold
                   </div>
                   <div className="mt-1 text-sm text-hush-text-primary">
-                    {session.RequiredShareCount} of {session.EligibleTrustees.length}
+                    {requiredTrusteeThreshold} of {expectedTrusteeCount}
                   </div>
                 </div>
                 <div>
@@ -257,7 +351,7 @@ export function ElectionFinalizationWorkspaceSection({
               {trusteeProgress.map(({ trustee, latestShare }) => (
                 <div
                   key={trustee.TrusteeUserAddress}
-                  className="rounded-xl border border-hush-bg-light/70 bg-hush-bg-element/60 px-4 py-3"
+                  className={`rounded-xl px-4 py-3 ${getTrusteeReleaseArtifactClass(latestShare?.Status)}`}
                 >
                   <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                     <div>
@@ -268,7 +362,7 @@ export function ElectionFinalizationWorkspaceSection({
                         {trustee.TrusteeUserAddress}
                       </div>
                     </div>
-                    <div className="text-sm text-hush-text-primary">
+                    <div className="text-sm font-medium">
                       {latestShare
                         ? getFinalizationShareStatusLabel(latestShare.Status)
                         : 'Pending'}
@@ -280,10 +374,18 @@ export function ElectionFinalizationWorkspaceSection({
                       Submitted {formatTimestamp(latestShare.SubmittedAt)}
                       {latestShare.Status ===
                       ElectionFinalizationShareStatusProto.FinalizationShareRejected
-                        ? ` - ${latestShare.FailureCode || 'Rejected'}`
+                        ? ` - ${latestShare.FailureCode || 'Rejected'}${
+                            latestShare.FailureReason
+                              ? `: ${latestShare.FailureReason}`
+                              : ''
+                          }`
                         : ''}
                     </div>
-                  ) : null}
+                  ) : (
+                    <div className="mt-2 text-xs text-amber-100">
+                      Missing trustee release artifact remains visible for the finalization evidence.
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

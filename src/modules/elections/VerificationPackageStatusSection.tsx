@@ -205,6 +205,29 @@ function getSp05EvidenceAccent(status: ElectionVerificationPackageStatusView): s
   return evidence.PublicEvidenceAvailable ? 'text-amber-100' : 'text-red-100';
 }
 
+function getSp06EvidenceAccent(status: ElectionVerificationPackageStatusView): string {
+  const evidence = status.Sp06Evidence;
+  if (!evidence) {
+    return 'text-hush-text-accent';
+  }
+
+  if (!evidence.EvidenceExpected) {
+    return 'text-hush-text-accent';
+  }
+
+  const hasBlockingEvidence =
+    evidence.MissingEvidenceCount > 0 ||
+    evidence.StaleEvidenceCount > 0 ||
+    evidence.IncompatibleEvidenceCount > 0 ||
+    evidence.RejectedReleaseArtifactCount > 0;
+
+  if (!evidence.PublicEvidenceAvailable || hasBlockingEvidence) {
+    return 'text-amber-100';
+  }
+
+  return evidence.LatestCtrlResultCode ? 'text-green-100' : 'text-amber-100';
+}
+
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';
   const chunkSize = 0x8000;
@@ -499,6 +522,76 @@ export function VerificationPackageStatusSection({
               </div>
             </div>
           </div>
+        </div>
+      ) : null}
+
+      {status.Sp06Evidence ? (
+        <div
+          className="mt-5 rounded-2xl bg-hush-bg-dark/70 p-4"
+          data-testid="verification-package-sp06-evidence"
+        >
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                SP-06 trustee control
+              </div>
+              <div className={`mt-2 text-sm font-semibold ${getSp06EvidenceAccent(status)}`}>
+                {status.Sp06Evidence.Message ||
+                  'Trustee control-domain evidence status is available for this package.'}
+              </div>
+              <div className="mt-2 font-mono text-xs text-hush-text-accent">
+                {status.Sp06Evidence.LatestCtrlResultCode || 'CTRL not available'}
+              </div>
+            </div>
+            <div className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-2xl bg-black/20 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Profile
+                </div>
+                <div className="mt-2 break-words text-sm font-semibold text-hush-text-primary">
+                  {status.Sp06Evidence.ControlDomainProfileId}
+                  {status.Sp06Evidence.ControlDomainProfileVersion
+                    ? ` ${status.Sp06Evidence.ControlDomainProfileVersion}`
+                    : ''}
+                </div>
+              </div>
+              <div className="rounded-2xl bg-black/20 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Threshold
+                </div>
+                <div className="mt-2 text-sm font-semibold text-hush-text-primary">
+                  {status.Sp06Evidence.TrusteeThreshold} of {status.Sp06Evidence.TrusteeCount}
+                </div>
+              </div>
+              <div className="rounded-2xl bg-black/20 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Open evidence
+                </div>
+                <div className="mt-2 text-sm font-semibold text-hush-text-primary">
+                  {status.Sp06Evidence.CompleteEvidenceCount} complete /{' '}
+                  {status.Sp06Evidence.MissingEvidenceCount} missing
+                </div>
+              </div>
+              <div className="rounded-2xl bg-black/20 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Release artifacts
+                </div>
+                <div className="mt-2 text-sm font-semibold text-hush-text-primary">
+                  {status.Sp06Evidence.AcceptedReleaseArtifactCount} accepted /{' '}
+                  {status.Sp06Evidence.RejectedReleaseArtifactCount} rejected
+                </div>
+              </div>
+            </div>
+          </div>
+          {status.Sp06Evidence.Blockers.length > 0 ? (
+            <ul className="mt-4 space-y-2 text-sm text-amber-100">
+              {status.Sp06Evidence.Blockers.map((blocker) => (
+                <li key={`${blocker.Code}-${blocker.TrusteeRef}`} className="rounded-2xl bg-amber-500/10 px-3 py-2">
+                  {blocker.Message || blocker.Code}
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       ) : null}
 
