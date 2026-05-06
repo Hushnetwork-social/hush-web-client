@@ -389,6 +389,21 @@ export function createVerificationPackageStatus(
       Message: 'No verifier output has been recorded for this package.',
       HasVerifiedAt: false,
     },
+    Sp05Evidence: {
+      EvidenceExpected: true,
+      PublicEvidenceAvailable: true,
+      RestrictedEvidenceAvailable: true,
+      RosteredCount: 18,
+      LinkedCount: 17,
+      ActiveDenominatorCount: 18,
+      CommitmentCount: 13,
+      CountedParticipationCount: 13,
+      DuplicateContactWarningCount: 0,
+      RosterCanonicalHash: 'f'.repeat(64),
+      CommitmentTreeRoot: 'a'.repeat(64),
+      LatestEliResultCode: 'ELI-001',
+      Message: 'SP-05 eligibility evidence is available for verification package export.',
+    },
     ...overrides,
   };
 }

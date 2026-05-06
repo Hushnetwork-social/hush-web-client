@@ -206,6 +206,39 @@ describe('VerificationPackageStatusSection', () => {
     expect(screen.getByRole('button', { name: 'Download restricted package' })).toBeEnabled();
   });
 
+  it('shows SP-05 eligibility evidence and ELI result inside the existing package section', () => {
+    render(
+      <VerificationPackageStatusSection
+        electionId="election-1"
+        actorPublicAddress="auditor-address"
+        status={createVerificationPackageStatus({
+          Sp05Evidence: {
+            EvidenceExpected: true,
+            PublicEvidenceAvailable: true,
+            RestrictedEvidenceAvailable: true,
+            RosteredCount: 120,
+            LinkedCount: 118,
+            ActiveDenominatorCount: 119,
+            CommitmentCount: 90,
+            CountedParticipationCount: 88,
+            DuplicateContactWarningCount: 2,
+            RosterCanonicalHash: 'b'.repeat(64),
+            CommitmentTreeRoot: 'c'.repeat(64),
+            LatestEliResultCode: 'eligibility_dev_only_verification_blocked',
+            Message: 'SP-05 verifier warning: provider is dev-only.',
+          },
+        })}
+      />
+    );
+
+    const evidence = screen.getByTestId('verification-package-sp05-evidence');
+    expect(evidence).toHaveTextContent('SP-05 eligibility/checkoff');
+    expect(evidence).toHaveTextContent('SP-05 verifier warning');
+    expect(evidence).toHaveTextContent('eligibility_dev_only_verification_blocked');
+    expect(evidence).toHaveTextContent('120');
+    expect(evidence).toHaveTextContent('90');
+  });
+
   it.each([
     [
       ElectionVerifierOverallStatusProto.ElectionVerifierPass,

@@ -10,6 +10,8 @@ import {
   UserRoundCheck,
 } from "lucide-react";
 import {
+  ElectionActorLinkMultiplicityPolicyProto,
+  ElectionContactCodeProviderReadinessProto,
   ElectionLifecycleStateProto,
   ElectionParticipationStatusProto,
   ElectionVotingRightStatusProto,
@@ -44,6 +46,40 @@ type ImportPreviewState = {
   rows: ElectionRosterImportItemPayload[];
   errors: string[];
 };
+
+function getActorPolicyLabel(policy?: ElectionActorLinkMultiplicityPolicyProto): string {
+  return policy === ElectionActorLinkMultiplicityPolicyProto.MultipleRosterEntriesPerActorAllowed
+    ? "Multiple roster entries per actor"
+    : "Single roster entry per actor";
+}
+
+function getProviderReadinessLabel(readiness?: ElectionContactCodeProviderReadinessProto): string {
+  switch (readiness) {
+    case ElectionContactCodeProviderReadinessProto.ContactCodeProviderReady:
+      return "Provider ready";
+    case ElectionContactCodeProviderReadinessProto.ContactCodeProviderDegraded:
+      return "Provider degraded";
+    case ElectionContactCodeProviderReadinessProto.ContactCodeProviderMissing:
+      return "Provider missing";
+    case ElectionContactCodeProviderReadinessProto.ContactCodeProviderDevOnly:
+    default:
+      return "Dev-only provider";
+  }
+}
+
+function getProviderReadinessTone(readiness?: ElectionContactCodeProviderReadinessProto): string {
+  return readiness === ElectionContactCodeProviderReadinessProto.ContactCodeProviderReady
+    ? "text-green-100"
+    : "text-amber-100";
+}
+
+function shortenEvidenceValue(value?: string): string {
+  if (!value) {
+    return "Not available";
+  }
+
+  return value.length > 18 ? `${value.slice(0, 10)}...${value.slice(-6)}` : value;
+}
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -597,6 +633,118 @@ export function ElectionEligibilityWorkspaceSection({
               </div>
             </div>
           </div>
+
+          {eligibilityView.LatestRosterImportEvidence ||
+          eligibilityView.EligibilityPolicyEvidence ||
+          eligibilityView.Sp05Evidence ? (
+            <div
+              className="mt-5 rounded-xl bg-hush-bg-dark/80 p-4 shadow-sm shadow-black/10"
+              data-testid="eligibility-sp05-readiness"
+            >
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <div className="text-sm font-semibold">SP-05 readiness</div>
+                  <p className="mt-1 text-sm text-hush-text-accent">
+                    Eligibility and checkoff evidence stays separated from anonymous ballot
+                    artifacts. Named roster details remain restricted to this authorized surface.
+                  </p>
+                </div>
+                {eligibilityView.EligibilityPolicyEvidence ? (
+                  <div
+                    className={`rounded-xl bg-black/20 px-3 py-2 text-xs font-semibold ${
+                      eligibilityView.EligibilityPolicyEvidence.HighAssuranceAvailable
+                        ? "text-green-100"
+                        : "text-amber-100"
+                    }`}
+                  >
+                    {eligibilityView.EligibilityPolicyEvidence.HighAssuranceAvailable
+                      ? "High assurance ready"
+                      : "Readiness blockers"}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-2xl bg-black/20 p-3">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                    Import
+                  </div>
+                  <div className="mt-2 text-sm font-semibold text-hush-text-primary">
+                    {eligibilityView.LatestRosterImportEvidence
+                      ? `${eligibilityView.LatestRosterImportEvidence.AcceptedRowCount} accepted / ${eligibilityView.LatestRosterImportEvidence.RejectedRowCount} rejected`
+                      : "No import evidence"}
+                  </div>
+                  <div className="mt-1 text-xs text-hush-text-accent">
+                    Warnings:{" "}
+                    {eligibilityView.LatestRosterImportEvidence?.DuplicateContactWarningCount ?? 0}
+                  </div>
+                </div>
+                <div className="rounded-2xl bg-black/20 p-3">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                    Canonical hash
+                  </div>
+                  <div
+                    className="mt-2 break-all font-mono text-xs text-hush-text-primary"
+                    title={eligibilityView.LatestRosterImportEvidence?.RosterCanonicalHash}
+                  >
+                    {shortenEvidenceValue(
+                      eligibilityView.LatestRosterImportEvidence?.RosterCanonicalHash,
+                    )}
+                  </div>
+                  <div className="mt-1 font-mono text-xs text-hush-text-accent">
+                    Source:{" "}
+                    {shortenEvidenceValue(
+                      eligibilityView.LatestRosterImportEvidence?.RosterSourceFileHash,
+                    )}
+                  </div>
+                </div>
+                <div className="rounded-2xl bg-black/20 p-3">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                    Actor policy
+                  </div>
+                  <div className="mt-2 text-sm font-semibold text-hush-text-primary">
+                    {getActorPolicyLabel(
+                      eligibilityView.EligibilityPolicyEvidence?.ActorLinkMultiplicityPolicy,
+                    )}
+                  </div>
+                  {eligibilityView.EligibilityPolicyEvidence?.ActorLinkMultiplicityPolicy ===
+                  ElectionActorLinkMultiplicityPolicyProto.MultipleRosterEntriesPerActorAllowed ? (
+                    <div className="mt-1 text-xs text-amber-100">
+                      Multiple rights per actor must stay restricted-audited.
+                    </div>
+                  ) : null}
+                </div>
+                <div className="rounded-2xl bg-black/20 p-3">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                    Provider
+                  </div>
+                  <div
+                    className={`mt-2 text-sm font-semibold ${getProviderReadinessTone(
+                      eligibilityView.EligibilityPolicyEvidence?.ContactCodeProviderReadiness,
+                    )}`}
+                  >
+                    {getProviderReadinessLabel(
+                      eligibilityView.EligibilityPolicyEvidence?.ContactCodeProviderReadiness,
+                    )}
+                  </div>
+                  <div className="mt-1 font-mono text-xs text-hush-text-accent">
+                    {eligibilityView.Sp05Evidence?.LatestEliResultCode || "ELI not available"}
+                  </div>
+                </div>
+              </div>
+
+              {(eligibilityView.EligibilityPolicyEvidence?.OpenBlockers ?? []).length > 0 ? (
+                <div className="mt-4 rounded-2xl bg-amber-500/12 p-3 text-sm text-amber-100">
+                  <div className="font-semibold">Open blockers</div>
+                  <div className="mt-2 space-y-1">
+                    {eligibilityView.EligibilityPolicyEvidence!.OpenBlockers.map((blocker) => (
+                      <div key={blocker}>{blocker}</div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           {eligibilityView.CanImportRoster ? (
             <div className="mt-5 rounded-xl border border-hush-bg-light bg-hush-bg-dark/80 p-4">

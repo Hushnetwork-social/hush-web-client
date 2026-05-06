@@ -188,6 +188,23 @@ function getSp04EvidenceAccent(status: ElectionVerificationPackageStatusView): s
   return 'text-amber-100';
 }
 
+function getSp05EvidenceAccent(status: ElectionVerificationPackageStatusView): string {
+  const evidence = status.Sp05Evidence;
+  if (!evidence) {
+    return 'text-hush-text-accent';
+  }
+
+  if (!evidence.EvidenceExpected) {
+    return 'text-hush-text-accent';
+  }
+
+  if (evidence.PublicEvidenceAvailable && evidence.LatestEliResultCode === 'eligibility_evidence_valid') {
+    return 'text-green-100';
+  }
+
+  return evidence.PublicEvidenceAvailable ? 'text-amber-100' : 'text-red-100';
+}
+
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';
   const chunkSize = 0x8000;
@@ -419,6 +436,64 @@ export function VerificationPackageStatusSection({
                 <div className="mt-2 break-all font-mono text-xs text-hush-text-primary">
                   {status.Sp04Evidence.ReceiptCommitmentSetHash
                     ? formatArtifactValue(status.Sp04Evidence.ReceiptCommitmentSetHash)
+                    : 'Not available'}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {status.Sp05Evidence ? (
+        <div
+          className="mt-5 rounded-2xl bg-hush-bg-dark/70 p-4"
+          data-testid="verification-package-sp05-evidence"
+        >
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                SP-05 eligibility/checkoff
+              </div>
+              <div className={`mt-2 text-sm font-semibold ${getSp05EvidenceAccent(status)}`}>
+                {status.Sp05Evidence.Message ||
+                  'Eligibility/checkoff evidence status is available for this package.'}
+              </div>
+              <div className="mt-2 font-mono text-xs text-hush-text-accent">
+                {status.Sp05Evidence.LatestEliResultCode || 'ELI not available'}
+              </div>
+            </div>
+            <div className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-2xl bg-black/20 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Rostered
+                </div>
+                <div className="mt-2 text-sm font-semibold text-hush-text-primary">
+                  {status.Sp05Evidence.RosteredCount}
+                </div>
+              </div>
+              <div className="rounded-2xl bg-black/20 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Commitments
+                </div>
+                <div className="mt-2 text-sm font-semibold text-hush-text-primary">
+                  {status.Sp05Evidence.CommitmentCount}
+                </div>
+              </div>
+              <div className="rounded-2xl bg-black/20 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Counted
+                </div>
+                <div className="mt-2 text-sm font-semibold text-hush-text-primary">
+                  {status.Sp05Evidence.CountedParticipationCount}
+                </div>
+              </div>
+              <div className="rounded-2xl bg-black/20 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Roster hash
+                </div>
+                <div className="mt-2 break-all font-mono text-xs text-hush-text-primary">
+                  {status.Sp05Evidence.RosterCanonicalHash
+                    ? formatArtifactValue(status.Sp05Evidence.RosterCanonicalHash)
                     : 'Not available'}
                 </div>
               </div>
