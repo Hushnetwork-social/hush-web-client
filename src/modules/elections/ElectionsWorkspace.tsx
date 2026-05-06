@@ -1077,16 +1077,15 @@ export function ElectionsWorkspace({
   const sp06Evidence = openReadiness?.Sp06Evidence ?? null;
   const sp06EvidenceExpected = Boolean(
     sp06Evidence?.EvidenceExpected ||
-      draft.ControlDomainProfileId ||
       election?.ControlDomainProfileId,
   );
   const sp06ControlDomainLabel = getSp06ControlDomainLabel(
     sp06Evidence,
-    draft.ControlDomainProfileId ?? election?.ControlDomainProfileId,
+    election?.ControlDomainProfileId,
   );
   const sp06ThresholdLabel = getSp06ThresholdLabel(
     sp06Evidence,
-    draft.ThresholdProfileId ?? election?.ThresholdProfileId,
+    election?.ThresholdProfileId,
   );
   const sp06OpenBlockerMessages = useMemo(
     () => getSp06OpenBlockerMessages(sp06Evidence, sp06EvidenceExpected),
