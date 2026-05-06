@@ -882,6 +882,28 @@ export enum EligibilityMutationPolicyProto {
   LateActivationForRosteredVotersOnly = 1,
 }
 
+export enum ElectionActorLinkMultiplicityPolicyProto {
+  SingleRosterEntryPerActor = 0,
+  MultipleRosterEntriesPerActorAllowed = 1,
+}
+
+export enum ElectionIdentityLinkPolicyProto {
+  ContactCodeV1 = 0,
+  PrelinkedHushAccountV1 = 1,
+  OwnerManualVerificationV1 = 2,
+}
+
+export enum ElectionCheckoffVisibilityPolicyProto {
+  RestrictedOwnerAuditor = 0,
+}
+
+export enum ElectionContactCodeProviderReadinessProto {
+  ContactCodeProviderMissing = 0,
+  ContactCodeProviderDevOnly = 1,
+  ContactCodeProviderDegraded = 2,
+  ContactCodeProviderReady = 3,
+}
+
 export enum OutcomeRuleKindProto {
   SingleWinner = 0,
   PassFail = 1,
@@ -1203,6 +1225,10 @@ export interface ElectionFrozenPolicy {
   VoteUpdatePolicy: VoteUpdatePolicyProto;
   EligibilitySourceType: EligibilitySourceTypeProto;
   EligibilityMutationPolicy: EligibilityMutationPolicyProto;
+  IdentityLinkPolicy?: ElectionIdentityLinkPolicyProto;
+  CheckoffVisibilityPolicy?: ElectionCheckoffVisibilityPolicyProto;
+  ActorLinkMultiplicityPolicy?: ElectionActorLinkMultiplicityPolicyProto;
+  ContactCodeProviderReadiness?: ElectionContactCodeProviderReadinessProto;
   OutcomeRule: OutcomeRule;
   ApprovedClientApplications: ApprovedClientApplication[];
   ProtocolOmegaVersion: string;
@@ -1556,6 +1582,7 @@ export interface ElectionVerificationPackageStatusView {
   ProtocolPackageBinding?: ElectionProtocolPackageBindingView;
   LastVerifierResult?: ElectionVerifierResultSummaryView;
   Sp04Evidence?: ElectionSp04EvidenceStatusView;
+  Sp05Evidence?: ElectionSp05EvidenceStatusView;
 }
 
 export interface ElectionSp04EvidenceStatusView {
@@ -1567,6 +1594,46 @@ export interface ElectionSp04EvidenceStatusView {
   AcceptedBoundReceiptCount: number;
   ReceiptCommitmentSetHash: string;
   Message: string;
+}
+
+export interface ElectionSp05EvidenceStatusView {
+  EvidenceExpected: boolean;
+  PublicEvidenceAvailable: boolean;
+  RestrictedEvidenceAvailable: boolean;
+  RosteredCount: number;
+  LinkedCount: number;
+  ActiveDenominatorCount: number;
+  CommitmentCount: number;
+  CountedParticipationCount: number;
+  DuplicateContactWarningCount: number;
+  RosterCanonicalHash: string;
+  CommitmentTreeRoot: string;
+  LatestEliResultCode: string;
+  Message: string;
+}
+
+export interface ElectionRosterImportEvidenceView {
+  RosterSourceFileHash: string;
+  RosterCanonicalHash: string;
+  RosterCanonicalizationVersion: string;
+  AcceptedRowCount: number;
+  RejectedRowCount: number;
+  DuplicateContactWarningCount: number;
+  HasBlockingErrors: boolean;
+  ImportedAt?: GrpcTimestamp;
+  ImportedByActor: string;
+}
+
+export interface ElectionEligibilityPolicyEvidenceView {
+  EligibilityPolicyId: string;
+  EligibilityPolicyVersion: string;
+  EligibilityMutationPolicy: EligibilityMutationPolicyProto;
+  IdentityLinkPolicy: ElectionIdentityLinkPolicyProto;
+  CheckoffVisibilityPolicy: ElectionCheckoffVisibilityPolicyProto;
+  ActorLinkMultiplicityPolicy: ElectionActorLinkMultiplicityPolicyProto;
+  ContactCodeProviderReadiness: ElectionContactCodeProviderReadinessProto;
+  HighAssuranceAvailable: boolean;
+  OpenBlockers: string[];
 }
 
 export interface ElectionVerificationPackageFileView {
@@ -1593,6 +1660,10 @@ export interface ElectionRecordView {
   VoteUpdatePolicy: VoteUpdatePolicyProto;
   EligibilitySourceType: EligibilitySourceTypeProto;
   EligibilityMutationPolicy: EligibilityMutationPolicyProto;
+  IdentityLinkPolicy?: ElectionIdentityLinkPolicyProto;
+  CheckoffVisibilityPolicy?: ElectionCheckoffVisibilityPolicyProto;
+  ActorLinkMultiplicityPolicy?: ElectionActorLinkMultiplicityPolicyProto;
+  ContactCodeProviderReadiness?: ElectionContactCodeProviderReadinessProto;
   OutcomeRule: OutcomeRule;
   ApprovedClientApplications: ApprovedClientApplication[];
   ProtocolOmegaVersion: string;
@@ -1737,6 +1808,10 @@ export interface ElectionDraftInput {
   VoteUpdatePolicy: VoteUpdatePolicyProto;
   EligibilitySourceType: EligibilitySourceTypeProto;
   EligibilityMutationPolicy: EligibilityMutationPolicyProto;
+  IdentityLinkPolicy: ElectionIdentityLinkPolicyProto;
+  CheckoffVisibilityPolicy: ElectionCheckoffVisibilityPolicyProto;
+  ActorLinkMultiplicityPolicy: ElectionActorLinkMultiplicityPolicyProto;
+  ContactCodeProviderReadiness: ElectionContactCodeProviderReadinessProto;
   OutcomeRule: OutcomeRule;
   ApprovedClientApplications: ApprovedClientApplication[];
   ProtocolOmegaVersion: string;
@@ -2384,6 +2459,9 @@ export interface GetElectionEligibilityViewResponse {
   RestrictedRosterEntries: ElectionRosterEntryView[];
   ActivationEvents: ElectionEligibilityActivationEventView[];
   EligibilitySnapshots: ElectionEligibilitySnapshotView[];
+  LatestRosterImportEvidence?: ElectionRosterImportEvidenceView;
+  EligibilityPolicyEvidence?: ElectionEligibilityPolicyEvidenceView;
+  Sp05Evidence?: ElectionSp05EvidenceStatusView;
 }
 
 export interface GetElectionVotingViewResponse {

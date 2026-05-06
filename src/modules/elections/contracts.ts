@@ -1,6 +1,7 @@
 import {
   ElectionCloseCountingJobStatusProto,
   ElectionClosedProgressStatusProto,
+  ElectionActorLinkMultiplicityPolicyProto,
   type ElectionHubEntryView,
   ElectionHubNextActionHintProto,
   type ElectionCeremonyProfile,
@@ -9,8 +10,11 @@ import {
   ElectionCeremonyShareCustodyStatusProto,
   ElectionCeremonyVersionStatusProto,
   ElectionBindingStatusProto,
+  ElectionCheckoffVisibilityPolicyProto,
   ElectionClassProto,
+  ElectionContactCodeProviderReadinessProto,
   ElectionDisclosureModeProto,
+  ElectionIdentityLinkPolicyProto,
   type ElectionDraftInput,
   type ElectionDraftSnapshot,
   type ElectionFinalizationReleaseEvidence,
@@ -631,6 +635,10 @@ export function createDefaultElectionDraft(): ElectionDraftInput {
     VoteUpdatePolicy: VoteUpdatePolicyProto.SingleSubmissionOnly,
     EligibilitySourceType: EligibilitySourceTypeProto.OrganizationImportedRoster,
     EligibilityMutationPolicy: EligibilityMutationPolicyProto.FrozenAtOpen,
+    IdentityLinkPolicy: ElectionIdentityLinkPolicyProto.ContactCodeV1,
+    CheckoffVisibilityPolicy: ElectionCheckoffVisibilityPolicyProto.RestrictedOwnerAuditor,
+    ActorLinkMultiplicityPolicy: ElectionActorLinkMultiplicityPolicyProto.SingleRosterEntryPerActor,
+    ContactCodeProviderReadiness: ElectionContactCodeProviderReadinessProto.ContactCodeProviderDevOnly,
     OutcomeRule: createSingleWinnerOutcomeRule(),
     ApprovedClientApplications: [...DEFAULT_APPROVED_CLIENT_APPLICATIONS],
     ProtocolOmegaVersion: DEFAULT_PROTOCOL_OMEGA_VERSION,
@@ -665,6 +673,17 @@ export function createDraftFromElectionDetail(detail: GetElectionResponse | null
       VoteUpdatePolicy: draftSnapshot.Policy.VoteUpdatePolicy,
       EligibilitySourceType: draftSnapshot.Policy.EligibilitySourceType,
       EligibilityMutationPolicy: draftSnapshot.Policy.EligibilityMutationPolicy,
+      IdentityLinkPolicy:
+        draftSnapshot.Policy.IdentityLinkPolicy ?? ElectionIdentityLinkPolicyProto.ContactCodeV1,
+      CheckoffVisibilityPolicy:
+        draftSnapshot.Policy.CheckoffVisibilityPolicy ??
+        ElectionCheckoffVisibilityPolicyProto.RestrictedOwnerAuditor,
+      ActorLinkMultiplicityPolicy:
+        draftSnapshot.Policy.ActorLinkMultiplicityPolicy ??
+        ElectionActorLinkMultiplicityPolicyProto.SingleRosterEntryPerActor,
+      ContactCodeProviderReadiness:
+        draftSnapshot.Policy.ContactCodeProviderReadiness ??
+        ElectionContactCodeProviderReadinessProto.ContactCodeProviderDevOnly,
       OutcomeRule: { ...draftSnapshot.Policy.OutcomeRule },
       ApprovedClientApplications: draftSnapshot.Policy.ApprovedClientApplications.map((application) => ({
         ...application,
@@ -700,6 +719,16 @@ export function createDraftFromElectionDetail(detail: GetElectionResponse | null
       VoteUpdatePolicy: election.VoteUpdatePolicy,
       EligibilitySourceType: election.EligibilitySourceType,
       EligibilityMutationPolicy: election.EligibilityMutationPolicy,
+      IdentityLinkPolicy: election.IdentityLinkPolicy ?? ElectionIdentityLinkPolicyProto.ContactCodeV1,
+      CheckoffVisibilityPolicy:
+        election.CheckoffVisibilityPolicy ??
+        ElectionCheckoffVisibilityPolicyProto.RestrictedOwnerAuditor,
+      ActorLinkMultiplicityPolicy:
+        election.ActorLinkMultiplicityPolicy ??
+        ElectionActorLinkMultiplicityPolicyProto.SingleRosterEntryPerActor,
+      ContactCodeProviderReadiness:
+        election.ContactCodeProviderReadiness ??
+        ElectionContactCodeProviderReadinessProto.ContactCodeProviderDevOnly,
       OutcomeRule: { ...election.OutcomeRule },
       ApprovedClientApplications: election.ApprovedClientApplications.map((application) => ({
         ...application,
@@ -766,6 +795,15 @@ export function normalizeElectionDraft(
       draft.GovernanceMode === ElectionGovernanceModeProto.TrusteeThreshold
         ? Math.max(1, selectedProfile?.RequiredApprovalCount ?? draft.RequiredApprovalCount ?? 1)
         : undefined,
+    IdentityLinkPolicy: draft.IdentityLinkPolicy ?? ElectionIdentityLinkPolicyProto.ContactCodeV1,
+    CheckoffVisibilityPolicy:
+      draft.CheckoffVisibilityPolicy ?? ElectionCheckoffVisibilityPolicyProto.RestrictedOwnerAuditor,
+    ActorLinkMultiplicityPolicy:
+      draft.ActorLinkMultiplicityPolicy ??
+      ElectionActorLinkMultiplicityPolicyProto.SingleRosterEntryPerActor,
+    ContactCodeProviderReadiness:
+      draft.ContactCodeProviderReadiness ??
+      ElectionContactCodeProviderReadinessProto.ContactCodeProviderDevOnly,
   };
 }
 

@@ -20,6 +20,7 @@ import type {
 import {
   ElectionHubNextActionHintProto,
   ElectionLifecycleStateProto,
+  ElectionParticipationStatusProto,
 } from '@/lib/grpc';
 import { electionsService } from '@/lib/grpc/services/elections';
 import {
@@ -55,6 +56,12 @@ type HubReceiptVerificationFeedback = {
     label: string;
     complete: boolean;
   }>;
+};
+
+type VoterEligibilityStatusCopy = {
+  title: string;
+  detail: string;
+  tone: 'success' | 'warning' | 'neutral';
 };
 
 function parseAcceptedBallotReceipt(receiptText: string): {
@@ -105,6 +112,72 @@ function parseAcceptedBallotReceipt(receiptText: string): {
       ballotDefinitionHash: ballotDefinitionHash || undefined,
     },
   };
+}
+
+function buildVoterEligibilityStatusCopy(
+  entry: ElectionHubEntryView,
+  votingView: GetElectionVotingViewResponse | null,
+  hasAcceptedReceipt: boolean
+): VoterEligibilityStatusCopy {
+  if (entry.CanClaimIdentity) {
+    return {
+      title: 'Eligibility identity required',
+      detail: 'Link the voter identity before this actor can enter the ballot flow.',
+      tone: 'warning',
+    };
+  }
+
+  if (entry.Election.LifecycleState === ElectionLifecycleStateProto.Draft) {
+    return {
+      title: 'Linked, waiting for election open',
+      detail: 'Commitment registration waits until the ballot definition is sealed at open.',
+      tone: 'neutral',
+    };
+  }
+
+  if (hasAcceptedReceipt || votingView?.HasAcceptedAt) {
+    return {
+      title:
+        votingView?.PersonalParticipationStatus === ElectionParticipationStatusProto.ParticipationBlank
+          ? 'Blank participation counted'
+          : 'Participation counted',
+      detail: 'The voting right is consumed. This status does not reveal the selected option.',
+      tone: 'success',
+    };
+  }
+
+  if (votingView?.CommitmentRegistered) {
+    return {
+      title: 'Commitment registered',
+      detail: 'The voting right remains available until a final ballot cast is accepted.',
+      tone: 'success',
+    };
+  }
+
+  if (entry.Election.LifecycleState === ElectionLifecycleStateProto.Open) {
+    return {
+      title: 'Eligible for ballot ceremony',
+      detail: 'Open the ballot flow to prepare the challenge/spoil ceremony and final cast.',
+      tone: 'success',
+    };
+  }
+
+  return {
+    title: 'No accepted participation recorded',
+    detail: 'The election is not accepting ballots on this surface. Receipt checks remain available.',
+    tone: 'neutral',
+  };
+}
+
+function getVoterEligibilityToneClass(tone: VoterEligibilityStatusCopy['tone']): string {
+  switch (tone) {
+    case 'success':
+      return 'text-green-100';
+    case 'warning':
+      return 'text-amber-100';
+    default:
+      return 'text-hush-text-primary';
+  }
 }
 
 function loadRetainedReceiptCommitment(electionId: string): {
@@ -434,6 +507,10 @@ export function VoterWorkspaceSummary({
       ? 'text-green-100'
       : 'text-amber-100'
     : undefined;
+  const voterEligibilityStatus = useMemo(
+    () => buildVoterEligibilityStatusCopy(entry, receiptVotingView, hasAcceptedReceipt),
+    [entry, hasAcceptedReceipt, receiptVotingView],
+  );
 
   const voterSurfaceSummary = useMemo(() => {
     if (entry.CanClaimIdentity) {
@@ -697,6 +774,25 @@ export function VoterWorkspaceSummary({
           }
           accentClass={entry.HasOfficialResult || entry.HasUnofficialResult ? 'text-green-100' : undefined}
         />
+      </div>
+
+      <div
+        className="mt-4 rounded-2xl bg-hush-bg-dark/70 p-4"
+        data-testid="hush-voting-voter-eligibility-status"
+      >
+        <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+          Personal eligibility
+        </div>
+        <div
+          className={`mt-2 text-sm font-semibold ${getVoterEligibilityToneClass(
+            voterEligibilityStatus.tone,
+          )}`}
+        >
+          {voterEligibilityStatus.title}
+        </div>
+        <div className="mt-2 text-sm leading-6 text-hush-text-accent">
+          {voterEligibilityStatus.detail}
+        </div>
       </div>
 
       {receiptVotingView?.Sp04Required ? (

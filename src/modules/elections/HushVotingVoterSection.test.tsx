@@ -316,6 +316,150 @@ describe('VoterWorkspaceSummary', () => {
     expect(screen.queryByText(/Protocol package/i)).not.toBeInTheDocument();
   });
 
+  it('shows linked voters that commitment registration waits for the sealed ballot definition', async () => {
+    const entry = createHubEntry(
+      'election-draft',
+      ElectionLifecycleStateProto.Draft,
+      'Draft Election',
+      {
+        ActorRoles: {
+          IsOwnerAdmin: false,
+          IsTrustee: false,
+          IsVoter: true,
+          IsDesignatedAuditor: false,
+        },
+        CanClaimIdentity: false,
+        CanViewNamedParticipationRoster: false,
+        CanViewReportPackage: false,
+        CanViewParticipantResults: false,
+        HasUnofficialResult: false,
+        HasOfficialResult: false,
+      },
+    );
+
+    render(
+      <VoterWorkspaceSummary
+        entry={entry}
+        actorPublicAddress="actor-address"
+        resultView={null}
+      />,
+    );
+
+    fireEvent.click(await screen.findByTestId('hush-voting-voter-toggle'));
+
+    const eligibilityStatus = await screen.findByTestId('hush-voting-voter-eligibility-status');
+    expect(eligibilityStatus).toHaveTextContent('Linked, waiting for election open');
+    expect(eligibilityStatus).toHaveTextContent(
+      'Commitment registration waits until the ballot definition is sealed at open.',
+    );
+    expect(screen.queryByText(/Protocol package/i)).not.toBeInTheDocument();
+  });
+
+  it('explains that a registered commitment has not consumed the voting right', async () => {
+    const entry = createHubEntry(
+      'election-open',
+      ElectionLifecycleStateProto.Open,
+      'Annual Elections 2026',
+      {
+        ActorRoles: {
+          IsOwnerAdmin: false,
+          IsTrustee: false,
+          IsVoter: true,
+          IsDesignatedAuditor: false,
+        },
+        SuggestedAction: ElectionHubNextActionHintProto.ElectionHubActionVoterCastBallot,
+        CanViewNamedParticipationRoster: false,
+        CanViewReportPackage: false,
+        CanViewParticipantResults: true,
+        HasUnofficialResult: false,
+        HasOfficialResult: false,
+      },
+    );
+
+    electionsServiceMock.getElectionVotingView.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      HasAcceptedAt: false,
+      ReceiptId: '',
+      AcceptanceId: '',
+      ServerProof: '',
+      CommitmentRegistered: true,
+      PersonalParticipationStatus: ElectionParticipationStatusProto.ParticipationDidNotVote,
+    });
+
+    render(
+      <VoterWorkspaceSummary
+        entry={entry}
+        actorPublicAddress="actor-address"
+        resultView={null}
+      />,
+    );
+
+    const eligibilityStatus = await screen.findByTestId('hush-voting-voter-eligibility-status');
+    await waitFor(() => {
+      expect(eligibilityStatus).toHaveTextContent('Commitment registered');
+    });
+    expect(eligibilityStatus).toHaveTextContent(
+      'The voting right remains available until a final ballot cast is accepted.',
+    );
+    expect(screen.queryByText(/Protocol package/i)).not.toBeInTheDocument();
+  });
+
+  it('shows counted participation without exposing the selected option', async () => {
+    const entry = createHubEntry(
+      'election-final',
+      ElectionLifecycleStateProto.Finalized,
+      'Finalized Election',
+      {
+        ActorRoles: {
+          IsOwnerAdmin: false,
+          IsTrustee: false,
+          IsVoter: true,
+          IsDesignatedAuditor: false,
+        },
+        SuggestedAction: ElectionHubNextActionHintProto.ElectionHubActionVoterReviewResult,
+        CanViewNamedParticipationRoster: false,
+        CanViewReportPackage: false,
+        CanViewParticipantResults: true,
+        HasUnofficialResult: true,
+        HasOfficialResult: true,
+      },
+    );
+
+    electionsServiceMock.getElectionVotingView.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      HasAcceptedAt: true,
+      ReceiptId: 'rcpt-final-1',
+      AcceptanceId: 'acceptance-final-1',
+      ServerProof: 'server-proof-final-1',
+      PersonalParticipationStatus: ElectionParticipationStatusProto.ParticipationCountedAsVoted,
+    });
+
+    render(
+      <VoterWorkspaceSummary
+        entry={entry}
+        actorPublicAddress="actor-address"
+        resultView={null}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('hush-voting-voter-toggle')).toHaveAttribute(
+        'aria-expanded',
+        'false',
+      );
+    });
+    fireEvent.click(screen.getByTestId('hush-voting-voter-toggle'));
+
+    const eligibilityStatus = await screen.findByTestId('hush-voting-voter-eligibility-status');
+    expect(eligibilityStatus).toHaveTextContent('Participation counted');
+    expect(eligibilityStatus).toHaveTextContent(
+      'The voting right is consumed. This status does not reveal the selected option.',
+    );
+    expect(eligibilityStatus).not.toHaveTextContent(/\b(Alice|Bob|Yes|No)\b/i);
+  });
+
   it('shows explicit non-binding mode and circuit truth on the hub receipt verifier', async () => {
     const entry = createHubEntry(
       'election-open',
