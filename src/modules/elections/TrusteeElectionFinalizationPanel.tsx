@@ -212,10 +212,6 @@ export function TrusteeElectionFinalizationPanel({
   }, [selectedElection, session]);
   const expectedTrusteeCount = session?.TrusteeCount ?? eligibleTrusteeCount;
   const requiredTrusteeThreshold = session?.TrusteeThreshold ?? session?.RequiredShareCount ?? 0;
-  const acceptedReleaseArtifactCount =
-    session?.AcceptedReleaseArtifactCount ?? acceptedShareCount;
-  const missingReleaseArtifactCount =
-    session?.MissingReleaseArtifactCount ?? pendingEligibleTrusteeCount;
   const rejectedReleaseArtifactCount =
     session?.RejectedReleaseArtifactCount ??
     (selectedElection?.FinalizationShares ?? []).filter(
@@ -224,6 +220,11 @@ export function TrusteeElectionFinalizationPanel({
         share.Status ===
           ElectionFinalizationShareStatusProto.FinalizationShareRejected
     ).length;
+  const acceptedReleaseArtifactCount =
+    session?.AcceptedReleaseArtifactCount ?? releaseEvidence?.AcceptedShareCount ?? acceptedShareCount;
+  const missingReleaseArtifactCount =
+    session?.MissingReleaseArtifactCount ??
+    Math.max(0, expectedTrusteeCount - acceptedReleaseArtifactCount - rejectedReleaseArtifactCount);
   const belowTrusteeThreshold =
     Boolean(session) &&
     requiredTrusteeThreshold > 0 &&

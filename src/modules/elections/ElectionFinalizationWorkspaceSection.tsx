@@ -106,10 +106,6 @@ export function ElectionFinalizationWorkspaceSection({
   ).length;
   const expectedTrusteeCount = session?.TrusteeCount ?? eligibleTrusteeCount;
   const requiredTrusteeThreshold = session?.TrusteeThreshold ?? session?.RequiredShareCount ?? 0;
-  const acceptedReleaseArtifactCount =
-    session?.AcceptedReleaseArtifactCount ?? acceptedShareCount;
-  const missingReleaseArtifactCount =
-    session?.MissingReleaseArtifactCount ?? pendingEligibleTrusteeCount;
   const rejectedReleaseArtifactCount =
     session?.RejectedReleaseArtifactCount ??
     shares.filter(
@@ -117,6 +113,11 @@ export function ElectionFinalizationWorkspaceSection({
         share.Status ===
         ElectionFinalizationShareStatusProto.FinalizationShareRejected
     ).length;
+  const acceptedReleaseArtifactCount =
+    session?.AcceptedReleaseArtifactCount ?? releaseEvidence?.AcceptedShareCount ?? acceptedShareCount;
+  const missingReleaseArtifactCount =
+    session?.MissingReleaseArtifactCount ??
+    Math.max(0, expectedTrusteeCount - acceptedReleaseArtifactCount - rejectedReleaseArtifactCount);
   const thresholdSatisfied =
     !usesTrustees ||
     requiredTrusteeThreshold <= 0 ||

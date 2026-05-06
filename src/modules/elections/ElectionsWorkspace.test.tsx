@@ -4993,10 +4993,10 @@ describe("ElectionsWorkspace", () => {
     ).toHaveTextContent("aggregate-tally-1");
     expect(
       screen.getByTestId("elections-finalization-session"),
-    ).toHaveTextContent("1 accepted / 2 expected");
+    ).toHaveTextContent("2 accepted / 2 expected");
     expect(
       screen.getByTestId("elections-finalization-session"),
-    ).toHaveTextContent("Fail closed: trustee threshold not met");
+    ).toHaveTextContent("Trustee threshold satisfied");
     expect(
       screen.getByTestId("elections-finalization-session"),
     ).toHaveTextContent("Alice Trustee");
