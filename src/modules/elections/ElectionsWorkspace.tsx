@@ -32,6 +32,7 @@ import {
   ElectionGovernanceModeProto,
   ElectionGovernedProposalExecutionStatusProto,
   type Identity,
+  type ElectionSp06EvidenceStatusView,
   ProtocolPackageBindingStatusProto,
   type ResolveElectionTrusteeInvitationRequest,
   ElectionTrusteeInvitationStatusProto,
@@ -117,6 +118,73 @@ type FixedPolicyItem = {
   value: string;
   note: string;
 };
+
+function getSp06ControlDomainLabel(
+  evidence: ElectionSp06EvidenceStatusView | null,
+  fallbackProfileId?: string | null,
+): string {
+  const profileId = evidence?.ControlDomainProfileId || fallbackProfileId || "";
+  const profileVersion = evidence?.ControlDomainProfileVersion || "";
+
+  if (!profileId) {
+    return "Not configured";
+  }
+
+  return profileVersion ? `${profileId} ${profileVersion}` : profileId;
+}
+
+function getSp06ThresholdLabel(
+  evidence: ElectionSp06EvidenceStatusView | null,
+  fallbackThresholdProfileId?: string | null,
+): string {
+  if (evidence?.TrusteeThreshold && evidence.TrusteeCount) {
+    return `${evidence.TrusteeThreshold} of ${evidence.TrusteeCount}`;
+  }
+
+  return fallbackThresholdProfileId || "Not configured";
+}
+
+function getSp06OpenBlockerMessages(
+  evidence: ElectionSp06EvidenceStatusView | null,
+  evidenceExpected: boolean,
+): string[] {
+  if (!evidenceExpected) {
+    return [];
+  }
+
+  if (!evidence) {
+    return [
+      "Refresh server open readiness to load trustee control-domain evidence before opening.",
+    ];
+  }
+
+  const explicitBlockers = evidence.Blockers.filter((blocker) => blocker.BlocksOpen).map(
+    (blocker) => blocker.Message || blocker.Code,
+  );
+
+  if (explicitBlockers.length > 0) {
+    return explicitBlockers;
+  }
+
+  const derivedBlockers: string[] = [];
+  if (evidence.MissingEvidenceCount > 0) {
+    derivedBlockers.push(
+      `${evidence.MissingEvidenceCount} trustee control-domain evidence item(s) are missing.`,
+    );
+  }
+  if (evidence.StaleEvidenceCount > 0) {
+    derivedBlockers.push(
+      `${evidence.StaleEvidenceCount} trustee control-domain evidence item(s) are stale.`,
+    );
+  }
+  if (evidence.IncompatibleEvidenceCount > 0) {
+    derivedBlockers.push(
+      `${evidence.IncompatibleEvidenceCount} trustee control-domain evidence item(s) are incompatible with the selected profile.`,
+    );
+  }
+
+  return derivedBlockers;
+}
 
 function formatTrusteeReferenceList(
   trustees:
@@ -1006,6 +1074,31 @@ export function ElectionsWorkspace({
       protocolPackageBinding,
     ]
   );
+  const sp06Evidence = openReadiness?.Sp06Evidence ?? null;
+  const sp06EvidenceExpected = Boolean(
+    sp06Evidence?.EvidenceExpected ||
+      draft.ControlDomainProfileId ||
+      election?.ControlDomainProfileId,
+  );
+  const sp06ControlDomainLabel = getSp06ControlDomainLabel(
+    sp06Evidence,
+    draft.ControlDomainProfileId ?? election?.ControlDomainProfileId,
+  );
+  const sp06ThresholdLabel = getSp06ThresholdLabel(
+    sp06Evidence,
+    draft.ThresholdProfileId ?? election?.ThresholdProfileId,
+  );
+  const sp06OpenBlockerMessages = useMemo(
+    () => getSp06OpenBlockerMessages(sp06Evidence, sp06EvidenceExpected),
+    [sp06Evidence, sp06EvidenceExpected],
+  );
+  const isSp06EvidenceReady =
+    !sp06EvidenceExpected ||
+    Boolean(sp06Evidence) &&
+      sp06OpenBlockerMessages.length === 0 &&
+      sp06Evidence!.MissingEvidenceCount === 0 &&
+      sp06Evidence!.StaleEvidenceCount === 0 &&
+      sp06Evidence!.IncompatibleEvidenceCount === 0;
   const canCloseSelectedElection = canCloseElection(election);
   const canFinalizeSelectedElection = canFinalizeElection(election);
   const governedOpenPrerequisiteIssues = useMemo(() => {
@@ -1036,6 +1129,9 @@ export function ElectionsWorkspace({
     }
     if (protocolPackagePresentation.openBlocked) {
       issues.push(protocolPackagePresentation.description);
+    }
+    if (sp06OpenBlockerMessages.length > 0) {
+      issues.push(...sp06OpenBlockerMessages);
     }
     if (!hasAcceptedTrusteesForOpen) {
       issues.push(
@@ -1068,6 +1164,7 @@ export function ElectionsWorkspace({
     requiredTrusteeCountForOpen,
     saveValidationErrors.length,
     selectedTrusteeRosterLabel,
+    sp06OpenBlockerMessages,
     usesTrusteeThreshold,
   ]);
   const isGovernedOpenWorkflowReady =
@@ -1114,6 +1211,18 @@ export function ElectionsWorkspace({
       },
       ...(usesTrusteeThreshold
         ? [
+            ...(sp06EvidenceExpected
+              ? [
+                  {
+                    label: "Trustee control-domain evidence",
+                    isReady: isSp06EvidenceReady,
+                    detail: isSp06EvidenceReady
+                      ? `Profile ${sp06ControlDomainLabel} is compatible with the ${sp06ThresholdLabel} trustee threshold.`
+                      : sp06OpenBlockerMessages[0] ||
+                        "Trustee control-domain evidence is not ready for open.",
+                  },
+                ]
+              : []),
             {
               label: "Accepted trustee roster",
               isReady: hasAcceptedTrusteesForOpen,
@@ -1166,6 +1275,11 @@ export function ElectionsWorkspace({
       requiredTrusteeCountForOpen,
       saveValidationErrors.length,
       selectedTrusteeRosterLabel,
+      sp06ControlDomainLabel,
+      sp06EvidenceExpected,
+      sp06OpenBlockerMessages,
+      sp06ThresholdLabel,
+      isSp06EvidenceReady,
       usesTrusteeThreshold,
     ],
   );
@@ -2559,6 +2673,89 @@ export function ElectionsWorkspace({
                     refreshDisabled={isSubmitting || !canEditDraft}
                     testId="elections-protocol-package-readiness"
                   />
+                </div>
+              ) : null}
+
+              {sp06EvidenceExpected ? (
+                <div
+                  className="mb-5 rounded-xl bg-hush-bg-dark/80 p-4 shadow-sm shadow-black/10"
+                  data-testid="elections-sp06-control-domain-readiness"
+                >
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <div className="text-sm font-semibold">Trustee control profile</div>
+                      <p className="mt-2 text-sm text-hush-text-accent">
+                        SP-06 keeps the selected trustee control-domain evidence close to the open
+                        decision. Missing, stale, or incompatible evidence blocks open until the
+                        readiness response is clean.
+                      </p>
+                    </div>
+                    <div
+                      className={`inline-flex items-center gap-2 self-start rounded-full px-3 py-1 text-xs font-semibold ${
+                        isSp06EvidenceReady
+                          ? "bg-green-500/12 text-green-100"
+                          : "bg-amber-500/12 text-amber-100"
+                      }`}
+                    >
+                      {isSp06EvidenceReady ? (
+                        <CheckCircle2 className="h-4 w-4" />
+                      ) : (
+                        <AlertCircle className="h-4 w-4" />
+                      )}
+                      <span>{isSp06EvidenceReady ? "Ready" : "Open blocked"}</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 md:grid-cols-4">
+                    <div className="rounded-2xl bg-black/20 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                        Profile
+                      </div>
+                      <div className="mt-2 break-words text-sm font-medium text-hush-text-primary">
+                        {sp06ControlDomainLabel}
+                      </div>
+                    </div>
+                    <div className="rounded-2xl bg-black/20 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                        Threshold
+                      </div>
+                      <div className="mt-2 text-sm font-medium text-hush-text-primary">
+                        {sp06ThresholdLabel}
+                      </div>
+                    </div>
+                    <div className="rounded-2xl bg-black/20 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                        Before open
+                      </div>
+                      <div className="mt-2 text-sm font-medium text-hush-text-primary">
+                        {sp06Evidence
+                          ? `${sp06Evidence.CompleteEvidenceCount} complete / ${sp06Evidence.TrusteeCount} trustee(s)`
+                          : "Not loaded"}
+                      </div>
+                    </div>
+                    <div className="rounded-2xl bg-black/20 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                        Latest CTRL
+                      </div>
+                      <div className="mt-2 break-all font-mono text-xs text-hush-text-primary">
+                        {sp06Evidence?.LatestCtrlResultCode || "CTRL not available"}
+                      </div>
+                    </div>
+                  </div>
+
+                  {sp06OpenBlockerMessages.length > 0 ? (
+                    <ul className="mt-4 space-y-2 text-sm text-amber-100">
+                      {sp06OpenBlockerMessages.map((message) => (
+                        <li key={message} className="rounded-2xl bg-amber-500/10 px-3 py-2">
+                          {message}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="mt-4 rounded-2xl bg-green-500/10 px-3 py-2 text-sm text-green-100">
+                      Trustee control-domain evidence is compatible with the selected open profile.
+                    </div>
+                  )}
                 </div>
               ) : null}
 
