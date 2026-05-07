@@ -1038,6 +1038,11 @@ export enum ElectionClosedProgressStatusProto {
   ClosedProgressNone = 0,
   ClosedProgressWaitingForTrusteeShares = 1,
   ClosedProgressTallyCalculationInProgress = 2,
+  ClosedProgressPublicationProofPending = 3,
+  ClosedProgressPublicationProofGenerating = 4,
+  ClosedProgressPublicationProofSelfVerifying = 5,
+  ClosedProgressPublicationProofFailed = 6,
+  ClosedProgressPublicationProofVerified = 7,
 }
 
 export enum ElectionBoundaryArtifactTypeProto {
@@ -1595,6 +1600,7 @@ export interface ElectionVerificationPackageStatusView {
   Sp04Evidence?: ElectionSp04EvidenceStatusView;
   Sp05Evidence?: ElectionSp05EvidenceStatusView;
   Sp06Evidence?: ElectionSp06EvidenceStatusView;
+  Sp07Evidence?: ElectionSp07EvidenceStatusView;
 }
 
 export interface ElectionSp04EvidenceStatusView {
@@ -1650,6 +1656,40 @@ export interface ElectionSp06ReadinessBlockerView {
   Code: string;
   Message: string;
   TrusteeRef: string;
+  BlocksOpen: boolean;
+  BlocksFinalization: boolean;
+}
+
+export interface ElectionSp07EvidenceStatusView {
+  EvidenceExpected: boolean;
+  PublicEvidenceAvailable: boolean;
+  RestrictedEvidenceAvailable: boolean;
+  PublicationProofMode: string;
+  ProofConstruction: string;
+  StatementId: string;
+  ExternalReviewStatus: string;
+  AcceptedBallotCount: number;
+  PublishedBallotCount: number;
+  CiphertextSlotCount: number;
+  ChunkCount: number;
+  AcceptedBallotSetHash: string;
+  PublishedBallotStreamHash: string;
+  TranscriptHash: string;
+  ProofHash: string;
+  WitnessDeletionReceiptHash: string;
+  LatestPubResultCode: string;
+  ProgressStatus: ElectionClosedProgressStatusProto;
+  CanRetry: boolean;
+  Blockers: ElectionSp07ReadinessBlockerView[];
+  Message: string;
+  CompletedChunkCount: number;
+  FailedChunkCount: number;
+  SlowestChunkMilliseconds: number;
+}
+
+export interface ElectionSp07ReadinessBlockerView {
+  Code: string;
+  Message: string;
   BlocksOpen: boolean;
   BlocksFinalization: boolean;
 }
@@ -2442,6 +2482,7 @@ export interface GetElectionOpenReadinessResponse {
   ProtocolPackageBindingStatus: ProtocolPackageBindingStatusProto;
   ProtocolPackageBindingMessage: string;
   Sp06Evidence?: ElectionSp06EvidenceStatusView;
+  Sp07Evidence?: ElectionSp07EvidenceStatusView;
 }
 
 export interface GetElectionResponse {

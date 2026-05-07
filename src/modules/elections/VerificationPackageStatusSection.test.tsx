@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  ElectionClosedProgressStatusProto,
   ElectionVerificationPackageBlockerProto,
   ElectionVerificationPackageStatusProto,
   ElectionVerificationPackageViewProto,
@@ -109,6 +110,52 @@ describe('VerificationPackageStatusSection', () => {
     );
 
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it('renders SP-07 publication-proof evidence and verifier result code', () => {
+    render(
+      <VerificationPackageStatusSection
+        electionId="election-1"
+        actorPublicAddress="auditor-address"
+        status={createVerificationPackageStatus({
+          Sp07Evidence: {
+            EvidenceExpected: true,
+            PublicEvidenceAvailable: true,
+            RestrictedEvidenceAvailable: true,
+            PublicationProofMode: 'zk_rerandomization_shuffle_v1',
+            ProofConstruction: 'bayer_groth_reencryption_shuffle_argument_v1',
+            StatementId: 'sp07-bayer-groth-hush-vector-shuffle-v1',
+            ExternalReviewStatus: 'external_crypto_review_pending',
+            AcceptedBallotCount: 18,
+            PublishedBallotCount: 18,
+            CiphertextSlotCount: 4,
+            ChunkCount: 1,
+            AcceptedBallotSetHash: '1'.repeat(64),
+            PublishedBallotStreamHash: '2'.repeat(64),
+            TranscriptHash: '3'.repeat(64),
+            ProofHash: '4'.repeat(64),
+            WitnessDeletionReceiptHash: '5'.repeat(64),
+            LatestPubResultCode: 'PUB-001',
+            ProgressStatus:
+              ElectionClosedProgressStatusProto.ClosedProgressPublicationProofVerified,
+            CanRetry: false,
+            Blockers: [],
+            Message: 'SP-07 publication-proof evidence is available for verification package export.',
+            CompletedChunkCount: 1,
+            FailedChunkCount: 0,
+            SlowestChunkMilliseconds: 120,
+          },
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('verification-package-sp07-evidence')).toHaveTextContent(
+      'SP-07 publication proof'
+    );
+    expect(screen.getByTestId('verification-package-sp07-evidence')).toHaveTextContent('PUB-001');
+    expect(screen.getByTestId('verification-package-sp07-evidence')).toHaveTextContent(
+      'external_crypto_review_pending'
+    );
   });
 
   it('downloads the public package bundle after an export succeeds', async () => {

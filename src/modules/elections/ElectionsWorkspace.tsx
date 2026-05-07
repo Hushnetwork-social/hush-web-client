@@ -86,6 +86,7 @@ import {
   getReportingPolicyLabel,
   getRequiredOpenWarningCodes,
   getReviewWindowPolicyLabel,
+  getSp07OpenReadinessPresentation,
   getModeProfileFamilyLabel,
   getModeProfileFreezeCopy,
   getSelectedProfileFamilyLabel,
@@ -1098,6 +1099,17 @@ export function ElectionsWorkspace({
       sp06Evidence!.MissingEvidenceCount === 0 &&
       sp06Evidence!.StaleEvidenceCount === 0 &&
       sp06Evidence!.IncompatibleEvidenceCount === 0;
+  const sp07ReadinessPresentation = useMemo(
+    () => getSp07OpenReadinessPresentation(openReadiness, "owner-admin"),
+    [openReadiness],
+  );
+  const isSp07EvidenceExpected = Boolean(
+    sp07ReadinessPresentation &&
+      sp07ReadinessPresentation.state !== "not_required",
+  );
+  const isSp07ReadinessReady =
+    !isSp07EvidenceExpected ||
+    sp07ReadinessPresentation?.state === "configured_ready";
   const canCloseSelectedElection = canCloseElection(election);
   const canFinalizeSelectedElection = canFinalizeElection(election);
   const governedOpenPrerequisiteIssues = useMemo(() => {
@@ -1132,6 +1144,9 @@ export function ElectionsWorkspace({
     if (sp06OpenBlockerMessages.length > 0) {
       issues.push(...sp06OpenBlockerMessages);
     }
+    if (sp07ReadinessPresentation?.state === "configured_blocked") {
+      issues.push(sp07ReadinessPresentation.description);
+    }
     if (!hasAcceptedTrusteesForOpen) {
       issues.push(
         selectedTrusteeRosterLabel
@@ -1164,6 +1179,7 @@ export function ElectionsWorkspace({
     saveValidationErrors.length,
     selectedTrusteeRosterLabel,
     sp06OpenBlockerMessages,
+    sp07ReadinessPresentation,
     usesTrusteeThreshold,
   ]);
   const isGovernedOpenWorkflowReady =
@@ -1210,6 +1226,17 @@ export function ElectionsWorkspace({
       },
       ...(usesTrusteeThreshold
         ? [
+            ...(isSp07EvidenceExpected
+              ? [
+                  {
+                    label: "Publication proof profile",
+                    isReady: isSp07ReadinessReady,
+                    detail:
+                      sp07ReadinessPresentation?.description ||
+                      "SP-07 publication-proof readiness is not loaded yet.",
+                  },
+                ]
+              : []),
             ...(sp06EvidenceExpected
               ? [
                   {
@@ -1274,6 +1301,9 @@ export function ElectionsWorkspace({
       requiredTrusteeCountForOpen,
       saveValidationErrors.length,
       selectedTrusteeRosterLabel,
+      isSp07EvidenceExpected,
+      isSp07ReadinessReady,
+      sp07ReadinessPresentation,
       sp06ControlDomainLabel,
       sp06EvidenceExpected,
       sp06OpenBlockerMessages,
@@ -2753,6 +2783,93 @@ export function ElectionsWorkspace({
                   ) : (
                     <div className="mt-4 rounded-2xl bg-green-500/10 px-3 py-2 text-sm text-green-100">
                       Trustee control-domain evidence is compatible with the selected open profile.
+                    </div>
+                  )}
+                </div>
+              ) : null}
+
+              {isSp07EvidenceExpected && sp07ReadinessPresentation ? (
+                <div
+                  className="mb-5 rounded-xl bg-hush-bg-dark/80 p-4 shadow-sm shadow-black/10"
+                  data-testid="elections-sp07-publication-proof-readiness"
+                >
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <div className="text-sm font-semibold">Publication proof profile</div>
+                      <p className="mt-2 text-sm text-hush-text-accent">
+                        SP-07 keeps publication-proof envelope checks close to the open decision:
+                        intended accepted ballots, encrypted slots, and chunk planning must fit the
+                        approved v1 profile.
+                      </p>
+                    </div>
+                    <div
+                      className={`inline-flex items-center gap-2 self-start rounded-full px-3 py-1 text-xs font-semibold ${
+                        sp07ReadinessPresentation.tone === "success"
+                          ? "bg-green-500/12 text-green-100"
+                          : sp07ReadinessPresentation.tone === "error"
+                            ? "bg-red-500/12 text-red-100"
+                            : "bg-amber-500/12 text-amber-100"
+                      }`}
+                    >
+                      {sp07ReadinessPresentation.tone === "success" ? (
+                        <CheckCircle2 className="h-4 w-4" />
+                      ) : (
+                        <AlertCircle className="h-4 w-4" />
+                      )}
+                      <span>{sp07ReadinessPresentation.label}</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 md:grid-cols-4">
+                    <div className="rounded-2xl bg-black/20 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                        Statement
+                      </div>
+                      <div className="mt-2 break-words text-sm font-medium text-hush-text-primary">
+                        {openReadiness?.Sp07Evidence?.StatementId || "Not loaded"}
+                      </div>
+                    </div>
+                    <div className="rounded-2xl bg-black/20 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                        Ballots
+                      </div>
+                      <div className="mt-2 text-sm font-medium text-hush-text-primary">
+                        {openReadiness?.Sp07Evidence?.AcceptedBallotCount ?? 0} intended
+                      </div>
+                    </div>
+                    <div className="rounded-2xl bg-black/20 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                        Slots / chunks
+                      </div>
+                      <div className="mt-2 text-sm font-medium text-hush-text-primary">
+                        {openReadiness?.Sp07Evidence?.CiphertextSlotCount ?? 0} slots /{" "}
+                        {openReadiness?.Sp07Evidence?.ChunkCount ?? 0} chunk(s)
+                      </div>
+                    </div>
+                    <div className="rounded-2xl bg-black/20 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                        Crypto review
+                      </div>
+                      <div className="mt-2 break-words text-sm font-medium text-hush-text-primary">
+                        {openReadiness?.Sp07Evidence?.ExternalReviewStatus ||
+                          "external_crypto_review_pending"}
+                      </div>
+                    </div>
+                  </div>
+
+                  {openReadiness?.Sp07Evidence?.Blockers.length ? (
+                    <ul className="mt-4 space-y-2 text-sm text-red-100">
+                      {openReadiness.Sp07Evidence.Blockers.map((blocker) => (
+                        <li key={`${blocker.Code}-${blocker.Message}`} className="rounded-2xl bg-red-500/10 px-3 py-2">
+                          <span className="font-mono text-xs">{blocker.Code}</span>
+                          <span className="mx-2">-</span>
+                          <span>{blocker.Message}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="mt-4 rounded-2xl bg-green-500/10 px-3 py-2 text-sm text-green-100">
+                      Publication-proof profile and v1 envelope checks are ready for open.
                     </div>
                   )}
                 </div>

@@ -35,7 +35,10 @@ import {
   type ElectionProtocolPackageBindingView,
   type ElectionRecordView,
   type ElectionSummary,
+  type ElectionSp07EvidenceStatusView,
   ElectionTrusteeCeremonyStateProto,
+  type ElectionVerificationPackageStatusView,
+  type GetElectionOpenReadinessResponse,
   ElectionWarningCodeProto,
   EligibilityMutationPolicyProto,
   EligibilitySourceTypeProto,
@@ -290,6 +293,16 @@ const CLOSED_PROGRESS_STATUS_LABELS: Record<ElectionClosedProgressStatusProto, s
     'Waiting for trustee tally shares',
   [ElectionClosedProgressStatusProto.ClosedProgressTallyCalculationInProgress]:
     'Unofficial tally calculation in progress',
+  [ElectionClosedProgressStatusProto.ClosedProgressPublicationProofPending]:
+    'Publication proof pending',
+  [ElectionClosedProgressStatusProto.ClosedProgressPublicationProofGenerating]:
+    'Publication proof generating',
+  [ElectionClosedProgressStatusProto.ClosedProgressPublicationProofSelfVerifying]:
+    'Publication proof self-verifying',
+  [ElectionClosedProgressStatusProto.ClosedProgressPublicationProofFailed]:
+    'Publication proof failed',
+  [ElectionClosedProgressStatusProto.ClosedProgressPublicationProofVerified]:
+    'Publication proof verified',
 };
 
 const GOVERNED_ACTION_LABELS: Record<ElectionGovernedActionTypeProto, string> = {
@@ -920,6 +933,199 @@ export function getClosedProgressStatusLabel(
   status: ElectionClosedProgressStatusProto
 ): string {
   return CLOSED_PROGRESS_STATUS_LABELS[status] ?? 'Unknown';
+}
+
+export type Sp07PublicationProofUiState =
+  | 'not_required'
+  | 'configured_ready'
+  | 'configured_blocked'
+  | 'publication_proof_pending'
+  | 'publication_proof_generating'
+  | 'publication_proof_self_verifying'
+  | 'publication_proof_failed'
+  | 'publication_proof_verified'
+  | 'tally_ready';
+
+export type Sp07PublicationProofTone = 'neutral' | 'success' | 'warning' | 'error';
+
+export type Sp07PublicationProofAudience =
+  | 'owner-admin'
+  | 'auditor'
+  | 'trustee'
+  | 'voter'
+  | 'generic';
+
+export interface Sp07PublicationProofPresentation {
+  state: Sp07PublicationProofUiState;
+  label: string;
+  tone: Sp07PublicationProofTone;
+  description: string;
+  canRetry: boolean;
+  showTechnicalRefs: boolean;
+  publicEvidenceAvailable: boolean;
+  restrictedEvidenceAvailable: boolean;
+  blockingCodes: string[];
+}
+
+export function getSp07OpenReadinessPresentation(
+  readiness?: Pick<GetElectionOpenReadinessResponse, 'Sp07Evidence'> | null,
+  audience: Sp07PublicationProofAudience = 'owner-admin'
+): Sp07PublicationProofPresentation | null {
+  return getSp07PublicationProofPresentation(readiness?.Sp07Evidence, audience, 'readiness');
+}
+
+export function getSp07VerificationPackagePresentation(
+  status?: Pick<ElectionVerificationPackageStatusView, 'Sp07Evidence'> | null,
+  audience: Sp07PublicationProofAudience = 'owner-admin'
+): Sp07PublicationProofPresentation | null {
+  return getSp07PublicationProofPresentation(status?.Sp07Evidence, audience, 'verification-package');
+}
+
+export function getSp07PublicationProofPresentation(
+  evidence?: ElectionSp07EvidenceStatusView | null,
+  audience: Sp07PublicationProofAudience = 'owner-admin',
+  surface: 'readiness' | 'close-progress' | 'verification-package' = 'close-progress'
+): Sp07PublicationProofPresentation | null {
+  if (audience === 'voter') {
+    return null;
+  }
+
+  if (!evidence || !evidence.EvidenceExpected) {
+    return {
+      state: 'not_required',
+      label: 'Publication proof not required',
+      tone: 'neutral',
+      description:
+        'This election profile does not require SP-07 publication-proof evidence.',
+      canRetry: false,
+      showTechnicalRefs: false,
+      publicEvidenceAvailable: false,
+      restrictedEvidenceAvailable: false,
+      blockingCodes: [],
+    };
+  }
+
+  const blockingCodes = evidence.Blockers
+    .filter((blocker) => blocker.BlocksOpen || blocker.BlocksFinalization)
+    .map((blocker) => blocker.Code);
+  const hasBlockingState = blockingCodes.length > 0;
+
+  if (surface === 'readiness') {
+    if (hasBlockingState) {
+      return {
+        state: 'configured_blocked',
+        label: 'Publication proof blocked',
+        tone: 'error',
+        description:
+          evidence.Message ||
+          'SP-07 publication-proof requirements must be resolved before the election can open.',
+        canRetry: false,
+        showTechnicalRefs: true,
+        publicEvidenceAvailable: false,
+        restrictedEvidenceAvailable: false,
+        blockingCodes,
+      };
+    }
+
+    return {
+      state: 'configured_ready',
+      label: 'Publication proof configured',
+      tone: 'success',
+      description:
+        evidence.Message ||
+        'SP-07 publication-proof profile and v1 envelope checks are ready for election open.',
+      canRetry: false,
+      showTechnicalRefs: true,
+      publicEvidenceAvailable: false,
+      restrictedEvidenceAvailable: false,
+      blockingCodes,
+    };
+  }
+
+  const base = {
+    canRetry: evidence.CanRetry,
+    showTechnicalRefs: true,
+    publicEvidenceAvailable: evidence.PublicEvidenceAvailable,
+    restrictedEvidenceAvailable: evidence.RestrictedEvidenceAvailable,
+    blockingCodes,
+  };
+
+  switch (evidence.ProgressStatus) {
+    case ElectionClosedProgressStatusProto.ClosedProgressPublicationProofPending:
+      return {
+        ...base,
+        state: 'publication_proof_pending',
+        label: 'Publication proof pending',
+        tone: 'warning',
+        description:
+          evidence.Message ||
+          'The election is closed and waiting to start SP-07 publication-proof generation.',
+      };
+    case ElectionClosedProgressStatusProto.ClosedProgressPublicationProofGenerating:
+      return {
+        ...base,
+        state: 'publication_proof_generating',
+        label: 'Publication proof generating',
+        tone: 'neutral',
+        description:
+          evidence.Message ||
+          'SP-07 publication-proof generation is running for the published encrypted ballot stream.',
+      };
+    case ElectionClosedProgressStatusProto.ClosedProgressPublicationProofSelfVerifying:
+      return {
+        ...base,
+        state: 'publication_proof_self_verifying',
+        label: 'Publication proof self-verifying',
+        tone: 'neutral',
+        description:
+          evidence.Message ||
+          'The generated SP-07 proof is being verified before publication.',
+      };
+    case ElectionClosedProgressStatusProto.ClosedProgressPublicationProofFailed:
+      return {
+        ...base,
+        state: 'publication_proof_failed',
+        label: 'Publication proof failed',
+        tone: 'error',
+        description:
+          evidence.Message ||
+          'SP-07 publication-proof generation or verification failed. Owner/admin retry is available only when sealed witness custody is still available.',
+      };
+    case ElectionClosedProgressStatusProto.ClosedProgressPublicationProofVerified:
+      return {
+        ...base,
+        state: evidence.PublicEvidenceAvailable ? 'tally_ready' : 'publication_proof_verified',
+        label: evidence.PublicEvidenceAvailable
+          ? 'Publication proof verified'
+          : 'Publication proof verified, package pending',
+        tone: 'success',
+        description:
+          evidence.Message ||
+          'SP-07 publication-proof evidence verified and can be included in auditor-visible packages.',
+      };
+    default:
+      if (hasBlockingState) {
+        return {
+          ...base,
+          state: 'configured_blocked',
+          label: 'Publication proof blocked',
+          tone: 'error',
+          description:
+            evidence.Message ||
+            'SP-07 publication-proof evidence has blocking verifier findings.',
+        };
+      }
+
+      return {
+        ...base,
+        state: 'configured_ready',
+        label: 'Publication proof configured',
+        tone: 'neutral',
+        description:
+          evidence.Message ||
+          'SP-07 publication-proof evidence is configured and waiting for the close lifecycle.',
+      };
+  }
 }
 
 export function getWarningTitle(code: ElectionWarningCodeProto): string {
@@ -2236,6 +2442,62 @@ export function getClosedProgressNarrative(
               'The required trustee tally shares were accepted, and the election is counting votes for the unofficial result. The official result will appear only after finalization.',
           };
       }
+    case ElectionClosedProgressStatusProto.ClosedProgressPublicationProofPending:
+    case ElectionClosedProgressStatusProto.ClosedProgressPublicationProofGenerating:
+    case ElectionClosedProgressStatusProto.ClosedProgressPublicationProofSelfVerifying:
+      switch (audience) {
+        case 'voter':
+          return {
+            title: 'Result evidence is being prepared',
+            description:
+              'Voting is closed. The election is preparing the evidence required before the unofficial result can be published.',
+          };
+        case 'auditor':
+          return {
+            title: 'Publication proof in progress',
+            description:
+              'The election is preparing SP-07 publication-proof evidence for the published encrypted ballot stream before result artifacts become reviewable.',
+          };
+        case 'owner-admin':
+        case 'trustee':
+        case 'generic':
+        default:
+          return {
+            title: getClosedProgressStatusLabel(entry.ClosedProgressStatus),
+            description:
+              'The election is preparing and checking SP-07 publication-proof evidence before the unofficial result is marked ready.',
+          };
+      }
+    case ElectionClosedProgressStatusProto.ClosedProgressPublicationProofFailed:
+      switch (audience) {
+        case 'voter':
+          return {
+            title: 'Result preparation needs attention',
+            description:
+              'Voting is closed, but result preparation needs operational attention before the unofficial result can be published.',
+          };
+        case 'auditor':
+          return {
+            title: 'Publication proof failed',
+            description:
+              'SP-07 publication-proof generation or verification failed. Owner/admin operators need to resolve the close evidence before result artifacts are reviewable.',
+          };
+        case 'owner-admin':
+        case 'trustee':
+        case 'generic':
+        default:
+          return {
+            title: 'Publication proof failed',
+            description:
+              'SP-07 publication-proof generation or verification failed. Retry is available only when the server still has sealed witness custody for the failed attempt.',
+          };
+      }
+    case ElectionClosedProgressStatusProto.ClosedProgressPublicationProofVerified:
+      return {
+        title: 'Publication proof verified',
+        description:
+          'SP-07 publication-proof evidence is verified. The election is completing the remaining close-counting publication steps.',
+      };
     default:
       return null;
   }

@@ -28,6 +28,7 @@ import {
   ElectionCeremonyVersionStatusProto,
   ElectionBindingStatusProto,
   ElectionClassProto,
+  ElectionClosedProgressStatusProto,
   ElectionDisclosureModeProto,
   ElectionFinalizationReleaseModeProto,
   ElectionFinalizationSessionPurposeProto,
@@ -2552,6 +2553,141 @@ describe("ElectionsWorkspace", () => {
     expect(
       await screen.findByTestId("elections-governed-open-readiness"),
     ).toHaveTextContent("Trustee trustee-e has no custody/domain evidence.");
+  });
+
+  it("shows SP-07 publication-proof envelope blockers in owner readiness", async () => {
+    const protocolBinding = createProtocolPackageBinding();
+    const trusteeDraft = createElectionRecord(ElectionLifecycleStateProto.Draft, {
+      GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+      RequiredApprovalCount: 3,
+      SelectedProfileId: "dkg-prod-3of5",
+      ControlDomainProfileId: "high_assurance_independent_trustees_v1",
+      ControlDomainProfileVersion: "v1",
+      ThresholdProfileId: "dkg-prod-3of5",
+    });
+
+    electionsServiceMock.getElectionsByOwner.mockResolvedValueOnce({
+      Elections: [
+        createElectionSummary(ElectionLifecycleStateProto.Draft, {
+          GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+        }),
+      ],
+    });
+    electionsServiceMock.getElection.mockResolvedValueOnce(
+      createElectionResponse({
+        Election: trusteeDraft,
+        LatestDraftSnapshot: createDraftSnapshot({
+          Policy: {
+            ...createDraftSnapshot().Policy,
+            GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+            SelectedProfileId: "dkg-prod-3of5",
+            RequiredApprovalCount: 3,
+            ReviewWindowPolicy:
+              ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+            ControlDomainProfileId: "high_assurance_independent_trustees_v1",
+            ControlDomainProfileVersion: "v1",
+            ThresholdProfileId: "dkg-prod-3of5",
+          },
+        }),
+        TrusteeInvitations: createAcceptedTrusteeInvitations(),
+        CeremonyVersions: [
+          {
+            Id: "ceremony-ready",
+            ElectionId: "election-1",
+            VersionNumber: 1,
+            ProfileId: "dkg-prod-3of5",
+            TrusteeCount: 5,
+            RequiredApprovalCount: 3,
+            Status: ElectionCeremonyVersionStatusProto.CeremonyVersionReady,
+            StartedAt: timestamp,
+            StartedByPublicAddress: "owner-public-key",
+            TallyPublicKeyFingerprint: "fingerprint-1",
+          },
+        ],
+        ProtocolPackageBinding: protocolBinding,
+      }),
+    );
+    electionsServiceMock.getElectionOpenReadiness.mockResolvedValue(
+      createReadinessResponse({
+        IsReadyToOpen: false,
+        ProtocolPackageBinding: protocolBinding,
+        Sp06Evidence: {
+          EvidenceExpected: true,
+          PublicEvidenceAvailable: true,
+          RestrictedEvidenceAvailable: true,
+          ControlDomainProfileId: "high_assurance_independent_trustees_v1",
+          ControlDomainProfileVersion: "v1",
+          ThresholdProfileId: "dkg-prod-3of5",
+          TrusteeCount: 5,
+          TrusteeThreshold: 3,
+          AcceptedBeforeOpenCount: 5,
+          CompleteEvidenceCount: 5,
+          MissingEvidenceCount: 0,
+          StaleEvidenceCount: 0,
+          IncompatibleEvidenceCount: 0,
+          AcceptedReleaseArtifactCount: 0,
+          MissingReleaseArtifactCount: 0,
+          RejectedReleaseArtifactCount: 0,
+          LatestCtrlResultCode: "CTRL-OPEN-READY",
+          Blockers: [],
+          Message: "Trustee control-domain evidence is ready.",
+        },
+        Sp07Evidence: {
+          EvidenceExpected: true,
+          PublicEvidenceAvailable: false,
+          RestrictedEvidenceAvailable: false,
+          PublicationProofMode: "zk_rerandomization_shuffle_v1",
+          ProofConstruction: "bayer_groth_reencryption_shuffle_argument_v1",
+          StatementId: "sp07-bayer-groth-hush-vector-shuffle-v1",
+          ExternalReviewStatus: "external_crypto_review_pending",
+          AcceptedBallotCount: 501,
+          PublishedBallotCount: 0,
+          CiphertextSlotCount: 8,
+          ChunkCount: 0,
+          AcceptedBallotSetHash: "",
+          PublishedBallotStreamHash: "",
+          TranscriptHash: "",
+          ProofHash: "",
+          WitnessDeletionReceiptHash: "",
+          LatestPubResultCode: "sp07_publication_proof_envelope_exceeded",
+          ProgressStatus: ElectionClosedProgressStatusProto.ClosedProgressNone,
+          CanRetry: false,
+          Blockers: [
+            {
+              Code: "sp07_publication_proof_envelope_exceeded",
+              Message: "SP-07 high-assurance v1 supports up to 500 accepted ballots.",
+              BlocksOpen: true,
+              BlocksFinalization: true,
+            },
+          ],
+          Message: "SP-07 publication-proof profile has blockers before election open.",
+          CompletedChunkCount: 0,
+          FailedChunkCount: 0,
+          SlowestChunkMilliseconds: 0,
+        },
+      }),
+    );
+
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />,
+    );
+
+    await openOwnerDetailTab("readiness");
+
+    expect(
+      await screen.findByTestId("elections-sp07-publication-proof-readiness"),
+    ).toHaveTextContent("sp07_publication_proof_envelope_exceeded");
+    expect(screen.getByTestId("elections-ready-to-open-checklist")).toHaveTextContent(
+      "Publication proof profile",
+    );
+    expect(
+      await screen.findByTestId("elections-governed-open-readiness"),
+    ).toHaveTextContent("SP-07 publication-proof profile has blockers before election open.");
   });
 
   it("shows incompatible SP-06 trustee profile evidence as an open blocker", async () => {

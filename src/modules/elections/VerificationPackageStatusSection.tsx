@@ -27,6 +27,7 @@ import { electionsService } from '@/lib/grpc/services/elections';
 import {
   formatArtifactValue,
   formatTimestamp,
+  getSp07VerificationPackagePresentation,
   shortenProtocolPackageHash,
 } from './contracts';
 import { AvailabilityCard } from './HushVotingWorkspaceShared';
@@ -322,6 +323,7 @@ export function VerificationPackageStatusSection({
   const verifierCopy = getVerifierCopy(status.LastVerifierResult?.OverallStatus);
   const VerifierIcon = verifierCopy.icon;
   const protocolBinding = status.ProtocolPackageBinding;
+  const sp07Presentation = getSp07VerificationPackagePresentation(status, 'auditor');
 
   const handleExport = async (packageView: ElectionVerificationPackageViewProto) => {
     setLoadingPackageView(packageView);
@@ -587,6 +589,119 @@ export function VerificationPackageStatusSection({
             <ul className="mt-4 space-y-2 text-sm text-amber-100">
               {status.Sp06Evidence.Blockers.map((blocker) => (
                 <li key={`${blocker.Code}-${blocker.TrusteeRef}`} className="rounded-2xl bg-amber-500/10 px-3 py-2">
+                  {blocker.Message || blocker.Code}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+
+      {status.Sp07Evidence && sp07Presentation ? (
+        <div
+          className="mt-5 rounded-2xl bg-hush-bg-dark/70 p-4"
+          data-testid="verification-package-sp07-evidence"
+        >
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                SP-07 publication proof
+              </div>
+              <div
+                className={`mt-2 text-sm font-semibold ${
+                  sp07Presentation.tone === 'success'
+                    ? 'text-green-100'
+                    : sp07Presentation.tone === 'error'
+                      ? 'text-red-100'
+                      : sp07Presentation.tone === 'warning'
+                        ? 'text-amber-100'
+                        : 'text-hush-text-primary'
+                }`}
+              >
+                {status.Sp07Evidence.Message || sp07Presentation.description}
+              </div>
+              <div className="mt-2 font-mono text-xs text-hush-text-accent">
+                {status.Sp07Evidence.LatestPubResultCode || 'PUB not available'}
+              </div>
+            </div>
+            <div className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-2xl bg-black/20 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Ballots
+                </div>
+                <div className="mt-2 text-sm font-semibold text-hush-text-primary">
+                  {status.Sp07Evidence.PublishedBallotCount || status.Sp07Evidence.AcceptedBallotCount}
+                </div>
+              </div>
+              <div className="rounded-2xl bg-black/20 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Chunks
+                </div>
+                <div className="mt-2 text-sm font-semibold text-hush-text-primary">
+                  {status.Sp07Evidence.CompletedChunkCount} / {status.Sp07Evidence.ChunkCount}
+                  {status.Sp07Evidence.FailedChunkCount > 0
+                    ? ` failed ${status.Sp07Evidence.FailedChunkCount}`
+                    : ''}
+                </div>
+              </div>
+              <div className="rounded-2xl bg-black/20 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Transcript
+                </div>
+                <div className="mt-2 break-all font-mono text-xs text-hush-text-primary">
+                  {status.Sp07Evidence.TranscriptHash
+                    ? formatArtifactValue(status.Sp07Evidence.TranscriptHash)
+                    : 'Not available'}
+                </div>
+              </div>
+              <div className="rounded-2xl bg-black/20 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Proof
+                </div>
+                <div className="mt-2 break-all font-mono text-xs text-hush-text-primary">
+                  {status.Sp07Evidence.ProofHash
+                    ? formatArtifactValue(status.Sp07Evidence.ProofHash)
+                    : 'Not available'}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <div className="rounded-2xl bg-black/20 p-3">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                Published stream
+              </div>
+              <div className="mt-2 break-all font-mono text-xs text-hush-text-primary">
+                {status.Sp07Evidence.PublishedBallotStreamHash
+                  ? formatArtifactValue(status.Sp07Evidence.PublishedBallotStreamHash)
+                  : 'Not available'}
+              </div>
+            </div>
+            <div className="rounded-2xl bg-black/20 p-3">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                Witness deletion
+              </div>
+              <div className="mt-2 break-all font-mono text-xs text-hush-text-primary">
+                {status.Sp07Evidence.WitnessDeletionReceiptHash
+                  ? formatArtifactValue(status.Sp07Evidence.WitnessDeletionReceiptHash)
+                  : 'Not available'}
+              </div>
+            </div>
+            <div className="rounded-2xl bg-black/20 p-3">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                External review
+              </div>
+              <div className="mt-2 break-words text-sm font-semibold text-hush-text-primary">
+                {status.Sp07Evidence.ExternalReviewStatus || 'external_crypto_review_pending'}
+              </div>
+            </div>
+          </div>
+
+          {status.Sp07Evidence.Blockers.length > 0 ? (
+            <ul className="mt-4 space-y-2 text-sm text-red-100">
+              {status.Sp07Evidence.Blockers.map((blocker) => (
+                <li key={`${blocker.Code}-${blocker.Message}`} className="rounded-2xl bg-red-500/10 px-3 py-2">
                   {blocker.Message || blocker.Code}
                 </li>
               ))}

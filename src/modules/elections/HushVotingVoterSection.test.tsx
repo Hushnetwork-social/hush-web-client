@@ -147,6 +147,41 @@ describe('VoterWorkspaceSummary', () => {
     );
   });
 
+  it('keeps SP-07 technical proof labels out of the voter closed-progress surface', async () => {
+    const entry = createHubEntry(
+      'election-proof-failed',
+      ElectionLifecycleStateProto.Closed,
+      'Proof Failed Election',
+      {
+        ActorRoles: {
+          IsOwnerAdmin: false,
+          IsTrustee: false,
+          IsVoter: true,
+          IsDesignatedAuditor: false,
+        },
+        SuggestedAction: ElectionHubNextActionHintProto.ElectionHubActionNone,
+        ClosedProgressStatus:
+          ElectionClosedProgressStatusProto.ClosedProgressPublicationProofFailed,
+        HasUnofficialResult: false,
+        HasOfficialResult: false,
+      }
+    );
+
+    render(
+      <VoterWorkspaceSummary
+        entry={entry}
+        actorPublicAddress="actor-address"
+        resultView={null}
+      />
+    );
+
+    const voterSurface = await screen.findByTestId('hush-voting-section-voter');
+    expect(voterSurface).toHaveTextContent('Result preparation needs attention.');
+    expect(voterSurface).not.toHaveTextContent('SP-07');
+    expect(voterSurface).not.toHaveTextContent('publication-proof');
+    expect(voterSurface).not.toHaveTextContent('witness deletion receipt');
+  });
+
   it('stays collapsed once a published result is available', async () => {
     const entry = createHubEntry(
       'election-published',

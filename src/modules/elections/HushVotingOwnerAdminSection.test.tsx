@@ -346,6 +346,53 @@ describe('OwnerAdminWorkspaceSummary', () => {
     );
   });
 
+  it('shows SP-07 publication-proof failure in owner close progress without certification wording', () => {
+    const ownerEntry = createHubEntry(
+      'election-sp07-failed',
+      ElectionLifecycleStateProto.Closed,
+      'SP-07 Failed Election',
+      {
+        ActorRoles: {
+          IsOwnerAdmin: true,
+          IsTrustee: false,
+          IsVoter: false,
+          IsDesignatedAuditor: false,
+        },
+        Election: createSummary(
+          'election-sp07-failed',
+          ElectionLifecycleStateProto.Closed,
+          'SP-07 Failed Election',
+          'actor-address'
+        ),
+        ClosedProgressStatus:
+          ElectionClosedProgressStatusProto.ClosedProgressPublicationProofFailed,
+        HasUnofficialResult: false,
+        HasOfficialResult: false,
+      }
+    );
+
+    render(
+      <OwnerAdminWorkspaceSummary
+        entry={ownerEntry}
+        detail={createDetail(
+          'election-sp07-failed',
+          ElectionLifecycleStateProto.Closed,
+          'SP-07 Failed Election'
+        )}
+      />
+    );
+
+    expect(screen.getByTestId('hush-voting-section-owner-admin')).toHaveTextContent(
+      'Publication proof failed.'
+    );
+    expect(screen.getByTestId('hush-voting-section-owner-admin')).toHaveTextContent(
+      'Retry is available only when the server still has sealed witness custody'
+    );
+    expect(screen.getByTestId('hush-voting-section-owner-admin')).not.toHaveTextContent(
+      'certified'
+    );
+  });
+
   it('stays collapsed and explicit once the unofficial result is published', () => {
     const ownerEntry = createHubEntry(
       'election-unofficial',
