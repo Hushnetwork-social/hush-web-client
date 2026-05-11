@@ -17,6 +17,7 @@ import type {
   ElectionDraftSnapshot,
   ElectionProtocolPackageBindingView,
   ElectionRecordView,
+  ElectionSp08ReleaseIntegrityStatusView,
   ElectionSummary,
   GetElectionCeremonyActionViewResponse,
   GetElectionOpenReadinessResponse,
@@ -595,6 +596,36 @@ function createReadinessResponse(
     MissingWarningAcknowledgements: [],
     ProtocolPackageBindingStatus: ProtocolPackageBindingStatusProto.Latest,
     ProtocolPackageBindingMessage: "",
+    ...overrides,
+  };
+}
+
+function createSp08ReleaseIntegrityStatus(
+  overrides?: Partial<ElectionSp08ReleaseIntegrityStatusView>,
+): ElectionSp08ReleaseIntegrityStatusView {
+  return {
+    EvidenceExpected: true,
+    PublicEvidenceAvailable: false,
+    RestrictedEvidenceAvailable: false,
+    EvidenceMode: "development_placeholder",
+    NotForReleaseIntegrityClaims: true,
+    BlocksHighAssurance: true,
+    ReleaseManifestName: "development-placeholder-release-manifest",
+    ReleaseManifestHash: "sha256:development-placeholder-release-manifest",
+    ProtocolPackageManifestName: "omega-package-manifest",
+    ProtocolPackageManifestHash: "c".repeat(64),
+    PrimaryResultCode: "release_integrity_evidence_mode_not_allowed",
+    PrimaryIssue:
+      "Official SP-08 release evidence is required before high-assurance elections can open.",
+    ComponentCount: 6,
+    LifecycleBindingCount: 1,
+    EvidenceFileCount: 0,
+    MobileEvidenceIncluded: false,
+    Message:
+      "Official SP-08 release-integrity evidence is required before high-assurance elections can open.",
+    Components: [],
+    LifecycleBindings: [],
+    EvidenceFiles: [],
     ...overrides,
   };
 }
@@ -2688,6 +2719,119 @@ describe("ElectionsWorkspace", () => {
     expect(
       await screen.findByTestId("elections-governed-open-readiness"),
     ).toHaveTextContent("SP-07 publication-proof profile has blockers before election open.");
+  });
+
+  it("shows SP-08 release-integrity evidence blockers in owner readiness", async () => {
+    const protocolBinding = createProtocolPackageBinding();
+    const trusteeDraft = createElectionRecord(ElectionLifecycleStateProto.Draft, {
+      GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+      RequiredApprovalCount: 3,
+      SelectedProfileId: "dkg-prod-3of5",
+      ControlDomainProfileId: "high_assurance_independent_trustees_v1",
+      ControlDomainProfileVersion: "v1",
+      ThresholdProfileId: "dkg-prod-3of5",
+    });
+
+    electionsServiceMock.getElectionsByOwner.mockResolvedValueOnce({
+      Elections: [
+        createElectionSummary(ElectionLifecycleStateProto.Draft, {
+          GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+        }),
+      ],
+    });
+    electionsServiceMock.getElection.mockResolvedValueOnce(
+      createElectionResponse({
+        Election: trusteeDraft,
+        LatestDraftSnapshot: createDraftSnapshot({
+          Policy: {
+            ...createDraftSnapshot().Policy,
+            GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+            SelectedProfileId: "dkg-prod-3of5",
+            RequiredApprovalCount: 3,
+            ReviewWindowPolicy:
+              ReviewWindowPolicyProto.GovernedReviewWindowReserved,
+            ControlDomainProfileId: "high_assurance_independent_trustees_v1",
+            ControlDomainProfileVersion: "v1",
+            ThresholdProfileId: "dkg-prod-3of5",
+          },
+        }),
+        TrusteeInvitations: createAcceptedTrusteeInvitations(),
+        CeremonyVersions: [
+          {
+            Id: "ceremony-ready",
+            ElectionId: "election-1",
+            VersionNumber: 1,
+            ProfileId: "dkg-prod-3of5",
+            TrusteeCount: 5,
+            RequiredApprovalCount: 3,
+            Status: ElectionCeremonyVersionStatusProto.CeremonyVersionReady,
+            StartedAt: timestamp,
+            StartedByPublicAddress: "owner-public-key",
+            TallyPublicKeyFingerprint: "fingerprint-1",
+          },
+        ],
+        ProtocolPackageBinding: protocolBinding,
+      }),
+    );
+    electionsServiceMock.getElectionOpenReadiness.mockResolvedValue(
+      createReadinessResponse({
+        IsReadyToOpen: false,
+        ProtocolPackageBinding: protocolBinding,
+        Sp06Evidence: {
+          EvidenceExpected: true,
+          PublicEvidenceAvailable: true,
+          RestrictedEvidenceAvailable: true,
+          ControlDomainProfileId: "high_assurance_independent_trustees_v1",
+          ControlDomainProfileVersion: "v1",
+          ThresholdProfileId: "dkg-prod-3of5",
+          TrusteeCount: 5,
+          TrusteeThreshold: 3,
+          AcceptedBeforeOpenCount: 5,
+          CompleteEvidenceCount: 5,
+          MissingEvidenceCount: 0,
+          StaleEvidenceCount: 0,
+          IncompatibleEvidenceCount: 0,
+          AcceptedReleaseArtifactCount: 0,
+          MissingReleaseArtifactCount: 0,
+          RejectedReleaseArtifactCount: 0,
+          LatestCtrlResultCode: "CTRL-OPEN-READY",
+          Blockers: [],
+          Message: "Trustee control-domain evidence is ready.",
+        },
+        Sp08ReleaseIntegrity: createSp08ReleaseIntegrityStatus({
+          ProtocolPackageManifestHash: protocolBinding.ReleaseManifestHash,
+        }),
+      }),
+    );
+
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />,
+    );
+
+    await openOwnerDetailTab("readiness");
+
+    expect(
+      await screen.findByTestId("elections-sp08-release-integrity-readiness"),
+    ).toHaveTextContent("release_integrity_evidence_mode_not_allowed");
+    expect(screen.getByTestId("elections-sp08-release-integrity-readiness")).toHaveTextContent(
+      "development_placeholder",
+    );
+    expect(screen.getByTestId("elections-sp08-release-integrity-readiness")).toHaveTextContent(
+      "Blocks high-assurance claims.",
+    );
+    expect(screen.getByTestId("elections-ready-to-open-checklist")).toHaveTextContent(
+      "Release integrity evidence",
+    );
+    expect(
+      await screen.findByTestId("elections-governed-open-readiness"),
+    ).toHaveTextContent(
+      "Official SP-08 release-integrity evidence is required before high-assurance elections can open.",
+    );
   });
 
   it("shows incompatible SP-06 trustee profile evidence as an open blocker", async () => {

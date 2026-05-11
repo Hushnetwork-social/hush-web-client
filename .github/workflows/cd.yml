@@ -66,7 +66,7 @@ jobs:
     environment: HushServerNode AWS CD
 
     permissions:
-      contents: read
+      contents: write
       packages: write
 
     steps:
@@ -108,6 +108,7 @@ jobs:
           password: ${{ secrets.GHCR_TOKEN }}
 
       - name: Build and push Docker image
+        id: build_image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -122,6 +123,162 @@ jobs:
             NEXT_PUBLIC_DEBUG_LOGGING=${{ inputs.debug_logging || 'false' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Setup Node.js for SP-08 web release hash
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Capture SP-08 web app release hashes
+        id: web_release_hash
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
+          NEXT_PUBLIC_GRPC_URL: ${{ inputs.grpc_url || 'https://api.hushnetwork.social' }}
+          NEXT_PUBLIC_DEBUG_LOGGING: ${{ inputs.debug_logging || 'false' }}
+          NEXT_PUBLIC_APP_VERSION: ${{ steps.version.outputs.version }}
+          NEXT_TELEMETRY_DISABLED: '1'
+          STANDALONE_BUILD: 'true'
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+
+          mkdir -p release-evidence
+          node_version="$(node --version)"
+          npm_version="$(npm --version)"
+          package_lock_hash="sha256:$(sha256sum package-lock.json | cut -d' ' -f1)"
+          dockerfile_hash="sha256:$(sha256sum Dockerfile | cut -d' ' -f1)"
+          build_id="$(cat .next/BUILD_ID)"
+          static_tree_hash="sha256:$(find .next/static public -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)"
+          circuit_wasm_hash="sha256:$(sha256sum public/circuits/omega-v1.0.0/reaction.wasm | cut -d' ' -f1)"
+          proving_key_hash="sha256:$(sha256sum public/circuits/omega-v1.0.0/reaction.zkey | cut -d' ' -f1)"
+          app_release_hash="sha256:$(printf '%s\n%s\n%s\n%s\n%s\n' "${APP_VERSION}" "${build_id}" "${static_tree_hash}" "${circuit_wasm_hash}" "${proving_key_hash}" | sha256sum | cut -d' ' -f1)"
+
+          {
+            echo "node_version=${node_version}"
+            echo "npm_version=${npm_version}"
+            echo "package_lock_hash=${package_lock_hash}"
+            echo "dockerfile_hash=${dockerfile_hash}"
+            echo "build_id=${build_id}"
+            echo "static_tree_hash=${static_tree_hash}"
+            echo "circuit_wasm_hash=${circuit_wasm_hash}"
+            echo "proving_key_hash=${proving_key_hash}"
+            echo "app_release_hash=${app_release_hash}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Write SP-08 web release component manifest
+        env:
+          IMAGE_DIGEST: ${{ steps.build_image.outputs.digest }}
+          IMAGE_TAG: ${{ steps.version.outputs.version }}
+          GRPC_URL: ${{ inputs.grpc_url || 'https://api.hushnetwork.social' }}
+          DEBUG_LOGGING: ${{ inputs.debug_logging || 'false' }}
+          NODE_VERSION: ${{ steps.web_release_hash.outputs.node_version }}
+          NPM_VERSION: ${{ steps.web_release_hash.outputs.npm_version }}
+          PACKAGE_LOCK_HASH: ${{ steps.web_release_hash.outputs.package_lock_hash }}
+          DOCKERFILE_HASH: ${{ steps.web_release_hash.outputs.dockerfile_hash }}
+          BUILD_ID: ${{ steps.web_release_hash.outputs.build_id }}
+          STATIC_TREE_HASH: ${{ steps.web_release_hash.outputs.static_tree_hash }}
+          CIRCUIT_WASM_HASH: ${{ steps.web_release_hash.outputs.circuit_wasm_hash }}
+          PROVING_KEY_HASH: ${{ steps.web_release_hash.outputs.proving_key_hash }}
+          APP_RELEASE_HASH: ${{ steps.web_release_hash.outputs.app_release_hash }}
+        run: |
+          set -euo pipefail
+          evidence_mode="development_placeholder"
+          is_placeholder=true
+          immutable_reference="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}"
+
+          if [[ "${{ github.event_name }}" == "push" && "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            if [[ -z "${IMAGE_DIGEST}" ]]; then
+              echo "::error::Official SP-08 web evidence requires an immutable image digest."
+              exit 1
+            fi
+            evidence_mode="official_sp08"
+            is_placeholder=false
+            immutable_reference="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${IMAGE_DIGEST}"
+          fi
+
+          artifact_digest="${IMAGE_DIGEST:-sha256:$(printf '%s' "${GITHUB_SHA}:${IMAGE_TAG}:development-placeholder" | sha256sum | cut -d' ' -f1)}"
+          mkdir -p release-evidence
+          jq -n \
+            --arg componentId "web_client" \
+            --arg componentType "container_image" \
+            --arg evidenceMode "${evidence_mode}" \
+            --arg artifactName "hush-webclient" \
+            --arg artifactDigest "${artifact_digest}" \
+            --arg sourceCommit "${GITHUB_SHA}" \
+            --arg sourceTag "${GITHUB_REF_NAME}" \
+            --arg immutableReference "${immutable_reference}" \
+            --arg buildWorkflowRunId "${GITHUB_RUN_ID}" \
+            --arg distributionReference "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}" \
+            --arg packageLockHash "${PACKAGE_LOCK_HASH}" \
+            --arg dockerfileHash "${DOCKERFILE_HASH}" \
+            --arg nodeVersion "${NODE_VERSION}" \
+            --arg npmVersion "${NPM_VERSION}" \
+            --arg buildId "${BUILD_ID}" \
+            --arg staticTreeHash "${STATIC_TREE_HASH}" \
+            --arg circuitWasmHash "${CIRCUIT_WASM_HASH}" \
+            --arg provingKeyHash "${PROVING_KEY_HASH}" \
+            --arg appReleaseHash "${APP_RELEASE_HASH}" \
+            --arg grpcUrl "${GRPC_URL}" \
+            --arg debugLogging "${DEBUG_LOGGING}" \
+            --argjson isPlaceholder "${is_placeholder}" \
+            '{
+              componentId: $componentId,
+              componentType: $componentType,
+              evidenceMode: $evidenceMode,
+              artifactName: $artifactName,
+              artifactDigest: $artifactDigest,
+              sourceCommit: $sourceCommit,
+              sourceTag: $sourceTag,
+              immutableReference: $immutableReference,
+              buildWorkflowRunId: $buildWorkflowRunId,
+              distributionReference: $distributionReference,
+              signingFingerprint: null,
+              isPlaceholder: $isPlaceholder,
+              packageLockHash: $packageLockHash,
+              dockerfileHash: $dockerfileHash,
+              nodeVersion: $nodeVersion,
+              npmVersion: $npmVersion,
+              buildId: $buildId,
+              staticTreeHash: $staticTreeHash,
+              circuitWasmHash: $circuitWasmHash,
+              provingKeyHash: $provingKeyHash,
+              appReleaseHash: $appReleaseHash,
+              buildArgs: {
+                nextPublicGrpcUrl: $grpcUrl,
+                nextPublicDebugLogging: $debugLogging
+              }
+            }' > release-evidence/sp08-web-client-component.json
+
+          {
+            echo "### SP-08 Web Release Evidence"
+            echo ""
+            echo "- Evidence mode: \`${evidence_mode}\`"
+            echo "- Image digest: \`${artifact_digest}\`"
+            echo "- App release hash: \`${APP_RELEASE_HASH}\`"
+            echo "- Static tree hash: \`${STATIC_TREE_HASH}\`"
+            echo "- package-lock hash: \`${PACKAGE_LOCK_HASH}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload SP-08 web release component manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: sp08-web-client-release-component
+          path: release-evidence/sp08-web-client-component.json
+
+      - name: Publish SP-08 web release component manifest to GitHub Release
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 || \
+            gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --notes "Automated SP-08 release evidence for ${GITHUB_REF_NAME}."
+          gh release upload "${GITHUB_REF_NAME}" \
+            release-evidence/sp08-web-client-component.json \
+            --clobber
 
       - name: Summary - Image pushed
         run: |

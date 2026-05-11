@@ -87,6 +87,7 @@ import {
   getRequiredOpenWarningCodes,
   getReviewWindowPolicyLabel,
   getSp07OpenReadinessPresentation,
+  getSp08OpenReadinessPresentation,
   getModeProfileFamilyLabel,
   getModeProfileFreezeCopy,
   getSelectedProfileFamilyLabel,
@@ -1110,6 +1111,25 @@ export function ElectionsWorkspace({
   const isSp07ReadinessReady =
     !isSp07EvidenceExpected ||
     sp07ReadinessPresentation?.state === "configured_ready";
+  const sp08ReadinessPresentation = useMemo(
+    () => getSp08OpenReadinessPresentation(openReadiness, "owner-admin"),
+    [openReadiness],
+  );
+  const sp08ReadinessEvidence = openReadiness?.Sp08ReleaseIntegrity ?? null;
+  const isSp08EvidenceExpected = Boolean(
+    sp08ReadinessEvidence &&
+      sp08ReadinessPresentation &&
+      sp08ReadinessPresentation.state !== "not_visible" &&
+      sp08ReadinessPresentation.state !== "not_required",
+  );
+  const isSp08ReadinessReady =
+    !isSp08EvidenceExpected ||
+    Boolean(
+      sp08ReadinessPresentation &&
+        !sp08ReadinessPresentation.blocksHighAssurance &&
+        sp08ReadinessPresentation.state !== "missing" &&
+        sp08ReadinessPresentation.state !== "blocked",
+    );
   const canCloseSelectedElection = canCloseElection(election);
   const canFinalizeSelectedElection = canFinalizeElection(election);
   const governedOpenPrerequisiteIssues = useMemo(() => {
@@ -1147,6 +1167,9 @@ export function ElectionsWorkspace({
     if (sp07ReadinessPresentation?.state === "configured_blocked") {
       issues.push(sp07ReadinessPresentation.description);
     }
+    if (sp08ReadinessPresentation?.blocksHighAssurance) {
+      issues.push(sp08ReadinessPresentation.description);
+    }
     if (!hasAcceptedTrusteesForOpen) {
       issues.push(
         selectedTrusteeRosterLabel
@@ -1180,6 +1203,7 @@ export function ElectionsWorkspace({
     selectedTrusteeRosterLabel,
     sp06OpenBlockerMessages,
     sp07ReadinessPresentation,
+    sp08ReadinessPresentation,
     usesTrusteeThreshold,
   ]);
   const isGovernedOpenWorkflowReady =
@@ -1234,6 +1258,17 @@ export function ElectionsWorkspace({
                     detail:
                       sp07ReadinessPresentation?.description ||
                       "SP-07 publication-proof readiness is not loaded yet.",
+                  },
+                ]
+              : []),
+            ...(isSp08EvidenceExpected
+              ? [
+                  {
+                    label: "Release integrity evidence",
+                    isReady: isSp08ReadinessReady,
+                    detail:
+                      sp08ReadinessPresentation?.description ||
+                      "SP-08 release-integrity readiness is not loaded yet.",
                   },
                 ]
               : []),
@@ -1304,6 +1339,9 @@ export function ElectionsWorkspace({
       isSp07EvidenceExpected,
       isSp07ReadinessReady,
       sp07ReadinessPresentation,
+      isSp08EvidenceExpected,
+      isSp08ReadinessReady,
+      sp08ReadinessPresentation,
       sp06ControlDomainLabel,
       sp06EvidenceExpected,
       sp06OpenBlockerMessages,
@@ -2870,6 +2908,155 @@ export function ElectionsWorkspace({
                   ) : (
                     <div className="mt-4 rounded-2xl bg-green-500/10 px-3 py-2 text-sm text-green-100">
                       Publication-proof profile and v1 envelope checks are ready for open.
+                    </div>
+                  )}
+                </div>
+              ) : null}
+
+              {isSp08EvidenceExpected &&
+              sp08ReadinessPresentation &&
+              sp08ReadinessEvidence ? (
+                <div
+                  className={`mb-5 rounded-xl p-4 shadow-sm shadow-black/10 ${
+                    sp08ReadinessPresentation.tone === "success"
+                      ? "bg-green-950/40"
+                      : sp08ReadinessPresentation.tone === "error"
+                        ? "bg-red-950/35"
+                        : sp08ReadinessPresentation.tone === "warning"
+                          ? "bg-amber-950/35"
+                          : "bg-hush-bg-dark/80"
+                  }`}
+                  data-testid="elections-sp08-release-integrity-readiness"
+                >
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <div className="text-sm font-semibold">
+                        Release integrity evidence
+                      </div>
+                      <p className="mt-2 text-sm text-hush-text-accent">
+                        SP-08 ties the open decision to official release evidence for the
+                        server, web client, mobile app, and Protocol Omega package used by
+                        this election.
+                      </p>
+                    </div>
+                    <div
+                      className={`inline-flex items-center gap-2 self-start rounded-full px-3 py-1 text-xs font-semibold ${
+                        sp08ReadinessPresentation.tone === "success"
+                          ? "bg-green-500/12 text-green-100"
+                          : sp08ReadinessPresentation.tone === "error"
+                            ? "bg-red-500/12 text-red-100"
+                            : sp08ReadinessPresentation.tone === "warning"
+                              ? "bg-amber-500/12 text-amber-100"
+                              : "bg-hush-purple/12 text-hush-text-primary"
+                      }`}
+                    >
+                      {sp08ReadinessPresentation.tone === "success" ? (
+                        <CheckCircle2 className="h-4 w-4" />
+                      ) : sp08ReadinessPresentation.blocksHighAssurance ? (
+                        <ShieldAlert className="h-4 w-4" />
+                      ) : (
+                        <AlertCircle className="h-4 w-4" />
+                      )}
+                      <span>{sp08ReadinessPresentation.label}</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+                    <div className="rounded-2xl bg-black/20 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                        Result
+                      </div>
+                      <div className="mt-2 break-all font-mono text-xs text-hush-text-primary">
+                        {sp08ReadinessPresentation.primaryResultCode ||
+                          "Result not recorded"}
+                      </div>
+                    </div>
+                    <div className="rounded-2xl bg-black/20 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                        Mode
+                      </div>
+                      <div className="mt-2 break-words text-sm font-medium text-hush-text-primary">
+                        {sp08ReadinessPresentation.evidenceMode || "Not recorded"}
+                      </div>
+                    </div>
+                    <div className="rounded-2xl bg-black/20 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                        Release manifest
+                      </div>
+                      <div className="mt-2 break-words text-sm font-medium text-hush-text-primary">
+                        {sp08ReadinessEvidence.ReleaseManifestName || "Not recorded"}
+                      </div>
+                      <div className="mt-1 break-all font-mono text-xs text-hush-text-accent">
+                        {sp08ReadinessPresentation.releaseManifestHashShort}
+                      </div>
+                    </div>
+                    <div className="rounded-2xl bg-black/20 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                        Protocol package
+                      </div>
+                      <div className="mt-2 break-words text-sm font-medium text-hush-text-primary">
+                        {sp08ReadinessEvidence.ProtocolPackageManifestName ||
+                          "Not recorded"}
+                      </div>
+                      <div className="mt-1 break-all font-mono text-xs text-hush-text-accent">
+                        {sp08ReadinessPresentation.protocolPackageManifestHashShort}
+                      </div>
+                    </div>
+                    <div className="rounded-2xl bg-black/20 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                        Evidence set
+                      </div>
+                      <div className="mt-2 text-sm font-medium text-hush-text-primary">
+                        {sp08ReadinessPresentation.componentCount} component(s)
+                      </div>
+                      <div className="mt-1 text-xs text-hush-text-accent">
+                        {sp08ReadinessPresentation.evidenceFileCount} public file(s)
+                      </div>
+                    </div>
+                    <div className="rounded-2xl bg-black/20 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                        Lifecycle / mobile
+                      </div>
+                      <div className="mt-2 text-sm font-medium text-hush-text-primary">
+                        {sp08ReadinessPresentation.lifecycleBindingCount} binding(s)
+                      </div>
+                      <div
+                        className={`mt-1 text-xs ${
+                          sp08ReadinessPresentation.mobileEvidenceIncluded
+                            ? "text-green-100"
+                            : "text-amber-100"
+                        }`}
+                      >
+                        {sp08ReadinessPresentation.mobileEvidenceIncluded
+                          ? "Mobile evidence included"
+                          : "Mobile evidence not complete"}
+                      </div>
+                    </div>
+                  </div>
+
+                  {sp08ReadinessPresentation.blockingCodes.length > 0 ? (
+                    <ul className="mt-4 space-y-2 text-sm text-red-100">
+                      {sp08ReadinessPresentation.blockingCodes.map((code) => (
+                        <li
+                          key={code}
+                          className="rounded-2xl bg-red-500/10 px-3 py-2"
+                        >
+                          <span className="font-mono text-xs">{code}</span>
+                          {sp08ReadinessPresentation.blocksHighAssurance ? (
+                            <span className="ml-2">Blocks high-assurance claims.</span>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div
+                      className={`mt-4 rounded-2xl px-3 py-2 text-sm ${
+                        isSp08ReadinessReady
+                          ? "bg-green-500/10 text-green-100"
+                          : "bg-amber-500/10 text-amber-100"
+                      }`}
+                    >
+                      {sp08ReadinessPresentation.description}
                     </div>
                   )}
                 </div>

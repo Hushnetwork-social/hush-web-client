@@ -138,6 +138,7 @@ jobs:
           echo "Updated tauri.conf.json version to ${VERSION}"
 
       - name: Setup Android signing
+        id: android_signing
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -166,6 +167,17 @@ jobs:
           keytool -exportcert -keystore /tmp/release.keystore -alias "${ANDROID_KEY_ALIAS}" -storepass "${ANDROID_KEYSTORE_PASSWORD}" -keypass "${ANDROID_KEY_PASSWORD}" > /dev/null 2>&1 \
             && echo "Key password: OK" \
             || echo "WARNING: Key password may not match (this is OK if storepass==keypass)"
+
+          CERT_SHA256=$(keytool -list -v -keystore /tmp/release.keystore -alias "${ANDROID_KEY_ALIAS}" -storepass "${ANDROID_KEYSTORE_PASSWORD}" 2>/dev/null \
+            | awk -F'SHA256: ' '/SHA256:/ { gsub(":", "", $2); print tolower($2); exit }')
+          if [ -z "${CERT_SHA256}" ]; then
+            echo "ERROR: Could not read signing certificate SHA-256 fingerprint"
+            exit 1
+          fi
+
+          SIGNING_FINGERPRINT="sha256:${CERT_SHA256}"
+          echo "signing_fingerprint=${SIGNING_FINGERPRINT}" >> "$GITHUB_OUTPUT"
+          echo "Signing certificate SHA-256 fingerprint captured"
 
       - name: Setup Google Services
         run: |
@@ -216,6 +228,144 @@ jobs:
           echo "path=./${NEW_NAME}" >> $GITHUB_OUTPUT
           echo "filename=${NEW_NAME}" >> $GITHUB_OUTPUT
           echo "APK: ${NEW_NAME}"
+
+      - name: Write SP-08 Android release component manifest
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          APK_FILE: ${{ steps.apk.outputs.path }}
+          APK_FILENAME: ${{ steps.apk.outputs.filename }}
+          SIGNING_FINGERPRINT: ${{ steps.android_signing.outputs.signing_fingerprint }}
+        run: |
+          set -euo pipefail
+
+          evidence_mode="development_placeholder"
+          is_placeholder=true
+          if [[ "${{ github.event_name }}" == "push" && "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            evidence_mode="official_sp08"
+            is_placeholder=false
+          fi
+
+          apk_digest="sha256:$(sha256sum "${APK_FILE}" | cut -d' ' -f1)"
+          apk_size_bytes="$(stat -c%s "${APK_FILE}")"
+          package_lock_hash="sha256:$(sha256sum package-lock.json | cut -d' ' -f1)"
+          cargo_lock_hash="sha256:$(sha256sum src-tauri/Cargo.lock | cut -d' ' -f1)"
+          tauri_conf_hash="sha256:$(sha256sum src-tauri/tauri.conf.json | cut -d' ' -f1)"
+          product_name="$(jq -r '.productName' src-tauri/tauri.conf.json)"
+          package_id="$(jq -r '.identifier' src-tauri/tauri.conf.json)"
+          app_version="$(jq -r '.version' src-tauri/tauri.conf.json)"
+          android_version_code="$(grep -E '^tauri\.android\.versionCode=' src-tauri/gen/android/app/tauri.properties 2>/dev/null | tail -1 | cut -d'=' -f2- || true)"
+          android_version_name="$(grep -E '^tauri\.android\.versionName=' src-tauri/gen/android/app/tauri.properties 2>/dev/null | tail -1 | cut -d'=' -f2- || true)"
+          android_version_code="${android_version_code:-${GITHUB_RUN_NUMBER}}"
+          android_version_name="${android_version_name:-${VERSION}}"
+          runtime_app_release_hash="sha256:$(printf '%s\n' "${package_id}" "${app_version}" "${android_version_code}" "${apk_digest}" "${SIGNING_FINGERPRINT}" | sha256sum | cut -d' ' -f1)"
+          node_version="$(node --version)"
+          npm_version="$(npm --version)"
+          rust_version="$(rustc --version)"
+          cargo_version="$(cargo --version)"
+          java_version="$(java -version 2>&1 | head -1)"
+          distribution_reference="https://downloads.hushnetwork.social/android/${APK_FILENAME}"
+          immutable_reference="github-actions://${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts/${APK_FILENAME}#${apk_digest}"
+
+          mkdir -p release-evidence
+          jq -n \
+            --arg componentId "mobile_app" \
+            --arg componentType "android_apk" \
+            --arg evidenceMode "${evidence_mode}" \
+            --arg artifactName "${APK_FILENAME}" \
+            --arg artifactDigest "${apk_digest}" \
+            --arg sourceCommit "${GITHUB_SHA}" \
+            --arg sourceTag "${GITHUB_REF_NAME}" \
+            --arg immutableReference "${immutable_reference}" \
+            --arg buildWorkflowRunId "${GITHUB_RUN_ID}" \
+            --arg distributionReference "${distribution_reference}" \
+            --arg signingFingerprint "${SIGNING_FINGERPRINT}" \
+            --arg packageId "${package_id}" \
+            --arg productName "${product_name}" \
+            --arg appVersion "${app_version}" \
+            --arg androidVersionName "${android_version_name}" \
+            --arg androidVersionCode "${android_version_code}" \
+            --arg runtimeAppReleaseHash "${runtime_app_release_hash}" \
+            --arg distributionChannel "downloads.hushnetwork.social/android" \
+            --arg nodeVersion "${node_version}" \
+            --arg npmVersion "${npm_version}" \
+            --arg rustVersion "${rust_version}" \
+            --arg cargoVersion "${cargo_version}" \
+            --arg javaVersion "${java_version}" \
+            --arg androidNdkVersion "${ANDROID_NDK_VERSION}" \
+            --arg packageLockHash "${package_lock_hash}" \
+            --arg cargoLockHash "${cargo_lock_hash}" \
+            --arg tauriConfHash "${tauri_conf_hash}" \
+            --argjson apkSizeBytes "${apk_size_bytes}" \
+            --argjson isPlaceholder "${is_placeholder}" \
+            '{
+              componentId: $componentId,
+              componentType: $componentType,
+              evidenceMode: $evidenceMode,
+              artifactName: $artifactName,
+              artifactDigest: $artifactDigest,
+              sourceCommit: $sourceCommit,
+              sourceTag: $sourceTag,
+              immutableReference: $immutableReference,
+              buildWorkflowRunId: $buildWorkflowRunId,
+              distributionReference: $distributionReference,
+              signingFingerprint: $signingFingerprint,
+              isPlaceholder: $isPlaceholder,
+              packageId: $packageId,
+              productName: $productName,
+              appVersion: $appVersion,
+              androidVersionName: $androidVersionName,
+              androidVersionCode: $androidVersionCode,
+              runtimeAppReleaseHash: $runtimeAppReleaseHash,
+              distributionChannel: $distributionChannel,
+              apkSizeBytes: $apkSizeBytes,
+              toolchain: {
+                nodeVersion: $nodeVersion,
+                npmVersion: $npmVersion,
+                rustVersion: $rustVersion,
+                cargoVersion: $cargoVersion,
+                javaVersion: $javaVersion,
+                androidNdkVersion: $androidNdkVersion
+              },
+              sourceHashes: {
+                packageLockHash: $packageLockHash,
+                cargoLockHash: $cargoLockHash,
+                tauriConfHash: $tauriConfHash
+              }
+            }' > release-evidence/sp08-android-component.json
+
+          {
+            echo "### SP-08 Android Release Evidence"
+            echo ""
+            echo "- Evidence mode: \`${evidence_mode}\`"
+            echo "- APK digest: \`${apk_digest}\`"
+            echo "- Runtime app release hash: \`${runtime_app_release_hash}\`"
+            echo "- APK size: \`${apk_size_bytes}\` bytes"
+            echo "- Distribution: \`${distribution_reference}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Android APK release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.apk.outputs.filename }}
+          path: ${{ steps.apk.outputs.path }}
+
+      - name: Upload SP-08 Android release component manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: sp08-android-release-component
+          path: release-evidence/sp08-android-component.json
+
+      - name: Publish SP-08 Android release component manifest to GitHub Release
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 || \
+            gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --notes "Automated SP-08 release evidence for ${GITHUB_REF_NAME}."
+          gh release upload "${GITHUB_REF_NAME}" \
+            release-evidence/sp08-android-component.json \
+            --clobber
 
       # ============================================
       # UPLOAD TO DOWNLOADS SERVER

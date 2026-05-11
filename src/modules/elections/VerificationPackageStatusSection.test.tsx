@@ -110,6 +110,7 @@ describe('VerificationPackageStatusSection', () => {
     );
 
     expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByTestId('verification-package-sp08-evidence')).not.toBeInTheDocument();
   });
 
   it('renders SP-07 publication-proof evidence and verifier result code', () => {
@@ -155,6 +156,190 @@ describe('VerificationPackageStatusSection', () => {
     expect(screen.getByTestId('verification-package-sp07-evidence')).toHaveTextContent('PUB-001');
     expect(screen.getByTestId('verification-package-sp07-evidence')).toHaveTextContent(
       'external_crypto_review_pending'
+    );
+  });
+
+  it('renders SP-08 official release-integrity evidence and detail rows', () => {
+    render(
+      <VerificationPackageStatusSection
+        electionId="election-1"
+        actorPublicAddress="auditor-address"
+        status={createVerificationPackageStatus()}
+      />
+    );
+
+    const evidence = screen.getByTestId('verification-package-sp08-evidence');
+    expect(evidence).toHaveTextContent('SP-08 release integrity');
+    expect(evidence).toHaveTextContent('Official SP-08 evidence');
+    expect(evidence).toHaveTextContent('release_integrity_evidence_valid');
+    expect(evidence).toHaveTextContent('HushVotingReleaseManifest-v1.json');
+    expect(evidence).toHaveTextContent('bbbbbbbbbbbb...bbbbbbbb');
+    expect(evidence).toHaveTextContent('Mobile evidence');
+    expect(evidence).toHaveTextContent('Included');
+
+    fireEvent.click(screen.getByText('Show release evidence details'));
+
+    expect(screen.getByTestId('verification-package-sp08-components')).toHaveTextContent(
+      'mobile_app'
+    );
+    expect(screen.getByTestId('verification-package-sp08-lifecycle')).toHaveTextContent('Matched');
+    expect(screen.getByTestId('verification-package-sp08-files')).toHaveTextContent(
+      'release-integrity-verifier-output.json'
+    );
+  });
+
+  it('renders SP-08 development placeholders as high-assurance blocking evidence', () => {
+    const baseStatus = createVerificationPackageStatus();
+
+    render(
+      <VerificationPackageStatusSection
+        electionId="election-1"
+        actorPublicAddress="owner-address"
+        status={createVerificationPackageStatus({
+          Sp08ReleaseIntegrity: {
+            ...baseStatus.Sp08ReleaseIntegrity!,
+            EvidenceMode: 'development_placeholder',
+            NotForReleaseIntegrityClaims: true,
+            BlocksHighAssurance: true,
+            PrimaryResultCode: 'release_integrity_evidence_pending',
+            Message:
+              'Development placeholder SP-08 release-integrity evidence is present and is not official release evidence.',
+            ComponentCount: 1,
+            MobileEvidenceIncluded: false,
+            Components: [
+              {
+                ...baseStatus.Sp08ReleaseIntegrity!.Components[0],
+                EvidenceMode: 'development_placeholder',
+                IsPlaceholder: true,
+                ImmutableReference: 'development-placeholder',
+              },
+            ],
+          },
+        })}
+      />
+    );
+
+    const evidence = screen.getByTestId('verification-package-sp08-evidence');
+    expect(evidence).toHaveTextContent('Development placeholder');
+    expect(evidence).toHaveTextContent('Not for release-integrity claims');
+    expect(evidence).toHaveTextContent('Blocks high-assurance claims');
+    expect(evidence).toHaveTextContent('release_integrity_evidence_pending');
+    expect(evidence).toHaveTextContent('Not included');
+    expect(evidence.textContent?.toLowerCase()).not.toContain('certified');
+  });
+
+  it('renders missing SP-08 release evidence as an explicit package issue', () => {
+    const baseStatus = createVerificationPackageStatus();
+
+    render(
+      <VerificationPackageStatusSection
+        electionId="election-1"
+        actorPublicAddress="owner-address"
+        status={createVerificationPackageStatus({
+          Sp08ReleaseIntegrity: {
+            ...baseStatus.Sp08ReleaseIntegrity!,
+            PublicEvidenceAvailable: false,
+            RestrictedEvidenceAvailable: false,
+            EvidenceFileCount: 0,
+            ReleaseManifestHash: '',
+            PrimaryResultCode: 'release_integrity_manifest_missing',
+            PrimaryIssue: 'SP-08 release manifest is missing from the public package.',
+            Message: 'SP-08 release-integrity evidence is not exportable yet.',
+            Components: [],
+            ComponentCount: 0,
+            LifecycleBindings: [],
+            LifecycleBindingCount: 0,
+            MobileEvidenceIncluded: false,
+          },
+        })}
+      />
+    );
+
+    const evidence = screen.getByTestId('verification-package-sp08-evidence');
+    expect(evidence).toHaveTextContent('Release evidence missing');
+    expect(evidence).toHaveTextContent('release_integrity_manifest_missing');
+    expect(evidence).toHaveTextContent('SP-08 release-integrity evidence is not exportable yet.');
+    expect(evidence).toHaveTextContent('Not recorded');
+  });
+
+  it.each([
+    [
+      'release_integrity_mutable_artifact_reference',
+      'Mutable or local artifact references cannot satisfy SP-08 release-integrity evidence.',
+    ],
+    [
+      'release_integrity_mobile_evidence_incomplete',
+      'Mobile release evidence is incomplete for a release set that includes a mobile app.',
+    ],
+  ])('renders SP-08 blocked result %s with explicit issue text', (resultCode, issue) => {
+    const baseStatus = createVerificationPackageStatus();
+
+    render(
+      <VerificationPackageStatusSection
+        electionId="election-1"
+        actorPublicAddress="auditor-address"
+        status={createVerificationPackageStatus({
+          Sp08ReleaseIntegrity: {
+            ...baseStatus.Sp08ReleaseIntegrity!,
+            BlocksHighAssurance: true,
+            PrimaryResultCode: resultCode,
+            PrimaryIssue: issue,
+            Message: '',
+          },
+        })}
+      />
+    );
+
+    const evidence = screen.getByTestId('verification-package-sp08-evidence');
+    expect(evidence).toHaveTextContent('Release integrity blocked');
+    expect(evidence).toHaveTextContent(resultCode);
+    expect(evidence).toHaveTextContent(issue);
+  });
+
+  it('renders SP-08 lifecycle mismatches with expected and observed releases', () => {
+    const baseStatus = createVerificationPackageStatus();
+
+    render(
+      <VerificationPackageStatusSection
+        electionId="election-1"
+        actorPublicAddress="auditor-address"
+        status={createVerificationPackageStatus({
+          Sp08ReleaseIntegrity: {
+            ...baseStatus.Sp08ReleaseIntegrity!,
+            BlocksHighAssurance: true,
+            PrimaryResultCode: 'release_integrity_lifecycle_mismatch',
+            PrimaryIssue:
+              'One or more SP-08 lifecycle release bindings do not match the sealed policy.',
+            Message: '',
+            LifecycleBindings: [
+              {
+                LifecycleStage: 'proof_worker',
+                ExpectedReleaseId: 'release-2026.05.11',
+                ObservedReleaseId: 'release-2026.05.12',
+                ExpectedArtifactDigest: 'sha256:expected',
+                ObservedArtifactDigest: 'sha256:observed',
+                MatchesSealedPolicy: false,
+              },
+            ],
+          },
+        })}
+      />
+    );
+
+    const evidence = screen.getByTestId('verification-package-sp08-evidence');
+    expect(evidence).toHaveTextContent('1 mismatch');
+    expect(evidence).toHaveTextContent('release_integrity_lifecycle_mismatch');
+
+    fireEvent.click(screen.getByText('Show release evidence details'));
+
+    expect(screen.getByTestId('verification-package-sp08-lifecycle')).toHaveTextContent(
+      'proof_worker'
+    );
+    expect(screen.getByTestId('verification-package-sp08-lifecycle')).toHaveTextContent(
+      'Mismatch'
+    );
+    expect(screen.getByTestId('verification-package-sp08-lifecycle')).toHaveTextContent(
+      'release-2026.05.12'
     );
   });
 

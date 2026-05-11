@@ -1601,6 +1601,7 @@ export interface ElectionVerificationPackageStatusView {
   Sp05Evidence?: ElectionSp05EvidenceStatusView;
   Sp06Evidence?: ElectionSp06EvidenceStatusView;
   Sp07Evidence?: ElectionSp07EvidenceStatusView;
+  Sp08ReleaseIntegrity?: ElectionSp08ReleaseIntegrityStatusView;
 }
 
 export interface ElectionSp04EvidenceStatusView {
@@ -1692,6 +1693,58 @@ export interface ElectionSp07ReadinessBlockerView {
   Message: string;
   BlocksOpen: boolean;
   BlocksFinalization: boolean;
+}
+
+export interface ElectionSp08ReleaseIntegrityStatusView {
+  EvidenceExpected: boolean;
+  PublicEvidenceAvailable: boolean;
+  RestrictedEvidenceAvailable: boolean;
+  EvidenceMode: string;
+  NotForReleaseIntegrityClaims: boolean;
+  BlocksHighAssurance: boolean;
+  ReleaseManifestName: string;
+  ReleaseManifestHash: string;
+  ProtocolPackageManifestName: string;
+  ProtocolPackageManifestHash: string;
+  PrimaryResultCode: string;
+  PrimaryIssue: string;
+  ComponentCount: number;
+  LifecycleBindingCount: number;
+  EvidenceFileCount: number;
+  MobileEvidenceIncluded: boolean;
+  Message: string;
+  Components: ElectionSp08ReleaseComponentStatusView[];
+  LifecycleBindings: ElectionSp08LifecycleBindingStatusView[];
+  EvidenceFiles: ElectionSp08EvidenceFileStatusView[];
+}
+
+export interface ElectionSp08ReleaseComponentStatusView {
+  ComponentId: string;
+  ComponentType: string;
+  EvidenceMode: string;
+  ArtifactName: string;
+  ArtifactDigest: string;
+  ImmutableReference: string;
+  BuildWorkflowRunId: string;
+  DistributionReference: string;
+  HasSigningFingerprint: boolean;
+  IsPlaceholder: boolean;
+}
+
+export interface ElectionSp08LifecycleBindingStatusView {
+  LifecycleStage: string;
+  ExpectedReleaseId: string;
+  ObservedReleaseId: string;
+  ExpectedArtifactDigest: string;
+  ObservedArtifactDigest: string;
+  MatchesSealedPolicy: boolean;
+}
+
+export interface ElectionSp08EvidenceFileStatusView {
+  RelativePath: string;
+  Visibility: ElectionVerificationArtifactVisibilityProto;
+  IsPresent: boolean;
+  ContentHash: string;
 }
 
 export interface ElectionRosterImportEvidenceView {
@@ -2483,6 +2536,7 @@ export interface GetElectionOpenReadinessResponse {
   ProtocolPackageBindingMessage: string;
   Sp06Evidence?: ElectionSp06EvidenceStatusView;
   Sp07Evidence?: ElectionSp07EvidenceStatusView;
+  Sp08ReleaseIntegrity?: ElectionSp08ReleaseIntegrityStatusView;
 }
 
 export interface GetElectionResponse {

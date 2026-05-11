@@ -28,6 +28,7 @@ import {
   formatArtifactValue,
   formatTimestamp,
   getSp07VerificationPackagePresentation,
+  getSp08VerificationPackagePresentation,
   shortenProtocolPackageHash,
 } from './contracts';
 import { AvailabilityCard } from './HushVotingWorkspaceShared';
@@ -229,6 +230,52 @@ function getSp06EvidenceAccent(status: ElectionVerificationPackageStatusView): s
   return evidence.LatestCtrlResultCode ? 'text-green-100' : 'text-amber-100';
 }
 
+function getReleaseIntegrityToneClass(tone: 'neutral' | 'success' | 'warning' | 'error'): string {
+  switch (tone) {
+    case 'success':
+      return 'text-green-100';
+    case 'warning':
+      return 'text-amber-100';
+    case 'error':
+      return 'text-red-100';
+    case 'neutral':
+    default:
+      return 'text-hush-text-primary';
+  }
+}
+
+function getReleaseIntegritySurfaceClass(tone: 'neutral' | 'success' | 'warning' | 'error'): string {
+  switch (tone) {
+    case 'success':
+      return 'bg-green-500/10';
+    case 'warning':
+      return 'bg-amber-500/10';
+    case 'error':
+      return 'bg-red-500/10';
+    case 'neutral':
+    default:
+      return 'bg-black/20';
+  }
+}
+
+function getReleaseIntegrityIcon(tone: 'neutral' | 'success' | 'warning' | 'error') {
+  switch (tone) {
+    case 'success':
+      return CheckCircle2;
+    case 'warning':
+      return TriangleAlert;
+    case 'error':
+      return AlertCircle;
+    case 'neutral':
+    default:
+      return Info;
+  }
+}
+
+function formatReleaseIntegrityMode(value?: string): string {
+  return value || 'Not recorded';
+}
+
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';
   const chunkSize = 0x8000;
@@ -324,6 +371,10 @@ export function VerificationPackageStatusSection({
   const VerifierIcon = verifierCopy.icon;
   const protocolBinding = status.ProtocolPackageBinding;
   const sp07Presentation = getSp07VerificationPackagePresentation(status, 'auditor');
+  const sp08Presentation = getSp08VerificationPackagePresentation(status, 'auditor');
+  const ReleaseIntegrityIcon = sp08Presentation
+    ? getReleaseIntegrityIcon(sp08Presentation.tone)
+    : Info;
 
   const handleExport = async (packageView: ElectionVerificationPackageViewProto) => {
     setLoadingPackageView(packageView);
@@ -706,6 +757,279 @@ export function VerificationPackageStatusSection({
                 </li>
               ))}
             </ul>
+          ) : null}
+        </div>
+      ) : null}
+
+      {status.Sp08ReleaseIntegrity && sp08Presentation ? (
+        <div
+          className={`mt-5 rounded-2xl p-4 ${getReleaseIntegritySurfaceClass(sp08Presentation.tone)}`}
+          data-testid="verification-package-sp08-evidence"
+        >
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                SP-08 release integrity
+              </div>
+              <div
+                className={`mt-2 flex items-center gap-2 text-sm font-semibold ${getReleaseIntegrityToneClass(sp08Presentation.tone)}`}
+              >
+                <ReleaseIntegrityIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span>{sp08Presentation.label}</span>
+              </div>
+              <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
+                {sp08Presentation.description}
+              </p>
+              <div className="mt-2 font-mono text-xs text-hush-text-accent">
+                {sp08Presentation.primaryResultCode || 'REL not available'}
+              </div>
+            </div>
+
+            <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="rounded-2xl bg-black/20 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Evidence mode
+                </div>
+                <div className="mt-2 break-words text-sm font-semibold text-hush-text-primary">
+                  {formatReleaseIntegrityMode(sp08Presentation.evidenceMode)}
+                </div>
+                {status.Sp08ReleaseIntegrity.NotForReleaseIntegrityClaims ? (
+                  <div className="mt-1 text-xs text-amber-100">
+                    Not for release-integrity claims
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="rounded-2xl bg-black/20 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Release manifest
+                </div>
+                <div className="mt-2 break-words text-sm font-semibold text-hush-text-primary">
+                  {status.Sp08ReleaseIntegrity.ReleaseManifestName || 'Not recorded'}
+                </div>
+                <div
+                  className="mt-1 break-all font-mono text-xs text-hush-text-accent"
+                  title={sp08Presentation.releaseManifestHashFull || undefined}
+                >
+                  {sp08Presentation.releaseManifestHashShort}
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-black/20 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Evidence files
+                </div>
+                <div className="mt-2 text-sm font-semibold text-hush-text-primary">
+                  {sp08Presentation.evidenceFileCount} public files
+                </div>
+                <div className="mt-1 text-xs text-hush-text-accent">
+                  Components {sp08Presentation.componentCount} / lifecycle{' '}
+                  {sp08Presentation.lifecycleBindingCount}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <div className="rounded-2xl bg-black/20 p-3">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                Protocol package manifest
+              </div>
+              <div className="mt-2 break-words text-sm font-semibold text-hush-text-primary">
+                {status.Sp08ReleaseIntegrity.ProtocolPackageManifestName || 'Not recorded'}
+              </div>
+              <div
+                className="mt-1 break-all font-mono text-xs text-hush-text-accent"
+                title={sp08Presentation.protocolPackageManifestHashFull || undefined}
+              >
+                {sp08Presentation.protocolPackageManifestHashShort}
+              </div>
+            </div>
+
+            <div className="rounded-2xl bg-black/20 p-3">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                Lifecycle binding
+              </div>
+              <div className="mt-2 text-sm font-semibold text-hush-text-primary">
+                {sp08Presentation.lifecycleMismatchCount > 0
+                  ? `${sp08Presentation.lifecycleMismatchCount} mismatch`
+                  : 'Observed releases match'}
+              </div>
+              <div className="mt-1 text-xs text-hush-text-accent">
+                {sp08Presentation.blocksHighAssurance
+                  ? 'Blocks high-assurance claims'
+                  : 'No high-assurance block reported'}
+              </div>
+            </div>
+
+            <div className="rounded-2xl bg-black/20 p-3">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                Mobile evidence
+              </div>
+              <div className="mt-2 text-sm font-semibold text-hush-text-primary">
+                {sp08Presentation.mobileEvidenceIncluded ? 'Included' : 'Not included'}
+              </div>
+              <div className="mt-1 text-xs text-hush-text-accent">
+                Aggregate release evidence only
+              </div>
+            </div>
+          </div>
+
+          {sp08Presentation.blockingCodes.length > 0 ? (
+            <ul
+              className={`mt-4 space-y-2 text-sm ${getReleaseIntegrityToneClass(sp08Presentation.tone)}`}
+              aria-label="SP-08 release-integrity blockers"
+            >
+              {sp08Presentation.blockingCodes.map((code) => (
+                <li key={code} className="rounded-2xl bg-black/20 px-3 py-2 font-mono text-xs">
+                  {code}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+
+          {sp08Presentation.showTechnicalRefs ? (
+            <details className="mt-4 rounded-2xl bg-black/18 p-4">
+              <summary className="cursor-pointer text-sm font-medium text-hush-text-primary">
+                Show release evidence details
+              </summary>
+
+              <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_1fr]">
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                    Components
+                  </div>
+                  <div className="mt-3 space-y-2" data-testid="verification-package-sp08-components">
+                    {status.Sp08ReleaseIntegrity.Components.length > 0 ? (
+                      status.Sp08ReleaseIntegrity.Components.map((component) => (
+                        <div
+                          key={`${component.ComponentId}-${component.ArtifactDigest}`}
+                          className="rounded-2xl bg-black/20 p-3"
+                        >
+                          <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="min-w-0">
+                              <div className="break-words text-sm font-semibold text-hush-text-primary">
+                                {component.ComponentId || 'component'}
+                              </div>
+                              <div className="mt-1 text-xs text-hush-text-accent">
+                                {component.ComponentType || 'component evidence'}
+                                {component.IsPlaceholder ? ' / placeholder' : ''}
+                                {component.HasSigningFingerprint ? ' / signed' : ''}
+                              </div>
+                            </div>
+                            <code
+                              className="break-all text-xs text-hush-text-primary sm:text-right"
+                              title={component.ArtifactDigest || undefined}
+                            >
+                              {formatArtifactValue(component.ArtifactDigest)}
+                            </code>
+                          </div>
+                          {component.ImmutableReference ? (
+                            <div
+                              className="mt-2 break-all font-mono text-xs text-hush-text-accent"
+                              title={component.ImmutableReference}
+                            >
+                              {formatArtifactValue(component.ImmutableReference)}
+                            </div>
+                          ) : null}
+                        </div>
+                      ))
+                    ) : (
+                      <div className="rounded-2xl bg-black/20 p-3 text-sm text-hush-text-accent">
+                        No component rows were projected.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid gap-4">
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                      Lifecycle observations
+                    </div>
+                    <div
+                      className="mt-3 space-y-2"
+                      data-testid="verification-package-sp08-lifecycle"
+                    >
+                      {status.Sp08ReleaseIntegrity.LifecycleBindings.length > 0 ? (
+                        status.Sp08ReleaseIntegrity.LifecycleBindings.map((binding) => (
+                          <div
+                            key={`${binding.LifecycleStage}-${binding.ExpectedReleaseId}-${binding.ObservedReleaseId}`}
+                            className="rounded-2xl bg-black/20 p-3"
+                          >
+                            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                              <div className="text-sm font-semibold text-hush-text-primary">
+                                {binding.LifecycleStage || 'lifecycle stage'}
+                              </div>
+                              <div
+                                className={`text-xs font-semibold ${
+                                  binding.MatchesSealedPolicy ? 'text-green-100' : 'text-red-100'
+                                }`}
+                              >
+                                {binding.MatchesSealedPolicy ? 'Matched' : 'Mismatch'}
+                              </div>
+                            </div>
+                            <div className="mt-2 grid gap-2 text-xs text-hush-text-accent sm:grid-cols-2">
+                              <div className="break-all">
+                                Expected: {binding.ExpectedReleaseId || 'Not recorded'} /{' '}
+                                {formatArtifactValue(binding.ExpectedArtifactDigest)}
+                              </div>
+                              <div className="break-all">
+                                Observed: {binding.ObservedReleaseId || 'Not recorded'} /{' '}
+                                {formatArtifactValue(binding.ObservedArtifactDigest)}
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="rounded-2xl bg-black/20 p-3 text-sm text-hush-text-accent">
+                          No lifecycle rows were projected.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                      Evidence files
+                    </div>
+                    <div className="mt-3 space-y-2" data-testid="verification-package-sp08-files">
+                      {status.Sp08ReleaseIntegrity.EvidenceFiles.length > 0 ? (
+                        status.Sp08ReleaseIntegrity.EvidenceFiles.map((file) => (
+                          <div
+                            key={file.RelativePath}
+                            className="rounded-2xl bg-black/20 p-3"
+                          >
+                            <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                              <div className="min-w-0 break-words text-sm font-semibold text-hush-text-primary">
+                                {file.RelativePath}
+                              </div>
+                              <div
+                                className={`text-xs font-semibold ${
+                                  file.IsPresent ? 'text-green-100' : 'text-red-100'
+                                }`}
+                              >
+                                {file.IsPresent ? 'Present' : 'Missing'}
+                              </div>
+                            </div>
+                            <div
+                              className="mt-2 break-all font-mono text-xs text-hush-text-accent"
+                              title={file.ContentHash || undefined}
+                            >
+                              {formatArtifactValue(file.ContentHash)}
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="rounded-2xl bg-black/20 p-3 text-sm text-hush-text-accent">
+                          No SP-08 evidence files were projected.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </details>
           ) : null}
         </div>
       ) : null}

@@ -36,6 +36,7 @@ import {
   type ElectionRecordView,
   type ElectionSummary,
   type ElectionSp07EvidenceStatusView,
+  type ElectionSp08ReleaseIntegrityStatusView,
   ElectionTrusteeCeremonyStateProto,
   type ElectionVerificationPackageStatusView,
   type GetElectionOpenReadinessResponse,
@@ -1126,6 +1127,304 @@ export function getSp07PublicationProofPresentation(
           'SP-07 publication-proof evidence is configured and waiting for the close lifecycle.',
       };
   }
+}
+
+export type Sp08ReleaseIntegrityUiState =
+  | 'not_visible'
+  | 'not_required'
+  | 'missing'
+  | 'placeholder'
+  | 'blocked'
+  | 'official';
+
+export type Sp08ReleaseIntegrityTone = 'neutral' | 'success' | 'warning' | 'error';
+
+export type Sp08ReleaseIntegrityAudience =
+  | 'owner-admin'
+  | 'auditor'
+  | 'trustee'
+  | 'voter'
+  | 'generic';
+
+export interface Sp08ReleaseIntegrityPresentation {
+  state: Sp08ReleaseIntegrityUiState;
+  label: string;
+  tone: Sp08ReleaseIntegrityTone;
+  description: string;
+  showTechnicalRefs: boolean;
+  publicEvidenceAvailable: boolean;
+  restrictedEvidenceAvailable: boolean;
+  blocksHighAssurance: boolean;
+  primaryResultCode: string;
+  evidenceMode: string;
+  componentCount: number;
+  lifecycleBindingCount: number;
+  lifecycleMismatchCount: number;
+  evidenceFileCount: number;
+  mobileEvidenceIncluded: boolean;
+  releaseManifestHashShort: string;
+  releaseManifestHashFull: string;
+  protocolPackageManifestHashShort: string;
+  protocolPackageManifestHashFull: string;
+  blockingCodes: string[];
+}
+
+const SP08_DEVELOPMENT_PLACEHOLDER_EVIDENCE_MODE = 'development_placeholder';
+const SP08_OFFICIAL_EVIDENCE_MODE = 'official_sp08';
+const SP08_RELEASE_INTEGRITY_VALID_RESULT_CODE = 'release_integrity_evidence_valid';
+const SP08_RELEASE_INTEGRITY_LIFECYCLE_MISMATCH_RESULT_CODE =
+  'release_integrity_lifecycle_mismatch';
+
+export function getSp08VerificationPackagePresentation(
+  status?: Pick<ElectionVerificationPackageStatusView, 'IsVisible' | 'Sp08ReleaseIntegrity'> | null,
+  audience: Sp08ReleaseIntegrityAudience = 'owner-admin'
+): Sp08ReleaseIntegrityPresentation | null {
+  if (audience === 'voter') {
+    return null;
+  }
+
+  if (status && !status.IsVisible) {
+    return createSp08NotVisiblePresentation();
+  }
+
+  return getSp08ReleaseIntegrityPresentation(status?.Sp08ReleaseIntegrity, audience);
+}
+
+export function getSp08OpenReadinessPresentation(
+  readiness?: Pick<GetElectionOpenReadinessResponse, 'Sp08ReleaseIntegrity'> | null,
+  audience: Sp08ReleaseIntegrityAudience = 'owner-admin'
+): Sp08ReleaseIntegrityPresentation | null {
+  return getSp08ReleaseIntegrityPresentation(readiness?.Sp08ReleaseIntegrity, audience);
+}
+
+export function getSp08ReleaseIntegrityPresentation(
+  evidence?: ElectionSp08ReleaseIntegrityStatusView | null,
+  audience: Sp08ReleaseIntegrityAudience = 'owner-admin'
+): Sp08ReleaseIntegrityPresentation | null {
+  if (audience === 'voter') {
+    return null;
+  }
+
+  if (!evidence) {
+    return createSp08NotVisiblePresentation();
+  }
+
+  if (!evidence.EvidenceExpected) {
+    return {
+      state: 'not_required',
+      label: 'Release integrity not required',
+      tone: 'neutral',
+      description:
+        evidence.Message ||
+        'This election profile does not require SP-08 release-integrity evidence.',
+      showTechnicalRefs: false,
+      publicEvidenceAvailable: false,
+      restrictedEvidenceAvailable: false,
+      blocksHighAssurance: false,
+      primaryResultCode: evidence.PrimaryResultCode,
+      evidenceMode: evidence.EvidenceMode,
+      componentCount: 0,
+      lifecycleBindingCount: 0,
+      lifecycleMismatchCount: 0,
+      evidenceFileCount: 0,
+      mobileEvidenceIncluded: false,
+      releaseManifestHashShort: shortenProtocolPackageHash(evidence.ReleaseManifestHash),
+      releaseManifestHashFull: evidence.ReleaseManifestHash,
+      protocolPackageManifestHashShort: shortenProtocolPackageHash(
+        evidence.ProtocolPackageManifestHash
+      ),
+      protocolPackageManifestHashFull: evidence.ProtocolPackageManifestHash,
+      blockingCodes: [],
+    };
+  }
+
+  const lifecycleMismatchCount = evidence.LifecycleBindings.filter(
+    (binding) => !binding.MatchesSealedPolicy
+  ).length;
+  const usesPlaceholderEvidence =
+    evidence.NotForReleaseIntegrityClaims ||
+    evidence.EvidenceMode === SP08_DEVELOPMENT_PLACEHOLDER_EVIDENCE_MODE ||
+    evidence.Components.some((component) => component.IsPlaceholder);
+  const usesOfficialEvidence =
+    evidence.EvidenceMode === SP08_OFFICIAL_EVIDENCE_MODE &&
+    !evidence.NotForReleaseIntegrityClaims;
+  const hasValidOfficialEvidence =
+    usesOfficialEvidence &&
+    evidence.PrimaryResultCode === SP08_RELEASE_INTEGRITY_VALID_RESULT_CODE &&
+    !evidence.BlocksHighAssurance &&
+    lifecycleMismatchCount === 0;
+
+  const state = resolveSp08ReleaseIntegrityState(
+    evidence,
+    usesPlaceholderEvidence,
+    hasValidOfficialEvidence,
+    lifecycleMismatchCount
+  );
+  const blockingCodes = resolveSp08BlockingCodes(evidence, state, lifecycleMismatchCount);
+
+  return {
+    state,
+    label: resolveSp08ReleaseIntegrityLabel(state),
+    tone: resolveSp08ReleaseIntegrityTone(state, evidence.BlocksHighAssurance),
+    description: resolveSp08ReleaseIntegrityDescription(evidence, state),
+    showTechnicalRefs: true,
+    publicEvidenceAvailable: evidence.PublicEvidenceAvailable,
+    restrictedEvidenceAvailable: evidence.RestrictedEvidenceAvailable,
+    blocksHighAssurance: evidence.BlocksHighAssurance,
+    primaryResultCode: evidence.PrimaryResultCode,
+    evidenceMode: evidence.EvidenceMode,
+    componentCount: evidence.ComponentCount,
+    lifecycleBindingCount: evidence.LifecycleBindingCount,
+    lifecycleMismatchCount,
+    evidenceFileCount: evidence.EvidenceFileCount,
+    mobileEvidenceIncluded: evidence.MobileEvidenceIncluded,
+    releaseManifestHashShort: shortenProtocolPackageHash(evidence.ReleaseManifestHash),
+    releaseManifestHashFull: evidence.ReleaseManifestHash,
+    protocolPackageManifestHashShort: shortenProtocolPackageHash(
+      evidence.ProtocolPackageManifestHash
+    ),
+    protocolPackageManifestHashFull: evidence.ProtocolPackageManifestHash,
+    blockingCodes,
+  };
+}
+
+function createSp08NotVisiblePresentation(): Sp08ReleaseIntegrityPresentation {
+  return {
+    state: 'not_visible',
+    label: 'Release integrity not visible',
+    tone: 'neutral',
+    description: 'SP-08 release-integrity status is not available on this surface.',
+    showTechnicalRefs: false,
+    publicEvidenceAvailable: false,
+    restrictedEvidenceAvailable: false,
+    blocksHighAssurance: false,
+    primaryResultCode: '',
+    evidenceMode: '',
+    componentCount: 0,
+    lifecycleBindingCount: 0,
+    lifecycleMismatchCount: 0,
+    evidenceFileCount: 0,
+    mobileEvidenceIncluded: false,
+    releaseManifestHashShort: 'Not recorded',
+    releaseManifestHashFull: '',
+    protocolPackageManifestHashShort: 'Not recorded',
+    protocolPackageManifestHashFull: '',
+    blockingCodes: [],
+  };
+}
+
+function resolveSp08ReleaseIntegrityState(
+  evidence: ElectionSp08ReleaseIntegrityStatusView,
+  usesPlaceholderEvidence: boolean,
+  hasValidOfficialEvidence: boolean,
+  lifecycleMismatchCount: number
+): Sp08ReleaseIntegrityUiState {
+  if (usesPlaceholderEvidence) {
+    return 'placeholder';
+  }
+
+  if (!evidence.PublicEvidenceAvailable || evidence.EvidenceFileCount === 0) {
+    return 'missing';
+  }
+
+  if (hasValidOfficialEvidence) {
+    return 'official';
+  }
+
+  if (evidence.BlocksHighAssurance || lifecycleMismatchCount > 0) {
+    return 'blocked';
+  }
+
+  return 'blocked';
+}
+
+function resolveSp08ReleaseIntegrityLabel(state: Sp08ReleaseIntegrityUiState): string {
+  switch (state) {
+    case 'not_visible':
+      return 'Release integrity not visible';
+    case 'not_required':
+      return 'Release integrity not required';
+    case 'missing':
+      return 'Release evidence missing';
+    case 'placeholder':
+      return 'Development placeholder';
+    case 'official':
+      return 'Official SP-08 evidence';
+    case 'blocked':
+    default:
+      return 'Release integrity blocked';
+  }
+}
+
+function resolveSp08ReleaseIntegrityTone(
+  state: Sp08ReleaseIntegrityUiState,
+  blocksHighAssurance: boolean
+): Sp08ReleaseIntegrityTone {
+  switch (state) {
+    case 'official':
+      return 'success';
+    case 'blocked':
+    case 'missing':
+      return 'error';
+    case 'placeholder':
+      return blocksHighAssurance ? 'error' : 'warning';
+    case 'not_visible':
+    case 'not_required':
+    default:
+      return 'neutral';
+  }
+}
+
+function resolveSp08ReleaseIntegrityDescription(
+  evidence: ElectionSp08ReleaseIntegrityStatusView,
+  state: Sp08ReleaseIntegrityUiState
+): string {
+  if (evidence.Message) {
+    return evidence.Message;
+  }
+
+  switch (state) {
+    case 'missing':
+      return 'SP-08 release-integrity evidence is not available in the verification package yet.';
+    case 'placeholder':
+      return 'Development placeholder SP-08 release evidence is present. It is not official release evidence and must not support release-integrity claims.';
+    case 'official':
+      return 'Official SP-08 release-integrity evidence is present in the verification package.';
+    case 'blocked':
+      return (
+        evidence.PrimaryIssue ||
+        'SP-08 release-integrity evidence has blocking findings that must be resolved before release-integrity claims can be made.'
+      );
+    case 'not_required':
+      return 'This election profile does not require SP-08 release-integrity evidence.';
+    case 'not_visible':
+    default:
+      return 'SP-08 release-integrity status is not available on this surface.';
+  }
+}
+
+function resolveSp08BlockingCodes(
+  evidence: ElectionSp08ReleaseIntegrityStatusView,
+  state: Sp08ReleaseIntegrityUiState,
+  lifecycleMismatchCount: number
+): string[] {
+  const blockingCodes = new Set<string>();
+
+  if (
+    evidence.PrimaryResultCode &&
+    (state === 'blocked' ||
+      state === 'missing' ||
+      state === 'placeholder' ||
+      evidence.BlocksHighAssurance)
+  ) {
+    blockingCodes.add(evidence.PrimaryResultCode);
+  }
+
+  if (lifecycleMismatchCount > 0) {
+    blockingCodes.add(SP08_RELEASE_INTEGRITY_LIFECYCLE_MISMATCH_RESULT_CODE);
+  }
+
+  return Array.from(blockingCodes);
 }
 
 export function getWarningTitle(code: ElectionWarningCodeProto): string {
