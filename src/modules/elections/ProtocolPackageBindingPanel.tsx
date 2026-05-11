@@ -162,7 +162,20 @@ export function ProtocolPackageBindingPanel({
           <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
             External review
           </div>
-          <div className="mt-2">{presentation.externalReviewLabel}</div>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${getToneClass(presentation.externalReviewTone)}`}>
+              {presentation.externalReviewLabel}
+            </span>
+            <span className="rounded-full bg-black/20 px-2.5 py-1 font-mono text-xs text-hush-text-accent">
+              {presentation.externalReviewAvailability}
+            </span>
+          </div>
+          <div className="mt-2 text-xs text-hush-text-accent">
+            {presentation.externalReviewDescription}
+          </div>
+          <div className="mt-2 break-all font-mono text-xs text-hush-text-accent" title={presentation.externalReviewScope}>
+            {presentation.externalReviewScope}
+          </div>
         </div>
         <div className="rounded-2xl bg-emerald-500/12 p-3 text-sm text-hush-text-primary">
           <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
