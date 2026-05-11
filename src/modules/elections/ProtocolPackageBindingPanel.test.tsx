@@ -44,6 +44,9 @@ describe('ProtocolPackageBindingPanel', () => {
     expect(screen.getByText('Sealed at open')).toBeInTheDocument();
     expect(screen.getByText('These package refs are immutable evidence for this election.')).toBeInTheDocument();
     expect(screen.getByText('Access-location availability is operational; sealed hashes remain the election evidence.')).toBeInTheDocument();
+    expect(screen.getByText('No external review conclusion')).toBeInTheDocument();
+    expect(screen.getByText('not_available')).toBeInTheDocument();
+    expect(screen.getByText('protocol_proof_verifier_publication_path_v1')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open Public spec package access location' })).toHaveAttribute(
       'href',
       'https://www.hushnetwork.social/protocol-omega/hushvoting-v1/v1.0.0/spec.zip'

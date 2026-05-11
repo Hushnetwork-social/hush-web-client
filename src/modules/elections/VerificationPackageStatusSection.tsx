@@ -29,6 +29,7 @@ import {
   formatTimestamp,
   getSp07VerificationPackagePresentation,
   getSp08VerificationPackagePresentation,
+  getSp09VerificationPackagePresentation,
   shortenProtocolPackageHash,
 } from './contracts';
 import { AvailabilityCard } from './HushVotingWorkspaceShared';
@@ -372,8 +373,12 @@ export function VerificationPackageStatusSection({
   const protocolBinding = status.ProtocolPackageBinding;
   const sp07Presentation = getSp07VerificationPackagePresentation(status, 'auditor');
   const sp08Presentation = getSp08VerificationPackagePresentation(status, 'auditor');
+  const sp09Presentation = getSp09VerificationPackagePresentation(status, 'auditor');
   const ReleaseIntegrityIcon = sp08Presentation
     ? getReleaseIntegrityIcon(sp08Presentation.tone)
+    : Info;
+  const ExternalReviewIcon = sp09Presentation
+    ? getReleaseIntegrityIcon(sp09Presentation.tone)
     : Info;
 
   const handleExport = async (packageView: ElectionVerificationPackageViewProto) => {
@@ -1027,6 +1032,222 @@ export function VerificationPackageStatusSection({
                       )}
                     </div>
                   </div>
+                </div>
+              </div>
+            </details>
+          ) : null}
+        </div>
+      ) : null}
+
+      {status.Sp09ExternalReview && sp09Presentation ? (
+        <div
+          className={`mt-5 rounded-2xl p-4 ${getReleaseIntegritySurfaceClass(sp09Presentation.tone)}`}
+          data-testid="verification-package-sp09-external-review"
+        >
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                SP-09 external review
+              </div>
+              <div
+                className={`mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ${getReleaseIntegrityToneClass(sp09Presentation.tone)}`}
+              >
+                <ExternalReviewIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span>{sp09Presentation.label}</span>
+              </div>
+              <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
+                {sp09Presentation.description}
+              </p>
+              <div className="mt-2 font-mono text-xs text-hush-text-accent">
+                {sp09Presentation.primaryResultCode || 'REV not available'}
+              </div>
+            </div>
+
+            <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="rounded-2xl bg-black/20 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Availability
+                </div>
+                <div className="mt-2 break-words text-sm font-semibold text-hush-text-primary">
+                  {sp09Presentation.availability}
+                </div>
+                <div className="mt-1 text-xs text-hush-text-accent">
+                  {sp09Presentation.detailedStatus}
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-black/20 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Claim state
+                </div>
+                <div className="mt-2 break-words text-sm font-semibold text-hush-text-primary">
+                  {sp09Presentation.claimState}
+                </div>
+                <div className="mt-1 text-xs text-hush-text-accent">
+                  {sp09Presentation.programVersion}
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-black/20 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Reviewed artifacts
+                </div>
+                <div className="mt-2 text-sm font-semibold text-hush-text-primary">
+                  {sp09Presentation.reviewedArtifactCount}
+                </div>
+                <div className="mt-1 text-xs text-hush-text-accent">
+                  Open findings {sp09Presentation.openFindingCount}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <div className="rounded-2xl bg-black/20 p-3">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                Review scope
+              </div>
+              <div
+                className="mt-2 break-all font-mono text-xs text-hush-text-primary"
+                title={sp09Presentation.reviewScope}
+              >
+                {sp09Presentation.reviewScopeShort}
+              </div>
+            </div>
+
+            <div className="rounded-2xl bg-black/20 p-3">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                High/Critical open
+              </div>
+              <div className="mt-2 text-sm font-semibold text-hush-text-primary">
+                {sp09Presentation.openHighFindingCount} high / {sp09Presentation.openCriticalFindingCount} critical
+              </div>
+              <div className="mt-1 text-xs text-hush-text-accent">
+                Strong claims are blocked when high or critical findings remain open.
+              </div>
+            </div>
+
+            <div className="rounded-2xl bg-black/20 p-3">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                Evidence files
+              </div>
+              <div className="mt-2 text-sm font-semibold text-hush-text-primary">
+                {sp09Presentation.evidenceFileCount}
+              </div>
+              <div className="mt-1 text-xs text-hush-text-accent">
+                Public package keeps restricted report and finding detail out of view.
+              </div>
+            </div>
+          </div>
+
+          {sp09Presentation.blockingCodes.length > 0 ? (
+            <ul
+              className={`mt-4 space-y-2 text-sm ${getReleaseIntegrityToneClass(sp09Presentation.tone)}`}
+              aria-label="SP-09 external-review blockers"
+            >
+              {sp09Presentation.blockingCodes.map((code) => (
+                <li key={code} className="rounded-2xl bg-black/20 px-3 py-2 font-mono text-xs">
+                  {code}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+
+          {sp09Presentation.showTechnicalRefs ? (
+            <details className="mt-4 rounded-2xl bg-black/18 p-4">
+              <summary className="cursor-pointer text-sm font-medium text-hush-text-primary">
+                Show external review evidence details
+              </summary>
+
+              <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_1fr]">
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                    Finding summary
+                  </div>
+                  <div className="mt-3 space-y-2" data-testid="verification-package-sp09-findings">
+                    {status.Sp09ExternalReview.FindingSummary.length > 0 ? (
+                      status.Sp09ExternalReview.FindingSummary.map((finding) => (
+                        <div
+                          key={finding.Severity}
+                          className="rounded-2xl bg-black/20 p-3 text-sm text-hush-text-primary"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="font-semibold">{finding.Severity}</span>
+                            <span className="font-mono text-xs text-hush-text-accent">
+                              open {finding.OpenCount} / fixed {finding.FixedCount} / accepted {finding.AcceptedLimitationCount}
+                            </span>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="rounded-2xl bg-black/20 p-3 text-sm text-hush-text-accent">
+                        No finding rows were projected.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                    Reviewed artifacts
+                  </div>
+                  <div className="mt-3 space-y-2" data-testid="verification-package-sp09-reviewed-artifacts">
+                    {status.Sp09ExternalReview.ReviewedArtifacts.length > 0 ? (
+                      status.Sp09ExternalReview.ReviewedArtifacts.map((artifact) => (
+                        <div
+                          key={`${artifact.ArtifactId}-${artifact.ArtifactHash}`}
+                          className="rounded-2xl bg-black/20 p-3"
+                        >
+                          <div className="break-words text-sm font-semibold text-hush-text-primary">
+                            {artifact.ArtifactName || artifact.ArtifactId}
+                          </div>
+                          <div
+                            className="mt-2 break-all font-mono text-xs text-hush-text-accent"
+                            title={artifact.ArtifactHash || undefined}
+                          >
+                            {formatArtifactValue(artifact.ArtifactHash)}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="rounded-2xl bg-black/20 p-3 text-sm text-hush-text-accent">
+                        No reviewer-scoped artifact hashes are available yet.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Evidence files
+                </div>
+                <div className="mt-3 space-y-2" data-testid="verification-package-sp09-files">
+                  {status.Sp09ExternalReview.EvidenceFiles.map((file) => (
+                    <div
+                      key={file.RelativePath}
+                      className="rounded-2xl bg-black/20 p-3"
+                    >
+                      <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0 break-words text-sm font-semibold text-hush-text-primary">
+                          {file.RelativePath}
+                        </div>
+                        <div
+                          className={`text-xs font-semibold ${
+                            file.IsPresent ? 'text-green-100' : 'text-red-100'
+                          }`}
+                        >
+                          {file.IsPresent ? 'Present' : 'Missing'}
+                        </div>
+                      </div>
+                      <div
+                        className="mt-2 break-all font-mono text-xs text-hush-text-accent"
+                        title={file.ContentHash || undefined}
+                      >
+                        {formatArtifactValue(file.ContentHash)}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </details>

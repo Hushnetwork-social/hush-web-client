@@ -8,6 +8,7 @@ import {
   type ElectionProtocolPackageBindingView,
 } from '@/lib/grpc';
 import {
+  getSp09VerificationPackagePresentation,
   getProtocolPackageBindingPresentation,
   shortenProtocolPackageHash,
 } from './contracts';
@@ -77,7 +78,10 @@ describe('protocol package presentation contracts', () => {
     expect(presentation.specHashShort).toBe('aaaaaaaaaaaa...aaaaaaaa');
     expect(presentation.specHashFull).toHaveLength(64);
     expect(presentation.approvalLabel).toBe('Approved internal');
-    expect(presentation.externalReviewLabel).toBe('Not externally reviewed');
+    expect(presentation.externalReviewLabel).toBe('No external review conclusion');
+    expect(presentation.externalReviewAvailability).toBe('not_available');
+    expect(presentation.externalReviewClaimState).toBe('program_defined');
+    expect(presentation.externalReviewDescription).toContain('no reviewer conclusion');
   });
 
   it.each([
@@ -102,11 +106,11 @@ describe('protocol package presentation contracts', () => {
   );
 
   it.each([
-    [ProtocolPackageExternalReviewStatusProto.NotReviewed, 'Not externally reviewed'],
+    [ProtocolPackageExternalReviewStatusProto.NotReviewed, 'No external review conclusion'],
     [ProtocolPackageExternalReviewStatusProto.ReviewRequested, 'External review requested'],
     [ProtocolPackageExternalReviewStatusProto.ReviewInProgress, 'External review in progress'],
-    [ProtocolPackageExternalReviewStatusProto.ReviewedWithFindings, 'Reviewed with findings'],
-    [ProtocolPackageExternalReviewStatusProto.ReviewedAccepted, 'External review accepted'],
+    [ProtocolPackageExternalReviewStatusProto.ReviewedWithFindings, 'Review has findings'],
+    [ProtocolPackageExternalReviewStatusProto.ReviewedAccepted, 'Reviewed for declared scope'],
   ] as const)('keeps external review status copy non-certifying for %s', (status, expectedLabel) => {
     const presentation = getProtocolPackageBindingPresentation(createBinding({
       ExternalReviewStatus: status,
@@ -114,6 +118,95 @@ describe('protocol package presentation contracts', () => {
 
     expect(presentation.externalReviewLabel).toBe(expectedLabel);
     expect(presentation.externalReviewLabel.toLowerCase()).not.toContain('certified');
+    expect(presentation.externalReviewDescription.toLowerCase()).not.toContain('externally audited');
+  });
+
+  it('maps SP-09 planned review status without certification wording', () => {
+    const presentation = getSp09VerificationPackagePresentation({
+      IsVisible: true,
+      Sp09ExternalReview: {
+        EvidenceExpected: true,
+        PublicEvidenceAvailable: true,
+        RestrictedEvidenceAvailable: false,
+        ProgramVersion: 'SP09-P1',
+        ReviewScope: 'protocol_proof_verifier_publication_path_v1',
+        ReviewType: 'private_third_party_crypto_protocol_review_v1',
+        ReviewPhase: 'SP09-P1',
+        DetailedStatus: 'not_started',
+        Availability: 'planned',
+        ClaimState: 'program_defined',
+        ReviewScopeMatchesElection: true,
+        PrimaryResultCode: 'external_review_not_complete',
+        PrimaryIssue: '',
+        CustomerSafeSummaryHash: '',
+        CustomerSafeSummaryUrl: '',
+        KnownLimitationsVersion: '',
+        KnownLimitationsHash: '',
+        ReviewedArtifactCount: 0,
+        OpenCriticalFindingCount: 0,
+        OpenHighFindingCount: 0,
+        OpenFindingCount: 0,
+        PublicEvidenceFileCount: 3,
+        RestrictedEvidenceFileCount: 0,
+        BlocksReviewedClaims: false,
+        RequiresRedesign: false,
+        Message: '',
+        ReviewedArtifacts: [],
+        FindingSummary: [],
+        EvidenceFiles: [],
+      },
+    }, 'auditor');
+
+    expect(presentation?.state).toBe('planned');
+    expect(presentation?.label).toBe('Review planned');
+    expect(presentation?.description).toContain('no reviewer conclusion');
+    expect(presentation?.description.toLowerCase()).not.toContain('certified');
+  });
+
+  it('maps SP-09 blocking review states to explicit error copy', () => {
+    const presentation = getSp09VerificationPackagePresentation({
+      IsVisible: true,
+      Sp09ExternalReview: {
+        EvidenceExpected: true,
+        PublicEvidenceAvailable: true,
+        RestrictedEvidenceAvailable: true,
+        ProgramVersion: 'SP09-P1',
+        ReviewScope: 'protocol_proof_verifier_publication_path_v1',
+        ReviewType: 'private_third_party_crypto_protocol_review_v1',
+        ReviewPhase: 'SP09-P1',
+        DetailedStatus: 'requires_redesign',
+        Availability: 'not_available',
+        ClaimState: 'blocked_requires_redesign',
+        ReviewScopeMatchesElection: true,
+        PrimaryResultCode: 'external_review_requires_redesign',
+        PrimaryIssue: '',
+        CustomerSafeSummaryHash: '',
+        CustomerSafeSummaryUrl: '',
+        KnownLimitationsVersion: '',
+        KnownLimitationsHash: '',
+        ReviewedArtifactCount: 3,
+        OpenCriticalFindingCount: 1,
+        OpenHighFindingCount: 0,
+        OpenFindingCount: 1,
+        PublicEvidenceFileCount: 3,
+        RestrictedEvidenceFileCount: 3,
+        BlocksReviewedClaims: true,
+        RequiresRedesign: true,
+        Message: '',
+        ReviewedArtifacts: [],
+        FindingSummary: [],
+        EvidenceFiles: [],
+      },
+    }, 'owner-admin');
+
+    expect(presentation?.state).toBe('requires_redesign');
+    expect(presentation?.tone).toBe('error');
+    expect(presentation?.blockingCodes).toContain('external_review_requires_redesign');
+    expect(presentation?.description).toContain('redesign');
+  });
+
+  it('hides SP-09 presentation for voter audience', () => {
+    expect(getSp09VerificationPackagePresentation({ IsVisible: true }, 'voter')).toBeNull();
   });
 
   it('keeps reference-only copy separate from sealed-at-open evidence', () => {

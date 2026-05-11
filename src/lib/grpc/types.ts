@@ -1602,6 +1602,7 @@ export interface ElectionVerificationPackageStatusView {
   Sp06Evidence?: ElectionSp06EvidenceStatusView;
   Sp07Evidence?: ElectionSp07EvidenceStatusView;
   Sp08ReleaseIntegrity?: ElectionSp08ReleaseIntegrityStatusView;
+  Sp09ExternalReview?: ElectionSp09ExternalReviewStatusView;
 }
 
 export interface ElectionSp04EvidenceStatusView {
@@ -1741,6 +1742,61 @@ export interface ElectionSp08LifecycleBindingStatusView {
 }
 
 export interface ElectionSp08EvidenceFileStatusView {
+  RelativePath: string;
+  Visibility: ElectionVerificationArtifactVisibilityProto;
+  IsPresent: boolean;
+  ContentHash: string;
+}
+
+export interface ElectionSp09ExternalReviewStatusView {
+  EvidenceExpected: boolean;
+  PublicEvidenceAvailable: boolean;
+  RestrictedEvidenceAvailable: boolean;
+  ProgramVersion: string;
+  ReviewScope: string;
+  ReviewType: string;
+  ReviewPhase: string;
+  DetailedStatus: string;
+  Availability: string;
+  ClaimState: string;
+  ReviewScopeMatchesElection: boolean;
+  PrimaryResultCode: string;
+  PrimaryIssue: string;
+  CustomerSafeSummaryHash: string;
+  CustomerSafeSummaryUrl: string;
+  KnownLimitationsVersion: string;
+  KnownLimitationsHash: string;
+  ReviewedArtifactCount: number;
+  OpenCriticalFindingCount: number;
+  OpenHighFindingCount: number;
+  OpenFindingCount: number;
+  PublicEvidenceFileCount: number;
+  RestrictedEvidenceFileCount: number;
+  BlocksReviewedClaims: boolean;
+  RequiresRedesign: boolean;
+  Message: string;
+  ReviewedArtifacts: ElectionSp09ReviewedArtifactStatusView[];
+  FindingSummary: ElectionSp09FindingSeverityStatusView[];
+  EvidenceFiles: ElectionSp09EvidenceFileStatusView[];
+}
+
+export interface ElectionSp09ReviewedArtifactStatusView {
+  ArtifactId: string;
+  ArtifactType: string;
+  ArtifactName: string;
+  ArtifactHash: string;
+  ArtifactVersion: string;
+  ReviewScope: string;
+}
+
+export interface ElectionSp09FindingSeverityStatusView {
+  Severity: string;
+  OpenCount: number;
+  FixedCount: number;
+  AcceptedLimitationCount: number;
+}
+
+export interface ElectionSp09EvidenceFileStatusView {
   RelativePath: string;
   Visibility: ElectionVerificationArtifactVisibilityProto;
   IsPresent: boolean;

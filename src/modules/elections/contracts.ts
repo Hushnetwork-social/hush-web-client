@@ -37,6 +37,7 @@ import {
   type ElectionSummary,
   type ElectionSp07EvidenceStatusView,
   type ElectionSp08ReleaseIntegrityStatusView,
+  type ElectionSp09ExternalReviewStatusView,
   ElectionTrusteeCeremonyStateProto,
   type ElectionVerificationPackageStatusView,
   type GetElectionOpenReadinessResponse,
@@ -1169,11 +1170,130 @@ export interface Sp08ReleaseIntegrityPresentation {
   blockingCodes: string[];
 }
 
+export type Sp09ExternalReviewUiState =
+  | 'not_visible'
+  | 'not_available'
+  | 'planned'
+  | 'available'
+  | 'open_findings'
+  | 'scope_mismatch'
+  | 'claim_blocked'
+  | 'requires_redesign';
+
+export type Sp09ExternalReviewTone = 'neutral' | 'success' | 'warning' | 'error';
+
+export type Sp09ExternalReviewAudience =
+  | 'owner-admin'
+  | 'auditor'
+  | 'trustee'
+  | 'voter'
+  | 'generic';
+
+export interface Sp09ExternalReviewPresentation {
+  state: Sp09ExternalReviewUiState;
+  label: string;
+  tone: Sp09ExternalReviewTone;
+  description: string;
+  showTechnicalRefs: boolean;
+  publicEvidenceAvailable: boolean;
+  restrictedEvidenceAvailable: boolean;
+  programVersion: string;
+  reviewScope: string;
+  reviewScopeShort: string;
+  reviewType: string;
+  reviewPhase: string;
+  detailedStatus: string;
+  availability: string;
+  claimState: string;
+  primaryResultCode: string;
+  primaryIssue: string;
+  reviewedArtifactCount: number;
+  openCriticalFindingCount: number;
+  openHighFindingCount: number;
+  openFindingCount: number;
+  evidenceFileCount: number;
+  blockingCodes: string[];
+}
+
 const SP08_DEVELOPMENT_PLACEHOLDER_EVIDENCE_MODE = 'development_placeholder';
 const SP08_OFFICIAL_EVIDENCE_MODE = 'official_sp08';
 const SP08_RELEASE_INTEGRITY_VALID_RESULT_CODE = 'release_integrity_evidence_valid';
 const SP08_RELEASE_INTEGRITY_LIFECYCLE_MISMATCH_RESULT_CODE =
   'release_integrity_lifecycle_mismatch';
+const SP09_REVIEW_SCOPE_PROTOCOL_OMEGA_V1 = 'protocol_proof_verifier_publication_path_v1';
+const SP09_PROGRAM_VERSION = 'SP09-P1';
+const SP09_REVIEW_TYPE_CRYPTO_SECURITY = 'private_third_party_crypto_protocol_review_v1';
+const SP09_AVAILABILITY_NOT_AVAILABLE = 'not_available';
+const SP09_AVAILABILITY_PLANNED = 'planned';
+const SP09_AVAILABILITY_AVAILABLE = 'available';
+const SP09_CLAIM_STATE_PROGRAM_DEFINED = 'program_defined';
+const SP09_CLAIM_STATE_PACKAGE_READY = 'package_ready';
+const SP09_CLAIM_STATE_IN_REVIEW = 'in_review';
+const SP09_CLAIM_STATE_REVIEWED_WITH_OPEN_FINDINGS = 'reviewed_with_open_findings';
+const SP09_CLAIM_STATE_REVIEWED_WITH_LIMITATIONS = 'reviewed_with_limitations';
+const SP09_CLAIM_STATE_REVIEWED_FOR_DECLARED_SCOPE = 'reviewed_for_declared_scope';
+const SP09_CLAIM_STATE_BLOCKED_REQUIRES_REDESIGN = 'blocked_requires_redesign';
+const SP09_RESULT_EXTERNAL_REVIEW_NOT_COMPLETE = 'external_review_not_complete';
+const SP09_RESULT_EXTERNAL_REVIEW_SCOPE_MISMATCH = 'external_review_scope_mismatch';
+const SP09_RESULT_EXTERNAL_REVIEW_OPEN_FINDINGS = 'external_review_open_findings_block_claims';
+const SP09_RESULT_EXTERNAL_REVIEW_CLAIM_NOT_ALLOWED = 'external_review_claim_not_allowed';
+const SP09_RESULT_EXTERNAL_REVIEW_PUBLIC_BOUNDARY = 'external_review_public_boundary_violation';
+const SP09_RESULT_EXTERNAL_REVIEW_REQUIRES_REDESIGN = 'external_review_requires_redesign';
+
+const SP09_ALLOWED_WORDING_BY_CLAIM_STATE: Record<string, string> = {
+  not_claimed: 'External examination is not claimed for this package.',
+  [SP09_CLAIM_STATE_PROGRAM_DEFINED]:
+    'External examination program is defined; no reviewer conclusion is available.',
+  [SP09_CLAIM_STATE_PACKAGE_READY]:
+    'External examination package is ready for review; no reviewer conclusion is available.',
+  [SP09_CLAIM_STATE_IN_REVIEW]:
+    'External examination is in progress; no reviewer conclusion is available.',
+  [SP09_CLAIM_STATE_REVIEWED_WITH_OPEN_FINDINGS]:
+    'External review artifact exists for the declared scope, but open findings limit or block affected claims.',
+  [SP09_CLAIM_STATE_REVIEWED_WITH_LIMITATIONS]:
+    'Reviewed for declared scope and version, with limitations documented.',
+  [SP09_CLAIM_STATE_REVIEWED_FOR_DECLARED_SCOPE]:
+    'Reviewed for declared scope and version.',
+  [SP09_CLAIM_STATE_BLOCKED_REQUIRES_REDESIGN]:
+    'Reviewer identified redesign work; external review claim is blocked for this scope.',
+  not_applicable_to_this_artifact_set:
+    'No applicable external review is available for this artifact set.',
+};
+
+const SP09_LEGACY_REVIEW_COPY: Record<
+  ProtocolPackageExternalReviewStatusProto,
+  {
+    label: string;
+    availability: string;
+    claimState: string;
+  }
+> = {
+  [ProtocolPackageExternalReviewStatusProto.NotReviewed]: {
+    label: 'No external review conclusion',
+    availability: SP09_AVAILABILITY_NOT_AVAILABLE,
+    claimState: SP09_CLAIM_STATE_PROGRAM_DEFINED,
+  },
+  [ProtocolPackageExternalReviewStatusProto.ReviewRequested]: {
+    label: 'External review requested',
+    availability: SP09_AVAILABILITY_PLANNED,
+    claimState: SP09_CLAIM_STATE_PACKAGE_READY,
+  },
+  [ProtocolPackageExternalReviewStatusProto.ReviewInProgress]: {
+    label: 'External review in progress',
+    availability: SP09_AVAILABILITY_PLANNED,
+    claimState: SP09_CLAIM_STATE_IN_REVIEW,
+  },
+  [ProtocolPackageExternalReviewStatusProto.ReviewedWithFindings]: {
+    label: 'Review has findings',
+    availability: SP09_AVAILABILITY_AVAILABLE,
+    claimState: SP09_CLAIM_STATE_REVIEWED_WITH_OPEN_FINDINGS,
+  },
+  [ProtocolPackageExternalReviewStatusProto.ReviewedAccepted]: {
+    label: 'Reviewed for declared scope',
+    availability: SP09_AVAILABILITY_AVAILABLE,
+    claimState: SP09_CLAIM_STATE_REVIEWED_FOR_DECLARED_SCOPE,
+  },
+};
 
 export function getSp08VerificationPackagePresentation(
   status?: Pick<ElectionVerificationPackageStatusView, 'IsVisible' | 'Sp08ReleaseIntegrity'> | null,
@@ -1188,6 +1308,218 @@ export function getSp08VerificationPackagePresentation(
   }
 
   return getSp08ReleaseIntegrityPresentation(status?.Sp08ReleaseIntegrity, audience);
+}
+
+export function getSp09VerificationPackagePresentation(
+  status?: Pick<ElectionVerificationPackageStatusView, 'IsVisible' | 'Sp09ExternalReview'> | null,
+  audience: Sp09ExternalReviewAudience = 'owner-admin'
+): Sp09ExternalReviewPresentation | null {
+  if (audience === 'voter') {
+    return null;
+  }
+
+  if (status && !status.IsVisible) {
+    return createSp09NotVisiblePresentation();
+  }
+
+  return getSp09ExternalReviewPresentation(status?.Sp09ExternalReview, audience);
+}
+
+export function getSp09ExternalReviewPresentation(
+  evidence?: ElectionSp09ExternalReviewStatusView | null,
+  audience: Sp09ExternalReviewAudience = 'owner-admin'
+): Sp09ExternalReviewPresentation | null {
+  if (audience === 'voter') {
+    return null;
+  }
+
+  if (!evidence) {
+    return createSp09NotVisiblePresentation();
+  }
+
+  const state = resolveSp09ExternalReviewState(evidence);
+  const blockingCodes = resolveSp09BlockingCodes(evidence, state);
+
+  return {
+    state,
+    label: resolveSp09ExternalReviewLabel(state),
+    tone: resolveSp09ExternalReviewTone(state),
+    description: evidence.Message || resolveSp09ExternalReviewDescription(evidence, state),
+    showTechnicalRefs: true,
+    publicEvidenceAvailable: evidence.PublicEvidenceAvailable,
+    restrictedEvidenceAvailable: evidence.RestrictedEvidenceAvailable,
+    programVersion: evidence.ProgramVersion || SP09_PROGRAM_VERSION,
+    reviewScope: evidence.ReviewScope || SP09_REVIEW_SCOPE_PROTOCOL_OMEGA_V1,
+    reviewScopeShort: shortenProtocolPackageHash(evidence.ReviewScope || SP09_REVIEW_SCOPE_PROTOCOL_OMEGA_V1),
+    reviewType: evidence.ReviewType || SP09_REVIEW_TYPE_CRYPTO_SECURITY,
+    reviewPhase: evidence.ReviewPhase || SP09_PROGRAM_VERSION,
+    detailedStatus: evidence.DetailedStatus || 'not_started',
+    availability: evidence.Availability || SP09_AVAILABILITY_NOT_AVAILABLE,
+    claimState: evidence.ClaimState || SP09_CLAIM_STATE_PROGRAM_DEFINED,
+    primaryResultCode: evidence.PrimaryResultCode || SP09_RESULT_EXTERNAL_REVIEW_NOT_COMPLETE,
+    primaryIssue: evidence.PrimaryIssue,
+    reviewedArtifactCount: evidence.ReviewedArtifactCount,
+    openCriticalFindingCount: evidence.OpenCriticalFindingCount,
+    openHighFindingCount: evidence.OpenHighFindingCount,
+    openFindingCount: evidence.OpenFindingCount,
+    evidenceFileCount: evidence.PublicEvidenceFileCount + evidence.RestrictedEvidenceFileCount,
+    blockingCodes,
+  };
+}
+
+function createSp09NotVisiblePresentation(): Sp09ExternalReviewPresentation {
+  return {
+    state: 'not_visible',
+    label: 'External review not visible',
+    tone: 'neutral',
+    description: 'SP-09 external-review status is not available on this surface.',
+    showTechnicalRefs: false,
+    publicEvidenceAvailable: false,
+    restrictedEvidenceAvailable: false,
+    programVersion: SP09_PROGRAM_VERSION,
+    reviewScope: SP09_REVIEW_SCOPE_PROTOCOL_OMEGA_V1,
+    reviewScopeShort: shortenProtocolPackageHash(SP09_REVIEW_SCOPE_PROTOCOL_OMEGA_V1),
+    reviewType: SP09_REVIEW_TYPE_CRYPTO_SECURITY,
+    reviewPhase: SP09_PROGRAM_VERSION,
+    detailedStatus: 'not_started',
+    availability: SP09_AVAILABILITY_NOT_AVAILABLE,
+    claimState: SP09_CLAIM_STATE_PROGRAM_DEFINED,
+    primaryResultCode: SP09_RESULT_EXTERNAL_REVIEW_NOT_COMPLETE,
+    primaryIssue: '',
+    reviewedArtifactCount: 0,
+    openCriticalFindingCount: 0,
+    openHighFindingCount: 0,
+    openFindingCount: 0,
+    evidenceFileCount: 0,
+    blockingCodes: [],
+  };
+}
+
+function resolveSp09ExternalReviewState(
+  evidence: ElectionSp09ExternalReviewStatusView
+): Sp09ExternalReviewUiState {
+  if (evidence.RequiresRedesign || evidence.PrimaryResultCode === SP09_RESULT_EXTERNAL_REVIEW_REQUIRES_REDESIGN) {
+    return 'requires_redesign';
+  }
+
+  if (evidence.PrimaryResultCode === SP09_RESULT_EXTERNAL_REVIEW_SCOPE_MISMATCH) {
+    return 'scope_mismatch';
+  }
+
+  if (
+    evidence.PrimaryResultCode === SP09_RESULT_EXTERNAL_REVIEW_CLAIM_NOT_ALLOWED ||
+    evidence.PrimaryResultCode === SP09_RESULT_EXTERNAL_REVIEW_PUBLIC_BOUNDARY
+  ) {
+    return 'claim_blocked';
+  }
+
+  if (
+    evidence.PrimaryResultCode === SP09_RESULT_EXTERNAL_REVIEW_OPEN_FINDINGS ||
+    evidence.OpenCriticalFindingCount > 0 ||
+    evidence.OpenHighFindingCount > 0 ||
+    evidence.ClaimState === SP09_CLAIM_STATE_REVIEWED_WITH_OPEN_FINDINGS
+  ) {
+    return 'open_findings';
+  }
+
+  if (evidence.Availability === SP09_AVAILABILITY_AVAILABLE) {
+    return 'available';
+  }
+
+  if (evidence.Availability === SP09_AVAILABILITY_PLANNED) {
+    return 'planned';
+  }
+
+  return 'not_available';
+}
+
+function resolveSp09ExternalReviewLabel(state: Sp09ExternalReviewUiState): string {
+  switch (state) {
+    case 'available':
+      return 'Review available';
+    case 'open_findings':
+      return 'Review has open findings';
+    case 'planned':
+      return 'Review planned';
+    case 'requires_redesign':
+      return 'Review requires redesign';
+    case 'scope_mismatch':
+      return 'Review scope mismatch';
+    case 'claim_blocked':
+      return 'Review claim blocked';
+    case 'not_available':
+      return 'Review not available';
+    case 'not_visible':
+    default:
+      return 'External review not visible';
+  }
+}
+
+function resolveSp09ExternalReviewTone(state: Sp09ExternalReviewUiState): Sp09ExternalReviewTone {
+  switch (state) {
+    case 'available':
+      return 'success';
+    case 'planned':
+    case 'open_findings':
+      return 'warning';
+    case 'requires_redesign':
+    case 'scope_mismatch':
+    case 'claim_blocked':
+      return 'error';
+    case 'not_available':
+    case 'not_visible':
+    default:
+      return 'neutral';
+  }
+}
+
+function resolveSp09ExternalReviewDescription(
+  evidence: ElectionSp09ExternalReviewStatusView,
+  state: Sp09ExternalReviewUiState
+): string {
+  if (evidence.PrimaryIssue) {
+    return evidence.PrimaryIssue;
+  }
+
+  if (state === 'available' || state === 'open_findings') {
+    return getSp09AllowedWordingForClaimState(evidence.ClaimState);
+  }
+
+  if (state === 'requires_redesign') {
+    return SP09_ALLOWED_WORDING_BY_CLAIM_STATE[SP09_CLAIM_STATE_BLOCKED_REQUIRES_REDESIGN];
+  }
+
+  if (state === 'scope_mismatch') {
+    return 'Current package artifacts are outside the reviewed scope.';
+  }
+
+  if (state === 'claim_blocked') {
+    return 'The package contains a review claim that is not allowed by available evidence.';
+  }
+
+  return getSp09AllowedWordingForClaimState(evidence.ClaimState);
+}
+
+function resolveSp09BlockingCodes(
+  evidence: ElectionSp09ExternalReviewStatusView,
+  state: Sp09ExternalReviewUiState
+): string[] {
+  const codes = new Set<string>();
+  if (
+    state === 'requires_redesign' ||
+    state === 'scope_mismatch' ||
+    state === 'claim_blocked' ||
+    state === 'open_findings'
+  ) {
+    codes.add(evidence.PrimaryResultCode);
+  }
+
+  return Array.from(codes).filter(Boolean);
+}
+
+function getSp09AllowedWordingForClaimState(claimState?: string): string {
+  return SP09_ALLOWED_WORDING_BY_CLAIM_STATE[claimState || ''] ??
+    SP09_ALLOWED_WORDING_BY_CLAIM_STATE.not_claimed;
 }
 
 export function getSp08OpenReadinessPresentation(
@@ -1470,6 +1802,11 @@ export interface ProtocolPackageBindingPresentation {
   releaseHashFull: string;
   approvalLabel: string;
   externalReviewLabel: string;
+  externalReviewAvailability: string;
+  externalReviewClaimState: string;
+  externalReviewScope: string;
+  externalReviewDescription: string;
+  externalReviewTone: Sp09ExternalReviewTone;
 }
 
 const PROTOCOL_PACKAGE_STATUS_COPY: Record<
@@ -1519,14 +1856,6 @@ const PROTOCOL_PACKAGE_APPROVAL_LABELS: Record<ProtocolPackageApprovalStatusProt
   [ProtocolPackageApprovalStatusProto.DraftPrivate]: 'Draft/private',
   [ProtocolPackageApprovalStatusProto.ApprovedInternal]: 'Approved internal',
   [ProtocolPackageApprovalStatusProto.Retired]: 'Retired',
-};
-
-const PROTOCOL_PACKAGE_EXTERNAL_REVIEW_LABELS: Record<ProtocolPackageExternalReviewStatusProto, string> = {
-  [ProtocolPackageExternalReviewStatusProto.NotReviewed]: 'Not externally reviewed',
-  [ProtocolPackageExternalReviewStatusProto.ReviewRequested]: 'External review requested',
-  [ProtocolPackageExternalReviewStatusProto.ReviewInProgress]: 'External review in progress',
-  [ProtocolPackageExternalReviewStatusProto.ReviewedWithFindings]: 'Reviewed with findings',
-  [ProtocolPackageExternalReviewStatusProto.ReviewedAccepted]: 'External review accepted',
 };
 
 function timestampToMilliseconds(timestamp?: GrpcTimestamp): number {
@@ -1607,7 +1936,7 @@ export function getProtocolPackageExternalReviewLabel(
 ): string {
   return status === undefined
     ? 'Unknown external review status'
-    : PROTOCOL_PACKAGE_EXTERNAL_REVIEW_LABELS[status] ?? 'Unknown external review status';
+    : SP09_LEGACY_REVIEW_COPY[status]?.label ?? 'Unknown external review status';
 }
 
 export function getProtocolPackageBindingStatusLabel(
@@ -1624,6 +1953,18 @@ export function getProtocolPackageBindingPresentation(
   const status = binding?.Status ?? fallbackStatus;
   const copy = PROTOCOL_PACKAGE_STATUS_COPY[status] ?? PROTOCOL_PACKAGE_STATUS_COPY[ProtocolPackageBindingStatusProto.Missing];
   const fallbackText = fallbackMessage?.trim();
+  const externalReview = binding?.ExternalReviewStatus === undefined
+    ? SP09_LEGACY_REVIEW_COPY[ProtocolPackageExternalReviewStatusProto.NotReviewed]
+    : SP09_LEGACY_REVIEW_COPY[binding.ExternalReviewStatus] ??
+      SP09_LEGACY_REVIEW_COPY[ProtocolPackageExternalReviewStatusProto.NotReviewed];
+  const externalReviewTone: Sp09ExternalReviewTone =
+    externalReview.availability === SP09_AVAILABILITY_AVAILABLE
+      ? binding?.ExternalReviewStatus === ProtocolPackageExternalReviewStatusProto.ReviewedWithFindings
+        ? 'warning'
+        : 'success'
+      : externalReview.availability === SP09_AVAILABILITY_PLANNED
+        ? 'warning'
+        : 'neutral';
 
   return {
     status,
@@ -1639,7 +1980,12 @@ export function getProtocolPackageBindingPresentation(
     proofHashFull: binding?.ProofPackageHash || '',
     releaseHashFull: binding?.ReleaseManifestHash || '',
     approvalLabel: getProtocolPackageApprovalLabel(binding?.PackageApprovalStatus),
-    externalReviewLabel: getProtocolPackageExternalReviewLabel(binding?.ExternalReviewStatus),
+    externalReviewLabel: externalReview.label,
+    externalReviewAvailability: externalReview.availability,
+    externalReviewClaimState: externalReview.claimState,
+    externalReviewScope: SP09_REVIEW_SCOPE_PROTOCOL_OMEGA_V1,
+    externalReviewDescription: getSp09AllowedWordingForClaimState(externalReview.claimState),
+    externalReviewTone,
   };
 }
 

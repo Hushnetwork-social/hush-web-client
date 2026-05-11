@@ -188,6 +188,151 @@ describe('VerificationPackageStatusSection', () => {
     );
   });
 
+  it('renders SP-09 planned external review without certification wording', () => {
+    render(
+      <VerificationPackageStatusSection
+        electionId="election-1"
+        actorPublicAddress="auditor-address"
+        status={createVerificationPackageStatus()}
+      />
+    );
+
+    const evidence = screen.getByTestId('verification-package-sp09-external-review');
+    expect(evidence).toHaveTextContent('SP-09 external review');
+    expect(evidence).toHaveTextContent('Review planned');
+    expect(evidence).toHaveTextContent('external_review_not_complete');
+    expect(evidence).toHaveTextContent('program_defined');
+    expect(evidence).toHaveTextContent('protocol_pro..._path_v1');
+    expect(evidence.textContent?.toLowerCase()).not.toContain('certified');
+    expect(evidence.textContent?.toLowerCase()).not.toContain('externally audited');
+
+    fireEvent.click(screen.getByText('Show external review evidence details'));
+
+    expect(screen.getByTestId('verification-package-sp09-files')).toHaveTextContent(
+      'external-review-status.json'
+    );
+    expect(screen.getByTestId('verification-package-sp09-reviewed-artifacts')).toHaveTextContent(
+      'No reviewer-scoped artifact hashes are available yet.'
+    );
+  });
+
+  it('renders SP-09 available external review with scoped artifacts and limitations copy', () => {
+    const baseStatus = createVerificationPackageStatus();
+
+    render(
+      <VerificationPackageStatusSection
+        electionId="election-1"
+        actorPublicAddress="auditor-address"
+        status={createVerificationPackageStatus({
+          Sp09ExternalReview: {
+            ...baseStatus.Sp09ExternalReview!,
+            DetailedStatus: 'reviewed_with_limitations',
+            Availability: 'available',
+            ClaimState: 'reviewed_with_limitations',
+            PrimaryResultCode: 'external_review_status_valid',
+            PrimaryIssue: '',
+            ReviewedArtifactCount: 3,
+            ReviewedArtifacts: [
+              {
+                ArtifactId: 'protocol-release-manifest',
+                ArtifactType: 'protocol_release_manifest',
+                ArtifactName: 'Protocol release manifest',
+                ArtifactHash: 'sha256:release',
+                ArtifactVersion: 'v1.1.10',
+                ReviewScope: 'protocol_proof_verifier_publication_path_v1',
+              },
+            ],
+            Message: '',
+          },
+        })}
+      />
+    );
+
+    const evidence = screen.getByTestId('verification-package-sp09-external-review');
+    expect(evidence).toHaveTextContent('Review available');
+    expect(evidence).toHaveTextContent('Reviewed for declared scope and version, with limitations documented.');
+    expect(evidence).toHaveTextContent('3');
+
+    fireEvent.click(screen.getByText('Show external review evidence details'));
+
+    expect(screen.getByTestId('verification-package-sp09-reviewed-artifacts')).toHaveTextContent(
+      'Protocol release manifest'
+    );
+  });
+
+  it.each([
+    [
+      'reviewed_with_open_findings',
+      'available',
+      'reviewed_with_open_findings',
+      'external_review_open_findings_block_claims',
+      'Review has open findings',
+    ],
+    [
+      'reviewed_for_declared_scope',
+      'not_available',
+      'not_applicable_to_this_artifact_set',
+      'external_review_scope_mismatch',
+      'Review scope mismatch',
+    ],
+    [
+      'reviewed_for_declared_scope',
+      'available',
+      'reviewed_for_declared_scope',
+      'external_review_claim_not_allowed',
+      'Review claim blocked',
+    ],
+    [
+      'reviewed_for_declared_scope',
+      'available',
+      'reviewed_for_declared_scope',
+      'external_review_public_boundary_violation',
+      'Review claim blocked',
+    ],
+    [
+      'requires_redesign',
+      'not_available',
+      'blocked_requires_redesign',
+      'external_review_requires_redesign',
+      'Review requires redesign',
+    ],
+  ])(
+    'renders SP-09 blocking state %s/%s/%s as %s',
+    (detailedStatus, availability, claimState, resultCode, expectedLabel) => {
+      const baseStatus = createVerificationPackageStatus();
+
+      render(
+        <VerificationPackageStatusSection
+          electionId="election-1"
+          actorPublicAddress="owner-address"
+          status={createVerificationPackageStatus({
+            Sp09ExternalReview: {
+              ...baseStatus.Sp09ExternalReview!,
+              DetailedStatus: detailedStatus,
+              Availability: availability,
+              ClaimState: claimState,
+              PrimaryResultCode: resultCode,
+              PrimaryIssue: `${resultCode} requires operator attention.`,
+              OpenHighFindingCount:
+                resultCode === 'external_review_open_findings_block_claims' ? 1 : 0,
+              OpenFindingCount:
+                resultCode === 'external_review_open_findings_block_claims' ? 1 : 0,
+              BlocksReviewedClaims: true,
+              RequiresRedesign: resultCode === 'external_review_requires_redesign',
+              Message: '',
+            },
+          })}
+        />
+      );
+
+      const evidence = screen.getByTestId('verification-package-sp09-external-review');
+      expect(evidence).toHaveTextContent(expectedLabel);
+      expect(evidence).toHaveTextContent(resultCode);
+      expect(evidence).toHaveTextContent(`${resultCode} requires operator attention.`);
+      expect(evidence.textContent?.toLowerCase()).not.toContain('certified');
+    }
+  );
+
   it('renders SP-08 development placeholders as high-assurance blocking evidence', () => {
     const baseStatus = createVerificationPackageStatus();
 
