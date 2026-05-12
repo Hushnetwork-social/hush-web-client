@@ -81,4 +81,11 @@ describe('VotingMenuPanel', () => {
     expect(setSelectedNavMock).not.toHaveBeenCalled();
     expect(pushMock).not.toHaveBeenCalled();
   });
+
+  it('keeps the FEAT-121 benchmark out of ordinary HushVoting navigation', () => {
+    render(<VotingMenuPanel />);
+
+    expect(screen.queryByText(/mobile benchmark/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/FEAT-121/i)).not.toBeInTheDocument();
+  });
 });

@@ -1,4 +1,5 @@
 mod fcm;
+mod mobile_benchmark;
 
 #[cfg(desktop)]
 use tauri::{
@@ -30,6 +31,7 @@ pub fn run() {
             fcm::is_push_supported,
             fcm::get_pending_navigation,
             fcm::clear_pending_navigation,
+            mobile_benchmark::get_mobile_benchmark_native_probe,
         ]);
 
     #[cfg(desktop)]
