@@ -1603,6 +1603,8 @@ export interface ElectionVerificationPackageStatusView {
   Sp07Evidence?: ElectionSp07EvidenceStatusView;
   Sp08ReleaseIntegrity?: ElectionSp08ReleaseIntegrityStatusView;
   Sp09ExternalReview?: ElectionSp09ExternalReviewStatusView;
+  Sp10OperationalSecurity?: ElectionSp10OperationalSecurityStatusView;
+  Sp11RegulatoryClaim?: ElectionSp11RegulatoryClaimStatusView;
 }
 
 export interface ElectionSp04EvidenceStatusView {
@@ -1797,6 +1799,77 @@ export interface ElectionSp09FindingSeverityStatusView {
 }
 
 export interface ElectionSp09EvidenceFileStatusView {
+  RelativePath: string;
+  Visibility: ElectionVerificationArtifactVisibilityProto;
+  IsPresent: boolean;
+  ContentHash: string;
+}
+
+export interface ElectionSp10OperationalSecurityStatusView {
+  EvidenceExpected: boolean;
+  PublicEvidenceAvailable: boolean;
+  RestrictedEvidenceAvailable: boolean;
+  ProgramVersion: string;
+  DeploymentProfileId: string;
+  EvidenceState: string;
+  DoesNotCompleteFeat106Readiness: boolean;
+  Feat106ReadinessCaveat: string;
+  ReleaseEvidenceMode: string;
+  ReleaseManifestHash: string;
+  ImmutableDeploymentRef: string;
+  CustodyMode: string;
+  ExecutorKeyLifecycle: string;
+  AccessSnapshotHashOrRestrictedRef: string;
+  BackupRestoreHashOrRestrictedRef: string;
+  IncidentStatus: string;
+  AuditorRoomAccessLogHashOrRestrictedRef: string;
+  BlocksHighAssurance: boolean;
+  PrimaryResultCode: string;
+  PrimaryIssue: string;
+  PublicEvidenceFileCount: number;
+  RestrictedEvidenceFileCount: number;
+  Message: string;
+  EvidenceFiles: ElectionSp10EvidenceFileStatusView[];
+}
+
+export interface ElectionSp10EvidenceFileStatusView {
+  RelativePath: string;
+  Visibility: ElectionVerificationArtifactVisibilityProto;
+  IsPresent: boolean;
+  ContentHash: string;
+}
+
+export interface ElectionSp11RegulatoryClaimStatusView {
+  EvidenceExpected: boolean;
+  PublicEvidenceAvailable: boolean;
+  RestrictedEvidenceAvailable: boolean;
+  ClaimExported: boolean;
+  TrackerVersion: string;
+  JurisdictionId: string;
+  ClaimId: string;
+  ClaimState: string;
+  SourceCheckedAt?: GrpcTimestamp;
+  HasSourceCheckedAt: boolean;
+  NextReviewAt?: GrpcTimestamp;
+  HasNextReviewAt: boolean;
+  SourceRef: string;
+  Owner: string;
+  IsLegalAdvice: boolean;
+  RequiresAuthorityEvidence: boolean;
+  AuthorityEvidenceRef: string;
+  RestrictedWorkpaperRef: string;
+  AllowedWording: string;
+  IsStale: boolean;
+  BlocksClaims: boolean;
+  PrimaryResultCode: string;
+  PrimaryIssue: string;
+  PublicEvidenceFileCount: number;
+  RestrictedEvidenceFileCount: number;
+  Message: string;
+  EvidenceFiles: ElectionSp11EvidenceFileStatusView[];
+}
+
+export interface ElectionSp11EvidenceFileStatusView {
   RelativePath: string;
   Visibility: ElectionVerificationArtifactVisibilityProto;
   IsPresent: boolean;
