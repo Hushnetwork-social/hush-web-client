@@ -38,6 +38,8 @@ import {
   type ElectionSp07EvidenceStatusView,
   type ElectionSp08ReleaseIntegrityStatusView,
   type ElectionSp09ExternalReviewStatusView,
+  type ElectionSp10OperationalSecurityStatusView,
+  type ElectionSp11RegulatoryClaimStatusView,
   ElectionTrusteeCeremonyStateProto,
   type ElectionVerificationPackageStatusView,
   type GetElectionOpenReadinessResponse,
@@ -1215,6 +1217,104 @@ export interface Sp09ExternalReviewPresentation {
   blockingCodes: string[];
 }
 
+export type Sp10OperationalSecurityUiState =
+  | 'not_visible'
+  | 'not_available'
+  | 'development_placeholder'
+  | 'managed_profile_declared'
+  | 'managed_profile_evidence_available'
+  | 'managed_profile_exception_declared'
+  | 'blocked';
+
+export type Sp10OperationalSecurityTone = 'neutral' | 'success' | 'warning' | 'error';
+
+export type Sp10OperationalSecurityAudience =
+  | 'owner-admin'
+  | 'auditor'
+  | 'trustee'
+  | 'voter'
+  | 'generic';
+
+export interface Sp10OperationalSecurityPresentation {
+  state: Sp10OperationalSecurityUiState;
+  label: string;
+  tone: Sp10OperationalSecurityTone;
+  description: string;
+  showTechnicalRefs: boolean;
+  publicEvidenceAvailable: boolean;
+  restrictedEvidenceAvailable: boolean;
+  blocksHighAssurance: boolean;
+  programVersion: string;
+  deploymentProfileId: string;
+  evidenceState: string;
+  feat106ReadinessCaveat: string;
+  releaseEvidenceMode: string;
+  custodyMode: string;
+  executorKeyLifecycle: string;
+  incidentStatus: string;
+  primaryResultCode: string;
+  primaryIssue: string;
+  publicEvidenceFileCount: number;
+  restrictedEvidenceFileCount: number;
+  evidenceFileCount: number;
+  releaseManifestHashShort: string;
+  releaseManifestHashFull: string;
+  immutableDeploymentRefShort: string;
+  immutableDeploymentRefFull: string;
+  accessSnapshotRef: string;
+  backupRestoreRef: string;
+  auditorRoomAccessLogRef: string;
+  blockingCodes: string[];
+}
+
+export type Sp11RegulatoryClaimUiState =
+  | 'not_visible'
+  | 'not_available'
+  | 'allowed_now'
+  | 'allowed_with_limitation'
+  | 'blocked_until_review'
+  | 'blocked_until_certification'
+  | 'forbidden'
+  | 'stale_tracker';
+
+export type Sp11RegulatoryClaimTone = 'neutral' | 'success' | 'warning' | 'error';
+
+export type Sp11RegulatoryClaimAudience =
+  | 'owner-admin'
+  | 'auditor'
+  | 'trustee'
+  | 'voter'
+  | 'generic';
+
+export interface Sp11RegulatoryClaimPresentation {
+  state: Sp11RegulatoryClaimUiState;
+  label: string;
+  tone: Sp11RegulatoryClaimTone;
+  description: string;
+  showTechnicalRefs: boolean;
+  claimExported: boolean;
+  publicEvidenceAvailable: boolean;
+  restrictedEvidenceAvailable: boolean;
+  trackerVersion: string;
+  jurisdictionId: string;
+  claimId: string;
+  claimState: string;
+  sourceRef: string;
+  owner: string;
+  allowedWording: string;
+  primaryResultCode: string;
+  primaryIssue: string;
+  requiresAuthorityEvidence: boolean;
+  authorityEvidenceRef: string;
+  restrictedWorkpaperRef: string;
+  blocksClaims: boolean;
+  isStale: boolean;
+  publicEvidenceFileCount: number;
+  restrictedEvidenceFileCount: number;
+  evidenceFileCount: number;
+  blockingCodes: string[];
+}
+
 const SP08_DEVELOPMENT_PLACEHOLDER_EVIDENCE_MODE = 'development_placeholder';
 const SP08_OFFICIAL_EVIDENCE_MODE = 'official_sp08';
 const SP08_RELEASE_INTEGRITY_VALID_RESULT_CODE = 'release_integrity_evidence_valid';
@@ -1239,6 +1339,23 @@ const SP09_RESULT_EXTERNAL_REVIEW_OPEN_FINDINGS = 'external_review_open_findings
 const SP09_RESULT_EXTERNAL_REVIEW_CLAIM_NOT_ALLOWED = 'external_review_claim_not_allowed';
 const SP09_RESULT_EXTERNAL_REVIEW_PUBLIC_BOUNDARY = 'external_review_public_boundary_violation';
 const SP09_RESULT_EXTERNAL_REVIEW_REQUIRES_REDESIGN = 'external_review_requires_redesign';
+const SP10_PROGRAM_VERSION = 'SP10-P1';
+const SP10_DEPLOYMENT_PROFILE_MANAGED_AWS_CONTAINER_V1 =
+  'hushvoting_managed_aws_container_v1';
+const SP10_EVIDENCE_NOT_AVAILABLE = 'not_available';
+const SP10_EVIDENCE_DEVELOPMENT_PLACEHOLDER = 'development_placeholder';
+const SP10_EVIDENCE_MANAGED_PROFILE_DECLARED = 'managed_profile_declared';
+const SP10_EVIDENCE_MANAGED_PROFILE_AVAILABLE = 'managed_profile_evidence_available';
+const SP10_EVIDENCE_MANAGED_PROFILE_EXCEPTION = 'managed_profile_exception_declared';
+const SP10_EVIDENCE_BLOCKED = 'blocked';
+const SP10_RESULT_OPERATIONAL_MISSING = 'operational_security_evidence_missing';
+const SP11_TRACKER_VERSION = 'SP11-P1';
+const SP11_CLAIM_ALLOWED_NOW = 'allowed_now';
+const SP11_CLAIM_ALLOWED_WITH_LIMITATION = 'allowed_with_limitation';
+const SP11_CLAIM_BLOCKED_UNTIL_REVIEW = 'blocked_until_review';
+const SP11_CLAIM_BLOCKED_UNTIL_CERTIFICATION = 'blocked_until_certification';
+const SP11_CLAIM_FORBIDDEN = 'forbidden';
+const SP11_RESULT_TRACKER_STALE = 'regulatory_tracker_stale';
 
 const SP09_ALLOWED_WORDING_BY_CLAIM_STATE: Record<string, string> = {
   not_claimed: 'External examination is not claimed for this package.',
@@ -1258,6 +1375,34 @@ const SP09_ALLOWED_WORDING_BY_CLAIM_STATE: Record<string, string> = {
     'Reviewer identified redesign work; external review claim is blocked for this scope.',
   not_applicable_to_this_artifact_set:
     'No applicable external review is available for this artifact set.',
+};
+
+const SP10_ALLOWED_WORDING_BY_STATE: Record<string, string> = {
+  [SP10_EVIDENCE_NOT_AVAILABLE]:
+    'Operational security evidence is not available for this package; FEAT-106 readiness is not completed.',
+  [SP10_EVIDENCE_DEVELOPMENT_PLACEHOLDER]:
+    'Development-only operational placeholders are present and cannot support high-assurance operational claims.',
+  [SP10_EVIDENCE_MANAGED_PROFILE_DECLARED]:
+    'Managed deployment profile is declared; supporting operational evidence is not yet complete.',
+  [SP10_EVIDENCE_MANAGED_PROFILE_AVAILABLE]:
+    'Managed deployment profile evidence is available for the declared scope; this is not legal approval or certification.',
+  [SP10_EVIDENCE_MANAGED_PROFILE_EXCEPTION]:
+    'Managed deployment profile exception is declared and limits operational assurance for this package.',
+  [SP10_EVIDENCE_BLOCKED]:
+    'Operational security evidence is blocked for the declared scope; high-assurance operational claims are not allowed.',
+};
+
+const SP11_ALLOWED_WORDING_BY_CLAIM_STATE: Record<string, string> = {
+  [SP11_CLAIM_ALLOWED_NOW]:
+    'Regulatory tracker currently allows this organizational-election claim for the declared scope; this is not legal advice.',
+  [SP11_CLAIM_ALLOWED_WITH_LIMITATION]:
+    'Regulatory tracker allows this claim only with the listed limitations; this is not legal advice.',
+  [SP11_CLAIM_BLOCKED_UNTIL_REVIEW]:
+    'Regulatory tracker blocks this claim until business/legal review updates the register.',
+  [SP11_CLAIM_BLOCKED_UNTIL_CERTIFICATION]:
+    'Regulatory tracker blocks this claim until required authority or certification evidence exists.',
+  [SP11_CLAIM_FORBIDDEN]:
+    'Regulatory tracker forbids this claim for the declared scope.',
 };
 
 const SP09_LEGACY_REVIEW_COPY: Record<
@@ -1520,6 +1665,405 @@ function resolveSp09BlockingCodes(
 function getSp09AllowedWordingForClaimState(claimState?: string): string {
   return SP09_ALLOWED_WORDING_BY_CLAIM_STATE[claimState || ''] ??
     SP09_ALLOWED_WORDING_BY_CLAIM_STATE.not_claimed;
+}
+
+export function getSp10VerificationPackagePresentation(
+  status?: Pick<ElectionVerificationPackageStatusView, 'IsVisible' | 'Sp10OperationalSecurity'> | null,
+  audience: Sp10OperationalSecurityAudience = 'owner-admin'
+): Sp10OperationalSecurityPresentation | null {
+  if (audience === 'voter') {
+    return null;
+  }
+
+  if (status && !status.IsVisible) {
+    return createSp10NotVisiblePresentation();
+  }
+
+  return getSp10OperationalSecurityPresentation(status?.Sp10OperationalSecurity, audience);
+}
+
+export function getSp10OperationalSecurityPresentation(
+  evidence?: ElectionSp10OperationalSecurityStatusView | null,
+  audience: Sp10OperationalSecurityAudience = 'owner-admin'
+): Sp10OperationalSecurityPresentation | null {
+  if (audience === 'voter') {
+    return null;
+  }
+
+  if (!evidence) {
+    return createSp10NotVisiblePresentation();
+  }
+
+  const state = resolveSp10OperationalSecurityState(evidence);
+  const blockingCodes = resolveSp10BlockingCodes(evidence, state);
+
+  return {
+    state,
+    label: resolveSp10OperationalSecurityLabel(state),
+    tone: resolveSp10OperationalSecurityTone(state, evidence.BlocksHighAssurance),
+    description: evidence.Message || resolveSp10OperationalSecurityDescription(evidence, state),
+    showTechnicalRefs: state !== 'not_visible',
+    publicEvidenceAvailable: evidence.PublicEvidenceAvailable,
+    restrictedEvidenceAvailable: evidence.RestrictedEvidenceAvailable,
+    blocksHighAssurance: evidence.BlocksHighAssurance,
+    programVersion: evidence.ProgramVersion || SP10_PROGRAM_VERSION,
+    deploymentProfileId:
+      evidence.DeploymentProfileId || SP10_DEPLOYMENT_PROFILE_MANAGED_AWS_CONTAINER_V1,
+    evidenceState: evidence.EvidenceState || SP10_EVIDENCE_NOT_AVAILABLE,
+    feat106ReadinessCaveat:
+      evidence.Feat106ReadinessCaveat ||
+      getSp10AllowedWordingForEvidenceState(evidence.EvidenceState),
+    releaseEvidenceMode: evidence.ReleaseEvidenceMode || 'not_recorded',
+    custodyMode: evidence.CustodyMode || 'not_recorded',
+    executorKeyLifecycle: evidence.ExecutorKeyLifecycle || 'not_recorded',
+    incidentStatus: evidence.IncidentStatus || 'not_recorded',
+    primaryResultCode: evidence.PrimaryResultCode || SP10_RESULT_OPERATIONAL_MISSING,
+    primaryIssue: evidence.PrimaryIssue,
+    publicEvidenceFileCount: evidence.PublicEvidenceFileCount,
+    restrictedEvidenceFileCount: evidence.RestrictedEvidenceFileCount,
+    evidenceFileCount: evidence.PublicEvidenceFileCount + evidence.RestrictedEvidenceFileCount,
+    releaseManifestHashShort: shortenProtocolPackageHash(evidence.ReleaseManifestHash),
+    releaseManifestHashFull: evidence.ReleaseManifestHash,
+    immutableDeploymentRefShort: shortenProtocolPackageHash(evidence.ImmutableDeploymentRef),
+    immutableDeploymentRefFull: evidence.ImmutableDeploymentRef,
+    accessSnapshotRef: evidence.AccessSnapshotHashOrRestrictedRef,
+    backupRestoreRef: evidence.BackupRestoreHashOrRestrictedRef,
+    auditorRoomAccessLogRef: evidence.AuditorRoomAccessLogHashOrRestrictedRef,
+    blockingCodes,
+  };
+}
+
+function createSp10NotVisiblePresentation(): Sp10OperationalSecurityPresentation {
+  return {
+    state: 'not_visible',
+    label: 'Operational status not visible',
+    tone: 'neutral',
+    description: 'SP-10 operational-security status is not available on this surface.',
+    showTechnicalRefs: false,
+    publicEvidenceAvailable: false,
+    restrictedEvidenceAvailable: false,
+    blocksHighAssurance: false,
+    programVersion: SP10_PROGRAM_VERSION,
+    deploymentProfileId: SP10_DEPLOYMENT_PROFILE_MANAGED_AWS_CONTAINER_V1,
+    evidenceState: SP10_EVIDENCE_NOT_AVAILABLE,
+    feat106ReadinessCaveat: getSp10AllowedWordingForEvidenceState(SP10_EVIDENCE_NOT_AVAILABLE),
+    releaseEvidenceMode: 'not_recorded',
+    custodyMode: 'not_recorded',
+    executorKeyLifecycle: 'not_recorded',
+    incidentStatus: 'not_recorded',
+    primaryResultCode: '',
+    primaryIssue: '',
+    publicEvidenceFileCount: 0,
+    restrictedEvidenceFileCount: 0,
+    evidenceFileCount: 0,
+    releaseManifestHashShort: 'Not recorded',
+    releaseManifestHashFull: '',
+    immutableDeploymentRefShort: 'Not recorded',
+    immutableDeploymentRefFull: '',
+    accessSnapshotRef: '',
+    backupRestoreRef: '',
+    auditorRoomAccessLogRef: '',
+    blockingCodes: [],
+  };
+}
+
+function resolveSp10OperationalSecurityState(
+  evidence: ElectionSp10OperationalSecurityStatusView
+): Sp10OperationalSecurityUiState {
+  if (!evidence.EvidenceExpected || !evidence.PublicEvidenceAvailable) {
+    return 'not_available';
+  }
+
+  switch (evidence.EvidenceState) {
+    case SP10_EVIDENCE_MANAGED_PROFILE_AVAILABLE:
+      return 'managed_profile_evidence_available';
+    case SP10_EVIDENCE_MANAGED_PROFILE_DECLARED:
+      return 'managed_profile_declared';
+    case SP10_EVIDENCE_MANAGED_PROFILE_EXCEPTION:
+      return 'managed_profile_exception_declared';
+    case SP10_EVIDENCE_BLOCKED:
+      return 'blocked';
+    case SP10_EVIDENCE_DEVELOPMENT_PLACEHOLDER:
+      return 'development_placeholder';
+    case SP10_EVIDENCE_NOT_AVAILABLE:
+    default:
+      return 'not_available';
+  }
+}
+
+function resolveSp10OperationalSecurityLabel(state: Sp10OperationalSecurityUiState): string {
+  switch (state) {
+    case 'managed_profile_evidence_available':
+      return 'Managed profile evidence available';
+    case 'managed_profile_declared':
+      return 'Managed profile declared';
+    case 'managed_profile_exception_declared':
+      return 'Managed profile exception declared';
+    case 'development_placeholder':
+      return 'Development placeholder';
+    case 'blocked':
+      return 'Operational evidence blocked';
+    case 'not_available':
+      return 'Operational evidence not available';
+    case 'not_visible':
+    default:
+      return 'Operational status not visible';
+  }
+}
+
+function resolveSp10OperationalSecurityTone(
+  state: Sp10OperationalSecurityUiState,
+  blocksHighAssurance: boolean
+): Sp10OperationalSecurityTone {
+  switch (state) {
+    case 'managed_profile_evidence_available':
+      return 'success';
+    case 'managed_profile_declared':
+    case 'managed_profile_exception_declared':
+      return 'warning';
+    case 'development_placeholder':
+      return blocksHighAssurance ? 'error' : 'warning';
+    case 'blocked':
+      return 'error';
+    case 'not_available':
+    case 'not_visible':
+    default:
+      return 'neutral';
+  }
+}
+
+function resolveSp10OperationalSecurityDescription(
+  evidence: ElectionSp10OperationalSecurityStatusView,
+  state: Sp10OperationalSecurityUiState
+): string {
+  if (evidence.PrimaryIssue && (state === 'blocked' || state === 'development_placeholder')) {
+    return evidence.PrimaryIssue;
+  }
+
+  return (
+    evidence.Feat106ReadinessCaveat ||
+    getSp10AllowedWordingForEvidenceState(evidence.EvidenceState)
+  );
+}
+
+function resolveSp10BlockingCodes(
+  evidence: ElectionSp10OperationalSecurityStatusView,
+  state: Sp10OperationalSecurityUiState
+): string[] {
+  if (
+    !evidence.PrimaryResultCode ||
+    (state !== 'blocked' &&
+      state !== 'development_placeholder' &&
+      state !== 'managed_profile_exception_declared' &&
+      !evidence.BlocksHighAssurance)
+  ) {
+    return [];
+  }
+
+  return [evidence.PrimaryResultCode];
+}
+
+function getSp10AllowedWordingForEvidenceState(evidenceState?: string): string {
+  return SP10_ALLOWED_WORDING_BY_STATE[evidenceState || ''] ??
+    SP10_ALLOWED_WORDING_BY_STATE[SP10_EVIDENCE_NOT_AVAILABLE];
+}
+
+export function getSp11VerificationPackagePresentation(
+  status?: Pick<ElectionVerificationPackageStatusView, 'IsVisible' | 'Sp11RegulatoryClaim'> | null,
+  audience: Sp11RegulatoryClaimAudience = 'owner-admin'
+): Sp11RegulatoryClaimPresentation | null {
+  if (audience === 'voter') {
+    return null;
+  }
+
+  if (status && !status.IsVisible) {
+    return createSp11NotVisiblePresentation();
+  }
+
+  return getSp11RegulatoryClaimPresentation(status?.Sp11RegulatoryClaim, audience);
+}
+
+export function getSp11RegulatoryClaimPresentation(
+  evidence?: ElectionSp11RegulatoryClaimStatusView | null,
+  audience: Sp11RegulatoryClaimAudience = 'owner-admin'
+): Sp11RegulatoryClaimPresentation | null {
+  if (audience === 'voter') {
+    return null;
+  }
+
+  if (!evidence) {
+    return createSp11NotVisiblePresentation();
+  }
+
+  const state = resolveSp11RegulatoryClaimState(evidence);
+  const blockingCodes = resolveSp11BlockingCodes(evidence, state);
+
+  return {
+    state,
+    label: resolveSp11RegulatoryClaimLabel(state),
+    tone: resolveSp11RegulatoryClaimTone(state),
+    description: evidence.Message || resolveSp11RegulatoryClaimDescription(evidence, state),
+    showTechnicalRefs: evidence.ClaimExported,
+    claimExported: evidence.ClaimExported,
+    publicEvidenceAvailable: evidence.PublicEvidenceAvailable,
+    restrictedEvidenceAvailable: evidence.RestrictedEvidenceAvailable,
+    trackerVersion: evidence.TrackerVersion || SP11_TRACKER_VERSION,
+    jurisdictionId: evidence.JurisdictionId || 'Not recorded',
+    claimId: evidence.ClaimId || 'Not recorded',
+    claimState: evidence.ClaimState || 'not_exported',
+    sourceRef: evidence.SourceRef,
+    owner: evidence.Owner,
+    allowedWording: evidence.AllowedWording || getSp11AllowedWordingForClaimState(evidence.ClaimState),
+    primaryResultCode: evidence.PrimaryResultCode,
+    primaryIssue: evidence.PrimaryIssue,
+    requiresAuthorityEvidence: evidence.RequiresAuthorityEvidence,
+    authorityEvidenceRef: evidence.AuthorityEvidenceRef,
+    restrictedWorkpaperRef: evidence.RestrictedWorkpaperRef,
+    blocksClaims: evidence.BlocksClaims,
+    isStale: evidence.IsStale,
+    publicEvidenceFileCount: evidence.PublicEvidenceFileCount,
+    restrictedEvidenceFileCount: evidence.RestrictedEvidenceFileCount,
+    evidenceFileCount: evidence.PublicEvidenceFileCount + evidence.RestrictedEvidenceFileCount,
+    blockingCodes,
+  };
+}
+
+function createSp11NotVisiblePresentation(): Sp11RegulatoryClaimPresentation {
+  return {
+    state: 'not_visible',
+    label: 'Regulatory claim not visible',
+    tone: 'neutral',
+    description: 'SP-11 regulatory-claim status is not available on this surface.',
+    showTechnicalRefs: false,
+    claimExported: false,
+    publicEvidenceAvailable: false,
+    restrictedEvidenceAvailable: false,
+    trackerVersion: SP11_TRACKER_VERSION,
+    jurisdictionId: 'Not recorded',
+    claimId: 'Not recorded',
+    claimState: 'not_exported',
+    sourceRef: '',
+    owner: '',
+    allowedWording: '',
+    primaryResultCode: '',
+    primaryIssue: '',
+    requiresAuthorityEvidence: false,
+    authorityEvidenceRef: '',
+    restrictedWorkpaperRef: '',
+    blocksClaims: false,
+    isStale: false,
+    publicEvidenceFileCount: 0,
+    restrictedEvidenceFileCount: 0,
+    evidenceFileCount: 0,
+    blockingCodes: [],
+  };
+}
+
+function resolveSp11RegulatoryClaimState(
+  evidence: ElectionSp11RegulatoryClaimStatusView
+): Sp11RegulatoryClaimUiState {
+  if (!evidence.ClaimExported || !evidence.PublicEvidenceAvailable) {
+    return 'not_available';
+  }
+
+  if (evidence.IsStale || evidence.PrimaryResultCode === SP11_RESULT_TRACKER_STALE) {
+    return 'stale_tracker';
+  }
+
+  switch (evidence.ClaimState) {
+    case SP11_CLAIM_ALLOWED_NOW:
+      return 'allowed_now';
+    case SP11_CLAIM_ALLOWED_WITH_LIMITATION:
+      return 'allowed_with_limitation';
+    case SP11_CLAIM_BLOCKED_UNTIL_REVIEW:
+      return 'blocked_until_review';
+    case SP11_CLAIM_BLOCKED_UNTIL_CERTIFICATION:
+      return 'blocked_until_certification';
+    case SP11_CLAIM_FORBIDDEN:
+      return 'forbidden';
+    default:
+      return 'not_available';
+  }
+}
+
+function resolveSp11RegulatoryClaimLabel(state: Sp11RegulatoryClaimUiState): string {
+  switch (state) {
+    case 'allowed_now':
+      return 'Claim allowed now';
+    case 'allowed_with_limitation':
+      return 'Claim allowed with limitation';
+    case 'blocked_until_review':
+      return 'Claim blocked until review';
+    case 'blocked_until_certification':
+      return 'Claim blocked until authority evidence';
+    case 'forbidden':
+      return 'Claim forbidden';
+    case 'stale_tracker':
+      return 'Tracker needs review';
+    case 'not_available':
+      return 'No regulatory claim exported';
+    case 'not_visible':
+    default:
+      return 'Regulatory claim not visible';
+  }
+}
+
+function resolveSp11RegulatoryClaimTone(
+  state: Sp11RegulatoryClaimUiState
+): Sp11RegulatoryClaimTone {
+  switch (state) {
+    case 'allowed_now':
+    case 'allowed_with_limitation':
+      return 'success';
+    case 'stale_tracker':
+    case 'blocked_until_review':
+      return 'warning';
+    case 'blocked_until_certification':
+    case 'forbidden':
+      return 'error';
+    case 'not_available':
+    case 'not_visible':
+    default:
+      return 'neutral';
+  }
+}
+
+function resolveSp11RegulatoryClaimDescription(
+  evidence: ElectionSp11RegulatoryClaimStatusView,
+  state: Sp11RegulatoryClaimUiState
+): string {
+  if (evidence.PrimaryIssue && state !== 'allowed_now' && state !== 'allowed_with_limitation') {
+    return evidence.PrimaryIssue;
+  }
+
+  if (state === 'not_available') {
+    return 'No SP-11 regulatory claim is exported for this package.';
+  }
+
+  return evidence.AllowedWording || getSp11AllowedWordingForClaimState(evidence.ClaimState);
+}
+
+function resolveSp11BlockingCodes(
+  evidence: ElectionSp11RegulatoryClaimStatusView,
+  state: Sp11RegulatoryClaimUiState
+): string[] {
+  if (
+    !evidence.PrimaryResultCode ||
+    (state !== 'stale_tracker' &&
+      state !== 'blocked_until_review' &&
+      state !== 'blocked_until_certification' &&
+      state !== 'forbidden' &&
+      !evidence.BlocksClaims)
+  ) {
+    return [];
+  }
+
+  return [evidence.PrimaryResultCode];
+}
+
+function getSp11AllowedWordingForClaimState(claimState?: string): string {
+  return SP11_ALLOWED_WORDING_BY_CLAIM_STATE[claimState || ''] ??
+    'No SP-11 regulatory claim is exported for this package.';
 }
 
 export function getSp08OpenReadinessPresentation(

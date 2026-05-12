@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ElectionClosedProgressStatusProto,
+  ElectionVerificationArtifactVisibilityProto,
   ElectionVerificationPackageBlockerProto,
   ElectionVerificationPackageStatusProto,
   ElectionVerificationPackageViewProto,
@@ -213,6 +214,108 @@ describe('VerificationPackageStatusSection', () => {
     );
     expect(screen.getByTestId('verification-package-sp09-reviewed-artifacts')).toHaveTextContent(
       'No reviewer-scoped artifact hashes are available yet.'
+    );
+  });
+
+  it('renders SP-10 operational security evidence with OPS result details', () => {
+    render(
+      <VerificationPackageStatusSection
+        electionId="election-1"
+        actorPublicAddress="auditor-address"
+        status={createVerificationPackageStatus()}
+      />
+    );
+
+    const evidence = screen.getByTestId('verification-package-sp10-operational-security');
+    expect(evidence).toHaveTextContent('SP-10 operational security');
+    expect(evidence).toHaveTextContent('Development placeholder');
+    expect(evidence).toHaveTextContent('operational_security_development_placeholder');
+    expect(evidence).toHaveTextContent('hushvoting_managed_aws_container_v1');
+    expect(evidence).toHaveTextContent('FEAT-106 readiness remains separate.');
+    expect(evidence.textContent?.toLowerCase()).not.toContain('certified');
+
+    fireEvent.click(screen.getByText('Show operational evidence details'));
+
+    expect(screen.getByTestId('verification-package-sp10-files')).toHaveTextContent(
+      'operational-security-summary.json'
+    );
+    expect(screen.getByTestId('verification-package-sp10-files')).toHaveTextContent(
+      'operational-access-control-snapshot.json'
+    );
+  });
+
+  it('renders SP-11 regulatory claim only when a claim is exported', () => {
+    const baseStatus = createVerificationPackageStatus();
+    const statusWithClaim = createVerificationPackageStatus({
+      Sp11RegulatoryClaim: {
+        ...baseStatus.Sp11RegulatoryClaim!,
+        EvidenceExpected: true,
+        PublicEvidenceAvailable: true,
+        RestrictedEvidenceAvailable: true,
+        ClaimExported: true,
+        TrackerVersion: 'SP11-P1',
+        JurisdictionId: 'CH',
+        ClaimId: 'organizational_remote_voting_market_intelligence',
+        ClaimState: 'allowed_with_limitation',
+        SourceRef: 'https://www.bk.admin.ch/bk/en/home/politische-rechte/e-voting.html',
+        Owner: 'protocol-omega-regulatory-tracker',
+        AllowedWording:
+          'Regulatory tracker allows this claim only with the listed limitations; this is not legal advice.',
+        PrimaryResultCode: 'regulatory_claim_allowed_by_register',
+        PublicEvidenceFileCount: 1,
+        RestrictedEvidenceFileCount: 1,
+        Message:
+          'Regulatory tracker allows this claim only with the listed limitations; this is not legal advice.',
+        EvidenceFiles: [
+          {
+            RelativePath: 'artifacts/election-record/regulatory-claim-state.json',
+            Visibility:
+              ElectionVerificationArtifactVisibilityProto.VerificationArtifactPublic,
+            IsPresent: true,
+            ContentHash: 'sha256:regulatory-claim-state',
+          },
+          {
+            RelativePath: 'artifacts/restricted/regulatory-jurisdiction-workpaper.json',
+            Visibility:
+              ElectionVerificationArtifactVisibilityProto.VerificationArtifactRestricted,
+            IsPresent: true,
+            ContentHash: 'sha256:regulatory-jurisdiction-workpaper',
+          },
+        ],
+      },
+    });
+
+    const { rerender } = render(
+      <VerificationPackageStatusSection
+        electionId="election-1"
+        actorPublicAddress="auditor-address"
+        status={baseStatus}
+      />
+    );
+
+    expect(screen.queryByTestId('verification-package-sp11-regulatory-claim')).not.toBeInTheDocument();
+
+    rerender(
+      <VerificationPackageStatusSection
+        electionId="election-1"
+        actorPublicAddress="auditor-address"
+        status={statusWithClaim}
+      />
+    );
+
+    const claim = screen.getByTestId('verification-package-sp11-regulatory-claim');
+    expect(claim).toHaveTextContent('SP-11 regulatory tracker');
+    expect(claim).toHaveTextContent('Claim allowed with limitation');
+    expect(claim).toHaveTextContent('regulatory_claim_allowed_by_register');
+    expect(claim.textContent?.toLowerCase()).not.toContain('approved for public elections');
+
+    fireEvent.click(screen.getByText('Show regulatory evidence details'));
+
+    expect(screen.getByTestId('verification-package-sp11-files')).toHaveTextContent(
+      'regulatory-claim-state.json'
+    );
+    expect(screen.getByTestId('verification-package-sp11-files')).toHaveTextContent(
+      'regulatory-jurisdiction-workpaper.json'
     );
   });
 

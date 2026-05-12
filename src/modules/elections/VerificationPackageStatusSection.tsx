@@ -30,6 +30,8 @@ import {
   getSp07VerificationPackagePresentation,
   getSp08VerificationPackagePresentation,
   getSp09VerificationPackagePresentation,
+  getSp10VerificationPackagePresentation,
+  getSp11VerificationPackagePresentation,
   shortenProtocolPackageHash,
 } from './contracts';
 import { AvailabilityCard } from './HushVotingWorkspaceShared';
@@ -374,11 +376,19 @@ export function VerificationPackageStatusSection({
   const sp07Presentation = getSp07VerificationPackagePresentation(status, 'auditor');
   const sp08Presentation = getSp08VerificationPackagePresentation(status, 'auditor');
   const sp09Presentation = getSp09VerificationPackagePresentation(status, 'auditor');
+  const sp10Presentation = getSp10VerificationPackagePresentation(status, 'auditor');
+  const sp11Presentation = getSp11VerificationPackagePresentation(status, 'auditor');
   const ReleaseIntegrityIcon = sp08Presentation
     ? getReleaseIntegrityIcon(sp08Presentation.tone)
     : Info;
   const ExternalReviewIcon = sp09Presentation
     ? getReleaseIntegrityIcon(sp09Presentation.tone)
+    : Info;
+  const OperationalSecurityIcon = sp10Presentation
+    ? getReleaseIntegrityIcon(sp10Presentation.tone)
+    : Info;
+  const RegulatoryClaimIcon = sp11Presentation
+    ? getReleaseIntegrityIcon(sp11Presentation.tone)
     : Info;
 
   const handleExport = async (packageView: ElectionVerificationPackageViewProto) => {
@@ -1248,6 +1258,373 @@ export function VerificationPackageStatusSection({
                       </div>
                     </div>
                   ))}
+                </div>
+              </div>
+            </details>
+          ) : null}
+        </div>
+      ) : null}
+
+      {status.Sp10OperationalSecurity && sp10Presentation ? (
+        <div
+          className={`mt-5 rounded-2xl p-4 ${getReleaseIntegritySurfaceClass(sp10Presentation.tone)}`}
+          data-testid="verification-package-sp10-operational-security"
+        >
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                SP-10 operational security
+              </div>
+              <div
+                className={`mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ${getReleaseIntegrityToneClass(sp10Presentation.tone)}`}
+              >
+                <OperationalSecurityIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span>{sp10Presentation.label}</span>
+              </div>
+              <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
+                {sp10Presentation.description}
+              </p>
+              <div className="mt-2 font-mono text-xs text-hush-text-accent">
+                {sp10Presentation.primaryResultCode || 'OPS not available'}
+              </div>
+            </div>
+
+            <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="rounded-2xl bg-black/20 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Evidence state
+                </div>
+                <div className="mt-2 break-words text-sm font-semibold text-hush-text-primary">
+                  {sp10Presentation.evidenceState}
+                </div>
+                <div className="mt-1 text-xs text-hush-text-accent">
+                  {sp10Presentation.programVersion}
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-black/20 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Deployment profile
+                </div>
+                <div className="mt-2 break-all font-mono text-xs text-hush-text-primary">
+                  {sp10Presentation.deploymentProfileId}
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-black/20 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Evidence files
+                </div>
+                <div className="mt-2 text-sm font-semibold text-hush-text-primary">
+                  {sp10Presentation.publicEvidenceFileCount} public /{' '}
+                  {sp10Presentation.restrictedEvidenceFileCount} restricted
+                </div>
+                <div className="mt-1 text-xs text-hush-text-accent">
+                  {sp10Presentation.blocksHighAssurance
+                    ? 'Blocks high-assurance operational claims'
+                    : 'No high-assurance operational block reported'}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <div className="rounded-2xl bg-black/20 p-3">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                Custody mode
+              </div>
+              <div className="mt-2 break-words text-sm font-semibold text-hush-text-primary">
+                {sp10Presentation.custodyMode}
+              </div>
+              <div className="mt-1 text-xs text-hush-text-accent">
+                {sp10Presentation.executorKeyLifecycle}
+              </div>
+            </div>
+
+            <div className="rounded-2xl bg-black/20 p-3">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                Incident status
+              </div>
+              <div className="mt-2 break-words text-sm font-semibold text-hush-text-primary">
+                {sp10Presentation.incidentStatus}
+              </div>
+              <div className="mt-1 text-xs text-hush-text-accent">
+                FEAT-106 readiness remains separate.
+              </div>
+            </div>
+
+            <div className="rounded-2xl bg-black/20 p-3">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                Release binding
+              </div>
+              <div className="mt-2 break-all font-mono text-xs text-hush-text-primary">
+                {sp10Presentation.releaseManifestHashShort}
+              </div>
+              <div className="mt-1 break-words text-xs text-hush-text-accent">
+                {sp10Presentation.releaseEvidenceMode}
+              </div>
+            </div>
+          </div>
+
+          {sp10Presentation.blockingCodes.length > 0 ? (
+            <ul
+              className={`mt-4 space-y-2 text-sm ${getReleaseIntegrityToneClass(sp10Presentation.tone)}`}
+              aria-label="SP-10 operational-security blockers"
+            >
+              {sp10Presentation.blockingCodes.map((code) => (
+                <li key={code} className="rounded-2xl bg-black/20 px-3 py-2 font-mono text-xs">
+                  {code}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+
+          {sp10Presentation.showTechnicalRefs ? (
+            <details className="mt-4 rounded-2xl bg-black/18 p-4">
+              <summary className="cursor-pointer text-sm font-medium text-hush-text-primary">
+                Show operational evidence details
+              </summary>
+
+              <div className="mt-4 grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+                <div className="grid gap-3">
+                  <div className="rounded-2xl bg-black/20 p-3">
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                      Immutable deployment
+                    </div>
+                    <div
+                      className="mt-2 break-all font-mono text-xs text-hush-text-primary"
+                      title={sp10Presentation.immutableDeploymentRefFull || undefined}
+                    >
+                      {sp10Presentation.immutableDeploymentRefShort}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl bg-black/20 p-3 text-sm text-hush-text-primary">
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                      Restricted refs
+                    </div>
+                    <div className="mt-2 space-y-1 text-xs text-hush-text-accent">
+                      <div className="break-all">
+                        Access: {formatArtifactValue(sp10Presentation.accessSnapshotRef)}
+                      </div>
+                      <div className="break-all">
+                        Backup: {formatArtifactValue(sp10Presentation.backupRestoreRef)}
+                      </div>
+                      <div className="break-all">
+                        Auditor room: {formatArtifactValue(sp10Presentation.auditorRoomAccessLogRef)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                    Evidence files
+                  </div>
+                  <div className="mt-3 space-y-2" data-testid="verification-package-sp10-files">
+                    {status.Sp10OperationalSecurity.EvidenceFiles.map((file) => (
+                      <div key={file.RelativePath} className="rounded-2xl bg-black/20 p-3">
+                        <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="min-w-0 break-words text-sm font-semibold text-hush-text-primary">
+                            {file.RelativePath}
+                          </div>
+                          <div
+                            className={`text-xs font-semibold ${
+                              file.IsPresent ? 'text-green-100' : 'text-red-100'
+                            }`}
+                          >
+                            {file.IsPresent ? 'Present' : 'Missing'}
+                          </div>
+                        </div>
+                        <div
+                          className="mt-2 break-all font-mono text-xs text-hush-text-accent"
+                          title={file.ContentHash || undefined}
+                        >
+                          {formatArtifactValue(file.ContentHash)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </details>
+          ) : null}
+        </div>
+      ) : null}
+
+      {status.Sp11RegulatoryClaim && sp11Presentation?.claimExported ? (
+        <div
+          className={`mt-5 rounded-2xl p-4 ${getReleaseIntegritySurfaceClass(sp11Presentation.tone)}`}
+          data-testid="verification-package-sp11-regulatory-claim"
+        >
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                SP-11 regulatory tracker
+              </div>
+              <div
+                className={`mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ${getReleaseIntegrityToneClass(sp11Presentation.tone)}`}
+              >
+                <RegulatoryClaimIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span>{sp11Presentation.label}</span>
+              </div>
+              <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
+                {sp11Presentation.description}
+              </p>
+              <div className="mt-2 font-mono text-xs text-hush-text-accent">
+                {sp11Presentation.primaryResultCode || 'REG not available'}
+              </div>
+            </div>
+
+            <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="rounded-2xl bg-black/20 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Jurisdiction
+                </div>
+                <div className="mt-2 break-words text-sm font-semibold text-hush-text-primary">
+                  {sp11Presentation.jurisdictionId}
+                </div>
+                <div className="mt-1 text-xs text-hush-text-accent">
+                  {sp11Presentation.trackerVersion}
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-black/20 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Claim state
+                </div>
+                <div className="mt-2 break-words text-sm font-semibold text-hush-text-primary">
+                  {sp11Presentation.claimState}
+                </div>
+                <div className="mt-1 text-xs text-hush-text-accent">
+                  {sp11Presentation.blocksClaims ? 'Claim reliance limited' : 'Tracker claim allowed'}
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-black/20 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Evidence files
+                </div>
+                <div className="mt-2 text-sm font-semibold text-hush-text-primary">
+                  {sp11Presentation.publicEvidenceFileCount} public /{' '}
+                  {sp11Presentation.restrictedEvidenceFileCount} restricted
+                </div>
+                <div className="mt-1 text-xs text-hush-text-accent">
+                  Not legal advice or authority approval.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <div className="rounded-2xl bg-black/20 p-3">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                Source checked
+              </div>
+              <div className="mt-2 text-sm font-semibold text-hush-text-primary">
+                {status.Sp11RegulatoryClaim.HasSourceCheckedAt
+                  ? formatTimestamp(status.Sp11RegulatoryClaim.SourceCheckedAt)
+                  : 'Not recorded'}
+              </div>
+              <div className="mt-1 text-xs text-hush-text-accent">
+                Next review{' '}
+                {status.Sp11RegulatoryClaim.HasNextReviewAt
+                  ? formatTimestamp(status.Sp11RegulatoryClaim.NextReviewAt)
+                  : 'not recorded'}
+              </div>
+            </div>
+
+            <div className="rounded-2xl bg-black/20 p-3">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                Claim id
+              </div>
+              <div className="mt-2 break-all font-mono text-xs text-hush-text-primary">
+                {sp11Presentation.claimId}
+              </div>
+            </div>
+
+            <div className="rounded-2xl bg-black/20 p-3">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                Authority evidence
+              </div>
+              <div className="mt-2 break-all font-mono text-xs text-hush-text-primary">
+                {formatArtifactValue(sp11Presentation.authorityEvidenceRef)}
+              </div>
+              <div className="mt-1 text-xs text-hush-text-accent">
+                {sp11Presentation.requiresAuthorityEvidence ? 'Required by claim' : 'Not required'}
+              </div>
+            </div>
+          </div>
+
+          {sp11Presentation.blockingCodes.length > 0 ? (
+            <ul
+              className={`mt-4 space-y-2 text-sm ${getReleaseIntegrityToneClass(sp11Presentation.tone)}`}
+              aria-label="SP-11 regulatory-claim blockers"
+            >
+              {sp11Presentation.blockingCodes.map((code) => (
+                <li key={code} className="rounded-2xl bg-black/20 px-3 py-2 font-mono text-xs">
+                  {code}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+
+          {sp11Presentation.showTechnicalRefs ? (
+            <details className="mt-4 rounded-2xl bg-black/18 p-4">
+              <summary className="cursor-pointer text-sm font-medium text-hush-text-primary">
+                Show regulatory evidence details
+              </summary>
+
+              <div className="mt-4 grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+                <div className="grid gap-3">
+                  <div className="rounded-2xl bg-black/20 p-3">
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                      Source
+                    </div>
+                    <div className="mt-2 break-all font-mono text-xs text-hush-text-primary">
+                      {sp11Presentation.sourceRef || 'Not recorded'}
+                    </div>
+                    <div className="mt-2 break-words text-xs text-hush-text-accent">
+                      Owner: {sp11Presentation.owner || 'Not recorded'}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl bg-black/20 p-3">
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                      Restricted workpaper
+                    </div>
+                    <div className="mt-2 break-all font-mono text-xs text-hush-text-primary">
+                      {formatArtifactValue(sp11Presentation.restrictedWorkpaperRef)}
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                    Evidence files
+                  </div>
+                  <div className="mt-3 space-y-2" data-testid="verification-package-sp11-files">
+                    {status.Sp11RegulatoryClaim.EvidenceFiles.map((file) => (
+                      <div key={file.RelativePath} className="rounded-2xl bg-black/20 p-3">
+                        <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="min-w-0 break-words text-sm font-semibold text-hush-text-primary">
+                            {file.RelativePath}
+                          </div>
+                          <div
+                            className={`text-xs font-semibold ${
+                              file.IsPresent ? 'text-green-100' : 'text-red-100'
+                            }`}
+                          >
+                            {file.IsPresent ? 'Present' : 'Missing'}
+                          </div>
+                        </div>
+                        <div
+                          className="mt-2 break-all font-mono text-xs text-hush-text-accent"
+                          title={file.ContentHash || undefined}
+                        >
+                          {formatArtifactValue(file.ContentHash)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             </details>

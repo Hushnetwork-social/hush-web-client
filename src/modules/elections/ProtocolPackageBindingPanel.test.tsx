@@ -47,6 +47,9 @@ describe('ProtocolPackageBindingPanel', () => {
     expect(screen.getByText('No external review conclusion')).toBeInTheDocument();
     expect(screen.getByText('not_available')).toBeInTheDocument();
     expect(screen.getByText('protocol_proof_verifier_publication_path_v1')).toBeInTheDocument();
+    expect(screen.getByText('Operational assumptions')).toBeInTheDocument();
+    expect(screen.getByText('hushvoting_managed_aws_container_v1')).toBeInTheDocument();
+    expect(screen.getByText(/tracker intelligence, not certification/i)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open Public spec package access location' })).toHaveAttribute(
       'href',
       'https://www.hushnetwork.social/protocol-omega/hushvoting-v1/v1.0.0/spec.zip'

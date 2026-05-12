@@ -151,7 +151,7 @@ export function ProtocolPackageBindingPanel({
         />
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-3">
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-2xl bg-violet-500/12 p-3 text-sm text-hush-text-primary">
           <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
             Approval
@@ -175,6 +175,17 @@ export function ProtocolPackageBindingPanel({
           </div>
           <div className="mt-2 break-all font-mono text-xs text-hush-text-accent" title={presentation.externalReviewScope}>
             {presentation.externalReviewScope}
+          </div>
+        </div>
+        <div className="rounded-2xl bg-sky-500/12 p-3 text-sm text-hush-text-primary">
+          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+            Operational assumptions
+          </div>
+          <div className="mt-2 break-all font-mono text-xs text-hush-text-primary">
+            hushvoting_managed_aws_container_v1
+          </div>
+          <div className="mt-2 text-xs text-hush-text-accent">
+            Custody is mode-specific and evidence-bound; regulatory posture is tracker intelligence, not certification.
           </div>
         </div>
         <div className="rounded-2xl bg-emerald-500/12 p-3 text-sm text-hush-text-primary">
