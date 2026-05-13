@@ -24,6 +24,8 @@ import type {
   GetElectionRequest,
   GetElectionEnvelopeAccessRequest,
   GetElectionEnvelopeAccessResponse,
+  GetElectionAnomalyOwnThreadRequest,
+  GetElectionAnomalyOwnThreadResponse,
   GetElectionResponse,
   GetElectionsByOwnerRequest,
   GetElectionsByOwnerResponse,
@@ -152,6 +154,15 @@ export const electionsService = {
   ): Promise<GetElectionEnvelopeAccessResponse> {
     return proxyElectionQuery<GetElectionEnvelopeAccessRequest, GetElectionEnvelopeAccessResponse>(
       'GetElectionEnvelopeAccess',
+      request
+    );
+  },
+
+  async getElectionAnomalyOwnThread(
+    request: GetElectionAnomalyOwnThreadRequest
+  ): Promise<GetElectionAnomalyOwnThreadResponse> {
+    return proxyElectionQuery<GetElectionAnomalyOwnThreadRequest, GetElectionAnomalyOwnThreadResponse>(
+      'GetElectionAnomalyOwnThread',
       request
     );
   },

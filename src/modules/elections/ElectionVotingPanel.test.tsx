@@ -37,6 +37,7 @@ const { electionsServiceMock, blockchainServiceMock, transactionServiceMock } = 
     getElection: vi.fn(),
     getElectionVotingView: vi.fn(),
     getElectionResultView: vi.fn(),
+    getElectionAnomalyOwnThread: vi.fn(),
   },
   blockchainServiceMock: {
     submitTransaction: vi.fn(),
@@ -65,16 +66,20 @@ vi.mock('@/modules/blockchain/BlockchainService', () => ({
   submitTransaction: (...args: unknown[]) => blockchainServiceMock.submitTransaction(...args),
 }));
 
-vi.mock('./transactionService', () => ({
-  createRegisterElectionVotingCommitmentTransaction: (...args: unknown[]) =>
-    transactionServiceMock.createRegisterElectionVotingCommitmentTransaction(...args),
-  createRegisterPreparedBallotCommitmentTransaction: (...args: unknown[]) =>
-    transactionServiceMock.createRegisterPreparedBallotCommitmentTransaction(...args),
-  createSpoilPreparedBallotTransaction: (...args: unknown[]) =>
-    transactionServiceMock.createSpoilPreparedBallotTransaction(...args),
-  createAcceptElectionBallotCastTransaction: (...args: unknown[]) =>
-    transactionServiceMock.createAcceptElectionBallotCastTransaction(...args),
-}));
+vi.mock('./transactionService', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./transactionService')>();
+  return {
+    ...actual,
+    createRegisterElectionVotingCommitmentTransaction: (...args: unknown[]) =>
+      transactionServiceMock.createRegisterElectionVotingCommitmentTransaction(...args),
+    createRegisterPreparedBallotCommitmentTransaction: (...args: unknown[]) =>
+      transactionServiceMock.createRegisterPreparedBallotCommitmentTransaction(...args),
+    createSpoilPreparedBallotTransaction: (...args: unknown[]) =>
+      transactionServiceMock.createSpoilPreparedBallotTransaction(...args),
+    createAcceptElectionBallotCastTransaction: (...args: unknown[]) =>
+      transactionServiceMock.createAcceptElectionBallotCastTransaction(...args),
+  };
+});
 
 const timestamp = { seconds: 1_774_120_000, nanos: 0 };
 const grpcTallyPublicKey = (() => {
@@ -284,6 +289,12 @@ describe('ElectionVotingPanel', () => {
     electionsServiceMock.getElection.mockResolvedValue(createElectionResponse());
     electionsServiceMock.getElectionVotingView.mockResolvedValue(createVotingViewResponse());
     electionsServiceMock.getElectionResultView.mockResolvedValue(createResultView());
+    electionsServiceMock.getElectionAnomalyOwnThread.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      ActorPublicAddress: 'actor-public-key',
+      HasThread: false,
+    });
     blockchainServiceMock.submitTransaction.mockResolvedValue({
       successful: true,
       message: 'Accepted',

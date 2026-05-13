@@ -19,6 +19,7 @@ import {
 const { electionsServiceMock } = vi.hoisted(() => ({
   electionsServiceMock: {
     getElectionVotingView: vi.fn(),
+    getElectionAnomalyOwnThread: vi.fn(),
     verifyElectionReceipt: vi.fn(),
   },
 }));
@@ -31,6 +32,8 @@ vi.mock('@/lib/grpc/services/elections', async (importOriginal) => {
       ...actual.electionsService,
       getElectionVotingView: (...args: unknown[]) =>
         electionsServiceMock.getElectionVotingView(...args),
+      getElectionAnomalyOwnThread: (...args: unknown[]) =>
+        electionsServiceMock.getElectionAnomalyOwnThread(...args),
       verifyElectionReceipt: (...args: unknown[]) =>
         electionsServiceMock.verifyElectionReceipt(...args),
     },
@@ -41,6 +44,7 @@ describe('VoterWorkspaceSummary', () => {
   beforeEach(() => {
     cleanup();
     electionsServiceMock.getElectionVotingView.mockReset();
+    electionsServiceMock.getElectionAnomalyOwnThread.mockReset();
     electionsServiceMock.verifyElectionReceipt.mockReset();
     localStorage.clear();
     sessionStorage.clear();
@@ -52,6 +56,12 @@ describe('VoterWorkspaceSummary', () => {
       AcceptanceId: '',
       ServerProof: '',
       PersonalParticipationStatus: ElectionParticipationStatusProto.ParticipationDidNotVote,
+    });
+    electionsServiceMock.getElectionAnomalyOwnThread.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      ActorPublicAddress: 'actor-address',
+      HasThread: false,
     });
     electionsServiceMock.verifyElectionReceipt.mockResolvedValue({
       Success: true,

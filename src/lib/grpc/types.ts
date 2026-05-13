@@ -1961,6 +1961,8 @@ export interface ElectionRecordView {
   HasBallotDefinitionSealedAt?: boolean;
   BallotDefinitionMutationPolicy?: BallotDefinitionMutationPolicyProto;
   HasBallotDefinitionSeal?: boolean;
+  AnomalySubmissionWindowClosesAt?: GrpcTimestamp;
+  HasAnomalySubmissionWindowClosesAt?: boolean;
 }
 
 export interface ElectionSummary {
@@ -1972,6 +1974,8 @@ export interface ElectionSummary {
   GovernanceMode: ElectionGovernanceModeProto;
   CurrentDraftRevision: number;
   LastUpdatedAt: GrpcTimestamp;
+  AnomalySubmissionWindowClosesAt?: GrpcTimestamp;
+  HasAnomalySubmissionWindowClosesAt?: boolean;
 }
 
 export interface ElectionDraftSnapshot {
@@ -2428,6 +2432,55 @@ export interface GetElectionEnvelopeAccessResponse {
   Success: boolean;
   ErrorMessage: string;
   ActorEncryptedElectionPrivateKey: string;
+}
+
+export interface GetElectionAnomalyOwnThreadRequest {
+  ElectionId: string;
+  ActorPublicAddress: string;
+}
+
+export interface ElectionAnomalyRecipientWrapView {
+  RecipientRoleId: string;
+  WrapStatusId: string;
+  RecipientPublicAddress: string;
+  RecipientKeyFingerprint: string;
+  EncryptedContentKey: string;
+  WrapAlgorithm: string;
+}
+
+export interface ElectionAnomalyMessageView {
+  MessageId: string;
+  MessageKindId: string;
+  RecordedAt?: GrpcTimestamp;
+  EncryptedBody: string;
+  EncryptedBodyHash: string;
+  PlaintextCharacterCount: number;
+  RecipientWraps: ElectionAnomalyRecipientWrapView[];
+  ClarificationRequestId: string;
+  HasClarificationRequest: boolean;
+  AttachmentManifestHash: string;
+}
+
+export interface ElectionAnomalyOwnThreadView {
+  AnomalyThreadId: string;
+  ElectionId: string;
+  CategoryId: string;
+  CaseStateId: string;
+  CurrentThreadHash: string;
+  SeverityCandidateId: string;
+  GovernedDecisionRef: string;
+  HasOpenClarificationRequest: boolean;
+  CreatedAt?: GrpcTimestamp;
+  UpdatedAt?: GrpcTimestamp;
+  Messages: ElectionAnomalyMessageView[];
+}
+
+export interface GetElectionAnomalyOwnThreadResponse {
+  Success: boolean;
+  ErrorMessage: string;
+  ActorPublicAddress: string;
+  HasThread: boolean;
+  Thread?: ElectionAnomalyOwnThreadView;
 }
 
 export interface GetElectionResultViewRequest {

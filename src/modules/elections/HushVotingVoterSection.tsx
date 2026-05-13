@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import {
   CheckCircle2,
   Circle,
+  FileWarning,
   Files,
   Loader2,
   ShieldCheck,
@@ -13,6 +14,7 @@ import {
 } from 'lucide-react';
 import type {
   ElectionHubEntryView,
+  GetElectionAnomalyOwnThreadResponse,
   GetElectionResultViewResponse,
   GetElectionVotingViewResponse,
   VerifyElectionReceiptResponse,
@@ -207,6 +209,14 @@ function loadRetainedReceiptCommitment(electionId: string): {
   } catch {
     return { ballotPackageCommitment: '', receiptCommitment: '' };
   }
+}
+
+function timestampToMillis(timestamp?: { seconds?: number; nanos?: number }): number | null {
+  if (!timestamp?.seconds) {
+    return null;
+  }
+
+  return timestamp.seconds * 1000 + Math.floor((timestamp.nanos ?? 0) / 1_000_000);
 }
 
 function buildCountedSetStatusItem({
@@ -466,6 +476,9 @@ export function VoterWorkspaceSummary({
   const [receiptVotingView, setReceiptVotingView] = useState<GetElectionVotingViewResponse | null>(
     null,
   );
+  const [anomalyThread, setAnomalyThread] =
+    useState<GetElectionAnomalyOwnThreadResponse | null>(null);
+  const [isLoadingAnomalyThread, setIsLoadingAnomalyThread] = useState(false);
   const [isReceiptDialogOpen, setIsReceiptDialogOpen] = useState(false);
   const [receiptInput, setReceiptInput] = useState('');
   const [receiptSourceLabel, setReceiptSourceLabel] = useState('');
@@ -511,6 +524,44 @@ export function VoterWorkspaceSummary({
     () => buildVoterEligibilityStatusCopy(entry, receiptVotingView, hasAcceptedReceipt),
     [entry, hasAcceptedReceipt, receiptVotingView],
   );
+  const anomalyWindowMillis = timestampToMillis(entry.Election.AnomalySubmissionWindowClosesAt);
+  const isAnomalyWindowOpen =
+    !entry.Election.HasAnomalySubmissionWindowClosesAt ||
+    !anomalyWindowMillis ||
+    anomalyWindowMillis > Date.now();
+  const anomalyStatus = useMemo(() => {
+    if (entry.CanClaimIdentity) {
+      return {
+        title: 'Eligibility required',
+        detail: 'Link the voter identity before reporting an election-workflow anomaly.',
+        tone: 'warning' as const,
+      };
+    }
+
+    if (anomalyThread?.Success && anomalyThread.HasThread) {
+      return {
+        title: 'Report thread available',
+        detail: anomalyThread.Thread?.HasOpenClarificationRequest
+          ? 'A clarification request is open on your anomaly thread.'
+          : 'Open the voter detail screen to review your anomaly thread.',
+        tone: 'success' as const,
+      };
+    }
+
+    if (!isAnomalyWindowOpen) {
+      return {
+        title: 'New reports closed',
+        detail: 'Existing own-thread review remains available after the submission window closes.',
+        tone: 'neutral' as const,
+      };
+    }
+
+    return {
+      title: 'No report submitted',
+      detail: 'Use the voter detail screen to submit one bounded anomaly report if needed.',
+      tone: 'neutral' as const,
+    };
+  }, [anomalyThread, entry.CanClaimIdentity, isAnomalyWindowOpen]);
 
   const voterSurfaceSummary = useMemo(() => {
     if (entry.CanClaimIdentity) {
@@ -608,6 +659,43 @@ export function VoterWorkspaceSummary({
     }
 
     void loadAcceptedReceiptState();
+
+    return () => {
+      isActive = false;
+    };
+  }, [actorPublicAddress, entry.CanClaimIdentity, entry.Election.ElectionId]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    async function loadAnomalyThread(): Promise<void> {
+      if (entry.CanClaimIdentity) {
+        setAnomalyThread(null);
+        setIsLoadingAnomalyThread(false);
+        return;
+      }
+
+      setIsLoadingAnomalyThread(true);
+      try {
+        const response = await electionsService.getElectionAnomalyOwnThread({
+          ElectionId: entry.Election.ElectionId,
+          ActorPublicAddress: actorPublicAddress,
+        });
+        if (isActive) {
+          setAnomalyThread(response);
+        }
+      } catch {
+        if (isActive) {
+          setAnomalyThread(null);
+        }
+      } finally {
+        if (isActive) {
+          setIsLoadingAnomalyThread(false);
+        }
+      }
+    }
+
+    void loadAnomalyThread();
 
     return () => {
       isActive = false;
@@ -792,6 +880,45 @@ export function VoterWorkspaceSummary({
         </div>
         <div className="mt-2 text-sm leading-6 text-hush-text-accent">
           {voterEligibilityStatus.detail}
+        </div>
+      </div>
+
+      <div
+        className="mt-4 rounded-2xl bg-hush-bg-dark/70 p-4"
+        data-testid="hush-voting-voter-anomaly-status"
+      >
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+              <FileWarning className="h-4 w-4" />
+              <span>Anomaly report</span>
+            </div>
+            <div
+              className={`mt-2 text-sm font-semibold ${
+                anomalyStatus.tone === 'success'
+                  ? 'text-green-100'
+                  : anomalyStatus.tone === 'warning'
+                    ? 'text-amber-100'
+                    : 'text-hush-text-primary'
+              }`}
+            >
+              {isLoadingAnomalyThread ? 'Checking report thread' : anomalyStatus.title}
+            </div>
+            <div className="mt-2 text-sm leading-6 text-hush-text-accent">
+              {isLoadingAnomalyThread ? 'Loading your voter anomaly status.' : anomalyStatus.detail}
+            </div>
+          </div>
+          <Link
+            href={primaryHref}
+            className="inline-flex self-start items-center gap-2 rounded-xl bg-hush-bg-element/80 px-4 py-2 text-sm font-medium whitespace-nowrap text-hush-text-primary transition-colors hover:bg-hush-bg-element focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple"
+          >
+            {isLoadingAnomalyThread ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <FileWarning className="h-4 w-4" />
+            )}
+            <span>{entry.CanClaimIdentity ? 'Open eligibility' : 'Open report'}</span>
+          </Link>
         </div>
       </div>
 
