@@ -47,6 +47,7 @@ import {
   createRegisterElectionVotingCommitmentTransaction,
   createSpoilPreparedBallotTransaction,
 } from './transactionService';
+import { ElectionAnomalyPanel } from './ElectionAnomalyPanel';
 import { ElectionReceiptTruthPanel } from './ElectionReceiptTruthPanel';
 import { ElectionResultArtifactsSection } from './ElectionResultArtifactsSection';
 import { getLifecycleLabel } from './contracts';
@@ -2401,6 +2402,25 @@ export function ElectionVotingPanel({
           election={election}
           resultView={resultView}
           showReportPackage={false}
+        />
+
+        <ElectionAnomalyPanel
+          electionId={electionId}
+          actorPublicAddress={actorPublicAddress}
+          actorEncryptionPublicKey={actorEncryptionPublicKey}
+          actorEncryptionPrivateKey={actorEncryptionPrivateKey}
+          actorSigningPrivateKey={actorSigningPrivateKey}
+          ownerPublicAddress={election.OwnerPublicAddress}
+          isLinkedVoter={hasVotingAccess && isLinked}
+          lifecycleState={election.LifecycleState}
+          anomalySubmissionWindowClosesAt={
+            election.AnomalySubmissionWindowClosesAt ??
+            votingView?.Election?.AnomalySubmissionWindowClosesAt
+          }
+          hasAnomalySubmissionWindowClosesAt={
+            election.HasAnomalySubmissionWindowClosesAt ??
+            votingView?.Election?.HasAnomalySubmissionWindowClosesAt
+          }
         />
 
         {isAccepted ? (

@@ -1,19 +1,33 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as secp256k1 from '@noble/secp256k1';
-import { bytesToBase64, bytesToHex, eciesDecrypt, eciesEncrypt, hexToBytes } from '@/lib/crypto';
+import {
+  aesDecrypt,
+  bytesToBase64,
+  bytesToHex,
+  eciesDecrypt,
+  eciesEncrypt,
+  hexToBytes,
+} from '@/lib/crypto';
 import {
   ElectionFinalizationTargetTypeProto,
+  type ElectionAnomalyMessageView,
   type ElectionDraftInput,
   type SubmitElectionFinalizationShareRequest,
 } from '@/lib/grpc';
 import {
   ENCRYPTED_ELECTION_ENVELOPE_PAYLOAD_KIND,
+  ELECTION_ANOMALY_CATEGORY_IDS,
+  ELECTION_ANOMALY_RECIPIENT_ROLE_IDS,
+  ELECTION_ANOMALY_VALIDATION_CODES,
   type CloseCountingExecutorSubmissionPayload,
   createAcceptElectionBallotCastTransaction,
   createAcceptElectionTrusteeInvitationTransaction,
   createRegisterElectionVotingCommitmentTransaction,
   createApproveElectionGovernedProposalTransaction,
   createClaimElectionRosterEntryTransaction,
+  createSubmitElectionAnomalyInformationTransaction,
+  createSubmitElectionAnomalyThreadTransaction,
+  decryptElectionAnomalyMessageBody,
   createElectionDraftTransaction,
   createElectionReportAccessGrantTransaction,
   createElectionTrusteeInvitationTransaction,
@@ -21,6 +35,8 @@ import {
   createRefreshProtocolPackageBindingTransaction,
   createRejectElectionTrusteeInvitationTransaction,
   createSubmitElectionFinalizationShareTransaction,
+  hasElectionAnomalyDuplicateThreadValidation,
+  type ElectionAnomalyMessageEnvelopePayload,
 } from './transactionService';
 
 const { blockchainServiceMock, electionsServiceMock, identityServiceMock } = vi.hoisted(() => ({
@@ -907,6 +923,257 @@ describe('transactionService encrypted election envelope helpers', () => {
     expect(decryptedPayload.ActionPayload.DkgProfileId).toBe('dkg-prod-1of1');
     expect(decryptedPayload.ActionPayload.TallyPublicKeyFingerprint).toBe('tally-fingerprint-9');
     expect(electionsServiceMock.getElectionEnvelopeAccess).not.toHaveBeenCalled();
+  });
+
+  it('creates a voter anomaly thread envelope with encrypted body and submitter/owner wraps', async () => {
+    const voterSigningPrivateKeyHex = '7777777777777777777777777777777777777777777777777777777777777777';
+    const voterEncryptionPrivateKeyHex = '8888888888888888888888888888888888888888888888888888888888888888';
+    const ownerSigningPrivateKeyHex = '1111111111111111111111111111111111111111111111111111111111111111';
+    const ownerEncryptionPrivateKeyHex = '2222222222222222222222222222222222222222222222222222222222222222';
+    const nodeEncryptionPrivateKeyHex = '3333333333333333333333333333333333333333333333333333333333333333';
+    const voterSigningPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(voterSigningPrivateKeyHex), true),
+    );
+    const voterEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(voterEncryptionPrivateKeyHex), true),
+    );
+    const ownerSigningPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(ownerSigningPrivateKeyHex), true),
+    );
+    const ownerEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(ownerEncryptionPrivateKeyHex), true),
+    );
+    const nodeEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(nodeEncryptionPrivateKeyHex), true),
+    );
+    blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
+      NodePublicEncryptAddress: nodeEncryptionPublicKey,
+      ElectionEnvelopeVersion: 'election-envelope-v2.1',
+    });
+    identityServiceMock.getIdentity.mockResolvedValue({
+      Successfull: true,
+      Message: '',
+      ProfileName: 'Election Owner',
+      PublicSigningAddress: ownerSigningPublicKey,
+      PublicEncryptAddress: ownerEncryptionPublicKey,
+      IsPublic: false,
+    });
+
+    const { signedTransaction, anomalyThreadId } = await createSubmitElectionAnomalyThreadTransaction({
+      ElectionId: 'election-123',
+      ActorPublicAddress: voterSigningPublicKey,
+      ActorPublicEncryptAddress: voterEncryptionPublicKey,
+      ActorPrivateEncryptKeyHex: voterEncryptionPrivateKeyHex,
+      OwnerPublicAddress: ownerSigningPublicKey,
+      CategoryId: ELECTION_ANOMALY_CATEGORY_IDS.BALLOT_CASTING_OR_RECEIPT,
+      Body: 'Receipt verification did not match my ballot status.',
+      SigningPrivateKeyHex: voterSigningPrivateKeyHex,
+    });
+
+    const parsedTransaction = JSON.parse(signedTransaction) as {
+      PayloadKind: string;
+      Payload: {
+        ActionType: string;
+        ActionPayload: Record<string, unknown> & {
+          InitialMessage: ElectionAnomalyMessageEnvelopePayload;
+        };
+        ActorEncryptedElectionPrivateKey: string;
+        EncryptedPayload: string;
+      };
+    };
+
+    expect(parsedTransaction.PayloadKind).toBe(ENCRYPTED_ELECTION_ENVELOPE_PAYLOAD_KIND);
+    expect(parsedTransaction.Payload.ActionType).toBe('submit_anomaly_thread');
+    expect(parsedTransaction.Payload.ActionPayload.AnomalyThreadId).toBe(anomalyThreadId);
+    expect(JSON.stringify(parsedTransaction.Payload.ActionPayload)).not.toContain('submitterPersonScopeId');
+    expect(electionsServiceMock.getElectionEnvelopeAccess).not.toHaveBeenCalled();
+
+    const actorElectionPrivateKey = await eciesDecrypt(
+      parsedTransaction.Payload.ActorEncryptedElectionPrivateKey,
+      voterEncryptionPrivateKeyHex,
+    );
+    const decryptedPayloadJson = await eciesDecrypt(
+      parsedTransaction.Payload.EncryptedPayload,
+      actorElectionPrivateKey,
+    );
+    const decryptedPayload = JSON.parse(decryptedPayloadJson) as {
+      ActionType: string;
+      ActionPayload: {
+        CategoryId: string;
+        InitialMessage: ElectionAnomalyMessageEnvelopePayload;
+      };
+    };
+    const message = decryptedPayload.ActionPayload.InitialMessage;
+
+    expect(decryptedPayload.ActionType).toBe('submit_anomaly_thread');
+    expect(decryptedPayload.ActionPayload.CategoryId).toBe(
+      ELECTION_ANOMALY_CATEGORY_IDS.BALLOT_CASTING_OR_RECEIPT,
+    );
+    expect(message.MessageKindId).toBe('initial_submission');
+    expect(message.PlaintextCharacterCount).toBe(52);
+    expect(message.EncryptedBody).not.toContain('Receipt verification');
+    expect(message.EncryptedBodyHash).toMatch(/^sha256:/);
+    expect(message.PlaintextBodyHash).toMatch(/^sha256:/);
+    expect(message.RecipientWraps).toHaveLength(2);
+
+    const submitterWrap = message.RecipientWraps.find((wrap) =>
+      wrap.RecipientRoleId === ELECTION_ANOMALY_RECIPIENT_ROLE_IDS.SUBMITTER
+    )!;
+    const ownerWrap = message.RecipientWraps.find((wrap) =>
+      wrap.RecipientRoleId === ELECTION_ANOMALY_RECIPIENT_ROLE_IDS.ELECTION_OWNER
+    )!;
+    const submitterContentKey = await eciesDecrypt(
+      submitterWrap.EncryptedContentKey,
+      voterEncryptionPrivateKeyHex,
+    );
+    const ownerContentKey = await eciesDecrypt(
+      ownerWrap.EncryptedContentKey,
+      ownerEncryptionPrivateKeyHex,
+    );
+
+    await expect(aesDecrypt(message.EncryptedBody, submitterContentKey)).resolves.toBe(
+      'Receipt verification did not match my ballot status.',
+    );
+    await expect(aesDecrypt(message.EncryptedBody, ownerContentKey)).resolves.toBe(
+      'Receipt verification did not match my ballot status.',
+    );
+    await expect(decryptElectionAnomalyMessageBody({
+      MessageId: message.MessageId,
+      MessageKindId: message.MessageKindId,
+      EncryptedBody: message.EncryptedBody,
+      EncryptedBodyHash: message.EncryptedBodyHash,
+      PlaintextCharacterCount: message.PlaintextCharacterCount,
+      RecipientWraps: message.RecipientWraps,
+      ClarificationRequestId: '',
+      HasClarificationRequest: false,
+      AttachmentManifestHash: '',
+    } satisfies ElectionAnomalyMessageView, voterEncryptionPrivateKeyHex)).resolves.toBe(
+      'Receipt verification did not match my ballot status.',
+    );
+  });
+
+  it('validates anomaly category and body constraints before creating a thread transaction', async () => {
+    const baseInput = {
+      ElectionId: 'election-123',
+      ActorPublicAddress: 'actor-address',
+      ActorPublicEncryptAddress: 'actor-encrypt-address',
+      ActorPrivateEncryptKeyHex: 'actor-private-key',
+      OwnerPublicAddress: 'owner-address',
+      CategoryId: ELECTION_ANOMALY_CATEGORY_IDS.ACCESS_OR_AUTHENTICATION,
+      Body: 'valid report body',
+      SigningPrivateKeyHex: 'signing-private-key',
+    };
+
+    await expect(createSubmitElectionAnomalyThreadTransaction({
+      ...baseInput,
+      CategoryId: 'unexpected_category',
+    })).rejects.toThrow(ELECTION_ANOMALY_VALIDATION_CODES.CATEGORY_INVALID);
+    await expect(createSubmitElectionAnomalyThreadTransaction({
+      ...baseInput,
+      Body: '   ',
+    })).rejects.toThrow(ELECTION_ANOMALY_VALIDATION_CODES.BODY_REQUIRED);
+    await expect(createSubmitElectionAnomalyThreadTransaction({
+      ...baseInput,
+      Body: 'x'.repeat(1001),
+    })).rejects.toThrow(ELECTION_ANOMALY_VALIDATION_CODES.BODY_TOO_LONG);
+  });
+
+  it('creates a bounded clarification response anomaly envelope', async () => {
+    const voterSigningPrivateKeyHex = '7777777777777777777777777777777777777777777777777777777777777777';
+    const voterEncryptionPrivateKeyHex = '8888888888888888888888888888888888888888888888888888888888888888';
+    const ownerSigningPrivateKeyHex = '1111111111111111111111111111111111111111111111111111111111111111';
+    const ownerEncryptionPrivateKeyHex = '2222222222222222222222222222222222222222222222222222222222222222';
+    const nodeEncryptionPrivateKeyHex = '3333333333333333333333333333333333333333333333333333333333333333';
+    const voterSigningPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(voterSigningPrivateKeyHex), true),
+    );
+    const voterEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(voterEncryptionPrivateKeyHex), true),
+    );
+    const ownerSigningPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(ownerSigningPrivateKeyHex), true),
+    );
+    const ownerEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(ownerEncryptionPrivateKeyHex), true),
+    );
+    const nodeEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(nodeEncryptionPrivateKeyHex), true),
+    );
+    blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
+      NodePublicEncryptAddress: nodeEncryptionPublicKey,
+      ElectionEnvelopeVersion: 'election-envelope-v2.1',
+    });
+    identityServiceMock.getIdentity.mockResolvedValue({
+      Successfull: true,
+      Message: '',
+      ProfileName: 'Election Owner',
+      PublicSigningAddress: ownerSigningPublicKey,
+      PublicEncryptAddress: ownerEncryptionPublicKey,
+      IsPublic: false,
+    });
+
+    const { signedTransaction } = await createSubmitElectionAnomalyInformationTransaction({
+      ElectionId: 'election-123',
+      AnomalyThreadId: 'thread-123',
+      ClarificationRequestId: 'clarification-123',
+      ActorPublicAddress: voterSigningPublicKey,
+      ActorPublicEncryptAddress: voterEncryptionPublicKey,
+      ActorPrivateEncryptKeyHex: voterEncryptionPrivateKeyHex,
+      OwnerPublicAddress: ownerSigningPublicKey,
+      Body: 'The receipt mismatch appeared after refresh.',
+      SigningPrivateKeyHex: voterSigningPrivateKeyHex,
+    });
+
+    const parsedTransaction = JSON.parse(signedTransaction) as {
+      Payload: {
+        ActorEncryptedElectionPrivateKey: string;
+        EncryptedPayload: string;
+      };
+    };
+    const actorElectionPrivateKey = await eciesDecrypt(
+      parsedTransaction.Payload.ActorEncryptedElectionPrivateKey,
+      voterEncryptionPrivateKeyHex,
+    );
+    const decryptedPayload = JSON.parse(
+      await eciesDecrypt(parsedTransaction.Payload.EncryptedPayload, actorElectionPrivateKey),
+    ) as {
+      ActionType: string;
+      ActionPayload: {
+        AnomalyThreadId: string;
+        ClarificationRequestId: string;
+        ResponseMessage: ElectionAnomalyMessageEnvelopePayload;
+      };
+    };
+
+    expect(decryptedPayload.ActionType).toBe('submit_anomaly_information');
+    expect(decryptedPayload.ActionPayload.AnomalyThreadId).toBe('thread-123');
+    expect(decryptedPayload.ActionPayload.ClarificationRequestId).toBe('clarification-123');
+    expect(decryptedPayload.ActionPayload.ResponseMessage.MessageKindId).toBe(
+      'submitter_information_response',
+    );
+    expect(JSON.stringify(decryptedPayload.ActionPayload)).not.toContain('submitterPersonScopeId');
+
+    await expect(createSubmitElectionAnomalyInformationTransaction({
+      ElectionId: 'election-123',
+      AnomalyThreadId: 'thread-123',
+      ClarificationRequestId: '',
+      ActorPublicAddress: voterSigningPublicKey,
+      ActorPublicEncryptAddress: voterEncryptionPublicKey,
+      ActorPrivateEncryptKeyHex: voterEncryptionPrivateKeyHex,
+      OwnerPublicAddress: ownerSigningPublicKey,
+      Body: 'The receipt mismatch appeared after refresh.',
+      SigningPrivateKeyHex: voterSigningPrivateKeyHex,
+    })).rejects.toThrow(ELECTION_ANOMALY_VALIDATION_CODES.CLARIFICATION_REQUEST_NOT_OPEN);
+  });
+
+  it('detects duplicate anomaly validation responses for route-to-thread recovery', () => {
+    expect(hasElectionAnomalyDuplicateThreadValidation({
+      Successfull: false,
+      Message: 'Rejected with anomaly_duplicate_thread',
+    })).toBe(true);
+    expect(hasElectionAnomalyDuplicateThreadValidation({
+      ValidationErrors: ['anomaly_body_required'],
+    })).toBe(false);
   });
 
   it('creates an encrypted aggregate-only finalization share envelope for a trustee actor', async () => {

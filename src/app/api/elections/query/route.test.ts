@@ -151,6 +151,44 @@ describe('POST /api/elections/query', () => {
     );
   });
 
+  it('passes through a signed anomaly own-thread election query', async () => {
+    const { POST } = await import('./route');
+    const signedHeaders = await createElectionQueryAuthHeaders(
+      'GetElectionAnomalyOwnThread',
+      {
+        ElectionId: 'election-1',
+        ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+      },
+      TEST_CREDENTIALS
+    );
+
+    const response = await POST(
+      new Request('http://localhost/api/elections/query', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...signedHeaders,
+        },
+        body: JSON.stringify({
+          method: 'GetElectionAnomalyOwnThread',
+          request: {
+            ElectionId: 'election-1',
+            ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+          },
+        }),
+      }) as never
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:4666/rpcHush.HushElections/GetElectionAnomalyOwnThread',
+      expect.objectContaining({
+        headers: expect.objectContaining(signedHeaders),
+      })
+    );
+  });
+
   it('passes through a signed actor-bound election directory search', async () => {
     const { POST } = await import('./route');
     const signedHeaders = await createElectionQueryAuthHeaders(

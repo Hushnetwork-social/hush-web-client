@@ -22,6 +22,7 @@ const METHOD_ADDRESS_FIELD = new Map<string, string>([
   ['GetElectionVotingView', 'ActorPublicAddress'],
   ['VerifyElectionReceipt', 'ActorPublicAddress'],
   ['GetElectionEnvelopeAccess', 'ActorPublicAddress'],
+  ['GetElectionAnomalyOwnThread', 'ActorPublicAddress'],
   ['GetElectionResultView', 'ActorPublicAddress'],
   ['GetElectionVerificationPackageStatus', 'ActorPublicAddress'],
   ['ExportElectionVerificationPackage', 'ActorPublicAddress'],

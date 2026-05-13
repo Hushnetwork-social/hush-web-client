@@ -1,11 +1,19 @@
-import type { ECPoint, ElectionDraftInput, SubmitElectionFinalizationShareRequest } from '@/lib/grpc';
+import type {
+  ECPoint,
+  ElectionAnomalyMessageView,
+  ElectionDraftInput,
+  SubmitElectionFinalizationShareRequest,
+} from '@/lib/grpc';
 import * as secp256k1 from '@noble/secp256k1';
 import {
+  aesDecrypt,
+  aesEncrypt,
   bytesToBase64,
   bytesToHex,
   createUnsignedTransaction,
   eciesDecrypt,
   eciesEncrypt,
+  generateAesKey,
   generateGuid,
   hexToBytes,
   signByUser,
@@ -25,6 +33,50 @@ export const RETRY_ELECTION_GOVERNED_PROPOSAL_EXECUTION_PAYLOAD_KIND = '47da657b
 export const OPEN_ELECTION_PAYLOAD_KIND = '7f4e60ef-2a88-4794-9705-63f4721a0f7b';
 export const CLOSE_ELECTION_PAYLOAD_KIND = '16d0401b-41b5-4d7f-8603-119e28fb53b0';
 export const FINALIZE_ELECTION_PAYLOAD_KIND = 'ca90e62d-8bcb-4764-9386-70d74fb75627';
+
+export const ELECTION_ANOMALY_BODY_MAX_CHARACTERS = 1000;
+export const ELECTION_ANOMALY_CLARIFICATION_BODY_MAX_CHARACTERS = 1000;
+export const ELECTION_ANOMALY_WRAP_ALGORITHM = 'x25519-aes-gcm';
+
+export const ELECTION_ANOMALY_CATEGORY_IDS = {
+  ACCESS_OR_AUTHENTICATION: 'access_or_authentication_anomaly',
+  BALLOT_CASTING_OR_RECEIPT: 'ballot_casting_or_receipt_anomaly',
+  TRUSTEE_CONTINUITY: 'trustee_continuity_anomaly',
+  COUNTING_OR_TALLY: 'counting_or_tally_anomaly',
+  REPORTING_OR_AUDIT_PACKAGE: 'reporting_or_audit_package_anomaly',
+  SECURITY_OR_INTEGRITY: 'security_or_integrity_concern',
+  EXTERNAL_OBJECTION_OR_COMPLAINT: 'external_objection_or_complaint',
+  OTHER_PROCESS: 'other_process_anomaly',
+} as const;
+
+export const ELECTION_ANOMALY_CATEGORY_ID_VALUES = Object.values(ELECTION_ANOMALY_CATEGORY_IDS);
+
+export type ElectionAnomalyCategoryId = typeof ELECTION_ANOMALY_CATEGORY_ID_VALUES[number];
+
+export const ELECTION_ANOMALY_MESSAGE_KIND_IDS = {
+  INITIAL_SUBMISSION: 'initial_submission',
+  AUTHORITY_INFORMATION_REQUEST: 'authority_information_request',
+  SUBMITTER_INFORMATION_RESPONSE: 'submitter_information_response',
+  AUTHORITY_RESPONSE: 'authority_response',
+} as const;
+
+export const ELECTION_ANOMALY_RECIPIENT_ROLE_IDS = {
+  SUBMITTER: 'submitter',
+  ELECTION_OWNER: 'election_owner',
+} as const;
+
+export const ELECTION_ANOMALY_RECIPIENT_WRAP_STATUS_IDS = {
+  AVAILABLE: 'available',
+} as const;
+
+export const ELECTION_ANOMALY_VALIDATION_CODES = {
+  DUPLICATE_THREAD: 'anomaly_duplicate_thread',
+  BODY_REQUIRED: 'anomaly_body_required',
+  BODY_TOO_LONG: 'anomaly_body_too_long',
+  CATEGORY_INVALID: 'anomaly_category_invalid',
+  FOLLOWUP_NOT_REQUESTED: 'anomaly_followup_not_requested',
+  CLARIFICATION_REQUEST_NOT_OPEN: 'anomaly_clarification_request_not_open',
+} as const;
 
 export interface CreateElectionDraftPayload {
   ElectionId: string;
@@ -160,6 +212,67 @@ export interface AcceptElectionBallotCastActionPayload {
   ReceiptCommitmentScheme?: string;
   BallotDefinitionVersion?: number;
   BallotDefinitionHash?: string;
+}
+
+export interface ElectionAnomalyRecipientWrapPayload {
+  RecipientRoleId: string;
+  RecipientPublicAddress: string;
+  RecipientKeyFingerprint: string;
+  EncryptedContentKey: string;
+  WrapAlgorithm: string;
+  WrapStatusId: string;
+}
+
+export interface ElectionAnomalyMessageEnvelopePayload {
+  MessageId: string;
+  MessageKindId: string;
+  EncryptedBody: string;
+  EncryptedBodyHash: string;
+  PlaintextCharacterCount: number;
+  RecipientWraps: ElectionAnomalyRecipientWrapPayload[];
+  PlaintextBodyHash?: string | null;
+  EncryptionAlgorithm?: string | null;
+}
+
+export interface SubmitElectionAnomalyThreadActionPayload {
+  AnomalyThreadId: string;
+  ActionNonce: string;
+  ActorPublicAddress: string;
+  CategoryId: string;
+  InitialMessage: ElectionAnomalyMessageEnvelopePayload;
+  ActorRoleContextId?: string | null;
+}
+
+export interface SubmitElectionAnomalyInformationActionPayload {
+  AnomalyThreadId: string;
+  ClarificationRequestId: string;
+  ActionNonce: string;
+  ActorPublicAddress: string;
+  ResponseMessage: ElectionAnomalyMessageEnvelopePayload;
+}
+
+export interface CreateSubmitElectionAnomalyThreadTransactionInput {
+  ElectionId: string;
+  ActorPublicAddress: string;
+  ActorPublicEncryptAddress: string;
+  ActorPrivateEncryptKeyHex: string;
+  OwnerPublicAddress: string;
+  CategoryId: string;
+  Body: string;
+  SigningPrivateKeyHex: string;
+  ActorRoleContextId?: string | null;
+}
+
+export interface CreateSubmitElectionAnomalyInformationTransactionInput {
+  ElectionId: string;
+  AnomalyThreadId: string;
+  ClarificationRequestId: string;
+  ActorPublicAddress: string;
+  ActorPublicEncryptAddress: string;
+  ActorPrivateEncryptKeyHex: string;
+  OwnerPublicAddress: string;
+  Body: string;
+  SigningPrivateKeyHex: string;
 }
 
 export interface StartElectionCeremonyActionPayload {
@@ -377,6 +490,144 @@ function normalizeOptionalBinaryClaim(value: unknown, fieldName: string): string
   throw new Error(`${fieldName} must be a base64 string or byte array.`);
 }
 
+function countUnicodeCharacters(value: string): number {
+  return Array.from(value).length;
+}
+
+function normalizeAnomalyBody(body: string, maxCharacters: number): string {
+  const normalized = body.trim();
+  if (!normalized) {
+    throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.BODY_REQUIRED);
+  }
+
+  if (countUnicodeCharacters(normalized) > maxCharacters) {
+    throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.BODY_TOO_LONG);
+  }
+
+  return normalized;
+}
+
+export function isElectionAnomalyCategoryId(value: string): value is ElectionAnomalyCategoryId {
+  return ELECTION_ANOMALY_CATEGORY_ID_VALUES.includes(value as ElectionAnomalyCategoryId);
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return `sha256:${bytesToHex(new Uint8Array(digest))}`;
+}
+
+async function resolveAnomalyOwnerEncryptAddress(
+  ownerPublicAddress: string,
+  actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+): Promise<string> {
+  if (ownerPublicAddress === actorPublicAddress) {
+    return actorPublicEncryptAddress;
+  }
+
+  const ownerIdentity = await identityService.getIdentity(ownerPublicAddress);
+  if (!ownerIdentity.Successfull || !ownerIdentity.PublicEncryptAddress) {
+    throw new Error(`Election owner encryption key was not found for ${ownerPublicAddress}.`);
+  }
+
+  return ownerIdentity.PublicEncryptAddress;
+}
+
+async function createAnomalyRecipientWrap(
+  recipientRoleId: string,
+  recipientPublicAddress: string,
+  recipientPublicEncryptAddress: string,
+  contentKey: string,
+): Promise<ElectionAnomalyRecipientWrapPayload> {
+  return {
+    RecipientRoleId: recipientRoleId,
+    RecipientPublicAddress: recipientPublicAddress,
+    RecipientKeyFingerprint: await sha256Hex(recipientPublicEncryptAddress),
+    EncryptedContentKey: await eciesEncrypt(contentKey, recipientPublicEncryptAddress),
+    WrapAlgorithm: ELECTION_ANOMALY_WRAP_ALGORITHM,
+    WrapStatusId: ELECTION_ANOMALY_RECIPIENT_WRAP_STATUS_IDS.AVAILABLE,
+  };
+}
+
+export async function createElectionAnomalyMessageEnvelope(input: {
+  MessageKindId: string;
+  Body: string;
+  ActorPublicAddress: string;
+  ActorPublicEncryptAddress: string;
+  OwnerPublicAddress: string;
+  MaxCharacters?: number;
+}): Promise<ElectionAnomalyMessageEnvelopePayload> {
+  const body = normalizeAnomalyBody(
+    input.Body,
+    input.MaxCharacters ?? ELECTION_ANOMALY_BODY_MAX_CHARACTERS,
+  );
+  const ownerPublicEncryptAddress = await resolveAnomalyOwnerEncryptAddress(
+    input.OwnerPublicAddress,
+    input.ActorPublicAddress,
+    input.ActorPublicEncryptAddress,
+  );
+  const contentKey = generateAesKey();
+  const encryptedBody = await aesEncrypt(body, contentKey);
+
+  return {
+    MessageId: generateGuid(),
+    MessageKindId: input.MessageKindId,
+    EncryptedBody: encryptedBody,
+    EncryptedBodyHash: await sha256Hex(encryptedBody),
+    PlaintextCharacterCount: countUnicodeCharacters(body),
+    RecipientWraps: [
+      await createAnomalyRecipientWrap(
+        ELECTION_ANOMALY_RECIPIENT_ROLE_IDS.SUBMITTER,
+        input.ActorPublicAddress,
+        input.ActorPublicEncryptAddress,
+        contentKey,
+      ),
+      await createAnomalyRecipientWrap(
+        ELECTION_ANOMALY_RECIPIENT_ROLE_IDS.ELECTION_OWNER,
+        input.OwnerPublicAddress,
+        ownerPublicEncryptAddress,
+        contentKey,
+      ),
+    ],
+    PlaintextBodyHash: await sha256Hex(body),
+    EncryptionAlgorithm: ELECTION_ANOMALY_WRAP_ALGORITHM,
+  };
+}
+
+export async function decryptElectionAnomalyMessageBody(
+  message: ElectionAnomalyMessageView,
+  actorPrivateEncryptKeyHex: string,
+): Promise<string> {
+  const callerWrap = message.RecipientWraps.find((wrap) =>
+    Boolean(wrap.EncryptedContentKey?.trim()) &&
+    wrap.WrapStatusId === ELECTION_ANOMALY_RECIPIENT_WRAP_STATUS_IDS.AVAILABLE
+  );
+
+  if (!callerWrap) {
+    throw new Error('anomaly_message_key_unavailable');
+  }
+
+  const contentKey = await eciesDecrypt(callerWrap.EncryptedContentKey, actorPrivateEncryptKeyHex);
+  return aesDecrypt(message.EncryptedBody, contentKey);
+}
+
+export function hasElectionAnomalyDuplicateThreadValidation(value: unknown): boolean {
+  if (typeof value === 'string') {
+    return value.includes(ELECTION_ANOMALY_VALIDATION_CODES.DUPLICATE_THREAD);
+  }
+
+  if (Array.isArray(value)) {
+    return value.some((entry) => hasElectionAnomalyDuplicateThreadValidation(entry));
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.values(value as Record<string, unknown>)
+      .some((entry) => hasElectionAnomalyDuplicateThreadValidation(entry));
+  }
+
+  return false;
+}
+
 export interface OpenElectionPayload {
   ElectionId: string;
   ActorPublicAddress: string;
@@ -423,6 +674,8 @@ const ENCRYPTED_ELECTION_ACTION_TYPES = {
   OPEN_ELECTION: 'open_election',
   CLOSE_ELECTION: 'close_election',
   FINALIZE_ELECTION: 'finalize_election',
+  SUBMIT_ANOMALY_THREAD: 'submit_anomaly_thread',
+  SUBMIT_ANOMALY_INFORMATION: 'submit_anomaly_information',
   SUBMIT_FINALIZATION_SHARE: 'submit_finalization_share',
   START_CEREMONY: 'start_ceremony',
   RESTART_CEREMONY: 'restart_ceremony',
@@ -922,6 +1175,90 @@ export async function createAcceptElectionBallotCastTransaction(
       {
         forceFreshEnvelopeAccess: true,
       }
+    );
+
+  return {
+    signedTransaction: encryptedEnvelope.signedTransaction,
+  };
+}
+
+export async function createSubmitElectionAnomalyThreadTransaction(
+  input: CreateSubmitElectionAnomalyThreadTransactionInput,
+): Promise<{ signedTransaction: string; anomalyThreadId: string }> {
+  if (!isElectionAnomalyCategoryId(input.CategoryId)) {
+    throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.CATEGORY_INVALID);
+  }
+
+  const anomalyThreadId = generateGuid();
+  const initialMessage = await createElectionAnomalyMessageEnvelope({
+    MessageKindId: ELECTION_ANOMALY_MESSAGE_KIND_IDS.INITIAL_SUBMISSION,
+    Body: input.Body,
+    ActorPublicAddress: input.ActorPublicAddress,
+    ActorPublicEncryptAddress: input.ActorPublicEncryptAddress,
+    OwnerPublicAddress: input.OwnerPublicAddress,
+    MaxCharacters: ELECTION_ANOMALY_BODY_MAX_CHARACTERS,
+  });
+  const actionPayload: SubmitElectionAnomalyThreadActionPayload = {
+    AnomalyThreadId: anomalyThreadId,
+    ActionNonce: generateGuid(),
+    ActorPublicAddress: input.ActorPublicAddress,
+    CategoryId: input.CategoryId,
+    InitialMessage: initialMessage,
+    ActorRoleContextId: input.ActorRoleContextId ?? undefined,
+  };
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<SubmitElectionAnomalyThreadActionPayload>(
+      input.ElectionId,
+      input.ActorPublicAddress,
+      input.ActorPublicEncryptAddress,
+      input.ActorPrivateEncryptKeyHex,
+      ENCRYPTED_ELECTION_ACTION_TYPES.SUBMIT_ANOMALY_THREAD,
+      actionPayload,
+      input.SigningPrivateKeyHex,
+      {
+        forceFreshEnvelopeAccess: true,
+      },
+    );
+
+  return {
+    signedTransaction: encryptedEnvelope.signedTransaction,
+    anomalyThreadId,
+  };
+}
+
+export async function createSubmitElectionAnomalyInformationTransaction(
+  input: CreateSubmitElectionAnomalyInformationTransactionInput,
+): Promise<{ signedTransaction: string }> {
+  if (!input.AnomalyThreadId.trim() || !input.ClarificationRequestId.trim()) {
+    throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.CLARIFICATION_REQUEST_NOT_OPEN);
+  }
+
+  const responseMessage = await createElectionAnomalyMessageEnvelope({
+    MessageKindId: ELECTION_ANOMALY_MESSAGE_KIND_IDS.SUBMITTER_INFORMATION_RESPONSE,
+    Body: input.Body,
+    ActorPublicAddress: input.ActorPublicAddress,
+    ActorPublicEncryptAddress: input.ActorPublicEncryptAddress,
+    OwnerPublicAddress: input.OwnerPublicAddress,
+    MaxCharacters: ELECTION_ANOMALY_CLARIFICATION_BODY_MAX_CHARACTERS,
+  });
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<SubmitElectionAnomalyInformationActionPayload>(
+      input.ElectionId,
+      input.ActorPublicAddress,
+      input.ActorPublicEncryptAddress,
+      input.ActorPrivateEncryptKeyHex,
+      ENCRYPTED_ELECTION_ACTION_TYPES.SUBMIT_ANOMALY_INFORMATION,
+      {
+        AnomalyThreadId: input.AnomalyThreadId,
+        ClarificationRequestId: input.ClarificationRequestId,
+        ActionNonce: generateGuid(),
+        ActorPublicAddress: input.ActorPublicAddress,
+        ResponseMessage: responseMessage,
+      },
+      input.SigningPrivateKeyHex,
+      {
+        forceFreshEnvelopeAccess: true,
+      },
     );
 
   return {

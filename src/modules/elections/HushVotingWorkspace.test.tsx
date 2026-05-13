@@ -25,6 +25,7 @@ const { electionsServiceMock } = vi.hoisted(() => ({
   electionsServiceMock: {
     getElectionResultView: vi.fn(),
     getElectionVotingView: vi.fn(),
+    getElectionAnomalyOwnThread: vi.fn(),
     verifyElectionReceipt: vi.fn(),
   },
 }));
@@ -48,6 +49,8 @@ vi.mock('@/lib/grpc/services/elections', async (importOriginal) => {
         electionsServiceMock.getElectionResultView(...args),
       getElectionVotingView: (...args: unknown[]) =>
         electionsServiceMock.getElectionVotingView(...args),
+      getElectionAnomalyOwnThread: (...args: unknown[]) =>
+        electionsServiceMock.getElectionAnomalyOwnThread(...args),
       verifyElectionReceipt: (...args: unknown[]) =>
         electionsServiceMock.verifyElectionReceipt(...args),
     },
@@ -61,6 +64,7 @@ describe('HushVotingWorkspace', () => {
     mockPush.mockReset();
     electionsServiceMock.getElectionResultView.mockReset();
     electionsServiceMock.getElectionVotingView.mockReset();
+    electionsServiceMock.getElectionAnomalyOwnThread.mockReset();
     electionsServiceMock.verifyElectionReceipt.mockReset();
     electionsServiceMock.getElectionResultView.mockResolvedValue(createResultView());
     electionsServiceMock.getElectionVotingView.mockResolvedValue({
@@ -71,6 +75,12 @@ describe('HushVotingWorkspace', () => {
       AcceptanceId: '',
       ServerProof: '',
       PersonalParticipationStatus: 0,
+    });
+    electionsServiceMock.getElectionAnomalyOwnThread.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      ActorPublicAddress: 'actor-address',
+      HasThread: false,
     });
     electionsServiceMock.verifyElectionReceipt.mockResolvedValue({
       Success: true,
