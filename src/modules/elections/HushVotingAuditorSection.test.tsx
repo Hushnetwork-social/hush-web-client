@@ -58,6 +58,10 @@ describe('AuditorWorkspaceSummary', () => {
     expect(screen.getByTestId('hush-voting-section-auditor')).toHaveTextContent(
       'Official result published.'
     );
+    expect(screen.getByTestId('auditor-anomaly-workspace-action')).toHaveAttribute(
+      'href',
+      '/elections/election-auditor/auditor/anomaly'
+    );
   });
 
   it('shows a closed-progress callout while trustees are still unlocking the unofficial result', async () => {

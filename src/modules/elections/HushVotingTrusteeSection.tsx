@@ -1,9 +1,13 @@
 "use client";
 
 import Link from 'next/link';
-import { useMemo } from 'react';
-import { ArrowRight, Files, ShieldCheck } from 'lucide-react';
-import type { ElectionHubEntryView, GetElectionResponse } from '@/lib/grpc';
+import { useEffect, useMemo, useState } from 'react';
+import { ArrowRight, FileWarning, Files, ShieldCheck } from 'lucide-react';
+import type {
+  ElectionHubEntryView,
+  GetElectionAnomalyTrusteeCountsResponse,
+  GetElectionResponse,
+} from '@/lib/grpc';
 import {
   ElectionCeremonyVersionStatusProto,
   ElectionCloseCountingJobStatusProto,
@@ -12,6 +16,7 @@ import {
   ElectionGovernedActionTypeProto,
   ElectionGovernedProposalExecutionStatusProto,
 } from '@/lib/grpc';
+import { electionsService } from '@/lib/grpc/services/elections';
 import {
   formatTimestamp,
   getActiveCeremonyVersion,
@@ -26,17 +31,24 @@ import {
   AvailabilityCard,
   CollapsibleSurfaceSection,
   getLatestProposal,
+  timestampToMillis,
 } from './HushVotingWorkspaceShared';
 
 type TrusteeWorkspaceSummaryProps = {
   entry: ElectionHubEntryView;
   detail: GetElectionResponse | null;
+  actorPublicAddress?: string;
 };
 
 export function TrusteeWorkspaceSummary({
   entry,
   detail,
+  actorPublicAddress,
 }: TrusteeWorkspaceSummaryProps) {
+  const [anomalyCountsResponse, setAnomalyCountsResponse] =
+    useState<GetElectionAnomalyTrusteeCountsResponse | null>(null);
+  const [hasOwnAnomalyThread, setHasOwnAnomalyThread] = useState<boolean | null>(null);
+  const [isLoadingAnomalyPreview, setIsLoadingAnomalyPreview] = useState(false);
   const latestProposal = useMemo(() => getLatestProposal(detail), [detail]);
   const activeCeremonyVersion = useMemo(() => getActiveCeremonyVersion(detail), [detail]);
   const latestCloseProposal = useMemo(
@@ -80,10 +92,99 @@ export function TrusteeWorkspaceSummary({
       ElectionGovernedProposalExecutionStatusProto.WaitingForApprovals &&
     !latestCloseCountingSession;
   const shareWorkspaceEnabled = Boolean(latestCloseCountingSession);
+  const anomalyWindowMillis = timestampToMillis(entry.Election.AnomalySubmissionWindowClosesAt);
+  const anomalyWindowOpen =
+    !entry.Election.HasAnomalySubmissionWindowClosesAt ||
+    !anomalyWindowMillis ||
+    anomalyWindowMillis > Date.now();
+  const trusteeAnomalyCounts = anomalyCountsResponse?.Success && anomalyCountsResponse.HasCounts
+    ? anomalyCountsResponse.Counts ?? null
+    : null;
+  const continuitySummary = trusteeAnomalyCounts?.ContinuitySummary;
   const publishedResultState = useMemo(
     () => getPublishedResultNarrative(entry, 'trustee'),
     [entry]
   );
+
+  useEffect(() => {
+    if (!actorPublicAddress || !entry.ActorRoles.IsTrustee) {
+      setAnomalyCountsResponse(null);
+      setHasOwnAnomalyThread(null);
+      setIsLoadingAnomalyPreview(false);
+      return;
+    }
+
+    let isCancelled = false;
+    setIsLoadingAnomalyPreview(true);
+
+    void Promise.allSettled([
+      electionsService.getElectionAnomalyTrusteeCounts({
+        ElectionId: entry.Election.ElectionId,
+        ActorPublicAddress: actorPublicAddress,
+      }),
+      electionsService.getElectionAnomalyOwnThread({
+        ElectionId: entry.Election.ElectionId,
+        ActorPublicAddress: actorPublicAddress,
+      }),
+    ]).then((results) => {
+      if (isCancelled) {
+        return;
+      }
+
+      const [countsResult, ownThreadResult] = results;
+      setAnomalyCountsResponse(
+        countsResult.status === 'fulfilled' ? countsResult.value : null
+      );
+      setHasOwnAnomalyThread(
+        ownThreadResult.status === 'fulfilled' && ownThreadResult.value.Success
+          ? ownThreadResult.value.HasThread
+          : null
+      );
+      setIsLoadingAnomalyPreview(false);
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [actorPublicAddress, entry.ActorRoles.IsTrustee, entry.Election.ElectionId]);
+
+  const anomalyPreview = useMemo(() => {
+    const ownThreadLabel =
+      hasOwnAnomalyThread === true
+        ? 'Existing report'
+        : hasOwnAnomalyThread === false
+          ? 'No report yet'
+          : isLoadingAnomalyPreview
+            ? 'Loading...'
+            : 'Open workspace';
+    const totalLabel = trusteeAnomalyCounts
+      ? `${trusteeAnomalyCounts.TotalThreadCount} total`
+      : isLoadingAnomalyPreview
+        ? 'Loading...'
+        : anomalyCountsResponse && !anomalyCountsResponse.Success
+          ? 'Unavailable'
+          : 'Open workspace';
+    const continuityLabel = continuitySummary?.HasContinuityIssue
+      ? `${continuitySummary.OpenContinuityThreadCount} open continuity`
+      : trusteeAnomalyCounts
+        ? 'None recorded'
+        : isLoadingAnomalyPreview
+          ? 'Loading...'
+          : 'Open workspace';
+
+    return {
+      ownThreadLabel,
+      totalLabel,
+      continuityLabel,
+      continuityAccent: continuitySummary?.HasContinuityIssue ? 'text-amber-100' : undefined,
+    };
+  }, [
+    anomalyCountsResponse,
+    continuitySummary,
+    hasOwnAnomalyThread,
+    isLoadingAnomalyPreview,
+    trusteeAnomalyCounts,
+  ]);
   const closeCountingJobSummary = useMemo(() => {
     if (!latestCloseCountingSession) {
       return null;
@@ -257,6 +358,14 @@ export function TrusteeWorkspaceSummary({
             <ArrowRight className="h-4 w-4" />
             <span>Open governed actions</span>
           </Link>
+          <Link
+            href={`/elections/${entry.Election.ElectionId}/trustee/anomaly`}
+            className="inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
+            data-testid="trustee-anomaly-workspace-action"
+          >
+            <FileWarning className="h-4 w-4" />
+            <span>Anomaly workspace</span>
+          </Link>
         </>
       }
     >
@@ -287,6 +396,31 @@ export function TrusteeWorkspaceSummary({
                 : 'No close-counting session recorded'
           }
         />
+      </div>
+      <div>
+        <div className="mb-3 text-sm font-semibold text-hush-text-primary">
+          Anomaly intake and counts
+        </div>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <AvailabilityCard
+            label="Your thread"
+            value={anomalyPreview.ownThreadLabel}
+          />
+          <AvailabilityCard
+            label="Election anomalies"
+            value={anomalyPreview.totalLabel}
+          />
+          <AvailabilityCard
+            label="Trustee continuity"
+            value={anomalyPreview.continuityLabel}
+            accentClass={anomalyPreview.continuityAccent}
+          />
+          <AvailabilityCard
+            label="New reports"
+            value={anomalyWindowOpen ? 'Open' : 'Closed'}
+            accentClass={anomalyWindowOpen ? 'text-green-100' : 'text-amber-100'}
+          />
+        </div>
       </div>
     </CollapsibleSurfaceSection>
   );

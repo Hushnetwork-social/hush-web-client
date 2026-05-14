@@ -2483,6 +2483,182 @@ export interface GetElectionAnomalyOwnThreadResponse {
   Thread?: ElectionAnomalyOwnThreadView;
 }
 
+export interface GetElectionAnomalyTrusteeCountsRequest {
+  ElectionId: string;
+  ActorPublicAddress: string;
+}
+
+export interface ElectionAnomalyCategoryCountView {
+  CategoryId: string;
+  Count: number;
+}
+
+export interface ElectionAnomalyCaseStateCountView {
+  CaseStateId: string;
+  Count: number;
+}
+
+export interface ElectionAnomalyTrusteeContinuitySummaryView {
+  TrusteeContinuityThreadCount: number;
+  OpenContinuityThreadCount: number;
+  AwaitingInformationContinuityThreadCount: number;
+  ClosedContinuityThreadCount: number;
+  GovernedDecisionLinkedCount: number;
+  HasContinuityIssue: boolean;
+}
+
+export interface ElectionAnomalyTrusteeCountsView {
+  ElectionId: string;
+  TotalThreadCount: number;
+  CategoryCounts: ElectionAnomalyCategoryCountView[];
+  CaseStateCounts: ElectionAnomalyCaseStateCountView[];
+  ContinuitySummary?: ElectionAnomalyTrusteeContinuitySummaryView;
+}
+
+export interface GetElectionAnomalyTrusteeCountsResponse {
+  Success: boolean;
+  ErrorMessage: string;
+  ActorPublicAddress: string;
+  HasCounts: boolean;
+  Counts?: ElectionAnomalyTrusteeCountsView;
+}
+
+export interface GetElectionAnomalyOwnerTriageRequest {
+  ElectionId: string;
+  ActorPublicAddress: string;
+}
+
+export interface ElectionAnomalyOwnerCallerWrapView {
+  WrapStatusId: string;
+  RecipientKeyFingerprint: string;
+  EncryptedContentKey: string;
+  WrapAlgorithm: string;
+}
+
+export interface ElectionAnomalyOwnerMessageView {
+  MessageId: string;
+  MessageKindId: string;
+  RecordedAt?: GrpcTimestamp;
+  EncryptedBody: string;
+  EncryptedBodyHash: string;
+  PlaintextCharacterCount: number;
+  RecipientStatuses: ElectionAnomalyRestrictedRecipientStatusView[];
+  HasCallerOwnerWrap: boolean;
+  CallerOwnerWrap?: ElectionAnomalyOwnerCallerWrapView;
+  ClarificationRequestId: string;
+  HasClarificationRequest: boolean;
+  AttachmentManifestHash: string;
+}
+
+export interface ElectionAnomalyOwnerTriageThreadView {
+  AnomalyThreadId: string;
+  ElectionId: string;
+  CategoryId: string;
+  CaseStateId: string;
+  CurrentThreadHash: string;
+  SeverityCandidateId: string;
+  GovernedDecisionRef: string;
+  SubmitterActorPublicAddress: string;
+  SubmitterRoleContextId: string;
+  LifecycleStateAtSubmission: ElectionLifecycleStateProto;
+  HasOpenClarificationRequest: boolean;
+  OpenClarificationRequestId: string;
+  HasOpenClarificationRequestId: boolean;
+  CreatedAt?: GrpcTimestamp;
+  UpdatedAt?: GrpcTimestamp;
+  Messages: ElectionAnomalyOwnerMessageView[];
+}
+
+export interface ElectionAnomalyOwnerTriageView {
+  ElectionId: string;
+  TotalThreadCount: number;
+  OpenThreadCount: number;
+  AwaitingInformationThreadCount: number;
+  ResponsePresentThreadCount: number;
+  ExternalClaimantThreadCount: number;
+  DecryptableMessageCount: number;
+  PendingRewrapMessageCount: number;
+  MissingOwnerWrapMessageCount: number;
+  AttachmentManifestCount: number;
+  GovernedContinuityHandoffStatusId: string;
+  CategoryCounts: ElectionAnomalyCategoryCountView[];
+  CaseStateCounts: ElectionAnomalyCaseStateCountView[];
+  ContinuitySummary?: ElectionAnomalyTrusteeContinuitySummaryView;
+  Threads: ElectionAnomalyOwnerTriageThreadView[];
+}
+
+export interface GetElectionAnomalyOwnerTriageResponse {
+  Success: boolean;
+  ErrorMessage: string;
+  ActorPublicAddress: string;
+  HasTriage: boolean;
+  Triage?: ElectionAnomalyOwnerTriageView;
+}
+
+export interface GetElectionAnomalyAuditorRestrictedReviewRequest {
+  ElectionId: string;
+  ActorPublicAddress: string;
+}
+
+export interface ElectionAnomalyRestrictedRecipientStatusView {
+  RecipientRoleId: string;
+  WrapStatusId: string;
+}
+
+export interface ElectionAnomalyAuditorCallerWrapView {
+  WrapStatusId: string;
+  RecipientKeyFingerprint: string;
+  EncryptedContentKey: string;
+  WrapAlgorithm: string;
+}
+
+export interface ElectionAnomalyRestrictedMessageView {
+  MessageId: string;
+  MessageKindId: string;
+  RecordedAt?: GrpcTimestamp;
+  EncryptedBody: string;
+  EncryptedBodyHash: string;
+  PlaintextCharacterCount: number;
+  RecipientStatuses: ElectionAnomalyRestrictedRecipientStatusView[];
+  HasCallerAuditorWrap: boolean;
+  CallerAuditorWrap?: ElectionAnomalyAuditorCallerWrapView;
+  ClarificationRequestId: string;
+  HasClarificationRequest: boolean;
+  AttachmentManifestHash: string;
+}
+
+export interface ElectionAnomalyAuditorRestrictedThreadView {
+  AnomalyThreadId: string;
+  ElectionId: string;
+  CategoryId: string;
+  CaseStateId: string;
+  CurrentThreadHash: string;
+  SeverityCandidateId: string;
+  GovernedDecisionRef: string;
+  HasOpenClarificationRequest: boolean;
+  CreatedAt?: GrpcTimestamp;
+  UpdatedAt?: GrpcTimestamp;
+  Messages: ElectionAnomalyRestrictedMessageView[];
+}
+
+export interface ElectionAnomalyAuditorRestrictedReviewView {
+  ElectionId: string;
+  TotalThreadCount: number;
+  DecryptableMessageCount: number;
+  PendingRewrapMessageCount: number;
+  MissingWrapMessageCount: number;
+  AttachmentManifestCount: number;
+  Threads: ElectionAnomalyAuditorRestrictedThreadView[];
+}
+
+export interface GetElectionAnomalyAuditorRestrictedReviewResponse {
+  Success: boolean;
+  ErrorMessage: string;
+  ActorPublicAddress: string;
+  HasReview: boolean;
+  Review?: ElectionAnomalyAuditorRestrictedReviewView;
+}
+
 export interface GetElectionResultViewRequest {
   ElectionId: string;
   ActorPublicAddress: string;

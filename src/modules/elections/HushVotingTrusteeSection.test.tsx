@@ -1,5 +1,5 @@
-import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ElectionCeremonyVersionStatusProto,
   ElectionCloseCountingJobStatusProto,
@@ -12,10 +12,19 @@ import {
 } from '@/lib/grpc';
 import { TrusteeWorkspaceSummary } from './HushVotingTrusteeSection';
 import { createDetail, createHubEntry, timestamp } from './HushVotingWorkspaceTestUtils';
+import { electionsService } from '@/lib/grpc/services/elections';
+
+vi.mock('@/lib/grpc/services/elections', () => ({
+  electionsService: {
+    getElectionAnomalyTrusteeCounts: vi.fn(),
+    getElectionAnomalyOwnThread: vi.fn(),
+  },
+}));
 
 describe('TrusteeWorkspaceSummary', () => {
   afterEach(() => {
     cleanup();
+    vi.clearAllMocks();
   });
 
   it('stays collapsed when ceremony work is complete and no trustee action is pending', () => {
@@ -80,6 +89,76 @@ describe('TrusteeWorkspaceSummary', () => {
       'aria-disabled',
       'true'
     );
+    expect(screen.getByTestId('trustee-anomaly-workspace-action')).toHaveAttribute(
+      'href',
+      '/elections/election-trustee-voter/trustee/anomaly'
+    );
+  });
+
+  it('loads compact trustee anomaly preview counts when an actor address is available', async () => {
+    vi.mocked(electionsService.getElectionAnomalyTrusteeCounts).mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      ActorPublicAddress: 'trustee-one',
+      HasCounts: true,
+      Counts: {
+        ElectionId: 'election-trustee-anomaly',
+        TotalThreadCount: 4,
+        CategoryCounts: [],
+        CaseStateCounts: [],
+        ContinuitySummary: {
+          TrusteeContinuityThreadCount: 1,
+          OpenContinuityThreadCount: 1,
+          AwaitingInformationContinuityThreadCount: 0,
+          ClosedContinuityThreadCount: 0,
+          GovernedDecisionLinkedCount: 0,
+          HasContinuityIssue: true,
+        },
+      },
+    });
+    vi.mocked(electionsService.getElectionAnomalyOwnThread).mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      ActorPublicAddress: 'trustee-one',
+      HasThread: true,
+    });
+
+    const entry = createHubEntry(
+      'election-trustee-anomaly',
+      ElectionLifecycleStateProto.Open,
+      'Trustee Anomaly Election',
+      {
+        ActorRoles: {
+          IsOwnerAdmin: false,
+          IsTrustee: true,
+          IsVoter: false,
+          IsDesignatedAuditor: false,
+        },
+        SuggestedAction: ElectionHubNextActionHintProto.ElectionHubActionTrusteeApproveGovernedAction,
+        SuggestedActionReason: 'A governed action needs trustee approval.',
+        HasUnofficialResult: false,
+        HasOfficialResult: false,
+      }
+    );
+
+    render(
+      <TrusteeWorkspaceSummary
+        entry={entry}
+        detail={createDetail('election-trustee-anomaly', ElectionLifecycleStateProto.Open, 'Trustee Anomaly Election')}
+        actorPublicAddress="trustee-one"
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('hush-voting-section-trustee')).toHaveTextContent('4 total');
+    });
+
+    expect(screen.getByTestId('hush-voting-section-trustee')).toHaveTextContent('Existing report');
+    expect(screen.getByTestId('hush-voting-section-trustee')).toHaveTextContent('1 open continuity');
+    expect(electionsService.getElectionAnomalyTrusteeCounts).toHaveBeenCalledWith({
+      ElectionId: 'election-trustee-anomaly',
+      ActorPublicAddress: 'trustee-one',
+    });
   });
 
   it('opens by default when the trustee still has ceremony follow-up work', () => {

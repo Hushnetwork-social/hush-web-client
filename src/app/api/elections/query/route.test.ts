@@ -189,6 +189,120 @@ describe('POST /api/elections/query', () => {
     );
   });
 
+  it('passes through a signed trustee anomaly aggregate query', async () => {
+    const { POST } = await import('./route');
+    const signedHeaders = await createElectionQueryAuthHeaders(
+      'GetElectionAnomalyTrusteeCounts',
+      {
+        ElectionId: 'election-1',
+        ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+      },
+      TEST_CREDENTIALS
+    );
+
+    const response = await POST(
+      new Request('http://localhost/api/elections/query', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...signedHeaders,
+        },
+        body: JSON.stringify({
+          method: 'GetElectionAnomalyTrusteeCounts',
+          request: {
+            ElectionId: 'election-1',
+            ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+          },
+        }),
+      }) as never
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:4666/rpcHush.HushElections/GetElectionAnomalyTrusteeCounts',
+      expect.objectContaining({
+        headers: expect.objectContaining(signedHeaders),
+      })
+    );
+  });
+
+  it('passes through a signed owner anomaly triage query', async () => {
+    const { POST } = await import('./route');
+    const signedHeaders = await createElectionQueryAuthHeaders(
+      'GetElectionAnomalyOwnerTriage',
+      {
+        ElectionId: 'election-1',
+        ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+      },
+      TEST_CREDENTIALS
+    );
+
+    const response = await POST(
+      new Request('http://localhost/api/elections/query', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...signedHeaders,
+        },
+        body: JSON.stringify({
+          method: 'GetElectionAnomalyOwnerTriage',
+          request: {
+            ElectionId: 'election-1',
+            ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+          },
+        }),
+      }) as never
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:4666/rpcHush.HushElections/GetElectionAnomalyOwnerTriage',
+      expect.objectContaining({
+        headers: expect.objectContaining(signedHeaders),
+      })
+    );
+  });
+
+  it('passes through a signed auditor anomaly restricted review query', async () => {
+    const { POST } = await import('./route');
+    const signedHeaders = await createElectionQueryAuthHeaders(
+      'GetElectionAnomalyAuditorRestrictedReview',
+      {
+        ElectionId: 'election-1',
+        ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+      },
+      TEST_CREDENTIALS
+    );
+
+    const response = await POST(
+      new Request('http://localhost/api/elections/query', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...signedHeaders,
+        },
+        body: JSON.stringify({
+          method: 'GetElectionAnomalyAuditorRestrictedReview',
+          request: {
+            ElectionId: 'election-1',
+            ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+          },
+        }),
+      }) as never
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:4666/rpcHush.HushElections/GetElectionAnomalyAuditorRestrictedReview',
+      expect.objectContaining({
+        headers: expect.objectContaining(signedHeaders),
+      })
+    );
+  });
+
   it('passes through a signed actor-bound election directory search', async () => {
     const { POST } = await import('./route');
     const signedHeaders = await createElectionQueryAuthHeaders(

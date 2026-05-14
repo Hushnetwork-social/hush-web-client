@@ -11,13 +11,19 @@ import {
 import {
   ElectionFinalizationTargetTypeProto,
   type ElectionAnomalyMessageView,
+  type ElectionAnomalyOwnerMessageView,
+  type ElectionAnomalyRestrictedMessageView,
   type ElectionDraftInput,
   type SubmitElectionFinalizationShareRequest,
 } from '@/lib/grpc';
 import {
   ENCRYPTED_ELECTION_ENVELOPE_PAYLOAD_KIND,
+  ELECTION_ANOMALY_CASE_STATE_IDS,
   ELECTION_ANOMALY_CATEGORY_IDS,
+  ELECTION_ANOMALY_MESSAGE_KIND_IDS,
   ELECTION_ANOMALY_RECIPIENT_ROLE_IDS,
+  ELECTION_ANOMALY_RECIPIENT_WRAP_STATUS_IDS,
+  ELECTION_ANOMALY_SEVERITY_CANDIDATE_IDS,
   ELECTION_ANOMALY_VALIDATION_CODES,
   type CloseCountingExecutorSubmissionPayload,
   createAcceptElectionBallotCastTransaction,
@@ -25,9 +31,16 @@ import {
   createRegisterElectionVotingCommitmentTransaction,
   createApproveElectionGovernedProposalTransaction,
   createClaimElectionRosterEntryTransaction,
+  createClassifyElectionAnomalyThreadTransaction,
+  createRecordElectionAnomalyAuthorityResponseTransaction,
+  createRecordElectionAnomalyAuditorRecipientRewrapTransaction,
+  createRegisterExternalElectionAnomalyClaimantTransaction,
+  createRequestElectionAnomalyInformationTransaction,
   createSubmitElectionAnomalyInformationTransaction,
   createSubmitElectionAnomalyThreadTransaction,
   decryptElectionAnomalyMessageBody,
+  decryptElectionAnomalyOwnerMessageBody,
+  decryptElectionAnomalyRestrictedMessageBody,
   createElectionDraftTransaction,
   createElectionReportAccessGrantTransaction,
   createElectionTrusteeInvitationTransaction,
@@ -36,7 +49,13 @@ import {
   createRejectElectionTrusteeInvitationTransaction,
   createSubmitElectionFinalizationShareTransaction,
   hasElectionAnomalyDuplicateThreadValidation,
+  hashExternalElectionAnomalyClaimantReference,
+  type ClassifyElectionAnomalyThreadActionPayload,
   type ElectionAnomalyMessageEnvelopePayload,
+  type RecordElectionAnomalyAuthorityResponseActionPayload,
+  type RecordElectionAnomalyAuditorRecipientRewrapActionPayload,
+  type RegisterExternalElectionAnomalyClaimantActionPayload,
+  type RequestElectionAnomalyInformationActionPayload,
 } from './transactionService';
 
 const { blockchainServiceMock, electionsServiceMock, identityServiceMock } = vi.hoisted(() => ({
@@ -1050,6 +1069,31 @@ describe('transactionService encrypted election envelope helpers', () => {
     } satisfies ElectionAnomalyMessageView, voterEncryptionPrivateKeyHex)).resolves.toBe(
       'Receipt verification did not match my ballot status.',
     );
+    await expect(decryptElectionAnomalyRestrictedMessageBody({
+      MessageId: message.MessageId,
+      MessageKindId: message.MessageKindId,
+      EncryptedBody: message.EncryptedBody,
+      EncryptedBodyHash: message.EncryptedBodyHash,
+      PlaintextCharacterCount: message.PlaintextCharacterCount,
+      RecipientStatuses: [
+        {
+          RecipientRoleId: ELECTION_ANOMALY_RECIPIENT_ROLE_IDS.DESIGNATED_AUDITOR,
+          WrapStatusId: ELECTION_ANOMALY_RECIPIENT_WRAP_STATUS_IDS.AVAILABLE,
+        },
+      ],
+      HasCallerAuditorWrap: true,
+      CallerAuditorWrap: {
+        WrapStatusId: ELECTION_ANOMALY_RECIPIENT_WRAP_STATUS_IDS.AVAILABLE,
+        RecipientKeyFingerprint: submitterWrap.RecipientKeyFingerprint,
+        EncryptedContentKey: submitterWrap.EncryptedContentKey,
+        WrapAlgorithm: submitterWrap.WrapAlgorithm,
+      },
+      ClarificationRequestId: '',
+      HasClarificationRequest: false,
+      AttachmentManifestHash: '',
+    } satisfies ElectionAnomalyRestrictedMessageView, voterEncryptionPrivateKeyHex)).resolves.toBe(
+      'Receipt verification did not match my ballot status.',
+    );
   });
 
   it('validates anomaly category and body constraints before creating a thread transaction', async () => {
@@ -1076,6 +1120,394 @@ describe('transactionService encrypted election envelope helpers', () => {
       ...baseInput,
       Body: 'x'.repeat(1001),
     })).rejects.toThrow(ELECTION_ANOMALY_VALIDATION_CODES.BODY_TOO_LONG);
+  });
+
+  it('creates an owner-authorized auditor anomaly recipient rewrap envelope', async () => {
+    const ownerSigningPrivateKeyHex = '1111111111111111111111111111111111111111111111111111111111111111';
+    const ownerEncryptionPrivateKeyHex = '2222222222222222222222222222222222222222222222222222222222222222';
+    const auditorSigningPrivateKeyHex = '7777777777777777777777777777777777777777777777777777777777777777';
+    const auditorEncryptionPrivateKeyHex = '8888888888888888888888888888888888888888888888888888888888888888';
+    const nodeEncryptionPrivateKeyHex = '3333333333333333333333333333333333333333333333333333333333333333';
+    const ownerSigningPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(ownerSigningPrivateKeyHex), true),
+    );
+    const ownerEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(ownerEncryptionPrivateKeyHex), true),
+    );
+    const auditorSigningPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(auditorSigningPrivateKeyHex), true),
+    );
+    const auditorEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(auditorEncryptionPrivateKeyHex), true),
+    );
+    const nodeEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(nodeEncryptionPrivateKeyHex), true),
+    );
+    blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
+      NodePublicEncryptAddress: nodeEncryptionPublicKey,
+      ElectionEnvelopeVersion: 'election-envelope-v2.1',
+    });
+
+    const { signedTransaction } =
+      await createRecordElectionAnomalyAuditorRecipientRewrapTransaction({
+        ElectionId: 'election-123',
+        AnomalyThreadId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        MessageId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+        ActorPublicAddress: ownerSigningPublicKey,
+        ActorPublicEncryptAddress: ownerEncryptionPublicKey,
+        ActorPrivateEncryptKeyHex: ownerEncryptionPrivateKeyHex,
+        AuditorPublicAddress: auditorSigningPublicKey,
+        AuditorPublicEncryptAddress: auditorEncryptionPublicKey,
+        ContentKey: 'message-content-key',
+        SigningPrivateKeyHex: ownerSigningPrivateKeyHex,
+      });
+
+    const parsedTransaction = JSON.parse(signedTransaction) as {
+      Payload: {
+        ActionType: string;
+        ActorEncryptedElectionPrivateKey: string;
+        EncryptedPayload: string;
+      };
+    };
+    expect(parsedTransaction.Payload.ActionType).toBe(
+      'record_anomaly_auditor_recipient_rewrap',
+    );
+
+    const actorElectionPrivateKey = await eciesDecrypt(
+      parsedTransaction.Payload.ActorEncryptedElectionPrivateKey,
+      ownerEncryptionPrivateKeyHex,
+    );
+    const decryptedPayloadJson = await eciesDecrypt(
+      parsedTransaction.Payload.EncryptedPayload,
+      actorElectionPrivateKey,
+    );
+    const decryptedPayload = JSON.parse(decryptedPayloadJson) as {
+      ActionType: string;
+      ActionPayload: RecordElectionAnomalyAuditorRecipientRewrapActionPayload;
+    };
+
+    expect(decryptedPayload.ActionType).toBe('record_anomaly_auditor_recipient_rewrap');
+    expect(decryptedPayload.ActionPayload.AnomalyThreadId).toBe('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+    expect(decryptedPayload.ActionPayload.MessageId).toBe('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
+    expect(decryptedPayload.ActionPayload.ActorPublicAddress).toBe(ownerSigningPublicKey);
+    expect(decryptedPayload.ActionPayload.AuditorPublicAddress).toBe(auditorSigningPublicKey);
+    expect(decryptedPayload.ActionPayload.RecipientKeyFingerprint).toMatch(/^sha256:/);
+    expect(decryptedPayload.ActionPayload.WrapAlgorithm).toBe('x25519-aes-gcm');
+    await expect(eciesDecrypt(
+      decryptedPayload.ActionPayload.EncryptedContentKey,
+      auditorEncryptionPrivateKeyHex,
+    )).resolves.toBe('message-content-key');
+    expect(electionsServiceMock.getElectionEnvelopeAccess).not.toHaveBeenCalled();
+  });
+
+  it('creates an owner clarification request with submitter, owner, and auditor wraps', async () => {
+    const ownerSigningPrivateKeyHex = '1111111111111111111111111111111111111111111111111111111111111111';
+    const ownerEncryptionPrivateKeyHex = '2222222222222222222222222222222222222222222222222222222222222222';
+    const submitterEncryptionPrivateKeyHex = '8888888888888888888888888888888888888888888888888888888888888888';
+    const auditorSigningPrivateKeyHex = '7777777777777777777777777777777777777777777777777777777777777777';
+    const auditorEncryptionPrivateKeyHex = '9999999999999999999999999999999999999999999999999999999999999999';
+    const nodeEncryptionPrivateKeyHex = '3333333333333333333333333333333333333333333333333333333333333333';
+    const ownerSigningPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(ownerSigningPrivateKeyHex), true),
+    );
+    const ownerEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(ownerEncryptionPrivateKeyHex), true),
+    );
+    const submitterEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(submitterEncryptionPrivateKeyHex), true),
+    );
+    const auditorSigningPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(auditorSigningPrivateKeyHex), true),
+    );
+    const auditorEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(auditorEncryptionPrivateKeyHex), true),
+    );
+    const nodeEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(nodeEncryptionPrivateKeyHex), true),
+    );
+    blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
+      NodePublicEncryptAddress: nodeEncryptionPublicKey,
+      ElectionEnvelopeVersion: 'election-envelope-v2.1',
+    });
+
+    const { signedTransaction, clarificationRequestId } =
+      await createRequestElectionAnomalyInformationTransaction({
+        ElectionId: 'election-123',
+        AnomalyThreadId: 'thread-123',
+        ActorPublicAddress: ownerSigningPublicKey,
+        ActorPublicEncryptAddress: ownerEncryptionPublicKey,
+        ActorPrivateEncryptKeyHex: ownerEncryptionPrivateKeyHex,
+        OriginalSubmitterPublicAddress: 'submitter-address',
+        OriginalSubmitterPublicEncryptAddress: submitterEncryptionPublicKey,
+        Body: 'Please confirm whether your trustee key is still available.',
+        SigningPrivateKeyHex: ownerSigningPrivateKeyHex,
+        AuditorRecipients: [
+          {
+            AuditorPublicAddress: auditorSigningPublicKey,
+            AuditorPublicEncryptAddress: auditorEncryptionPublicKey,
+          },
+        ],
+      });
+
+    const parsedTransaction = JSON.parse(signedTransaction) as {
+      Payload: {
+        ActionType: string;
+        ActionPayload: RequestElectionAnomalyInformationActionPayload;
+        ActorEncryptedElectionPrivateKey: string;
+        EncryptedPayload: string;
+      };
+    };
+
+    expect(parsedTransaction.Payload.ActionType).toBe('request_anomaly_information');
+    expect(parsedTransaction.Payload.ActionPayload.ClarificationRequestId)
+      .toBe(clarificationRequestId);
+    expect(parsedTransaction.Payload.ActionPayload.RequestMessage.EncryptedBody)
+      .not.toContain('trustee key');
+    expect(parsedTransaction.Payload.ActionPayload.RequestMessage.RecipientWraps)
+      .toHaveLength(3);
+
+    const actorElectionPrivateKey = await eciesDecrypt(
+      parsedTransaction.Payload.ActorEncryptedElectionPrivateKey,
+      ownerEncryptionPrivateKeyHex,
+    );
+    const decryptedPayload = JSON.parse(
+      await eciesDecrypt(parsedTransaction.Payload.EncryptedPayload, actorElectionPrivateKey),
+    ) as {
+      ActionType: string;
+      ActionPayload: RequestElectionAnomalyInformationActionPayload;
+    };
+    const message = decryptedPayload.ActionPayload.RequestMessage;
+    const submitterWrap = message.RecipientWraps.find((wrap) =>
+      wrap.RecipientRoleId === ELECTION_ANOMALY_RECIPIENT_ROLE_IDS.SUBMITTER
+    )!;
+    const ownerWrap = message.RecipientWraps.find((wrap) =>
+      wrap.RecipientRoleId === ELECTION_ANOMALY_RECIPIENT_ROLE_IDS.ELECTION_OWNER
+    )!;
+    const auditorWrap = message.RecipientWraps.find((wrap) =>
+      wrap.RecipientRoleId === ELECTION_ANOMALY_RECIPIENT_ROLE_IDS.DESIGNATED_AUDITOR
+    )!;
+
+    expect(decryptedPayload.ActionType).toBe('request_anomaly_information');
+    expect(message.MessageKindId).toBe(ELECTION_ANOMALY_MESSAGE_KIND_IDS.AUTHORITY_INFORMATION_REQUEST);
+    expect(message.PlaintextCharacterCount).toBe(59);
+    await expect(eciesDecrypt(submitterWrap.EncryptedContentKey, submitterEncryptionPrivateKeyHex))
+      .resolves
+      .toBe(await eciesDecrypt(ownerWrap.EncryptedContentKey, ownerEncryptionPrivateKeyHex));
+    await expect(eciesDecrypt(auditorWrap.EncryptedContentKey, auditorEncryptionPrivateKeyHex))
+      .resolves
+      .toBe(await eciesDecrypt(ownerWrap.EncryptedContentKey, ownerEncryptionPrivateKeyHex));
+    await expect(decryptElectionAnomalyOwnerMessageBody({
+      MessageId: message.MessageId,
+      MessageKindId: message.MessageKindId,
+      EncryptedBody: message.EncryptedBody,
+      EncryptedBodyHash: message.EncryptedBodyHash,
+      PlaintextCharacterCount: message.PlaintextCharacterCount,
+      RecipientStatuses: [],
+      HasCallerOwnerWrap: true,
+      CallerOwnerWrap: {
+        WrapStatusId: ownerWrap.WrapStatusId,
+        RecipientKeyFingerprint: ownerWrap.RecipientKeyFingerprint,
+        EncryptedContentKey: ownerWrap.EncryptedContentKey,
+        WrapAlgorithm: ownerWrap.WrapAlgorithm,
+      },
+      ClarificationRequestId: clarificationRequestId,
+      HasClarificationRequest: true,
+      AttachmentManifestHash: '',
+    } satisfies ElectionAnomalyOwnerMessageView, ownerEncryptionPrivateKeyHex)).resolves.toBe(
+      'Please confirm whether your trustee key is still available.',
+    );
+    expect(electionsServiceMock.getElectionEnvelopeAccess).not.toHaveBeenCalled();
+  });
+
+  it('creates an owner authority response anomaly envelope', async () => {
+    const ownerSigningPrivateKeyHex = '1111111111111111111111111111111111111111111111111111111111111111';
+    const ownerEncryptionPrivateKeyHex = '2222222222222222222222222222222222222222222222222222222222222222';
+    const submitterEncryptionPrivateKeyHex = '8888888888888888888888888888888888888888888888888888888888888888';
+    const nodeEncryptionPrivateKeyHex = '3333333333333333333333333333333333333333333333333333333333333333';
+    const ownerSigningPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(ownerSigningPrivateKeyHex), true),
+    );
+    const ownerEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(ownerEncryptionPrivateKeyHex), true),
+    );
+    const submitterEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(submitterEncryptionPrivateKeyHex), true),
+    );
+    const nodeEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(nodeEncryptionPrivateKeyHex), true),
+    );
+    blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
+      NodePublicEncryptAddress: nodeEncryptionPublicKey,
+      ElectionEnvelopeVersion: 'election-envelope-v2.1',
+    });
+
+    const { signedTransaction } = await createRecordElectionAnomalyAuthorityResponseTransaction({
+      ElectionId: 'election-123',
+      AnomalyThreadId: 'thread-123',
+      ActorPublicAddress: ownerSigningPublicKey,
+      ActorPublicEncryptAddress: ownerEncryptionPublicKey,
+      ActorPrivateEncryptKeyHex: ownerEncryptionPrivateKeyHex,
+      OriginalSubmitterPublicAddress: 'submitter-address',
+      OriginalSubmitterPublicEncryptAddress: submitterEncryptionPublicKey,
+      Body: 'The owner response is recorded as non-blocking evidence.',
+      SigningPrivateKeyHex: ownerSigningPrivateKeyHex,
+    });
+
+    const parsedTransaction = JSON.parse(signedTransaction) as {
+      Payload: {
+        ActionType: string;
+        ActorEncryptedElectionPrivateKey: string;
+        EncryptedPayload: string;
+      };
+    };
+    const actorElectionPrivateKey = await eciesDecrypt(
+      parsedTransaction.Payload.ActorEncryptedElectionPrivateKey,
+      ownerEncryptionPrivateKeyHex,
+    );
+    const decryptedPayload = JSON.parse(
+      await eciesDecrypt(parsedTransaction.Payload.EncryptedPayload, actorElectionPrivateKey),
+    ) as {
+      ActionType: string;
+      ActionPayload: RecordElectionAnomalyAuthorityResponseActionPayload;
+    };
+
+    expect(parsedTransaction.Payload.ActionType).toBe('record_anomaly_authority_response');
+    expect(decryptedPayload.ActionType).toBe('record_anomaly_authority_response');
+    expect(decryptedPayload.ActionPayload.AuthorityResponseMessage.MessageKindId)
+      .toBe(ELECTION_ANOMALY_MESSAGE_KIND_IDS.AUTHORITY_RESPONSE);
+    expect(JSON.stringify(parsedTransaction.Payload)).not.toContain('non-blocking evidence');
+  });
+
+  it('creates classification envelopes with stable severity candidates', async () => {
+    const ownerSigningPrivateKeyHex = '1111111111111111111111111111111111111111111111111111111111111111';
+    const ownerEncryptionPrivateKeyHex = '2222222222222222222222222222222222222222222222222222222222222222';
+    const nodeEncryptionPrivateKeyHex = '3333333333333333333333333333333333333333333333333333333333333333';
+    const ownerSigningPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(ownerSigningPrivateKeyHex), true),
+    );
+    const ownerEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(ownerEncryptionPrivateKeyHex), true),
+    );
+    const nodeEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(nodeEncryptionPrivateKeyHex), true),
+    );
+    blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
+      NodePublicEncryptAddress: nodeEncryptionPublicKey,
+      ElectionEnvelopeVersion: 'election-envelope-v2.1',
+    });
+
+    const { signedTransaction } = await createClassifyElectionAnomalyThreadTransaction({
+      ElectionId: 'election-123',
+      AnomalyThreadId: 'thread-123',
+      ActorPublicAddress: ownerSigningPublicKey,
+      ActorPublicEncryptAddress: ownerEncryptionPublicKey,
+      ActorPrivateEncryptKeyHex: ownerEncryptionPrivateKeyHex,
+      SigningPrivateKeyHex: ownerSigningPrivateKeyHex,
+      CategoryId: ELECTION_ANOMALY_CATEGORY_IDS.TRUSTEE_CONTINUITY,
+      CaseStateId: ELECTION_ANOMALY_CASE_STATE_IDS.ESCALATED_TO_GOVERNED_DECISION,
+      SeverityCandidateId: ELECTION_ANOMALY_SEVERITY_CANDIDATE_IDS.POTENTIALLY_ELECTION_BLOCKING,
+      GovernedDecisionRef: ' governed-decision-7 ',
+    });
+
+    const parsedTransaction = JSON.parse(signedTransaction) as {
+      Payload: {
+        ActionType: string;
+        ActorEncryptedElectionPrivateKey: string;
+        EncryptedPayload: string;
+      };
+    };
+    const actorElectionPrivateKey = await eciesDecrypt(
+      parsedTransaction.Payload.ActorEncryptedElectionPrivateKey,
+      ownerEncryptionPrivateKeyHex,
+    );
+    const decryptedPayload = JSON.parse(
+      await eciesDecrypt(parsedTransaction.Payload.EncryptedPayload, actorElectionPrivateKey),
+    ) as {
+      ActionType: string;
+      ActionPayload: ClassifyElectionAnomalyThreadActionPayload;
+    };
+
+    expect(decryptedPayload.ActionType).toBe('classify_anomaly_thread');
+    expect(decryptedPayload.ActionPayload.CaseStateId)
+      .toBe(ELECTION_ANOMALY_CASE_STATE_IDS.ESCALATED_TO_GOVERNED_DECISION);
+    expect(decryptedPayload.ActionPayload.SeverityCandidateId)
+      .toBe(ELECTION_ANOMALY_SEVERITY_CANDIDATE_IDS.POTENTIALLY_ELECTION_BLOCKING);
+    expect(decryptedPayload.ActionPayload.GovernedDecisionRef).toBe('governed-decision-7');
+
+    await expect(createClassifyElectionAnomalyThreadTransaction({
+      ElectionId: 'election-123',
+      AnomalyThreadId: 'thread-123',
+      ActorPublicAddress: ownerSigningPublicKey,
+      ActorPublicEncryptAddress: ownerEncryptionPublicKey,
+      ActorPrivateEncryptKeyHex: ownerEncryptionPrivateKeyHex,
+      SigningPrivateKeyHex: ownerSigningPrivateKeyHex,
+      SeverityCandidateId: 'critical-ish',
+    })).rejects.toThrow(ELECTION_ANOMALY_VALIDATION_CODES.SEVERITY_CANDIDATE_INVALID);
+  });
+
+  it('registers external claimant anomalies with a hashed reference only', async () => {
+    const ownerSigningPrivateKeyHex = '1111111111111111111111111111111111111111111111111111111111111111';
+    const ownerEncryptionPrivateKeyHex = '2222222222222222222222222222222222222222222222222222222222222222';
+    const nodeEncryptionPrivateKeyHex = '3333333333333333333333333333333333333333333333333333333333333333';
+    const ownerSigningPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(ownerSigningPrivateKeyHex), true),
+    );
+    const ownerEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(ownerEncryptionPrivateKeyHex), true),
+    );
+    const nodeEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(nodeEncryptionPrivateKeyHex), true),
+    );
+    blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
+      NodePublicEncryptAddress: nodeEncryptionPublicKey,
+      ElectionEnvelopeVersion: 'election-envelope-v2.1',
+    });
+    const expectedHash = await hashExternalElectionAnomalyClaimantReference(
+      'election-123',
+      ' CASE-2026-007 ',
+    );
+
+    const { signedTransaction, anomalyThreadId, externalClaimantReferenceHash } =
+      await createRegisterExternalElectionAnomalyClaimantTransaction({
+        ElectionId: 'election-123',
+        ActorPublicAddress: ownerSigningPublicKey,
+        ActorPublicEncryptAddress: ownerEncryptionPublicKey,
+        ActorPrivateEncryptKeyHex: ownerEncryptionPrivateKeyHex,
+        ExternalClaimantReference: ' CASE-2026-007 ',
+        CategoryId: ELECTION_ANOMALY_CATEGORY_IDS.EXTERNAL_OBJECTION_OR_COMPLAINT,
+        Body: 'An external objection was received and stored out of band.',
+        SigningPrivateKeyHex: ownerSigningPrivateKeyHex,
+      });
+
+    const parsedTransaction = JSON.parse(signedTransaction) as {
+      Payload: {
+        ActionType: string;
+        ActionPayload: RegisterExternalElectionAnomalyClaimantActionPayload;
+        ActorEncryptedElectionPrivateKey: string;
+        EncryptedPayload: string;
+      };
+    };
+    const actorElectionPrivateKey = await eciesDecrypt(
+      parsedTransaction.Payload.ActorEncryptedElectionPrivateKey,
+      ownerEncryptionPrivateKeyHex,
+    );
+    const decryptedPayload = JSON.parse(
+      await eciesDecrypt(parsedTransaction.Payload.EncryptedPayload, actorElectionPrivateKey),
+    ) as {
+      ActionType: string;
+      ActionPayload: RegisterExternalElectionAnomalyClaimantActionPayload;
+    };
+
+    expect(parsedTransaction.Payload.ActionType).toBe('register_external_anomaly_claimant');
+    expect(parsedTransaction.Payload.ActionPayload.AnomalyThreadId).toBe(anomalyThreadId);
+    expect(externalClaimantReferenceHash).toBe(expectedHash);
+    expect(parsedTransaction.Payload.ActionPayload.ExternalClaimantReferenceHash)
+      .toBe(expectedHash);
+    expect(decryptedPayload.ActionPayload.ExternalClaimantReferenceHash).toBe(expectedHash);
+    expect(decryptedPayload.ActionPayload.RegistrarRoleContextId)
+      .toBe('external_claimant_registrar');
+    expect(JSON.stringify(parsedTransaction.Payload.ActionPayload)).not.toContain('CASE-2026-007');
+    expect(JSON.stringify(decryptedPayload.ActionPayload)).not.toContain('CASE-2026-007');
   });
 
   it('creates a bounded clarification response anomaly envelope', async () => {

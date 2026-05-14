@@ -21,6 +21,7 @@ import { electionsService } from '@/lib/grpc/services/elections';
 import { submitTransaction } from '@/modules/blockchain/BlockchainService';
 import {
   ELECTION_ANOMALY_BODY_MAX_CHARACTERS,
+  ELECTION_ANOMALY_ACTOR_ROLE_CONTEXT_IDS,
   ELECTION_ANOMALY_CATEGORY_IDS,
   ELECTION_ANOMALY_MESSAGE_KIND_IDS,
   createSubmitElectionAnomalyInformationTransaction,
@@ -36,7 +37,14 @@ type ElectionAnomalyPanelProps = {
   actorEncryptionPrivateKey: string;
   actorSigningPrivateKey: string;
   ownerPublicAddress: string;
-  isLinkedVoter: boolean;
+  isLinkedVoter?: boolean;
+  surface?: 'voter' | 'trustee' | 'auditor';
+  canReadOwnThread?: boolean;
+  canCreateThread?: boolean;
+  unavailableTitle?: string;
+  unavailableDescription?: string;
+  unavailableActionHref?: string;
+  unavailableActionLabel?: string;
   lifecycleState?: ElectionLifecycleStateProto;
   anomalySubmissionWindowClosesAt?: GrpcTimestamp;
   hasAnomalySubmissionWindowClosesAt?: boolean;
@@ -101,14 +109,22 @@ function formatTimestamp(timestamp?: GrpcTimestamp): string {
   return millis ? new Date(millis).toLocaleString() : 'Not yet available';
 }
 
-function messageKindLabel(messageKindId: string): string {
+function messageKindLabel(messageKindId: string, surface: 'voter' | 'trustee' | 'auditor'): string {
   switch (messageKindId) {
     case ELECTION_ANOMALY_MESSAGE_KIND_IDS.INITIAL_SUBMISSION:
-      return 'Voter report';
+      return surface === 'trustee'
+        ? 'Trustee report'
+        : surface === 'auditor'
+          ? 'Auditor report'
+          : 'Voter report';
     case ELECTION_ANOMALY_MESSAGE_KIND_IDS.AUTHORITY_INFORMATION_REQUEST:
       return 'Clarification request';
     case ELECTION_ANOMALY_MESSAGE_KIND_IDS.SUBMITTER_INFORMATION_RESPONSE:
-      return 'Voter clarification';
+      return surface === 'trustee'
+        ? 'Trustee clarification'
+        : surface === 'auditor'
+          ? 'Auditor clarification'
+          : 'Voter clarification';
     case ELECTION_ANOMALY_MESSAGE_KIND_IDS.AUTHORITY_RESPONSE:
       return 'Authority response';
     default:
@@ -149,7 +165,14 @@ export function ElectionAnomalyPanel({
   actorEncryptionPrivateKey,
   actorSigningPrivateKey,
   ownerPublicAddress,
-  isLinkedVoter,
+  isLinkedVoter = false,
+  surface = 'voter',
+  canReadOwnThread,
+  canCreateThread,
+  unavailableTitle,
+  unavailableDescription,
+  unavailableActionHref,
+  unavailableActionLabel,
   lifecycleState,
   anomalySubmissionWindowClosesAt,
   hasAnomalySubmissionWindowClosesAt,
@@ -171,6 +194,10 @@ export function ElectionAnomalyPanel({
     !hasAnomalySubmissionWindowClosesAt ||
     !submissionWindowMillis ||
     submissionWindowMillis > Date.now();
+  const isTrusteeSurface = surface === 'trustee';
+  const isAuditorSurface = surface === 'auditor';
+  const canReadThread = canReadOwnThread ?? isLinkedVoter;
+  const canCreateNewThreadForActor = canCreateThread ?? isLinkedVoter;
   const thread = ownThread?.Thread;
   const hasThread = Boolean(ownThread?.Success && ownThread.HasThread && thread);
   const bodyCharacterCount = Array.from(body.trim()).length;
@@ -188,11 +215,29 @@ export function ElectionAnomalyPanel({
         message.ClarificationRequestId
       )?.ClarificationRequestId ?? '';
   }, [thread]);
-  const canSubmitNewThread = isLinkedVoter && !hasThread && isSubmissionWindowOpen;
+  const canSubmitNewThread = canCreateNewThreadForActor && !hasThread && isSubmissionWindowOpen;
   const canSubmitClarification = Boolean(hasThread && currentClarificationRequestId);
+  const noAccessTitle =
+    unavailableTitle ??
+    (isAuditorSurface
+      ? 'Designated auditor access is required.'
+      : isTrusteeSurface
+      ? 'Accepted trustee access is required.'
+      : 'Link voter identity before reporting an anomaly.');
+  const noAccessDescription =
+    unavailableDescription ??
+    (isAuditorSurface
+      ? 'Auditor anomaly creation and restricted review require a current designated-auditor grant. Own-thread review remains available when the thread belongs to this account.'
+      : isTrusteeSurface
+      ? 'Trustee anomaly creation and aggregate visibility require current accepted trustee status. Own-thread review remains available when the thread belongs to this account.'
+      : 'The report is bound to the same election voter account that can access the ballot flow.');
+  const noAccessActionHref =
+    unavailableActionHref ?? (isTrusteeSurface || isAuditorSurface ? '' : `/elections/${electionId}/eligibility`);
+  const noAccessActionLabel =
+    unavailableActionLabel ?? (isTrusteeSurface || isAuditorSurface ? '' : 'Open eligibility');
 
   async function refreshOwnThread(): Promise<void> {
-    if (!isLinkedVoter) {
+    if (!canReadThread) {
       setOwnThread(null);
       return;
     }
@@ -225,7 +270,7 @@ export function ElectionAnomalyPanel({
   useEffect(() => {
     void refreshOwnThread();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [actorPublicAddress, electionId, isLinkedVoter]);
+  }, [actorPublicAddress, canReadThread, electionId]);
 
   useEffect(() => {
     let isActive = true;
@@ -281,6 +326,11 @@ export function ElectionAnomalyPanel({
         CategoryId: selectedCategoryId,
         Body: body,
         SigningPrivateKeyHex: actorSigningPrivateKey,
+        ActorRoleContextId: isAuditorSurface
+          ? ELECTION_ANOMALY_ACTOR_ROLE_CONTEXT_IDS.DESIGNATED_AUDITOR
+          : isTrusteeSurface
+            ? ELECTION_ANOMALY_ACTOR_ROLE_CONTEXT_IDS.TRUSTEE
+            : undefined,
       });
       const submitResult = await submitTransaction(signedTransaction);
       if (
@@ -380,17 +430,24 @@ export function ElectionAnomalyPanel({
             <span>Anomaly reporting</span>
           </div>
           <h2 className="mt-3 text-xl font-semibold text-hush-text-primary">
-            Report and review your election anomaly thread
+            {isAuditorSurface
+              ? 'Report and review your auditor anomaly thread'
+              : isTrusteeSurface
+              ? 'Report and review your trustee anomaly thread'
+              : 'Report and review your election anomaly thread'}
           </h2>
           <p className="mt-3 text-sm leading-7 text-hush-text-accent">
-            Submit one election-workflow anomaly for this voter account, then review the same
-            thread here. Submitting an anomaly does not change, revoke, or void a ballot.
+            {isAuditorSurface
+              ? 'Submit one election-workflow anomaly for this auditor account, then review the same thread here. This own-thread view stays separate from restricted review of all anomaly cases.'
+              : isTrusteeSurface
+              ? 'Submit one election-workflow anomaly for this trustee account, then review the same thread here. Anomaly intake does not mark KeyLost, block approvals, submit shares, or void the election.'
+              : 'Submit one election-workflow anomaly for this voter account, then review the same thread here. Submitting an anomaly does not change, revoke, or void a ballot.'}
           </p>
         </div>
         <button
           type="button"
           onClick={() => void refreshOwnThread()}
-          disabled={isLoading || !isLinkedVoter}
+          disabled={isLoading || !canReadThread}
           className="inline-flex self-start items-center gap-2 rounded-xl bg-hush-bg-dark/80 px-4 py-2.5 text-sm font-medium text-hush-text-primary transition-colors hover:bg-hush-bg-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple disabled:cursor-not-allowed disabled:opacity-50"
           data-testid="election-anomaly-refresh"
         >
@@ -421,7 +478,11 @@ export function ElectionAnomalyPanel({
             Lifecycle
           </div>
           <div className="mt-2 text-sm font-semibold text-hush-text-primary">
-            {lifecycleState === ElectionLifecycleStateProto.Open ? 'Voting open' : 'Review available'}
+            {lifecycleState === ElectionLifecycleStateProto.Open
+              ? isTrusteeSurface
+                ? 'Election open'
+                : 'Voting open'
+              : 'Review available'}
           </div>
         </div>
       </div>
@@ -451,32 +512,41 @@ export function ElectionAnomalyPanel({
         </div>
       ) : null}
 
-      {!isLinkedVoter ? (
+      {!canReadThread ? (
         <div className="mt-5 rounded-2xl bg-hush-bg-dark/72 px-5 py-5">
           <div className="text-sm font-semibold text-hush-text-primary">
-            Link voter identity before reporting an anomaly.
+            {noAccessTitle}
           </div>
           <p className="mt-2 text-sm leading-7 text-hush-text-accent">
-            The report is bound to the same election voter account that can access the ballot flow.
+            {noAccessDescription}
           </p>
-          <Link
-            href={`/elections/${electionId}/eligibility`}
-            className="mt-4 inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple"
-          >
-            <LockKeyhole className="h-4 w-4" />
-            <span>Open eligibility</span>
-          </Link>
+          {noAccessActionHref && noAccessActionLabel ? (
+            <Link
+              href={noAccessActionHref}
+              className="mt-4 inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple"
+            >
+              <LockKeyhole className="h-4 w-4" />
+              <span>{noAccessActionLabel}</span>
+            </Link>
+          ) : null}
         </div>
       ) : null}
 
-      {isLinkedVoter && isLoading && !ownThread ? (
+      {canReadThread && isLoading && !ownThread ? (
         <div className="mt-5 flex items-center gap-3 rounded-2xl bg-hush-bg-dark/72 px-5 py-5 text-sm text-hush-text-accent">
           <Loader2 className="h-4 w-4 animate-spin" />
           <span>Loading anomaly thread...</span>
         </div>
       ) : null}
 
-      {isLinkedVoter && canSubmitNewThread ? (
+      {canReadThread && !canCreateNewThreadForActor && !hasThread && !isLoading ? (
+        <div className="mt-5 rounded-2xl bg-hush-bg-dark/72 px-5 py-5" data-testid="election-anomaly-create-unavailable">
+          <div className="text-sm font-semibold text-hush-text-primary">{noAccessTitle}</div>
+          <p className="mt-2 text-sm leading-7 text-hush-text-accent">{noAccessDescription}</p>
+        </div>
+      ) : null}
+
+      {canReadThread && canSubmitNewThread ? (
         <div className="mt-5 rounded-2xl bg-hush-bg-dark/72 px-5 py-5" data-testid="election-anomaly-create">
           <div className="text-sm font-semibold text-hush-text-primary">Submit one anomaly report</div>
           <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
@@ -524,7 +594,7 @@ export function ElectionAnomalyPanel({
         </div>
       ) : null}
 
-      {isLinkedVoter && !hasThread && !isSubmissionWindowOpen ? (
+      {canReadThread && !hasThread && !isSubmissionWindowOpen ? (
         <div className="mt-5 rounded-2xl bg-hush-bg-dark/72 px-5 py-5 text-sm leading-7 text-hush-text-accent" data-testid="election-anomaly-window-closed">
           New anomaly reports are closed for this election. Existing own-thread review remains
           available after submission closes.
@@ -557,7 +627,7 @@ export function ElectionAnomalyPanel({
                 <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                   <div>
                     <div className="text-sm font-semibold text-hush-text-primary">
-                      {messageKindLabel(message.MessageKindId)}
+                      {messageKindLabel(message.MessageKindId, surface)}
                     </div>
                     <div className="mt-1 text-xs uppercase tracking-[0.18em] text-hush-text-accent">
                       {formatTimestamp(message.RecordedAt)}
