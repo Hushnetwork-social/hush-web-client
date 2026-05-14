@@ -26,6 +26,12 @@ import type {
   GetElectionEnvelopeAccessResponse,
   GetElectionAnomalyOwnThreadRequest,
   GetElectionAnomalyOwnThreadResponse,
+  GetElectionAnomalyTrusteeCountsRequest,
+  GetElectionAnomalyTrusteeCountsResponse,
+  GetElectionAnomalyOwnerTriageRequest,
+  GetElectionAnomalyOwnerTriageResponse,
+  GetElectionAnomalyAuditorRestrictedReviewRequest,
+  GetElectionAnomalyAuditorRestrictedReviewResponse,
   GetElectionResponse,
   GetElectionsByOwnerRequest,
   GetElectionsByOwnerResponse,
@@ -165,6 +171,33 @@ export const electionsService = {
       'GetElectionAnomalyOwnThread',
       request
     );
+  },
+
+  async getElectionAnomalyTrusteeCounts(
+    request: GetElectionAnomalyTrusteeCountsRequest
+  ): Promise<GetElectionAnomalyTrusteeCountsResponse> {
+    return proxyElectionQuery<
+      GetElectionAnomalyTrusteeCountsRequest,
+      GetElectionAnomalyTrusteeCountsResponse
+    >('GetElectionAnomalyTrusteeCounts', request);
+  },
+
+  async getElectionAnomalyAuditorRestrictedReview(
+    request: GetElectionAnomalyAuditorRestrictedReviewRequest
+  ): Promise<GetElectionAnomalyAuditorRestrictedReviewResponse> {
+    return proxyElectionQuery<
+      GetElectionAnomalyAuditorRestrictedReviewRequest,
+      GetElectionAnomalyAuditorRestrictedReviewResponse
+    >('GetElectionAnomalyAuditorRestrictedReview', request);
+  },
+
+  async getElectionAnomalyOwnerTriage(
+    request: GetElectionAnomalyOwnerTriageRequest
+  ): Promise<GetElectionAnomalyOwnerTriageResponse> {
+    return proxyElectionQuery<
+      GetElectionAnomalyOwnerTriageRequest,
+      GetElectionAnomalyOwnerTriageResponse
+    >('GetElectionAnomalyOwnerTriage', request);
   },
 
   async getElectionResultView(

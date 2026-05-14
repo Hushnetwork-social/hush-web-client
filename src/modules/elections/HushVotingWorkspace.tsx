@@ -539,6 +539,7 @@ export function HushVotingWorkspace({
                       key="trustee"
                       entry={effectiveEntry}
                       detail={activeDetail}
+                      actorPublicAddress={actorPublicAddress}
                     />
                   );
                 case 'auditor':
@@ -549,6 +550,7 @@ export function HushVotingWorkspace({
                       detail={activeDetail}
                       resultView={effectiveResultView}
                       isLoadingResultView={isLoadingResultView}
+                      actorPublicAddress={actorPublicAddress}
                     />
                   );
                 case 'voter':

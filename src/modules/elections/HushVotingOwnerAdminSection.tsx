@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useMemo } from 'react';
-import { AlertCircle, CheckCircle2, ShieldCheck } from 'lucide-react';
+import { AlertCircle, CheckCircle2, FileWarning, ShieldCheck } from 'lucide-react';
 import type { ElectionHubEntryView, GetElectionResponse } from '@/lib/grpc';
 import {
   ElectionCeremonyVersionStatusProto,
@@ -233,13 +233,22 @@ export function OwnerAdminWorkspaceSummary({
       summary={ownerSummary}
       defaultExpanded={false}
       actions={
-        <Link
-          href={`/elections/owner?electionId=${entry.Election.ElectionId}`}
-          className="inline-flex self-start items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium whitespace-nowrap text-white transition-colors hover:bg-hush-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
-        >
-          <ShieldCheck className="h-4 w-4" />
-          <span>Owner Workspace</span>
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href={`/elections/${entry.Election.ElectionId}/owner/anomaly`}
+            className="inline-flex self-start items-center gap-2 rounded-xl bg-hush-bg-dark/80 px-4 py-2 text-sm font-medium whitespace-nowrap text-hush-text-primary transition-colors hover:bg-hush-bg-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
+          >
+            <FileWarning className="h-4 w-4" />
+            <span>Anomaly triage</span>
+          </Link>
+          <Link
+            href={`/elections/owner?electionId=${entry.Election.ElectionId}`}
+            className="inline-flex self-start items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium whitespace-nowrap text-white transition-colors hover:bg-hush-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
+          >
+            <ShieldCheck className="h-4 w-4" />
+            <span>Owner Workspace</span>
+          </Link>
+        </div>
       }
     >
       {publishedResultState || closedOwnerState ? (

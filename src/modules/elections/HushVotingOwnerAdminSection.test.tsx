@@ -276,6 +276,10 @@ describe('OwnerAdminWorkspaceSummary', () => {
       'href',
       '/elections/owner?electionId=election-ready'
     );
+    expect(screen.getByRole('link', { name: 'Anomaly triage' })).toHaveAttribute(
+      'href',
+      '/elections/election-ready/owner/anomaly'
+    );
   });
 
   it('reframes the owner surface around trustee tally shares once the election is closed', () => {

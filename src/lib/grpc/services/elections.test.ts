@@ -248,6 +248,177 @@ describe('electionsService query proxy', () => {
     expect(response.Status?.IsVisible).toBe(true);
   });
 
+  it('posts trustee anomaly aggregate queries to the server-side proxy', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          Success: true,
+          ErrorMessage: '',
+          ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+          HasCounts: true,
+          Counts: {
+            ElectionId: 'election-trustee',
+            TotalThreadCount: 2,
+            CategoryCounts: [],
+            CaseStateCounts: [],
+            ContinuitySummary: {
+              TrusteeContinuityThreadCount: 1,
+              OpenContinuityThreadCount: 1,
+              AwaitingInformationContinuityThreadCount: 0,
+              ClosedContinuityThreadCount: 0,
+              GovernedDecisionLinkedCount: 0,
+              HasContinuityIssue: true,
+            },
+          },
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+    );
+
+    const response = await electionsService.getElectionAnomalyTrusteeCounts({
+      ElectionId: 'election-trustee',
+      ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/elections/query', {
+      method: 'POST',
+      headers: expect.objectContaining({
+        'Content-Type': 'application/json',
+        'x-hush-election-query-signatory': TEST_CREDENTIALS.signingPublicKey,
+        'x-hush-election-query-signed-at': expect.any(String),
+        'x-hush-election-query-signature': expect.any(String),
+      }),
+      body: JSON.stringify({
+        method: 'GetElectionAnomalyTrusteeCounts',
+        request: {
+          ElectionId: 'election-trustee',
+          ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+        },
+      }),
+    });
+    expect(response.Success).toBe(true);
+    expect(response.Counts?.ContinuitySummary?.HasContinuityIssue).toBe(true);
+  });
+
+  it('posts auditor anomaly restricted review queries to the server-side proxy', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          Success: true,
+          ErrorMessage: '',
+          ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+          HasReview: true,
+          Review: {
+            ElectionId: 'election-auditor',
+            TotalThreadCount: 1,
+            DecryptableMessageCount: 1,
+            PendingRewrapMessageCount: 0,
+            MissingWrapMessageCount: 0,
+            AttachmentManifestCount: 0,
+            Threads: [],
+          },
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+    );
+
+    const response = await electionsService.getElectionAnomalyAuditorRestrictedReview({
+      ElectionId: 'election-auditor',
+      ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/elections/query', {
+      method: 'POST',
+      headers: expect.objectContaining({
+        'Content-Type': 'application/json',
+        'x-hush-election-query-signatory': TEST_CREDENTIALS.signingPublicKey,
+        'x-hush-election-query-signed-at': expect.any(String),
+        'x-hush-election-query-signature': expect.any(String),
+      }),
+      body: JSON.stringify({
+        method: 'GetElectionAnomalyAuditorRestrictedReview',
+        request: {
+          ElectionId: 'election-auditor',
+          ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+        },
+      }),
+    });
+    expect(response.Success).toBe(true);
+    expect(response.Review?.DecryptableMessageCount).toBe(1);
+  });
+
+  it('posts owner anomaly triage queries to the server-side proxy', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          Success: true,
+          ErrorMessage: '',
+          ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+          HasTriage: true,
+          Triage: {
+            ElectionId: 'election-owner',
+            TotalThreadCount: 1,
+            OpenThreadCount: 1,
+            AwaitingInformationThreadCount: 0,
+            ResponsePresentThreadCount: 0,
+            ExternalClaimantThreadCount: 0,
+            DecryptableMessageCount: 1,
+            PendingRewrapMessageCount: 0,
+            MissingOwnerWrapMessageCount: 0,
+            AttachmentManifestCount: 0,
+            GovernedContinuityHandoffStatusId: 'continuity_normal',
+            CategoryCounts: [],
+            CaseStateCounts: [],
+            Threads: [],
+          },
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+    );
+
+    const response = await electionsService.getElectionAnomalyOwnerTriage({
+      ElectionId: 'election-owner',
+      ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/elections/query', {
+      method: 'POST',
+      headers: expect.objectContaining({
+        'Content-Type': 'application/json',
+        'x-hush-election-query-signatory': TEST_CREDENTIALS.signingPublicKey,
+        'x-hush-election-query-signed-at': expect.any(String),
+        'x-hush-election-query-signature': expect.any(String),
+      }),
+      body: JSON.stringify({
+        method: 'GetElectionAnomalyOwnerTriage',
+        request: {
+          ElectionId: 'election-owner',
+          ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+        },
+      }),
+    });
+    expect(response.Success).toBe(true);
+    expect(response.Triage?.DecryptableMessageCount).toBe(1);
+  });
+
   it('posts verification package export queries to the server-side proxy', async () => {
     const fetchMock = vi.mocked(fetch);
     fetchMock.mockResolvedValue(
