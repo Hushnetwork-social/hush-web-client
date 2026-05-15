@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as secp256k1 from '@noble/secp256k1';
 import {
   aesDecrypt,
+  aesDecryptBytes,
   bytesToBase64,
   bytesToHex,
   eciesDecrypt,
@@ -10,6 +11,7 @@ import {
 } from '@/lib/crypto';
 import {
   ElectionFinalizationTargetTypeProto,
+  type ElectionAnomalyAttachmentManifestView,
   type ElectionAnomalyMessageView,
   type ElectionAnomalyOwnerMessageView,
   type ElectionAnomalyRestrictedMessageView,
@@ -18,11 +20,18 @@ import {
 } from '@/lib/grpc';
 import {
   ENCRYPTED_ELECTION_ENVELOPE_PAYLOAD_KIND,
+  ELECTION_ANOMALY_ATTACHMENT_KIND_IDS,
+  ELECTION_ANOMALY_ATTACHMENT_VALIDATION_STATUS_IDS,
   ELECTION_ANOMALY_CASE_STATE_IDS,
   ELECTION_ANOMALY_CATEGORY_IDS,
+  ELECTION_ANOMALY_EVIDENCE_MIME_TYPES,
   ELECTION_ANOMALY_MESSAGE_KIND_IDS,
   ELECTION_ANOMALY_RECIPIENT_ROLE_IDS,
   ELECTION_ANOMALY_RECIPIENT_WRAP_STATUS_IDS,
+  ELECTION_ANOMALY_REDACTION_REASON_IDS,
+  ELECTION_ANOMALY_REDACTION_TARGET_KIND_IDS,
+  ELECTION_ANOMALY_RESTRICTED_PAYLOAD_REFERENCE_PREFIX,
+  ELECTION_ANOMALY_SUBMITTER_CLARIFICATION_EVIDENCE_MAX_BYTES,
   ELECTION_ANOMALY_SEVERITY_CANDIDATE_IDS,
   ELECTION_ANOMALY_VALIDATION_CODES,
   type CloseCountingExecutorSubmissionPayload,
@@ -32,12 +41,21 @@ import {
   createApproveElectionGovernedProposalTransaction,
   createClaimElectionRosterEntryTransaction,
   createClassifyElectionAnomalyThreadTransaction,
+  createElectionAnomalyAttachmentContentKeyWrap,
+  createElectionAnomalyOwnerAttachmentContentKeyWraps,
+  createElectionAnomalyRestrictedPayloadReference,
+  createElectionAnomalyRestrictedEvidencePayload,
+  createElectionAnomalySubmitterAttachmentContentKeyWraps,
   createRecordElectionAnomalyAuthorityResponseTransaction,
   createRecordElectionAnomalyAuditorRecipientRewrapTransaction,
+  createRecordElectionAnomalyAttachmentManifestTransaction,
+  createRecordElectionAnomalyEvidenceRedactionTransaction,
   createRegisterExternalElectionAnomalyClaimantTransaction,
   createRequestElectionAnomalyInformationTransaction,
   createSubmitElectionAnomalyInformationTransaction,
   createSubmitElectionAnomalyThreadTransaction,
+  computeElectionAnomalyEvidenceHash,
+  decryptElectionAnomalyAttachmentPayload,
   decryptElectionAnomalyMessageBody,
   decryptElectionAnomalyOwnerMessageBody,
   decryptElectionAnomalyRestrictedMessageBody,
@@ -50,10 +68,13 @@ import {
   createSubmitElectionFinalizationShareTransaction,
   hasElectionAnomalyDuplicateThreadValidation,
   hashExternalElectionAnomalyClaimantReference,
+  prepareElectionAnomalyAttachmentManifestMaterial,
   type ClassifyElectionAnomalyThreadActionPayload,
   type ElectionAnomalyMessageEnvelopePayload,
   type RecordElectionAnomalyAuthorityResponseActionPayload,
   type RecordElectionAnomalyAuditorRecipientRewrapActionPayload,
+  type RecordElectionAnomalyAttachmentManifestActionPayload,
+  type RecordElectionAnomalyEvidenceRedactionActionPayload,
   type RegisterExternalElectionAnomalyClaimantActionPayload,
   type RequestElectionAnomalyInformationActionPayload,
 } from './transactionService';
@@ -1508,6 +1529,406 @@ describe('transactionService encrypted election envelope helpers', () => {
       .toBe('external_claimant_registrar');
     expect(JSON.stringify(parsedTransaction.Payload.ActionPayload)).not.toContain('CASE-2026-007');
     expect(JSON.stringify(decryptedPayload.ActionPayload)).not.toContain('CASE-2026-007');
+  });
+
+  it('prepares anomaly attachment manifest hashes and restricted payload references', async () => {
+    const payloadReference = createElectionAnomalyRestrictedPayloadReference(
+      'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+    );
+    const material = await prepareElectionAnomalyAttachmentManifestMaterial({
+      Content: 'hello',
+      EncryptedPayload: 'ciphertext',
+      EncryptedPayloadReference: payloadReference,
+    });
+
+    expect(material.ContentHash).toBe(
+      'sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824',
+    );
+    expect(material.EncryptedPayloadHash).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(material.EncryptedPayloadReference).toBe(payloadReference);
+    expect(material.EncryptedPayloadReference).toMatch(
+      new RegExp(`^${ELECTION_ANOMALY_RESTRICTED_PAYLOAD_REFERENCE_PREFIX}`),
+    );
+    expect(material.SizeBytes).toBe(5);
+    await expect(computeElectionAnomalyEvidenceHash(new Uint8Array([104, 101, 108, 108, 111])))
+      .resolves
+      .toBe(material.ContentHash);
+  });
+
+  it('creates decryptable restricted evidence payload content-key wraps', async () => {
+    const submitterEncryptionPrivateKeyHex =
+      '8888888888888888888888888888888888888888888888888888888888888888';
+    const ownerEncryptionPrivateKeyHex =
+      '9999999999999999999999999999999999999999999999999999999999999999';
+    const auditorEncryptionPrivateKeyHex =
+      'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const submitterEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(submitterEncryptionPrivateKeyHex), true),
+    );
+    const ownerEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(ownerEncryptionPrivateKeyHex), true),
+    );
+    const auditorEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(auditorEncryptionPrivateKeyHex), true),
+    );
+    identityServiceMock.getIdentity.mockResolvedValue({
+      Successfull: true,
+      PublicEncryptAddress: ownerEncryptionPublicKey,
+    });
+
+    const restrictedPayload = await createElectionAnomalyRestrictedEvidencePayload(
+      new Uint8Array([7, 8, 9]),
+    );
+    const submitterWraps = await createElectionAnomalySubmitterAttachmentContentKeyWraps({
+      ActorPublicAddress: 'submitter-address',
+      ActorPublicEncryptAddress: submitterEncryptionPublicKey,
+      OwnerPublicAddress: 'owner-address',
+      ContentKey: restrictedPayload.ContentKey,
+    });
+    const ownerWraps = await createElectionAnomalyOwnerAttachmentContentKeyWraps({
+      OwnerPublicAddress: 'owner-address',
+      OwnerPublicEncryptAddress: ownerEncryptionPublicKey,
+      AuditorRecipients: [
+        {
+          AuditorPublicAddress: 'auditor-address',
+          AuditorPublicEncryptAddress: auditorEncryptionPublicKey,
+        },
+      ],
+      ContentKey: restrictedPayload.ContentKey,
+    });
+
+    await expect(aesDecryptBytes(restrictedPayload.EncryptedPayload, restrictedPayload.ContentKey))
+      .resolves
+      .toEqual(new Uint8Array([7, 8, 9]));
+    expect(submitterWraps).toHaveLength(2);
+    expect(ownerWraps).toHaveLength(2);
+    await expect(eciesDecrypt(
+      submitterWraps[1].EncryptedContentKey,
+      ownerEncryptionPrivateKeyHex,
+    )).resolves.toBe(restrictedPayload.ContentKey);
+    await expect(eciesDecrypt(
+      ownerWraps[1].EncryptedContentKey,
+      auditorEncryptionPrivateKeyHex,
+    )).resolves.toBe(restrictedPayload.ContentKey);
+    expect(submitterWraps.map((wrap) => wrap.RecipientPublicAddress))
+      .toEqual(['submitter-address', 'owner-address']);
+    expect(ownerWraps.map((wrap) => wrap.RecipientPublicAddress))
+      .toEqual(['owner-address', 'auditor-address']);
+  });
+
+  it('decrypts restricted attachment payloads only when hashes and caller wrap match', async () => {
+    const ownerEncryptionPrivateKeyHex =
+      '9999999999999999999999999999999999999999999999999999999999999999';
+    const ownerEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(ownerEncryptionPrivateKeyHex), true),
+    );
+    const content = new Uint8Array([4, 5, 6]);
+    const restrictedPayload = await createElectionAnomalyRestrictedEvidencePayload(content);
+    const callerWrap = await createElectionAnomalyAttachmentContentKeyWrap({
+      RecipientRoleId: ELECTION_ANOMALY_RECIPIENT_ROLE_IDS.ELECTION_OWNER,
+      RecipientPublicAddress: 'owner-address',
+      RecipientPublicEncryptAddress: ownerEncryptionPublicKey,
+      ContentKey: restrictedPayload.ContentKey,
+    });
+    const attachment: ElectionAnomalyAttachmentManifestView = {
+      AttachmentManifestId: 'manifest-1',
+      AnomalyThreadId: 'thread-1',
+      EventId: 'event-1',
+      EventHash: 'sha256:event',
+      AttachmentKindId: ELECTION_ANOMALY_ATTACHMENT_KIND_IDS.AUTHORITY_EVIDENCE,
+      EncryptedPayloadReference: createElectionAnomalyRestrictedPayloadReference(
+        'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      ),
+      EncryptedPayloadHash: await computeElectionAnomalyEvidenceHash(
+        restrictedPayload.EncryptedPayload,
+      ),
+      ContentHash: await computeElectionAnomalyEvidenceHash(content),
+      SizeBytes: content.byteLength,
+      MimeType: ELECTION_ANOMALY_EVIDENCE_MIME_TYPES.IMAGE_PNG,
+      ValidationStatusId: ELECTION_ANOMALY_ATTACHMENT_VALIDATION_STATUS_IDS.ACCEPTED,
+      ScannerStatusId: 'clear',
+      PayloadAvailabilityStatusId: 'available',
+      ClarificationRequestId: '',
+      HasClarificationRequest: false,
+      ActorRoleId: ELECTION_ANOMALY_RECIPIENT_ROLE_IDS.ELECTION_OWNER,
+      SourceTransactionId: 'tx-1',
+      HasCallerContentKeyWrap: true,
+      CallerContentKeyWrap: {
+        WrapStatusId: callerWrap.WrapStatusId,
+        RecipientKeyFingerprint: callerWrap.RecipientKeyFingerprint,
+        EncryptedContentKey: callerWrap.EncryptedContentKey,
+        WrapAlgorithm: callerWrap.WrapAlgorithm,
+      },
+    };
+
+    await expect(decryptElectionAnomalyAttachmentPayload({
+      Attachment: attachment,
+      ActorPrivateEncryptKeyHex: ownerEncryptionPrivateKeyHex,
+      EncryptedPayloadBase64: bytesToBase64(restrictedPayload.EncryptedPayload),
+      EncryptedPayloadHash: attachment.EncryptedPayloadHash,
+      ContentHash: attachment.ContentHash,
+    })).resolves.toEqual(content);
+
+    await expect(decryptElectionAnomalyAttachmentPayload({
+      Attachment: attachment,
+      ActorPrivateEncryptKeyHex: ownerEncryptionPrivateKeyHex,
+      EncryptedPayloadBase64: bytesToBase64(restrictedPayload.EncryptedPayload),
+      EncryptedPayloadHash: attachment.EncryptedPayloadHash,
+      ContentHash: `sha256:${'0'.repeat(64)}`,
+    })).rejects.toThrow(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_HASH_INVALID);
+  });
+
+  it('creates a signed submitter clarification attachment manifest envelope', async () => {
+    const submitterSigningPrivateKeyHex = '7777777777777777777777777777777777777777777777777777777777777777';
+    const submitterEncryptionPrivateKeyHex = '8888888888888888888888888888888888888888888888888888888888888888';
+    const nodeEncryptionPrivateKeyHex = '3333333333333333333333333333333333333333333333333333333333333333';
+    const submitterSigningPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(submitterSigningPrivateKeyHex), true),
+    );
+    const submitterEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(submitterEncryptionPrivateKeyHex), true),
+    );
+    const nodeEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(nodeEncryptionPrivateKeyHex), true),
+    );
+    const material = await prepareElectionAnomalyAttachmentManifestMaterial({
+      Content: new Uint8Array([1, 2, 3]),
+      EncryptedPayload: 'encrypted-payload',
+      EncryptedPayloadReference: createElectionAnomalyRestrictedPayloadReference(
+        'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      ),
+    });
+    const contentKeyWraps = [
+      {
+        RecipientRoleId: ELECTION_ANOMALY_RECIPIENT_ROLE_IDS.SUBMITTER,
+        RecipientPublicAddress: submitterSigningPublicKey,
+        RecipientKeyFingerprint: `sha256:${'a'.repeat(64)}`,
+        EncryptedContentKey: 'submitter-wrapped-content-key',
+        WrapAlgorithm: 'x25519-aes-gcm',
+        WrapStatusId: ELECTION_ANOMALY_RECIPIENT_WRAP_STATUS_IDS.AVAILABLE,
+      },
+      {
+        RecipientRoleId: ELECTION_ANOMALY_RECIPIENT_ROLE_IDS.ELECTION_OWNER,
+        RecipientPublicAddress: 'owner-address',
+        RecipientKeyFingerprint: `sha256:${'b'.repeat(64)}`,
+        EncryptedContentKey: 'owner-wrapped-content-key',
+        WrapAlgorithm: 'x25519-aes-gcm',
+        WrapStatusId: ELECTION_ANOMALY_RECIPIENT_WRAP_STATUS_IDS.AVAILABLE,
+      },
+    ];
+    blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
+      NodePublicEncryptAddress: nodeEncryptionPublicKey,
+      ElectionEnvelopeVersion: 'election-envelope-v2.1',
+    });
+
+    const { signedTransaction, attachmentManifestId } =
+      await createRecordElectionAnomalyAttachmentManifestTransaction({
+        ElectionId: 'election-123',
+        AnomalyThreadId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+        AttachmentManifestId: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+        ActorPublicAddress: submitterSigningPublicKey,
+        ActorPublicEncryptAddress: submitterEncryptionPublicKey,
+        ActorPrivateEncryptKeyHex: submitterEncryptionPrivateKeyHex,
+        SigningPrivateKeyHex: submitterSigningPrivateKeyHex,
+        AttachmentKindId: ELECTION_ANOMALY_ATTACHMENT_KIND_IDS.AUTHORITY_REQUESTED_EVIDENCE,
+        EncryptedPayloadReference: material.EncryptedPayloadReference,
+        EncryptedPayloadHash: material.EncryptedPayloadHash,
+        ContentHash: material.ContentHash,
+        SizeBytes: material.SizeBytes,
+        MimeType: ELECTION_ANOMALY_EVIDENCE_MIME_TYPES.APPLICATION_JSON,
+        ValidationStatusId: ELECTION_ANOMALY_ATTACHMENT_VALIDATION_STATUS_IDS.PENDING_SCAN,
+        ClarificationRequestId: 'dddddddd-dddd-dddd-dddd-dddddddddddd',
+        ContentKeyWraps: contentKeyWraps,
+        ExistingAttachmentManifestCount: 1,
+        ExistingAttachmentManifestTotalBytes: 1024,
+      });
+
+    const parsedTransaction = JSON.parse(signedTransaction) as {
+      Payload: {
+        ActionType: string;
+        ActionPayload: RecordElectionAnomalyAttachmentManifestActionPayload;
+        ActorEncryptedElectionPrivateKey: string;
+        EncryptedPayload: string;
+      };
+    };
+    const actorElectionPrivateKey = await eciesDecrypt(
+      parsedTransaction.Payload.ActorEncryptedElectionPrivateKey,
+      submitterEncryptionPrivateKeyHex,
+    );
+    const decryptedPayload = JSON.parse(
+      await eciesDecrypt(parsedTransaction.Payload.EncryptedPayload, actorElectionPrivateKey),
+    ) as {
+      ActionType: string;
+      ActionPayload: RecordElectionAnomalyAttachmentManifestActionPayload;
+    };
+
+    expect(attachmentManifestId).toBe('cccccccc-cccc-cccc-cccc-cccccccccccc');
+    expect(parsedTransaction.Payload.ActionType).toBe('record_anomaly_attachment_manifest');
+    expect(parsedTransaction.Payload.ActionPayload.AttachmentManifestId)
+      .toBe('cccccccc-cccc-cccc-cccc-cccccccccccc');
+    expect(parsedTransaction.Payload.ActionPayload.AttachmentKindId)
+      .toBe(ELECTION_ANOMALY_ATTACHMENT_KIND_IDS.AUTHORITY_REQUESTED_EVIDENCE);
+    expect(parsedTransaction.Payload.ActionPayload.MimeType).toBe('application/json');
+    expect(parsedTransaction.Payload.ActionPayload.ContentHash).toBe(material.ContentHash);
+    expect(decryptedPayload.ActionType).toBe('record_anomaly_attachment_manifest');
+    expect(decryptedPayload.ActionPayload.ClarificationRequestId)
+      .toBe('dddddddd-dddd-dddd-dddd-dddddddddddd');
+    expect(decryptedPayload.ActionPayload.ContentKeyWraps).toEqual(contentKeyWraps);
+    expect(JSON.stringify(parsedTransaction.Payload)).not.toContain('encrypted-payload');
+    expect(JSON.stringify(decryptedPayload.ActionPayload)).not.toContain('encrypted-payload');
+    expect(JSON.stringify(decryptedPayload.ActionPayload)).not.toContain('content-key-plaintext');
+    expect(electionsServiceMock.getElectionEnvelopeAccess).not.toHaveBeenCalled();
+  });
+
+  it('rejects unsupported anomaly attachment manifest inputs before signing', async () => {
+    const baseInput = {
+      ElectionId: 'election-123',
+      AnomalyThreadId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      ActorPublicAddress: 'actor-address',
+      ActorPublicEncryptAddress: 'actor-encrypt-address',
+      ActorPrivateEncryptKeyHex: 'actor-private-key',
+      SigningPrivateKeyHex: 'signing-private-key',
+      AttachmentKindId: ELECTION_ANOMALY_ATTACHMENT_KIND_IDS.AUTHORITY_REQUESTED_EVIDENCE,
+      EncryptedPayloadReference: createElectionAnomalyRestrictedPayloadReference(
+        'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      ),
+      EncryptedPayloadHash: `sha256:${'a'.repeat(64)}`,
+      ContentHash: `sha256:${'b'.repeat(64)}`,
+      SizeBytes: 256,
+      MimeType: ELECTION_ANOMALY_EVIDENCE_MIME_TYPES.IMAGE_PNG,
+      ClarificationRequestId: 'dddddddd-dddd-dddd-dddd-dddddddddddd',
+    };
+
+    await expect(createRecordElectionAnomalyAttachmentManifestTransaction({
+      ...baseInput,
+      AttachmentKindId: ELECTION_ANOMALY_ATTACHMENT_KIND_IDS.SUBMITTER_EVIDENCE,
+    })).rejects.toThrow(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_SUBMITTER_NOT_ALLOWED);
+    await expect(createRecordElectionAnomalyAttachmentManifestTransaction({
+      ...baseInput,
+      MimeType: 'text/html',
+    })).rejects.toThrow(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_MIME_TYPE_INVALID);
+    await expect(createRecordElectionAnomalyAttachmentManifestTransaction({
+      ...baseInput,
+      SizeBytes: ELECTION_ANOMALY_SUBMITTER_CLARIFICATION_EVIDENCE_MAX_BYTES + 1,
+    })).rejects.toThrow(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_SIZE_EXCEEDED);
+    await expect(createRecordElectionAnomalyAttachmentManifestTransaction({
+      ...baseInput,
+      ExistingAttachmentManifestCount: 2,
+    })).rejects.toThrow(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_COUNT_EXCEEDED);
+    await expect(createRecordElectionAnomalyAttachmentManifestTransaction({
+      ...baseInput,
+      AttachmentKindId: ELECTION_ANOMALY_ATTACHMENT_KIND_IDS.AUTHORITY_EVIDENCE,
+      ClarificationRequestId: 'dddddddd-dddd-dddd-dddd-dddddddddddd',
+    })).rejects.toThrow(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_REQUEST_MISMATCH);
+    await expect(createRecordElectionAnomalyAttachmentManifestTransaction({
+      ...baseInput,
+      ContentKeyWraps: [
+        {
+          RecipientRoleId: ELECTION_ANOMALY_RECIPIENT_ROLE_IDS.ELECTION_OWNER,
+          RecipientPublicAddress: 'owner-address',
+          RecipientKeyFingerprint: `sha256:${'c'.repeat(64)}`,
+          EncryptedContentKey: 'owner-wrapped-content-key',
+          WrapAlgorithm: 'x25519-aes-gcm',
+          WrapStatusId: ELECTION_ANOMALY_RECIPIENT_WRAP_STATUS_IDS.MISSING,
+        },
+      ],
+    })).rejects.toThrow(ELECTION_ANOMALY_VALIDATION_CODES.RECIPIENT_WRAP_MISSING);
+    await expect(prepareElectionAnomalyAttachmentManifestMaterial({
+      Content: 'hello',
+      EncryptedPayload: 'ciphertext',
+      EncryptedPayloadReference: 'https://example.invalid/payload',
+    })).rejects.toThrow(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_PAYLOAD_REFERENCE_INVALID);
+    expect(blockchainServiceMock.getElectionEnvelopeContext).not.toHaveBeenCalled();
+  });
+
+  it('creates an owner evidence redaction envelope and validates redaction hashes', async () => {
+    const ownerSigningPrivateKeyHex = '1111111111111111111111111111111111111111111111111111111111111111';
+    const ownerEncryptionPrivateKeyHex = '2222222222222222222222222222222222222222222222222222222222222222';
+    const nodeEncryptionPrivateKeyHex = '3333333333333333333333333333333333333333333333333333333333333333';
+    const ownerSigningPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(ownerSigningPrivateKeyHex), true),
+    );
+    const ownerEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(ownerEncryptionPrivateKeyHex), true),
+    );
+    const nodeEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(nodeEncryptionPrivateKeyHex), true),
+    );
+    blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
+      NodePublicEncryptAddress: nodeEncryptionPublicKey,
+      ElectionEnvelopeVersion: 'election-envelope-v2.1',
+    });
+
+    const { signedTransaction, redactionEventId } =
+      await createRecordElectionAnomalyEvidenceRedactionTransaction({
+        ElectionId: 'election-123',
+        AnomalyThreadId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+        RedactionEventId: 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee',
+        ActorPublicAddress: ownerSigningPublicKey,
+        ActorPublicEncryptAddress: ownerEncryptionPublicKey,
+        ActorPrivateEncryptKeyHex: ownerEncryptionPrivateKeyHex,
+        SigningPrivateKeyHex: ownerSigningPrivateKeyHex,
+        TargetKindId: ELECTION_ANOMALY_REDACTION_TARGET_KIND_IDS.ATTACHMENT_MANIFEST,
+        TargetId: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+        ReasonCodeId: ELECTION_ANOMALY_REDACTION_REASON_IDS.PERSONAL_DATA,
+        OriginalHash: `sha256:${'c'.repeat(64)}`,
+        ReplacementManifestHash: `sha256:${'d'.repeat(64)}`,
+        TombstoneStatusId: 'redacted',
+      });
+
+    const parsedTransaction = JSON.parse(signedTransaction) as {
+      Payload: {
+        ActionType: string;
+        ActorEncryptedElectionPrivateKey: string;
+        EncryptedPayload: string;
+      };
+    };
+    const actorElectionPrivateKey = await eciesDecrypt(
+      parsedTransaction.Payload.ActorEncryptedElectionPrivateKey,
+      ownerEncryptionPrivateKeyHex,
+    );
+    const decryptedPayload = JSON.parse(
+      await eciesDecrypt(parsedTransaction.Payload.EncryptedPayload, actorElectionPrivateKey),
+    ) as {
+      ActionType: string;
+      ActionPayload: RecordElectionAnomalyEvidenceRedactionActionPayload;
+    };
+
+    expect(redactionEventId).toBe('eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee');
+    expect(parsedTransaction.Payload.ActionType).toBe('record_anomaly_evidence_redaction');
+    expect(decryptedPayload.ActionType).toBe('record_anomaly_evidence_redaction');
+    expect(decryptedPayload.ActionPayload.TargetKindId)
+      .toBe(ELECTION_ANOMALY_REDACTION_TARGET_KIND_IDS.ATTACHMENT_MANIFEST);
+    expect(decryptedPayload.ActionPayload.ReasonCodeId)
+      .toBe(ELECTION_ANOMALY_REDACTION_REASON_IDS.PERSONAL_DATA);
+    expect(decryptedPayload.ActionPayload.OriginalHash).toBe(`sha256:${'c'.repeat(64)}`);
+    expect(decryptedPayload.ActionPayload.ReplacementManifestHash)
+      .toBe(`sha256:${'d'.repeat(64)}`);
+
+    await expect(createRecordElectionAnomalyEvidenceRedactionTransaction({
+      ElectionId: 'election-123',
+      AnomalyThreadId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      ActorPublicAddress: ownerSigningPublicKey,
+      ActorPublicEncryptAddress: ownerEncryptionPublicKey,
+      ActorPrivateEncryptKeyHex: ownerEncryptionPrivateKeyHex,
+      SigningPrivateKeyHex: ownerSigningPrivateKeyHex,
+      TargetKindId: ELECTION_ANOMALY_REDACTION_TARGET_KIND_IDS.ATTACHMENT_MANIFEST,
+      TargetId: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+      ReasonCodeId: 'privacy-ish',
+      OriginalHash: `sha256:${'c'.repeat(64)}`,
+    })).rejects.toThrow(ELECTION_ANOMALY_VALIDATION_CODES.REDACTION_REASON_INVALID);
+    await expect(createRecordElectionAnomalyEvidenceRedactionTransaction({
+      ElectionId: 'election-123',
+      AnomalyThreadId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      ActorPublicAddress: ownerSigningPublicKey,
+      ActorPublicEncryptAddress: ownerEncryptionPublicKey,
+      ActorPrivateEncryptKeyHex: ownerEncryptionPrivateKeyHex,
+      SigningPrivateKeyHex: ownerSigningPrivateKeyHex,
+      TargetKindId: ELECTION_ANOMALY_REDACTION_TARGET_KIND_IDS.ATTACHMENT_MANIFEST,
+      TargetId: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+      ReasonCodeId: ELECTION_ANOMALY_REDACTION_REASON_IDS.PERSONAL_DATA,
+      OriginalHash: 'sha256:not-valid',
+    })).rejects.toThrow(ELECTION_ANOMALY_VALIDATION_CODES.REDACTION_ORIGINAL_HASH_INVALID);
   });
 
   it('creates a bounded clarification response anomaly envelope', async () => {

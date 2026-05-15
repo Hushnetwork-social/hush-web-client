@@ -32,6 +32,12 @@ import type {
   GetElectionAnomalyOwnerTriageResponse,
   GetElectionAnomalyAuditorRestrictedReviewRequest,
   GetElectionAnomalyAuditorRestrictedReviewResponse,
+  GetElectionAnomalyEvidenceManifestRequest,
+  GetElectionAnomalyEvidenceManifestResponse,
+  StageElectionAnomalyRestrictedPayloadRequest,
+  StageElectionAnomalyRestrictedPayloadResponse,
+  GetElectionAnomalyRestrictedPayloadRequest,
+  GetElectionAnomalyRestrictedPayloadResponse,
   GetElectionResponse,
   GetElectionsByOwnerRequest,
   GetElectionsByOwnerResponse,
@@ -198,6 +204,33 @@ export const electionsService = {
       GetElectionAnomalyOwnerTriageRequest,
       GetElectionAnomalyOwnerTriageResponse
     >('GetElectionAnomalyOwnerTriage', request);
+  },
+
+  async getElectionAnomalyEvidenceManifest(
+    request: GetElectionAnomalyEvidenceManifestRequest
+  ): Promise<GetElectionAnomalyEvidenceManifestResponse> {
+    return proxyElectionQuery<
+      GetElectionAnomalyEvidenceManifestRequest,
+      GetElectionAnomalyEvidenceManifestResponse
+    >('GetElectionAnomalyEvidenceManifest', request);
+  },
+
+  async stageElectionAnomalyRestrictedPayload(
+    request: StageElectionAnomalyRestrictedPayloadRequest
+  ): Promise<StageElectionAnomalyRestrictedPayloadResponse> {
+    return proxyElectionQuery<
+      StageElectionAnomalyRestrictedPayloadRequest,
+      StageElectionAnomalyRestrictedPayloadResponse
+    >('StageElectionAnomalyRestrictedPayload', request);
+  },
+
+  async getElectionAnomalyRestrictedPayload(
+    request: GetElectionAnomalyRestrictedPayloadRequest
+  ): Promise<GetElectionAnomalyRestrictedPayloadResponse> {
+    return proxyElectionQuery<
+      GetElectionAnomalyRestrictedPayloadRequest,
+      GetElectionAnomalyRestrictedPayloadResponse
+    >('GetElectionAnomalyRestrictedPayload', request);
   },
 
   async getElectionResultView(

@@ -1,5 +1,6 @@
 import type {
   ECPoint,
+  ElectionAnomalyAttachmentManifestView,
   ElectionAnomalyMessageView,
   ElectionAnomalyOwnerMessageView,
   ElectionAnomalyRestrictedMessageView,
@@ -9,7 +10,10 @@ import type {
 import * as secp256k1 from '@noble/secp256k1';
 import {
   aesDecrypt,
+  aesDecryptBytes,
   aesEncrypt,
+  aesEncryptBytes,
+  base64ToBytes,
   bytesToBase64,
   bytesToHex,
   createUnsignedTransaction,
@@ -38,7 +42,16 @@ export const FINALIZE_ELECTION_PAYLOAD_KIND = 'ca90e62d-8bcb-4764-9386-70d74fb75
 
 export const ELECTION_ANOMALY_BODY_MAX_CHARACTERS = 1000;
 export const ELECTION_ANOMALY_CLARIFICATION_BODY_MAX_CHARACTERS = 1000;
+export const ELECTION_ANOMALY_SUBMITTER_CLARIFICATION_EVIDENCE_MAX_COUNT = 2;
+export const ELECTION_ANOMALY_SUBMITTER_CLARIFICATION_EVIDENCE_MAX_BYTES = 5 * 1024 * 1024;
+export const ELECTION_ANOMALY_SUBMITTER_CLARIFICATION_EVIDENCE_MAX_TOTAL_BYTES =
+  10 * 1024 * 1024;
+export const ELECTION_ANOMALY_AUTHORITY_EVIDENCE_MAX_COUNT = 5;
+export const ELECTION_ANOMALY_AUTHORITY_EVIDENCE_MAX_BYTES = 10 * 1024 * 1024;
+export const ELECTION_ANOMALY_AUTHORITY_EVIDENCE_MAX_TOTAL_BYTES = 25 * 1024 * 1024;
 export const ELECTION_ANOMALY_WRAP_ALGORITHM = 'x25519-aes-gcm';
+export const ELECTION_ANOMALY_RESTRICTED_PAYLOAD_REFERENCE_PREFIX =
+  'hush-election-anomaly-payload-v1:';
 
 export const ELECTION_ANOMALY_CATEGORY_IDS = {
   ACCESS_OR_AUTHENTICATION: 'access_or_authentication_anomaly',
@@ -119,7 +132,87 @@ export const ELECTION_ANOMALY_VALIDATION_CODES = {
   CLARIFICATION_REQUEST_NOT_OPEN: 'anomaly_clarification_request_not_open',
   RECIPIENT_WRAP_MISSING: 'anomaly_recipient_wrap_missing',
   SEVERITY_CANDIDATE_INVALID: 'anomaly_severity_candidate_invalid',
+  ATTACHMENT_KIND_INVALID: 'anomaly_attachment_kind_invalid',
+  ATTACHMENT_MIME_TYPE_INVALID: 'anomaly_attachment_mime_type_invalid',
+  ATTACHMENT_SIZE_EXCEEDED: 'anomaly_attachment_size_exceeded',
+  ATTACHMENT_COUNT_EXCEEDED: 'anomaly_attachment_count_exceeded',
+  ATTACHMENT_HASH_INVALID: 'anomaly_attachment_hash_invalid',
+  ATTACHMENT_PAYLOAD_REFERENCE_INVALID: 'anomaly_attachment_payload_reference_invalid',
+  ATTACHMENT_REQUEST_MISMATCH: 'anomaly_attachment_request_mismatch',
+  ATTACHMENT_SUBMITTER_NOT_ALLOWED: 'anomaly_attachment_submitter_not_allowed',
+  ATTACHMENT_OPERATIONAL_EVIDENCE_DISABLED:
+    'anomaly_attachment_operational_evidence_disabled',
+  ATTACHMENT_SCANNER_STATUS_INVALID: 'anomaly_attachment_scanner_status_invalid',
+  REDACTION_REASON_INVALID: 'anomaly_redaction_reason_invalid',
+  REDACTION_TARGET_INVALID: 'anomaly_redaction_target_invalid',
+  REDACTION_ORIGINAL_HASH_INVALID: 'anomaly_redaction_original_hash_invalid',
 } as const;
+
+export const ELECTION_ANOMALY_ATTACHMENT_KIND_IDS = {
+  SUBMITTER_EVIDENCE: 'submitter_evidence',
+  AUTHORITY_REQUESTED_EVIDENCE: 'authority_requested_evidence',
+  AUTHORITY_EVIDENCE: 'authority_evidence',
+  RESTRICTED_OPERATIONAL_EVIDENCE: 'restricted_operational_evidence',
+} as const;
+
+export const ELECTION_ANOMALY_ATTACHMENT_KIND_ID_VALUES =
+  Object.values(ELECTION_ANOMALY_ATTACHMENT_KIND_IDS);
+
+export type ElectionAnomalyAttachmentKindId =
+  typeof ELECTION_ANOMALY_ATTACHMENT_KIND_ID_VALUES[number];
+
+export const ELECTION_ANOMALY_ATTACHMENT_VALIDATION_STATUS_IDS = {
+  MANIFEST_ONLY: 'manifest_only',
+  PENDING_SCAN: 'pending_scan',
+  ACCEPTED: 'accepted',
+  REJECTED: 'rejected',
+} as const;
+
+export const ELECTION_ANOMALY_ATTACHMENT_VALIDATION_STATUS_ID_VALUES =
+  Object.values(ELECTION_ANOMALY_ATTACHMENT_VALIDATION_STATUS_IDS);
+
+export type ElectionAnomalyAttachmentValidationStatusId =
+  typeof ELECTION_ANOMALY_ATTACHMENT_VALIDATION_STATUS_ID_VALUES[number];
+
+export const ELECTION_ANOMALY_EVIDENCE_MIME_TYPES = {
+  APPLICATION_PDF: 'application/pdf',
+  IMAGE_PNG: 'image/png',
+  IMAGE_JPEG: 'image/jpeg',
+  TEXT_PLAIN: 'text/plain',
+  TEXT_CSV: 'text/csv',
+  APPLICATION_JSON: 'application/json',
+} as const;
+
+export const ELECTION_ANOMALY_EVIDENCE_MIME_TYPE_VALUES =
+  Object.values(ELECTION_ANOMALY_EVIDENCE_MIME_TYPES);
+
+export type ElectionAnomalyEvidenceMimeType =
+  typeof ELECTION_ANOMALY_EVIDENCE_MIME_TYPE_VALUES[number];
+
+export const ELECTION_ANOMALY_REDACTION_REASON_IDS = {
+  PERSONAL_DATA: 'personal_data',
+  LEGAL_HOLD: 'legal_hold',
+  MALWARE_OR_QUARANTINE: 'malware_or_quarantine',
+  OPERATIONAL_SAFETY: 'operational_safety',
+  DUPLICATE_OR_IRRELEVANT: 'duplicate_or_irrelevant',
+  OTHER: 'other',
+} as const;
+
+export const ELECTION_ANOMALY_REDACTION_REASON_ID_VALUES =
+  Object.values(ELECTION_ANOMALY_REDACTION_REASON_IDS);
+
+export type ElectionAnomalyRedactionReasonId =
+  typeof ELECTION_ANOMALY_REDACTION_REASON_ID_VALUES[number];
+
+export const ELECTION_ANOMALY_REDACTION_TARGET_KIND_IDS = {
+  ATTACHMENT_MANIFEST: 'attachment_manifest',
+} as const;
+
+export const ELECTION_ANOMALY_REDACTION_TARGET_KIND_ID_VALUES =
+  Object.values(ELECTION_ANOMALY_REDACTION_TARGET_KIND_IDS);
+
+export type ElectionAnomalyRedactionTargetKindId =
+  typeof ELECTION_ANOMALY_REDACTION_TARGET_KIND_ID_VALUES[number];
 
 export interface CreateElectionDraftPayload {
   ElectionId: string;
@@ -277,6 +370,15 @@ export interface ElectionAnomalyMessageEnvelopePayload {
   EncryptionAlgorithm?: string | null;
 }
 
+export interface ElectionAnomalyAttachmentContentKeyWrapPayload {
+  RecipientRoleId: string;
+  RecipientPublicAddress: string;
+  RecipientKeyFingerprint: string;
+  EncryptedContentKey: string;
+  WrapAlgorithm: string;
+  WrapStatusId: string;
+}
+
 export interface SubmitElectionAnomalyThreadActionPayload {
   AnomalyThreadId: string;
   ActionNonce: string;
@@ -328,6 +430,36 @@ export interface RegisterExternalElectionAnomalyClaimantActionPayload {
   CategoryId: string;
   InitialMessage: ElectionAnomalyMessageEnvelopePayload;
   RegistrarRoleContextId?: string | null;
+}
+
+export interface RecordElectionAnomalyAttachmentManifestActionPayload {
+  AnomalyThreadId: string;
+  AttachmentManifestId: string;
+  ActionNonce: string;
+  ActorPublicAddress: string;
+  AttachmentKindId: string;
+  EncryptedPayloadReference: string;
+  EncryptedPayloadHash: string;
+  ContentHash: string;
+  SizeBytes: number;
+  MimeType: string;
+  ValidationStatusId: string;
+  ClarificationRequestId?: string | null;
+  ContentKeyWraps?: ElectionAnomalyAttachmentContentKeyWrapPayload[];
+}
+
+export interface RecordElectionAnomalyEvidenceRedactionActionPayload {
+  AnomalyThreadId: string;
+  RedactionEventId: string;
+  ActionNonce: string;
+  ActorPublicAddress: string;
+  TargetKindId: string;
+  TargetId: string;
+  ReasonCodeId: string;
+  OriginalHash: string;
+  ReplacementManifestHash?: string | null;
+  TombstoneStatusId?: string | null;
+  HoldReference?: string | null;
 }
 
 export interface CreateSubmitElectionAnomalyThreadTransactionInput {
@@ -419,6 +551,93 @@ export interface CreateRegisterExternalElectionAnomalyClaimantTransactionInput {
   Body: string;
   SigningPrivateKeyHex: string;
   AuditorRecipients?: ElectionAnomalyAuthorityAuditorRecipientInput[];
+}
+
+export type ElectionAnomalyEvidenceBinary = string | ArrayBuffer | ArrayBufferView | Blob;
+
+export interface PrepareElectionAnomalyAttachmentManifestMaterialInput {
+  Content: ElectionAnomalyEvidenceBinary;
+  EncryptedPayload: ElectionAnomalyEvidenceBinary;
+  EncryptedPayloadReference?: string;
+}
+
+export interface PreparedElectionAnomalyAttachmentManifestMaterial {
+  EncryptedPayloadReference: string;
+  EncryptedPayloadHash: string;
+  ContentHash: string;
+  SizeBytes: number;
+}
+
+export interface CreatedElectionAnomalyRestrictedEvidencePayload {
+  EncryptedPayload: Uint8Array;
+  ContentKey: string;
+}
+
+export interface DecryptElectionAnomalyAttachmentPayloadInput {
+  Attachment: ElectionAnomalyAttachmentManifestView;
+  ActorPrivateEncryptKeyHex: string;
+  EncryptedPayloadBase64: string;
+  EncryptedPayloadHash: string;
+  ContentHash: string;
+}
+
+export interface CreateElectionAnomalyAttachmentContentKeyWrapInput {
+  RecipientRoleId: string;
+  RecipientPublicAddress: string;
+  RecipientPublicEncryptAddress: string;
+  ContentKey: string;
+}
+
+export interface CreateElectionAnomalySubmitterAttachmentContentKeyWrapsInput {
+  ActorPublicAddress: string;
+  ActorPublicEncryptAddress: string;
+  OwnerPublicAddress: string;
+  ContentKey: string;
+}
+
+export interface CreateElectionAnomalyOwnerAttachmentContentKeyWrapsInput {
+  OwnerPublicAddress: string;
+  OwnerPublicEncryptAddress: string;
+  AuditorRecipients?: ElectionAnomalyAuthorityAuditorRecipientInput[];
+  ContentKey: string;
+}
+
+export interface CreateRecordElectionAnomalyAttachmentManifestTransactionInput {
+  ElectionId: string;
+  AnomalyThreadId: string;
+  ActorPublicAddress: string;
+  ActorPublicEncryptAddress: string;
+  ActorPrivateEncryptKeyHex: string;
+  SigningPrivateKeyHex: string;
+  AttachmentKindId: string;
+  EncryptedPayloadReference: string;
+  EncryptedPayloadHash: string;
+  ContentHash: string;
+  SizeBytes: number;
+  MimeType: string;
+  ValidationStatusId?: string;
+  AttachmentManifestId?: string;
+  ClarificationRequestId?: string | null;
+  ExistingAttachmentManifestCount?: number;
+  ExistingAttachmentManifestTotalBytes?: number;
+  ContentKeyWraps?: ElectionAnomalyAttachmentContentKeyWrapPayload[];
+}
+
+export interface CreateRecordElectionAnomalyEvidenceRedactionTransactionInput {
+  ElectionId: string;
+  AnomalyThreadId: string;
+  ActorPublicAddress: string;
+  ActorPublicEncryptAddress: string;
+  ActorPrivateEncryptKeyHex: string;
+  SigningPrivateKeyHex: string;
+  TargetKindId: string;
+  TargetId: string;
+  ReasonCodeId: string;
+  OriginalHash: string;
+  RedactionEventId?: string;
+  ReplacementManifestHash?: string | null;
+  TombstoneStatusId?: string | null;
+  HoldReference?: string | null;
 }
 
 export interface StartElectionCeremonyActionPayload {
@@ -664,6 +883,30 @@ function countUnicodeCharacters(value: string): number {
   return Array.from(value).length;
 }
 
+async function toEvidenceBytes(value: ElectionAnomalyEvidenceBinary): Promise<Uint8Array> {
+  if (typeof value === 'string') {
+    return new TextEncoder().encode(value);
+  }
+
+  if (value instanceof Uint8Array) {
+    return value;
+  }
+
+  if (value instanceof ArrayBuffer) {
+    return new Uint8Array(value);
+  }
+
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+
+  if (typeof Blob !== 'undefined' && value instanceof Blob) {
+    return new Uint8Array(await value.arrayBuffer());
+  }
+
+  throw new Error('Unsupported anomaly evidence bytes.');
+}
+
 function normalizeAnomalyBody(body: string, maxCharacters: number): string {
   const normalized = body.trim();
   if (!normalized) {
@@ -681,6 +924,41 @@ export function isElectionAnomalyCategoryId(value: string): value is ElectionAno
   return ELECTION_ANOMALY_CATEGORY_ID_VALUES.includes(value as ElectionAnomalyCategoryId);
 }
 
+export function isElectionAnomalyAttachmentKindId(
+  value: string,
+): value is ElectionAnomalyAttachmentKindId {
+  return ELECTION_ANOMALY_ATTACHMENT_KIND_ID_VALUES
+    .includes(value as ElectionAnomalyAttachmentKindId);
+}
+
+export function isElectionAnomalyAttachmentValidationStatusId(
+  value: string,
+): value is ElectionAnomalyAttachmentValidationStatusId {
+  return ELECTION_ANOMALY_ATTACHMENT_VALIDATION_STATUS_ID_VALUES
+    .includes(value as ElectionAnomalyAttachmentValidationStatusId);
+}
+
+export function isElectionAnomalyEvidenceMimeType(
+  value: string,
+): value is ElectionAnomalyEvidenceMimeType {
+  return ELECTION_ANOMALY_EVIDENCE_MIME_TYPE_VALUES
+    .includes(value.toLowerCase() as ElectionAnomalyEvidenceMimeType);
+}
+
+export function isElectionAnomalyRedactionReasonId(
+  value: string,
+): value is ElectionAnomalyRedactionReasonId {
+  return ELECTION_ANOMALY_REDACTION_REASON_ID_VALUES
+    .includes(value as ElectionAnomalyRedactionReasonId);
+}
+
+export function isElectionAnomalyRedactionTargetKindId(
+  value: string,
+): value is ElectionAnomalyRedactionTargetKindId {
+  return ELECTION_ANOMALY_REDACTION_TARGET_KIND_ID_VALUES
+    .includes(value as ElectionAnomalyRedactionTargetKindId);
+}
+
 export function isElectionAnomalySeverityCandidateId(
   value: string,
 ): value is ElectionAnomalySeverityCandidateId {
@@ -688,9 +966,66 @@ export function isElectionAnomalySeverityCandidateId(
     .includes(value as ElectionAnomalySeverityCandidateId);
 }
 
+export function isElectionAnomalySha256Reference(value: string): boolean {
+  return /^sha256:[a-f0-9]{64}$/.test(value);
+}
+
+export function isElectionAnomalyRestrictedPayloadReference(value: string): boolean {
+  const suffix = value.startsWith(ELECTION_ANOMALY_RESTRICTED_PAYLOAD_REFERENCE_PREFIX)
+    ? value.slice(ELECTION_ANOMALY_RESTRICTED_PAYLOAD_REFERENCE_PREFIX.length)
+    : '';
+
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    .test(suffix);
+}
+
 async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
   return `sha256:${bytesToHex(new Uint8Array(digest))}`;
+}
+
+export async function computeElectionAnomalyEvidenceHash(
+  value: ElectionAnomalyEvidenceBinary,
+): Promise<string> {
+  const bytes = await toEvidenceBytes(value);
+  const digestInput = new Uint8Array(bytes);
+  const digest = await crypto.subtle.digest('SHA-256', digestInput);
+  return `sha256:${bytesToHex(new Uint8Array(digest))}`;
+}
+
+export function createElectionAnomalyRestrictedPayloadReference(payloadId = generateGuid()): string {
+  return `${ELECTION_ANOMALY_RESTRICTED_PAYLOAD_REFERENCE_PREFIX}${payloadId}`;
+}
+
+export async function prepareElectionAnomalyAttachmentManifestMaterial(
+  input: PrepareElectionAnomalyAttachmentManifestMaterialInput,
+): Promise<PreparedElectionAnomalyAttachmentManifestMaterial> {
+  const contentBytes = await toEvidenceBytes(input.Content);
+  const encryptedPayloadReference =
+    input.EncryptedPayloadReference?.trim() ||
+    createElectionAnomalyRestrictedPayloadReference();
+
+  if (!isElectionAnomalyRestrictedPayloadReference(encryptedPayloadReference)) {
+    throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_PAYLOAD_REFERENCE_INVALID);
+  }
+
+  return {
+    EncryptedPayloadReference: encryptedPayloadReference,
+    EncryptedPayloadHash: await computeElectionAnomalyEvidenceHash(input.EncryptedPayload),
+    ContentHash: await computeElectionAnomalyEvidenceHash(contentBytes),
+    SizeBytes: contentBytes.byteLength,
+  };
+}
+
+export async function createElectionAnomalyRestrictedEvidencePayload(
+  content: ElectionAnomalyEvidenceBinary,
+): Promise<CreatedElectionAnomalyRestrictedEvidencePayload> {
+  const contentBytes = await toEvidenceBytes(content);
+  const contentKey = generateAesKey();
+  return {
+    EncryptedPayload: await aesEncryptBytes(contentBytes, contentKey),
+    ContentKey: contentKey,
+  };
 }
 
 async function resolveAnomalyOwnerEncryptAddress(
@@ -724,6 +1059,75 @@ async function createAnomalyRecipientWrap(
     WrapAlgorithm: ELECTION_ANOMALY_WRAP_ALGORITHM,
     WrapStatusId: ELECTION_ANOMALY_RECIPIENT_WRAP_STATUS_IDS.AVAILABLE,
   };
+}
+
+export async function createElectionAnomalyAttachmentContentKeyWrap(
+  input: CreateElectionAnomalyAttachmentContentKeyWrapInput,
+): Promise<ElectionAnomalyAttachmentContentKeyWrapPayload> {
+  if (
+    !input.RecipientRoleId.trim() ||
+    !input.RecipientPublicAddress.trim() ||
+    !input.RecipientPublicEncryptAddress.trim() ||
+    !input.ContentKey.trim()
+  ) {
+    throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.RECIPIENT_WRAP_MISSING);
+  }
+
+  return {
+    RecipientRoleId: input.RecipientRoleId,
+    RecipientPublicAddress: input.RecipientPublicAddress,
+    RecipientKeyFingerprint: await sha256Hex(input.RecipientPublicEncryptAddress),
+    EncryptedContentKey: await eciesEncrypt(input.ContentKey, input.RecipientPublicEncryptAddress),
+    WrapAlgorithm: ELECTION_ANOMALY_WRAP_ALGORITHM,
+    WrapStatusId: ELECTION_ANOMALY_RECIPIENT_WRAP_STATUS_IDS.AVAILABLE,
+  };
+}
+
+export async function createElectionAnomalySubmitterAttachmentContentKeyWraps(
+  input: CreateElectionAnomalySubmitterAttachmentContentKeyWrapsInput,
+): Promise<ElectionAnomalyAttachmentContentKeyWrapPayload[]> {
+  const ownerPublicEncryptAddress = await resolveAnomalyOwnerEncryptAddress(
+    input.OwnerPublicAddress,
+    input.ActorPublicAddress,
+    input.ActorPublicEncryptAddress,
+  );
+
+  return Promise.all([
+    createElectionAnomalyAttachmentContentKeyWrap({
+      RecipientRoleId: ELECTION_ANOMALY_RECIPIENT_ROLE_IDS.SUBMITTER,
+      RecipientPublicAddress: input.ActorPublicAddress,
+      RecipientPublicEncryptAddress: input.ActorPublicEncryptAddress,
+      ContentKey: input.ContentKey,
+    }),
+    createElectionAnomalyAttachmentContentKeyWrap({
+      RecipientRoleId: ELECTION_ANOMALY_RECIPIENT_ROLE_IDS.ELECTION_OWNER,
+      RecipientPublicAddress: input.OwnerPublicAddress,
+      RecipientPublicEncryptAddress: ownerPublicEncryptAddress,
+      ContentKey: input.ContentKey,
+    }),
+  ]);
+}
+
+export async function createElectionAnomalyOwnerAttachmentContentKeyWraps(
+  input: CreateElectionAnomalyOwnerAttachmentContentKeyWrapsInput,
+): Promise<ElectionAnomalyAttachmentContentKeyWrapPayload[]> {
+  const auditorRecipients = input.AuditorRecipients ?? [];
+  return Promise.all([
+    createElectionAnomalyAttachmentContentKeyWrap({
+      RecipientRoleId: ELECTION_ANOMALY_RECIPIENT_ROLE_IDS.ELECTION_OWNER,
+      RecipientPublicAddress: input.OwnerPublicAddress,
+      RecipientPublicEncryptAddress: input.OwnerPublicEncryptAddress,
+      ContentKey: input.ContentKey,
+    }),
+    ...auditorRecipients.map((auditor) =>
+      createElectionAnomalyAttachmentContentKeyWrap({
+        RecipientRoleId: ELECTION_ANOMALY_RECIPIENT_ROLE_IDS.DESIGNATED_AUDITOR,
+        RecipientPublicAddress: auditor.AuditorPublicAddress,
+        RecipientPublicEncryptAddress: auditor.AuditorPublicEncryptAddress,
+        ContentKey: input.ContentKey,
+      })
+    ),
+  ]);
 }
 
 export async function createElectionAnomalyMessageEnvelope(input: {
@@ -897,6 +1301,45 @@ export async function decryptElectionAnomalyRestrictedMessageBody(
   return aesDecrypt(message.EncryptedBody, contentKey);
 }
 
+export async function decryptElectionAnomalyAttachmentPayload(
+  input: DecryptElectionAnomalyAttachmentPayloadInput,
+): Promise<Uint8Array> {
+  const callerWrap = input.Attachment.CallerContentKeyWrap;
+  if (
+    !input.Attachment.HasCallerContentKeyWrap ||
+    !callerWrap ||
+    callerWrap.WrapStatusId !== ELECTION_ANOMALY_RECIPIENT_WRAP_STATUS_IDS.AVAILABLE ||
+    !callerWrap.EncryptedContentKey?.trim()
+  ) {
+    throw new Error('anomaly_attachment_key_unavailable');
+  }
+
+  if (
+    input.EncryptedPayloadHash !== input.Attachment.EncryptedPayloadHash ||
+    input.ContentHash !== input.Attachment.ContentHash
+  ) {
+    throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_HASH_INVALID);
+  }
+
+  const encryptedPayload = base64ToBytes(input.EncryptedPayloadBase64);
+  const encryptedPayloadHash = await computeElectionAnomalyEvidenceHash(encryptedPayload);
+  if (encryptedPayloadHash !== input.Attachment.EncryptedPayloadHash) {
+    throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_HASH_INVALID);
+  }
+
+  const contentKey = await eciesDecrypt(
+    callerWrap.EncryptedContentKey,
+    input.ActorPrivateEncryptKeyHex,
+  );
+  const decryptedPayload = await aesDecryptBytes(encryptedPayload, contentKey);
+  const contentHash = await computeElectionAnomalyEvidenceHash(decryptedPayload);
+  if (contentHash !== input.Attachment.ContentHash) {
+    throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_HASH_INVALID);
+  }
+
+  return decryptedPayload;
+}
+
 export function hasElectionAnomalyDuplicateThreadValidation(value: unknown): boolean {
   if (typeof value === 'string') {
     return value.includes(ELECTION_ANOMALY_VALIDATION_CODES.DUPLICATE_THREAD);
@@ -982,6 +1425,8 @@ const ENCRYPTED_ELECTION_ACTION_TYPES = {
   RECORD_ANOMALY_AUTHORITY_RESPONSE: 'record_anomaly_authority_response',
   CLASSIFY_ANOMALY_THREAD: 'classify_anomaly_thread',
   REGISTER_EXTERNAL_ANOMALY_CLAIMANT: 'register_external_anomaly_claimant',
+  RECORD_ANOMALY_ATTACHMENT_MANIFEST: 'record_anomaly_attachment_manifest',
+  RECORD_ANOMALY_EVIDENCE_REDACTION: 'record_anomaly_evidence_redaction',
   SUBMIT_FINALIZATION_SHARE: 'submit_finalization_share',
   START_CEREMONY: 'start_ceremony',
   RESTART_CEREMONY: 'restart_ceremony',
@@ -1759,6 +2204,331 @@ export async function createRegisterExternalElectionAnomalyClaimantTransaction(
     signedTransaction: encryptedEnvelope.signedTransaction,
     anomalyThreadId,
     externalClaimantReferenceHash,
+  };
+}
+
+function requireTrimmed(value: string | null | undefined, validationCode: string): string {
+  const normalized = value?.trim() ?? '';
+  if (!normalized) {
+    throw new Error(validationCode);
+  }
+
+  return normalized;
+}
+
+function validateOptionalExistingEvidenceState(
+  existingCount: number | undefined,
+  existingTotalSizeBytes: number | undefined,
+): void {
+  if (
+    existingCount !== undefined &&
+    (!Number.isInteger(existingCount) || existingCount < 0)
+  ) {
+    throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_COUNT_EXCEEDED);
+  }
+
+  if (
+    existingTotalSizeBytes !== undefined &&
+    (!Number.isFinite(existingTotalSizeBytes) || existingTotalSizeBytes < 0)
+  ) {
+    throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_SIZE_EXCEEDED);
+  }
+}
+
+function normalizeAttachmentContentKeyWraps(
+  wraps: ElectionAnomalyAttachmentContentKeyWrapPayload[] | undefined,
+): ElectionAnomalyAttachmentContentKeyWrapPayload[] | undefined {
+  if (!wraps?.length) {
+    return undefined;
+  }
+
+  const uniqueRecipients = new Set<string>();
+  return wraps.map((wrap) => {
+    const recipientRoleId = requireTrimmed(
+      wrap.RecipientRoleId,
+      ELECTION_ANOMALY_VALIDATION_CODES.RECIPIENT_WRAP_MISSING,
+    );
+    const recipientPublicAddress = requireTrimmed(
+      wrap.RecipientPublicAddress,
+      ELECTION_ANOMALY_VALIDATION_CODES.RECIPIENT_WRAP_MISSING,
+    );
+    const recipientKeyFingerprint = requireTrimmed(
+      wrap.RecipientKeyFingerprint,
+      ELECTION_ANOMALY_VALIDATION_CODES.RECIPIENT_WRAP_MISSING,
+    );
+    const encryptedContentKey = requireTrimmed(
+      wrap.EncryptedContentKey,
+      ELECTION_ANOMALY_VALIDATION_CODES.RECIPIENT_WRAP_MISSING,
+    );
+    const wrapAlgorithm = requireTrimmed(
+      wrap.WrapAlgorithm,
+      ELECTION_ANOMALY_VALIDATION_CODES.RECIPIENT_WRAP_MISSING,
+    );
+    const wrapStatusId = requireTrimmed(
+      wrap.WrapStatusId,
+      ELECTION_ANOMALY_VALIDATION_CODES.RECIPIENT_WRAP_MISSING,
+    );
+
+    if (
+      !Object.values(ELECTION_ANOMALY_RECIPIENT_ROLE_IDS).includes(
+        recipientRoleId as typeof ELECTION_ANOMALY_RECIPIENT_ROLE_IDS[keyof typeof ELECTION_ANOMALY_RECIPIENT_ROLE_IDS],
+      ) ||
+      wrapStatusId !== ELECTION_ANOMALY_RECIPIENT_WRAP_STATUS_IDS.AVAILABLE ||
+      !uniqueRecipients.add(`${recipientRoleId}\u001f${recipientPublicAddress}`)
+    ) {
+      throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.RECIPIENT_WRAP_MISSING);
+    }
+
+    return {
+      RecipientRoleId: recipientRoleId,
+      RecipientPublicAddress: recipientPublicAddress,
+      RecipientKeyFingerprint: recipientKeyFingerprint,
+      EncryptedContentKey: encryptedContentKey,
+      WrapAlgorithm: wrapAlgorithm,
+      WrapStatusId: wrapStatusId,
+    };
+  });
+}
+
+function normalizeAttachmentManifestAction(
+  input: CreateRecordElectionAnomalyAttachmentManifestTransactionInput,
+): Omit<RecordElectionAnomalyAttachmentManifestActionPayload, 'ActionNonce'> {
+  const attachmentKindId = requireTrimmed(
+    input.AttachmentKindId,
+    ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_KIND_INVALID,
+  );
+  const validationStatusId =
+    input.ValidationStatusId?.trim() ||
+    ELECTION_ANOMALY_ATTACHMENT_VALIDATION_STATUS_IDS.PENDING_SCAN;
+  const mimeType = requireTrimmed(
+    input.MimeType,
+    ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_MIME_TYPE_INVALID,
+  ).toLowerCase();
+  const encryptedPayloadReference = requireTrimmed(
+    input.EncryptedPayloadReference,
+    ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_PAYLOAD_REFERENCE_INVALID,
+  );
+  const encryptedPayloadHash = requireTrimmed(
+    input.EncryptedPayloadHash,
+    ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_HASH_INVALID,
+  );
+  const contentHash = requireTrimmed(
+    input.ContentHash,
+    ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_HASH_INVALID,
+  );
+  const clarificationRequestId = input.ClarificationRequestId?.trim() || undefined;
+
+  if (!isElectionAnomalyAttachmentKindId(attachmentKindId)) {
+    throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_KIND_INVALID);
+  }
+
+  if (attachmentKindId === ELECTION_ANOMALY_ATTACHMENT_KIND_IDS.SUBMITTER_EVIDENCE) {
+    throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_SUBMITTER_NOT_ALLOWED);
+  }
+
+  if (attachmentKindId === ELECTION_ANOMALY_ATTACHMENT_KIND_IDS.RESTRICTED_OPERATIONAL_EVIDENCE) {
+    throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_OPERATIONAL_EVIDENCE_DISABLED);
+  }
+
+  if (!isElectionAnomalyAttachmentValidationStatusId(validationStatusId)) {
+    throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_SCANNER_STATUS_INVALID);
+  }
+
+  if (!isElectionAnomalyEvidenceMimeType(mimeType)) {
+    throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_MIME_TYPE_INVALID);
+  }
+
+  if (
+    !isElectionAnomalySha256Reference(encryptedPayloadHash) ||
+    !isElectionAnomalySha256Reference(contentHash)
+  ) {
+    throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_HASH_INVALID);
+  }
+
+  if (!isElectionAnomalyRestrictedPayloadReference(encryptedPayloadReference)) {
+    throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_PAYLOAD_REFERENCE_INVALID);
+  }
+
+  if (!Number.isFinite(input.SizeBytes) || input.SizeBytes <= 0) {
+    throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_SIZE_EXCEEDED);
+  }
+
+  validateOptionalExistingEvidenceState(
+    input.ExistingAttachmentManifestCount,
+    input.ExistingAttachmentManifestTotalBytes,
+  );
+
+  const isSubmitterClarificationEvidence =
+    attachmentKindId === ELECTION_ANOMALY_ATTACHMENT_KIND_IDS.AUTHORITY_REQUESTED_EVIDENCE;
+  const perPayloadLimit = isSubmitterClarificationEvidence
+    ? ELECTION_ANOMALY_SUBMITTER_CLARIFICATION_EVIDENCE_MAX_BYTES
+    : ELECTION_ANOMALY_AUTHORITY_EVIDENCE_MAX_BYTES;
+  const countLimit = isSubmitterClarificationEvidence
+    ? ELECTION_ANOMALY_SUBMITTER_CLARIFICATION_EVIDENCE_MAX_COUNT
+    : ELECTION_ANOMALY_AUTHORITY_EVIDENCE_MAX_COUNT;
+  const totalSizeLimit = isSubmitterClarificationEvidence
+    ? ELECTION_ANOMALY_SUBMITTER_CLARIFICATION_EVIDENCE_MAX_TOTAL_BYTES
+    : ELECTION_ANOMALY_AUTHORITY_EVIDENCE_MAX_TOTAL_BYTES;
+
+  if (input.SizeBytes > perPayloadLimit) {
+    throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_SIZE_EXCEEDED);
+  }
+
+  if (
+    input.ExistingAttachmentManifestCount !== undefined &&
+    input.ExistingAttachmentManifestCount >= countLimit
+  ) {
+    throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_COUNT_EXCEEDED);
+  }
+
+  if (
+    input.ExistingAttachmentManifestTotalBytes !== undefined &&
+    input.ExistingAttachmentManifestTotalBytes + input.SizeBytes > totalSizeLimit
+  ) {
+    throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_SIZE_EXCEEDED);
+  }
+
+  if (isSubmitterClarificationEvidence && !clarificationRequestId) {
+    throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.CLARIFICATION_REQUEST_NOT_OPEN);
+  }
+
+  if (
+    attachmentKindId === ELECTION_ANOMALY_ATTACHMENT_KIND_IDS.AUTHORITY_EVIDENCE &&
+    clarificationRequestId
+  ) {
+    throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_REQUEST_MISMATCH);
+  }
+
+  return {
+    AnomalyThreadId: requireTrimmed(
+      input.AnomalyThreadId,
+      ELECTION_ANOMALY_VALIDATION_CODES.CLARIFICATION_REQUEST_NOT_OPEN,
+    ),
+    AttachmentManifestId: input.AttachmentManifestId?.trim() || generateGuid(),
+    ActorPublicAddress: requireTrimmed(
+      input.ActorPublicAddress,
+      ELECTION_ANOMALY_VALIDATION_CODES.BODY_REQUIRED,
+    ),
+    AttachmentKindId: attachmentKindId,
+    EncryptedPayloadReference: encryptedPayloadReference,
+    EncryptedPayloadHash: encryptedPayloadHash,
+    ContentHash: contentHash,
+    SizeBytes: input.SizeBytes,
+    MimeType: mimeType,
+    ValidationStatusId: validationStatusId,
+    ClarificationRequestId: clarificationRequestId,
+    ContentKeyWraps: normalizeAttachmentContentKeyWraps(input.ContentKeyWraps),
+  };
+}
+
+export async function createRecordElectionAnomalyAttachmentManifestTransaction(
+  input: CreateRecordElectionAnomalyAttachmentManifestTransactionInput,
+): Promise<{ signedTransaction: string; attachmentManifestId: string }> {
+  const normalized = normalizeAttachmentManifestAction(input);
+  const actionPayload: RecordElectionAnomalyAttachmentManifestActionPayload = {
+    ...normalized,
+    ActionNonce: generateGuid(),
+  };
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<RecordElectionAnomalyAttachmentManifestActionPayload>(
+      input.ElectionId,
+      actionPayload.ActorPublicAddress,
+      input.ActorPublicEncryptAddress,
+      input.ActorPrivateEncryptKeyHex,
+      ENCRYPTED_ELECTION_ACTION_TYPES.RECORD_ANOMALY_ATTACHMENT_MANIFEST,
+      actionPayload,
+      input.SigningPrivateKeyHex,
+      {
+        forceFreshEnvelopeAccess: true,
+      },
+    );
+
+  return {
+    signedTransaction: encryptedEnvelope.signedTransaction,
+    attachmentManifestId: actionPayload.AttachmentManifestId,
+  };
+}
+
+function normalizeRedactionAction(
+  input: CreateRecordElectionAnomalyEvidenceRedactionTransactionInput,
+): Omit<RecordElectionAnomalyEvidenceRedactionActionPayload, 'ActionNonce'> {
+  const targetKindId = requireTrimmed(
+    input.TargetKindId,
+    ELECTION_ANOMALY_VALIDATION_CODES.REDACTION_TARGET_INVALID,
+  );
+  const reasonCodeId = requireTrimmed(
+    input.ReasonCodeId,
+    ELECTION_ANOMALY_VALIDATION_CODES.REDACTION_REASON_INVALID,
+  );
+  const originalHash = requireTrimmed(
+    input.OriginalHash,
+    ELECTION_ANOMALY_VALIDATION_CODES.REDACTION_ORIGINAL_HASH_INVALID,
+  );
+  const replacementManifestHash = input.ReplacementManifestHash?.trim() || undefined;
+
+  if (!isElectionAnomalyRedactionTargetKindId(targetKindId)) {
+    throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.REDACTION_TARGET_INVALID);
+  }
+
+  if (!isElectionAnomalyRedactionReasonId(reasonCodeId)) {
+    throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.REDACTION_REASON_INVALID);
+  }
+
+  if (
+    !isElectionAnomalySha256Reference(originalHash) ||
+    (replacementManifestHash && !isElectionAnomalySha256Reference(replacementManifestHash))
+  ) {
+    throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.REDACTION_ORIGINAL_HASH_INVALID);
+  }
+
+  return {
+    AnomalyThreadId: requireTrimmed(
+      input.AnomalyThreadId,
+      ELECTION_ANOMALY_VALIDATION_CODES.CLARIFICATION_REQUEST_NOT_OPEN,
+    ),
+    RedactionEventId: input.RedactionEventId?.trim() || generateGuid(),
+    ActorPublicAddress: requireTrimmed(
+      input.ActorPublicAddress,
+      ELECTION_ANOMALY_VALIDATION_CODES.BODY_REQUIRED,
+    ),
+    TargetKindId: targetKindId,
+    TargetId: requireTrimmed(
+      input.TargetId,
+      ELECTION_ANOMALY_VALIDATION_CODES.REDACTION_TARGET_INVALID,
+    ),
+    ReasonCodeId: reasonCodeId,
+    OriginalHash: originalHash,
+    ReplacementManifestHash: replacementManifestHash,
+    TombstoneStatusId: input.TombstoneStatusId?.trim() || undefined,
+    HoldReference: input.HoldReference?.trim() || undefined,
+  };
+}
+
+export async function createRecordElectionAnomalyEvidenceRedactionTransaction(
+  input: CreateRecordElectionAnomalyEvidenceRedactionTransactionInput,
+): Promise<{ signedTransaction: string; redactionEventId: string }> {
+  const normalized = normalizeRedactionAction(input);
+  const actionPayload: RecordElectionAnomalyEvidenceRedactionActionPayload = {
+    ...normalized,
+    ActionNonce: generateGuid(),
+  };
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<RecordElectionAnomalyEvidenceRedactionActionPayload>(
+      input.ElectionId,
+      actionPayload.ActorPublicAddress,
+      input.ActorPublicEncryptAddress,
+      input.ActorPrivateEncryptKeyHex,
+      ENCRYPTED_ELECTION_ACTION_TYPES.RECORD_ANOMALY_EVIDENCE_REDACTION,
+      actionPayload,
+      input.SigningPrivateKeyHex,
+      {
+        forceFreshEnvelopeAccess: true,
+      },
+    );
+
+  return {
+    signedTransaction: encryptedEnvelope.signedTransaction,
+    redactionEventId: actionPayload.RedactionEventId,
   };
 }
 

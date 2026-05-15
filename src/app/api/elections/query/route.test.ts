@@ -303,6 +303,127 @@ describe('POST /api/elections/query', () => {
     );
   });
 
+  it('passes through a signed anomaly evidence manifest query', async () => {
+    const { POST } = await import('./route');
+    const signedHeaders = await createElectionQueryAuthHeaders(
+      'GetElectionAnomalyEvidenceManifest',
+      {
+        ElectionId: 'election-1',
+        ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+        ScopeId: 'owner',
+      },
+      TEST_CREDENTIALS
+    );
+
+    const response = await POST(
+      new Request('http://localhost/api/elections/query', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...signedHeaders,
+        },
+        body: JSON.stringify({
+          method: 'GetElectionAnomalyEvidenceManifest',
+          request: {
+            ElectionId: 'election-1',
+            ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+            ScopeId: 'owner',
+          },
+        }),
+      }) as never
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:4666/rpcHush.HushElections/GetElectionAnomalyEvidenceManifest',
+      expect.objectContaining({
+        headers: expect.objectContaining(signedHeaders),
+      })
+    );
+  });
+
+  it('passes through a signed restricted anomaly payload staging request', async () => {
+    const { POST } = await import('./route');
+    const stagingRequest = {
+      ElectionId: 'election-1',
+      ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+      AnomalyThreadId: '22222222-2222-2222-2222-222222222222',
+      AttachmentKindId: 'authority_requested_evidence',
+      EncryptedPayloadBase64: 'AQIDBA==',
+      EncryptedPayloadHash: `sha256:${'a'.repeat(64)}`,
+      ContentHash: `sha256:${'b'.repeat(64)}`,
+      SizeBytes: 256,
+      MimeType: 'image/png',
+      ClarificationRequestId: '11111111-1111-1111-1111-111111111111',
+    };
+    const signedHeaders = await createElectionQueryAuthHeaders(
+      'StageElectionAnomalyRestrictedPayload',
+      stagingRequest,
+      TEST_CREDENTIALS
+    );
+
+    const response = await POST(
+      new Request('http://localhost/api/elections/query', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...signedHeaders,
+        },
+        body: JSON.stringify({
+          method: 'StageElectionAnomalyRestrictedPayload',
+          request: stagingRequest,
+        }),
+      }) as never
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:4666/rpcHush.HushElections/StageElectionAnomalyRestrictedPayload',
+      expect.objectContaining({
+        headers: expect.objectContaining(signedHeaders),
+      })
+    );
+  });
+
+  it('passes through a signed restricted anomaly payload retrieval request', async () => {
+    const { POST } = await import('./route');
+    const retrieveRequest = {
+      ElectionId: 'election-1',
+      ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+      PayloadReference: 'hush-election-anomaly-payload-v1:33333333-3333-3333-3333-333333333333',
+    };
+    const signedHeaders = await createElectionQueryAuthHeaders(
+      'GetElectionAnomalyRestrictedPayload',
+      retrieveRequest,
+      TEST_CREDENTIALS
+    );
+
+    const response = await POST(
+      new Request('http://localhost/api/elections/query', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...signedHeaders,
+        },
+        body: JSON.stringify({
+          method: 'GetElectionAnomalyRestrictedPayload',
+          request: retrieveRequest,
+        }),
+      }) as never
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:4666/rpcHush.HushElections/GetElectionAnomalyRestrictedPayload',
+      expect.objectContaining({
+        headers: expect.objectContaining(signedHeaders),
+      })
+    );
+  });
+
   it('passes through a signed actor-bound election directory search', async () => {
     const { POST } = await import('./route');
     const signedHeaders = await createElectionQueryAuthHeaders(

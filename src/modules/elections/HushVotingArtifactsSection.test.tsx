@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ElectionLifecycleStateProto } from '@/lib/grpc';
 import { ArtifactsWorkspaceSummary } from './HushVotingArtifactsSection';
 import {
@@ -10,6 +10,18 @@ import {
   createResultView,
   createVerificationPackageStatus,
 } from './HushVotingWorkspaceTestUtils';
+
+vi.mock('./AnomalyEvidenceManifestStatusPanel', () => ({
+  AnomalyEvidenceManifestStatusPanel: ({
+    testId = 'verification-package-anomaly-manifest',
+  }: {
+    testId?: string;
+  }) => (
+    <section data-testid={testId}>
+      Restricted anomaly intake manifest
+    </section>
+  ),
+}));
 
 describe('ArtifactsWorkspaceSummary', () => {
   afterEach(() => {

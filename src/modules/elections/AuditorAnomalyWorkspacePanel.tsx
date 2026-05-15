@@ -17,6 +17,7 @@ import {
   type GrpcTimestamp,
 } from '@/lib/grpc';
 import { electionsService } from '@/lib/grpc/services/elections';
+import { AnomalyEvidenceManifestStatusPanel } from './AnomalyEvidenceManifestStatusPanel';
 import { ElectionAnomalyPanel } from './ElectionAnomalyPanel';
 import { getLifecycleLabel } from './contracts';
 import { sectionClass } from './HushVotingWorkspaceShared';
@@ -473,6 +474,16 @@ export function AuditorAnomalyWorkspacePanel({
               </div>
 
               <div className="mt-5 space-y-4">
+                <AnomalyEvidenceManifestStatusPanel
+                  electionId={electionId}
+                  actorPublicAddress={actorPublicAddress}
+                  actorPrivateEncryptKeyHex={actorEncryptionPrivateKey}
+                  scopeId="auditor"
+                  title="Auditor evidence manifest"
+                  description="Auditor review uses case/thread ids, manifest hashes, recipient wrap status, scanner status, and redaction history without submitter actor references."
+                  testId="auditor-anomaly-evidence-manifest"
+                />
+
                 {reviewThreads.length > 0 ? (
                   reviewThreads.map((thread) => (
                     <RestrictedThreadCard

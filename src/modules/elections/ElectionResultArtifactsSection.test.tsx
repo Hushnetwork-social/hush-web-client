@@ -295,6 +295,17 @@ describe('ElectionResultArtifactsSection', () => {
               Content: '{"conclusion":"pass"}',
               PairedArtifactId: 'report-artifact-6',
             }),
+            createReportArtifact({
+              Id: 'report-artifact-3',
+              ArtifactKind:
+                ElectionReportArtifactKindProto.ReportArtifactMachineRestrictedAnomalyIntakeManifest,
+              Format: ElectionReportArtifactFormatProto.ReportArtifactJson,
+              Title: 'Restricted anomaly manifest',
+              FileName: 'restricted-anomaly-intake-manifest.json',
+              MediaType: 'application/json',
+              Content: '{"packageReadinessStatusId":"ready"}',
+              PairedArtifactId: '',
+            }),
           ],
         })}
       />
@@ -305,6 +316,9 @@ describe('ElectionResultArtifactsSection', () => {
     );
     expect(screen.getByTestId('report-package-catalog')).toHaveTextContent('Final manifest');
     expect(screen.getByTestId('report-package-catalog')).toHaveTextContent('Outcome projection');
+    expect(screen.getByTestId('report-package-catalog')).toHaveTextContent(
+      'Restricted anomaly intake manifest'
+    );
     expect(screen.queryByText('Named roster')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('report-artifact-download-report-artifact-1'));

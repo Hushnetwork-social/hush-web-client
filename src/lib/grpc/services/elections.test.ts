@@ -419,6 +419,284 @@ describe('electionsService query proxy', () => {
     expect(response.Triage?.DecryptableMessageCount).toBe(1);
   });
 
+  it('posts anomaly evidence manifest queries to the server-side proxy', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          Success: true,
+          ErrorMessage: '',
+          ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+          HasManifest: true,
+          Manifest: {
+            ElectionId: 'election-owner',
+            ScopeId: 'owner',
+            CanonicalizationId: 'anomaly-intake-manifest-v1',
+            ManifestHash: `sha256:${'a'.repeat(64)}`,
+            PackageReadinessStatusId: 'ready',
+            PackageReadinessBlockerIds: [],
+            TotalThreadCount: 1,
+            AttachmentManifestCount: 1,
+            RedactionCount: 0,
+            Threads: [],
+          },
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+    );
+
+    const response = await electionsService.getElectionAnomalyEvidenceManifest({
+      ElectionId: 'election-owner',
+      ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+      ScopeId: 'owner',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/elections/query', {
+      method: 'POST',
+      headers: expect.objectContaining({
+        'Content-Type': 'application/json',
+        'x-hush-election-query-signatory': TEST_CREDENTIALS.signingPublicKey,
+        'x-hush-election-query-signed-at': expect.any(String),
+        'x-hush-election-query-signature': expect.any(String),
+      }),
+      body: JSON.stringify({
+        method: 'GetElectionAnomalyEvidenceManifest',
+        request: {
+          ElectionId: 'election-owner',
+          ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+          ScopeId: 'owner',
+        },
+      }),
+    });
+    expect(response.Success).toBe(true);
+    expect(response.Manifest?.ManifestHash).toBe(`sha256:${'a'.repeat(64)}`);
+  });
+
+  it.each(['auditor', 'package'] as const)(
+    'posts %s anomaly evidence manifest scope queries to the server-side proxy',
+    async (scopeId) => {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock.mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            Success: true,
+            ErrorMessage: '',
+            ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+            HasManifest: true,
+            Manifest: {
+              ElectionId: 'election-owner',
+              ScopeId: scopeId,
+              CanonicalizationId: 'anomaly-intake-manifest-v1',
+              ManifestHash: `sha256:${scopeId}`,
+              PackageReadinessStatusId: scopeId === 'package' ? 'blocked' : 'ready',
+              PackageReadinessBlockerIds: scopeId === 'package' ? ['payload_missing'] : [],
+              TotalThreadCount: 0,
+              AttachmentManifestCount: 0,
+              RedactionCount: 0,
+              Threads: [],
+            },
+          }),
+          {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          }
+        )
+      );
+
+      const response = await electionsService.getElectionAnomalyEvidenceManifest({
+        ElectionId: 'election-owner',
+        ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+        ScopeId: scopeId,
+      });
+
+      expect(fetchMock).toHaveBeenCalledWith('/api/elections/query', {
+        method: 'POST',
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json',
+          'x-hush-election-query-signatory': TEST_CREDENTIALS.signingPublicKey,
+          'x-hush-election-query-signed-at': expect.any(String),
+          'x-hush-election-query-signature': expect.any(String),
+        }),
+        body: JSON.stringify({
+          method: 'GetElectionAnomalyEvidenceManifest',
+          request: {
+            ElectionId: 'election-owner',
+            ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+            ScopeId: scopeId,
+          },
+        }),
+      });
+      expect(response.Manifest?.ScopeId).toBe(scopeId);
+    }
+  );
+
+  it('returns denied anomaly evidence manifest responses without exposing manifest rows', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          Success: false,
+          ErrorMessage: 'Restricted anomaly manifest unavailable for this role.',
+          ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+          HasManifest: false,
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+    );
+
+    const response = await electionsService.getElectionAnomalyEvidenceManifest({
+      ElectionId: 'election-owner',
+      ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+      ScopeId: 'package',
+    });
+
+    expect(response.Success).toBe(false);
+    expect(response.HasManifest).toBe(false);
+    expect(response.Manifest).toBeUndefined();
+    expect(response.ErrorMessage).toBe('Restricted anomaly manifest unavailable for this role.');
+  });
+
+  it('throws when the anomaly evidence manifest proxy rejects the signed query', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue(
+      new Response('signature rejected', {
+        status: 403,
+      })
+    );
+
+    await expect(
+      electionsService.getElectionAnomalyEvidenceManifest({
+        ElectionId: 'election-owner',
+        ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+        ScopeId: 'owner',
+      })
+    ).rejects.toThrow(
+      'Election query proxy failed for GetElectionAnomalyEvidenceManifest: 403 signature rejected'
+    );
+  });
+
+  it('posts restricted anomaly payload staging requests to the signed proxy', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          Success: true,
+          ErrorMessage: '',
+          ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+          PayloadReference: 'hush-election-anomaly-payload-v1:33333333-3333-3333-3333-333333333333',
+          EncryptedPayloadHash: `sha256:${'a'.repeat(64)}`,
+          ContentHash: `sha256:${'b'.repeat(64)}`,
+          SizeBytes: 256,
+          MimeType: 'image/png',
+          ScannerStatusId: 'pending',
+          PayloadAvailabilityStatusId: 'available',
+          ValidationCode: '',
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+    );
+
+    const request = {
+      ElectionId: 'election-owner',
+      ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+      AnomalyThreadId: '22222222-2222-2222-2222-222222222222',
+      AttachmentKindId: 'authority_requested_evidence',
+      EncryptedPayloadBase64: 'AQIDBA==',
+      EncryptedPayloadHash: `sha256:${'a'.repeat(64)}`,
+      ContentHash: `sha256:${'b'.repeat(64)}`,
+      SizeBytes: 256,
+      MimeType: 'image/png',
+      ClarificationRequestId: '11111111-1111-1111-1111-111111111111',
+    };
+
+    const response = await electionsService.stageElectionAnomalyRestrictedPayload(request);
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/elections/query', {
+      method: 'POST',
+      headers: expect.objectContaining({
+        'Content-Type': 'application/json',
+        'x-hush-election-query-signatory': TEST_CREDENTIALS.signingPublicKey,
+        'x-hush-election-query-signed-at': expect.any(String),
+        'x-hush-election-query-signature': expect.any(String),
+      }),
+      body: JSON.stringify({
+        method: 'StageElectionAnomalyRestrictedPayload',
+        request,
+      }),
+    });
+    expect(response.Success).toBe(true);
+    expect(response.PayloadReference).toMatch(/^hush-election-anomaly-payload-v1:/);
+  });
+
+  it('posts restricted anomaly payload retrieval requests to the signed proxy', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          Success: true,
+          ErrorMessage: '',
+          ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+          PayloadReference: 'hush-election-anomaly-payload-v1:33333333-3333-3333-3333-333333333333',
+          EncryptedPayloadBase64: 'AQIDBA==',
+          EncryptedPayloadHash: `sha256:${'a'.repeat(64)}`,
+          ContentHash: `sha256:${'b'.repeat(64)}`,
+          SizeBytes: 256,
+          MimeType: 'image/png',
+          ScannerStatusId: 'pending',
+          PayloadAvailabilityStatusId: 'available',
+          ValidationCode: '',
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+    );
+
+    const request = {
+      ElectionId: 'election-owner',
+      ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+      PayloadReference: 'hush-election-anomaly-payload-v1:33333333-3333-3333-3333-333333333333',
+    };
+
+    const response = await electionsService.getElectionAnomalyRestrictedPayload(request);
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/elections/query', {
+      method: 'POST',
+      headers: expect.objectContaining({
+        'Content-Type': 'application/json',
+        'x-hush-election-query-signatory': TEST_CREDENTIALS.signingPublicKey,
+        'x-hush-election-query-signed-at': expect.any(String),
+        'x-hush-election-query-signature': expect.any(String),
+      }),
+      body: JSON.stringify({
+        method: 'GetElectionAnomalyRestrictedPayload',
+        request,
+      }),
+    });
+    expect(response.Success).toBe(true);
+    expect(response.EncryptedPayloadBase64).toBe('AQIDBA==');
+  });
+
   it('posts verification package export queries to the server-side proxy', async () => {
     const fetchMock = vi.mocked(fetch);
     fetchMock.mockResolvedValue(

@@ -6,9 +6,11 @@ import {
   AlertCircle,
   ArrowLeft,
   FileWarning,
+  FileUp,
   Filter,
   KeyRound,
   Loader2,
+  Paperclip,
   RefreshCcw,
   Send,
   ShieldAlert,
@@ -23,28 +25,48 @@ import {
   type GetElectionAnomalyOwnerTriageResponse,
   type GrpcTimestamp,
 } from '@/lib/grpc';
+import { bytesToBase64 } from '@/lib/crypto';
 import { electionsService } from '@/lib/grpc/services/elections';
 import { identityService } from '@/lib/grpc/services/identity';
 import { submitTransaction } from '@/modules/blockchain/BlockchainService';
+import {
+  AnomalyEvidenceManifestStatusPanel,
+  type AnomalyEvidenceRedactionSubmitInput,
+} from './AnomalyEvidenceManifestStatusPanel';
 import { getLifecycleLabel } from './contracts';
 import { sectionClass } from './HushVotingWorkspaceShared';
 import {
+  ELECTION_ANOMALY_ATTACHMENT_KIND_IDS,
+  ELECTION_ANOMALY_ATTACHMENT_VALIDATION_STATUS_IDS,
+  ELECTION_ANOMALY_AUTHORITY_EVIDENCE_MAX_BYTES,
+  ELECTION_ANOMALY_AUTHORITY_EVIDENCE_MAX_COUNT,
+  ELECTION_ANOMALY_AUTHORITY_EVIDENCE_MAX_TOTAL_BYTES,
   ELECTION_ANOMALY_CASE_STATE_IDS,
   ELECTION_ANOMALY_CATEGORY_IDS,
   ELECTION_ANOMALY_CLARIFICATION_BODY_MAX_CHARACTERS,
+  ELECTION_ANOMALY_EVIDENCE_MIME_TYPE_VALUES,
   ELECTION_ANOMALY_MESSAGE_KIND_IDS,
   ELECTION_ANOMALY_RECIPIENT_ROLE_IDS,
   ELECTION_ANOMALY_RECIPIENT_WRAP_STATUS_IDS,
+  ELECTION_ANOMALY_REDACTION_TARGET_KIND_IDS,
   ELECTION_ANOMALY_SEVERITY_CANDIDATE_IDS,
+  ELECTION_ANOMALY_VALIDATION_CODES,
   createClassifyElectionAnomalyThreadTransaction,
+  createElectionAnomalyOwnerAttachmentContentKeyWraps,
+  createElectionAnomalyRestrictedEvidencePayload,
+  createRecordElectionAnomalyAttachmentManifestTransaction,
   createRecordElectionAnomalyAuthorityResponseTransaction,
   createRecordElectionAnomalyAuditorRecipientRewrapTransaction,
+  createRecordElectionAnomalyEvidenceRedactionTransaction,
   createRegisterExternalElectionAnomalyClaimantTransaction,
   createRequestElectionAnomalyInformationTransaction,
   decryptElectionAnomalyOwnerMessageContentKey,
   decryptElectionAnomalyOwnerMessageBody,
   hasElectionAnomalyDuplicateThreadValidation,
   hashExternalElectionAnomalyClaimantReference,
+  prepareElectionAnomalyAttachmentManifestMaterial,
+  type ElectionAnomalyAttachmentContentKeyWrapPayload,
+  type PreparedElectionAnomalyAttachmentManifestMaterial,
 } from './transactionService';
 import { useElectionsStore } from './useElectionsStore';
 
@@ -65,6 +87,26 @@ type DecryptedMessage = {
 type Feedback = {
   tone: 'success' | 'error' | 'warning';
   message: string;
+};
+
+type AuthorityEvidenceStatus =
+  | 'ready'
+  | 'encrypting'
+  | 'staging'
+  | 'staged'
+  | 'submitting'
+  | 'scanner_pending'
+  | 'accepted'
+  | 'quarantined'
+  | 'validation_rejected';
+
+type AuthorityEvidenceFile = {
+  id: string;
+  file: File;
+  status: AuthorityEvidenceStatus;
+  material?: PreparedElectionAnomalyAttachmentManifestMaterial;
+  contentKeyWraps?: ElectionAnomalyAttachmentContentKeyWrapPayload[];
+  validationCode?: string;
 };
 
 const CASE_STATE_OPTIONS = [
@@ -114,6 +156,89 @@ const QUEUE_MODE_OPTIONS = [
 ] as const;
 
 type QueueMode = typeof QUEUE_MODE_OPTIONS[number][0];
+
+const AUTHORITY_EVIDENCE_ACCEPTED_MIME_LABELS = 'PDF, PNG, JPG, TXT, CSV, JSON';
+
+function formatEvidenceSize(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+
+  const kib = bytes / 1024;
+  if (kib < 1024) {
+    return `${Math.round(kib)} KB`;
+  }
+
+  return `${Math.round((kib / 1024) * 10) / 10} MB`;
+}
+
+function evidenceStatusLabel(status: AuthorityEvidenceStatus): string {
+  switch (status) {
+    case 'encrypting':
+      return 'Encrypting and deriving hashes';
+    case 'staging':
+      return 'Staging restricted payload';
+    case 'staged':
+      return 'Payload staged';
+    case 'submitting':
+      return 'Signing manifest';
+    case 'scanner_pending':
+      return 'Scanner pending';
+    case 'accepted':
+      return 'Accepted';
+    case 'quarantined':
+      return 'Quarantined';
+    case 'validation_rejected':
+      return 'Validation rejected';
+    case 'ready':
+    default:
+      return 'Ready';
+  }
+}
+
+function evidenceStatusClass(status: AuthorityEvidenceStatus): string {
+  switch (status) {
+    case 'staged':
+    case 'staging':
+    case 'scanner_pending':
+      return 'bg-amber-500/10 text-amber-100';
+    case 'accepted':
+      return 'bg-green-500/10 text-green-100';
+    case 'quarantined':
+    case 'validation_rejected':
+      return 'bg-red-500/10 text-red-100';
+    default:
+      return 'bg-hush-bg-element/80 text-hush-text-primary';
+  }
+}
+
+function isAllowedAuthorityEvidenceMimeType(mimeType: string): boolean {
+  return ELECTION_ANOMALY_EVIDENCE_MIME_TYPE_VALUES.includes(
+    mimeType as typeof ELECTION_ANOMALY_EVIDENCE_MIME_TYPE_VALUES[number],
+  );
+}
+
+async function readFileBytes(file: File): Promise<Uint8Array> {
+  if (typeof file.arrayBuffer === 'function') {
+    return new Uint8Array(await file.arrayBuffer());
+  }
+
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (result instanceof ArrayBuffer) {
+        resolve(new Uint8Array(result));
+        return;
+      }
+
+      reject(new Error(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_HASH_INVALID));
+    };
+    reader.onerror = () =>
+      reject(reader.error ?? new Error(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_HASH_INVALID));
+    reader.readAsArrayBuffer(file);
+  });
+}
 
 function timestampToMillis(timestamp?: GrpcTimestamp): number | null {
   if (!timestamp?.seconds) {
@@ -337,6 +462,9 @@ export function OwnerAnomalyWorkspacePanel({
   const [queueMode, setQueueMode] = useState<QueueMode>('all');
   const [queueCategoryFilter, setQueueCategoryFilter] = useState('all');
   const [queueCaseStateFilter, setQueueCaseStateFilter] = useState('all');
+  const [authorityEvidenceFiles, setAuthorityEvidenceFiles] = useState<AuthorityEvidenceFile[]>([]);
+  const [authorityEvidenceFeedback, setAuthorityEvidenceFeedback] = useState<Feedback | null>(null);
+  const [manifestRefreshToken, setManifestRefreshToken] = useState(0);
 
   useEffect(() => {
     void loadElection(electionId);
@@ -519,6 +647,19 @@ export function OwnerAnomalyWorkspacePanel({
         .filter((entry) => entry.publicEncryptAddress.trim()),
     [auditorEncryptAddresses, auditorGrants],
   );
+  const stagedAuthorityEvidence = authorityEvidenceFiles.filter(
+    (item) => item.status === 'staged' && item.material,
+  );
+  const authorityEvidenceTotalBytes = authorityEvidenceFiles.reduce(
+    (total, item) => total + item.file.size,
+    0,
+  );
+  const hasAuthorityEvidenceInProgress = authorityEvidenceFiles.some((item) =>
+    item.status === 'encrypting' || item.status === 'staging' || item.status === 'submitting'
+  );
+  const hasRejectedAuthorityEvidence = authorityEvidenceFiles.some((item) =>
+    item.status === 'validation_rejected' || item.status === 'quarantined'
+  );
 
   useEffect(() => {
     if (!selectedThread) {
@@ -581,6 +722,11 @@ export function OwnerAnomalyWorkspacePanel({
     };
   }, [actorEncryptionPrivateKey, selectedThread]);
 
+  useEffect(() => {
+    setAuthorityEvidenceFiles([]);
+    setAuthorityEvidenceFeedback(null);
+  }, [selectedThread?.AnomalyThreadId]);
+
   async function submitOwnerAction(action: () => Promise<void>, successMessage: string): Promise<void> {
     setFeedback(null);
     setIsSubmittingAction(true);
@@ -606,6 +752,271 @@ export function OwnerAnomalyWorkspacePanel({
       result.status !== TransactionStatus.PENDING
     ) {
       throw new Error(result.message || fallbackMessage);
+    }
+  }
+
+  async function stageAuthorityEvidenceFiles(files: File[]): Promise<void> {
+    if (!selectedThread?.AnomalyThreadId) {
+      setAuthorityEvidenceFeedback({
+        tone: 'error',
+        message: ELECTION_ANOMALY_VALIDATION_CODES.CLARIFICATION_REQUEST_NOT_OPEN,
+      });
+      return;
+    }
+
+    const remainingSlots =
+      ELECTION_ANOMALY_AUTHORITY_EVIDENCE_MAX_COUNT - authorityEvidenceFiles.length;
+    if (files.length > remainingSlots) {
+      setAuthorityEvidenceFeedback({
+        tone: 'error',
+        message: ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_COUNT_EXCEEDED,
+      });
+      return;
+    }
+
+    const totalBytes = authorityEvidenceTotalBytes + files.reduce(
+      (total, file) => total + file.size,
+      0,
+    );
+    if (totalBytes > ELECTION_ANOMALY_AUTHORITY_EVIDENCE_MAX_TOTAL_BYTES) {
+      setAuthorityEvidenceFeedback({
+        tone: 'error',
+        message: ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_SIZE_EXCEEDED,
+      });
+      return;
+    }
+
+    const nextItems = files.map((file) => ({
+      id: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
+      file,
+      status: 'encrypting' as const,
+    }));
+    setAuthorityEvidenceFiles((current) => [...current, ...nextItems]);
+    setAuthorityEvidenceFeedback(null);
+
+    await Promise.all(
+      nextItems.map(async (item) => {
+        try {
+          if (!isAllowedAuthorityEvidenceMimeType(item.file.type)) {
+            throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_MIME_TYPE_INVALID);
+          }
+
+          if (
+            item.file.size <= 0 ||
+            item.file.size > ELECTION_ANOMALY_AUTHORITY_EVIDENCE_MAX_BYTES
+          ) {
+            throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_SIZE_EXCEEDED);
+          }
+
+          const fileBytes = await readFileBytes(item.file);
+          const restrictedPayload = await createElectionAnomalyRestrictedEvidencePayload(fileBytes);
+          const encryptedPayload = restrictedPayload.EncryptedPayload;
+          const contentKeyWraps = await createElectionAnomalyOwnerAttachmentContentKeyWraps({
+            OwnerPublicAddress: actorPublicAddress,
+            OwnerPublicEncryptAddress: actorEncryptionPublicKey,
+            AuditorRecipients: resolvedAuditorGrants.map((entry) => ({
+              AuditorPublicAddress: entry.grant.ActorPublicAddress,
+              AuditorPublicEncryptAddress: entry.publicEncryptAddress,
+            })),
+            ContentKey: restrictedPayload.ContentKey,
+          });
+          const draftMaterial = await prepareElectionAnomalyAttachmentManifestMaterial({
+            Content: fileBytes,
+            EncryptedPayload: encryptedPayload,
+          });
+          setAuthorityEvidenceFiles((current) =>
+            current.map((candidate) =>
+              candidate.id === item.id
+                ? {
+                    ...candidate,
+                    status: 'staging',
+                  }
+                : candidate,
+            ),
+          );
+
+          const stageResponse = await electionsService.stageElectionAnomalyRestrictedPayload({
+            ElectionId: electionId,
+            ActorPublicAddress: actorPublicAddress,
+            AnomalyThreadId: selectedThread.AnomalyThreadId,
+            AttachmentKindId: ELECTION_ANOMALY_ATTACHMENT_KIND_IDS.AUTHORITY_EVIDENCE,
+            EncryptedPayloadBase64: bytesToBase64(encryptedPayload),
+            EncryptedPayloadHash: draftMaterial.EncryptedPayloadHash,
+            ContentHash: draftMaterial.ContentHash,
+            SizeBytes: draftMaterial.SizeBytes,
+            MimeType: item.file.type,
+            ClarificationRequestId: '',
+          });
+          if (!stageResponse.Success) {
+            throw new Error(
+              stageResponse.ValidationCode ||
+              stageResponse.ErrorMessage ||
+              ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_PAYLOAD_REFERENCE_INVALID,
+            );
+          }
+
+          if (
+            !stageResponse.PayloadReference ||
+            stageResponse.EncryptedPayloadHash !== draftMaterial.EncryptedPayloadHash ||
+            stageResponse.ContentHash !== draftMaterial.ContentHash
+          ) {
+            throw new Error(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_HASH_INVALID);
+          }
+
+          const material = await prepareElectionAnomalyAttachmentManifestMaterial({
+            Content: fileBytes,
+            EncryptedPayload: encryptedPayload,
+            EncryptedPayloadReference: stageResponse.PayloadReference,
+          });
+
+          setAuthorityEvidenceFiles((current) =>
+            current.map((candidate) =>
+              candidate.id === item.id
+                ? {
+                  ...candidate,
+                  status: 'staged',
+                  material,
+                  contentKeyWraps,
+                }
+              : candidate,
+            ),
+          );
+        } catch (error) {
+          setAuthorityEvidenceFiles((current) =>
+            current.map((candidate) =>
+              candidate.id === item.id
+                ? {
+                    ...candidate,
+                    status: 'validation_rejected',
+                    validationCode:
+                      error instanceof Error
+                        ? error.message
+                        : ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_HASH_INVALID,
+                  }
+                : candidate,
+            ),
+          );
+        }
+      }),
+    );
+  }
+
+  function handleAuthorityEvidenceFileChange(files: FileList | null): void {
+    const selectedFiles = Array.from(files ?? []);
+    if (selectedFiles.length === 0) {
+      return;
+    }
+
+    void stageAuthorityEvidenceFiles(selectedFiles);
+  }
+
+  function removeAuthorityEvidenceFile(fileId: string): void {
+    setAuthorityEvidenceFiles((current) =>
+      current.filter((item) => item.id !== fileId),
+    );
+  }
+
+  function clearAuthorityEvidenceFiles(): void {
+    setAuthorityEvidenceFiles([]);
+    setAuthorityEvidenceFeedback(null);
+  }
+
+  async function handleAuthorityEvidenceSubmit(): Promise<void> {
+    if (!selectedThread || stagedAuthorityEvidence.length === 0) {
+      return;
+    }
+
+    setFeedback(null);
+    setAuthorityEvidenceFeedback(null);
+    setIsSubmittingAction(true);
+    try {
+      for (let index = 0; index < stagedAuthorityEvidence.length; index += 1) {
+        const evidence = stagedAuthorityEvidence[index];
+        if (!evidence.material) {
+          continue;
+        }
+
+        setAuthorityEvidenceFiles((current) =>
+          current.map((item) =>
+            item.id === evidence.id
+              ? {
+                  ...item,
+                  status: 'submitting',
+                }
+              : item,
+          ),
+        );
+
+        const { signedTransaction } = await createRecordElectionAnomalyAttachmentManifestTransaction({
+          ElectionId: electionId,
+          AnomalyThreadId: selectedThread.AnomalyThreadId,
+          ActorPublicAddress: actorPublicAddress,
+          ActorPublicEncryptAddress: actorEncryptionPublicKey,
+          ActorPrivateEncryptKeyHex: actorEncryptionPrivateKey,
+          SigningPrivateKeyHex: actorSigningPrivateKey,
+          AttachmentKindId: ELECTION_ANOMALY_ATTACHMENT_KIND_IDS.AUTHORITY_EVIDENCE,
+          EncryptedPayloadReference: evidence.material.EncryptedPayloadReference,
+          EncryptedPayloadHash: evidence.material.EncryptedPayloadHash,
+          ContentHash: evidence.material.ContentHash,
+          SizeBytes: evidence.material.SizeBytes,
+          MimeType: evidence.file.type,
+          ValidationStatusId: ELECTION_ANOMALY_ATTACHMENT_VALIDATION_STATUS_IDS.PENDING_SCAN,
+          ContentKeyWraps: evidence.contentKeyWraps,
+          ExistingAttachmentManifestCount: index,
+          ExistingAttachmentManifestTotalBytes: stagedAuthorityEvidence
+            .slice(0, index)
+            .reduce((total, item) => total + (item.material?.SizeBytes ?? item.file.size), 0),
+        });
+        const manifestResult = await submitTransaction(signedTransaction);
+        if (
+          !manifestResult.successful &&
+          manifestResult.status !== TransactionStatus.ACCEPTED &&
+          manifestResult.status !== TransactionStatus.PENDING
+        ) {
+          const rejectedAsQuarantined = /quarantin/i.test(manifestResult.message ?? '');
+          setAuthorityEvidenceFiles((current) =>
+            current.map((item) =>
+              item.id === evidence.id
+                ? {
+                    ...item,
+                    status: rejectedAsQuarantined ? 'quarantined' : 'validation_rejected',
+                    validationCode: manifestResult.message || 'The authority evidence manifest was rejected.',
+                  }
+                : item,
+            ),
+          );
+          throw new Error(manifestResult.message || 'The authority evidence manifest was rejected.');
+        }
+
+        setAuthorityEvidenceFiles((current) =>
+          current.map((item) =>
+            item.id === evidence.id
+              ? {
+                  ...item,
+                  status: manifestResult.status === TransactionStatus.PENDING
+                    ? 'scanner_pending'
+                    : 'accepted',
+                }
+              : item,
+          ),
+        );
+      }
+
+      await refreshTriage();
+      setManifestRefreshToken((current) => current + 1);
+      setFeedback({
+        tone: 'success',
+        message: 'Authority evidence manifest accepted. Scanner status remains pending until restricted evidence checks finish.',
+      });
+    } catch (error) {
+      setFeedback({
+        tone: 'error',
+        message: error instanceof Error
+          ? error.message
+          : 'Authority evidence could not be recorded.',
+      });
+    } finally {
+      setIsSubmittingAction(false);
     }
   }
 
@@ -777,6 +1188,49 @@ export function OwnerAnomalyWorkspacePanel({
       });
     } finally {
       setRewrapMessageId(null);
+      setIsSubmittingAction(false);
+    }
+  }
+
+  async function handleEvidenceRedactionSubmit(
+    input: AnomalyEvidenceRedactionSubmitInput,
+  ): Promise<void> {
+    setFeedback(null);
+    setIsSubmittingAction(true);
+
+    try {
+      const { signedTransaction } =
+        await createRecordElectionAnomalyEvidenceRedactionTransaction({
+          ElectionId: electionId,
+          AnomalyThreadId: input.anomalyThreadId,
+          ActorPublicAddress: actorPublicAddress,
+          ActorPublicEncryptAddress: actorEncryptionPublicKey,
+          ActorPrivateEncryptKeyHex: actorEncryptionPrivateKey,
+          SigningPrivateKeyHex: actorSigningPrivateKey,
+          TargetKindId: ELECTION_ANOMALY_REDACTION_TARGET_KIND_IDS.ATTACHMENT_MANIFEST,
+          TargetId: input.attachmentManifestId,
+          ReasonCodeId: input.reasonCodeId,
+          OriginalHash: input.originalHash,
+          ReplacementManifestHash: input.replacementManifestHash,
+          TombstoneStatusId: input.tombstoneStatusId,
+          HoldReference: input.holdReference,
+        });
+      await submitSignedTransaction(signedTransaction, 'The evidence redaction transaction was rejected.');
+      await refreshTriage();
+      setFeedback({
+        tone: 'success',
+        message: 'Evidence redaction accepted as append-only anomaly history.',
+      });
+    } catch (error) {
+      const message = error instanceof Error
+        ? error.message
+        : 'Evidence redaction could not be submitted.';
+      setFeedback({
+        tone: 'error',
+        message,
+      });
+      throw new Error(message);
+    } finally {
       setIsSubmittingAction(false);
     }
   }
@@ -1032,6 +1486,183 @@ export function OwnerAnomalyWorkspacePanel({
                         </div>
                       ) : null}
                     </article>
+
+                    <AnomalyEvidenceManifestStatusPanel
+                      key={`${selectedThread.AnomalyThreadId}-${manifestRefreshToken}`}
+                      electionId={electionId}
+                      actorPublicAddress={actorPublicAddress}
+                      actorPrivateEncryptKeyHex={actorEncryptionPrivateKey}
+                      scopeId="owner"
+                      focusThreadId={selectedThread.AnomalyThreadId}
+                      title="Selected case evidence manifest"
+                      description="Attachments are encrypted restricted evidence. Owner and restricted auditors may be able to read evidence when recipient wraps are available."
+                      testId="owner-anomaly-evidence-manifest"
+                      redactionControls={{
+                        enabled: true,
+                        isSubmitting: isSubmittingAction,
+                        onSubmit: handleEvidenceRedactionSubmit,
+                      }}
+                    />
+
+                    <section
+                      className="rounded-2xl bg-hush-bg-dark/72 px-5 py-4"
+                      data-testid="owner-anomaly-authority-evidence"
+                    >
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div>
+                          <div className="flex items-center gap-2 text-sm font-semibold text-hush-text-primary">
+                            <Paperclip className="h-4 w-4 text-hush-text-accent" />
+                            <span>Authority evidence</span>
+                          </div>
+                          <p className="mt-2 max-w-3xl text-sm leading-7 text-hush-text-accent">
+                            Attach owner-held restricted evidence to this case. Payloads are staged
+                            in the anomaly namespace before the signed manifest is recorded.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={clearAuthorityEvidenceFiles}
+                          disabled={isSubmittingAction || authorityEvidenceFiles.length === 0}
+                          className="inline-flex self-start items-center gap-2 rounded-xl bg-hush-bg-element px-3 py-2 text-xs font-medium text-hush-text-primary transition-colors hover:bg-hush-bg-element/80 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <X className="h-4 w-4" />
+                          <span>Clear</span>
+                        </button>
+                      </div>
+
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                        <div className="rounded-xl bg-hush-bg-element/70 px-4 py-3">
+                          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                            Kind
+                          </div>
+                          <div className="mt-2 text-sm font-semibold text-hush-text-primary">
+                            Authority evidence
+                          </div>
+                        </div>
+                        <div className="rounded-xl bg-hush-bg-element/70 px-4 py-3">
+                          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                            Attached
+                          </div>
+                          <div className="mt-2 text-sm font-semibold text-hush-text-primary">
+                            {authorityEvidenceFiles.length} of {ELECTION_ANOMALY_AUTHORITY_EVIDENCE_MAX_COUNT}
+                          </div>
+                        </div>
+                        <div className="rounded-xl bg-hush-bg-element/70 px-4 py-3">
+                          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                            Accepted types
+                          </div>
+                          <div className="mt-2 text-sm font-semibold text-hush-text-primary">
+                            {AUTHORITY_EVIDENCE_ACCEPTED_MIME_LABELS}
+                          </div>
+                        </div>
+                        <div className="rounded-xl bg-hush-bg-element/70 px-4 py-3">
+                          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                            Scanner
+                          </div>
+                          <div className="mt-2 text-sm font-semibold text-amber-100">
+                            Required
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-hush-bg-element px-4 py-2.5 text-sm font-medium text-hush-text-primary transition-colors hover:bg-hush-bg-element/80 focus-within:ring-2 focus-within:ring-hush-purple">
+                          <FileUp className="h-4 w-4" />
+                          <span>Choose files</span>
+                          <input
+                            type="file"
+                            multiple
+                            className="sr-only"
+                            accept={ELECTION_ANOMALY_EVIDENCE_MIME_TYPE_VALUES.join(',')}
+                            disabled={isSubmittingAction || hasAuthorityEvidenceInProgress}
+                            aria-label="Choose authority evidence files"
+                            onChange={(event) => {
+                              handleAuthorityEvidenceFileChange(event.target.files);
+                              event.target.value = '';
+                            }}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => void handleAuthorityEvidenceSubmit()}
+                          disabled={
+                            isSubmittingAction ||
+                            hasAuthorityEvidenceInProgress ||
+                            hasRejectedAuthorityEvidence ||
+                            stagedAuthorityEvidence.length === 0
+                          }
+                          className="inline-flex items-center justify-center gap-2 rounded-xl bg-hush-purple px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {isSubmittingAction ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                          <span>Record authority evidence</span>
+                        </button>
+                      </div>
+
+                      {authorityEvidenceFeedback ? (
+                        <div
+                          className={`mt-4 rounded-xl px-4 py-3 text-sm ${
+                            authorityEvidenceFeedback.tone === 'success'
+                              ? 'bg-green-500/10 text-green-100'
+                              : authorityEvidenceFeedback.tone === 'warning'
+                                ? 'bg-amber-500/10 text-amber-100'
+                                : 'bg-red-500/10 text-red-100'
+                          }`}
+                        >
+                          {authorityEvidenceFeedback.message}
+                        </div>
+                      ) : null}
+
+                      {authorityEvidenceFiles.length > 0 ? (
+                        <div className="mt-4 space-y-3">
+                          {authorityEvidenceFiles.map((item) => (
+                            <div
+                              key={item.id}
+                              className="flex flex-col gap-3 rounded-xl bg-hush-bg-element/70 px-4 py-3 md:flex-row md:items-center md:justify-between"
+                            >
+                              <div className="min-w-0">
+                                <div className="break-all text-sm font-medium text-hush-text-primary">
+                                  {item.file.name}
+                                </div>
+                                <div className="mt-1 flex flex-wrap gap-2 text-xs text-hush-text-accent">
+                                  <span>{formatEvidenceSize(item.file.size)}</span>
+                                  <span>{item.file.type || 'application/octet-stream'}</span>
+                                  {item.material?.ContentHash ? (
+                                    <span className="break-all font-mono">
+                                      {item.material.ContentHash}
+                                    </span>
+                                  ) : null}
+                                </div>
+                                {item.validationCode ? (
+                                  <div className="mt-2 text-xs text-red-100">
+                                    {item.validationCode}
+                                  </div>
+                                ) : null}
+                              </div>
+                              <div className="flex shrink-0 items-center gap-2">
+                                <span
+                                  className={`rounded-full px-3 py-1 text-xs font-semibold ${evidenceStatusClass(item.status)}`}
+                                >
+                                  {evidenceStatusLabel(item.status)}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => removeAuthorityEvidenceFile(item.id)}
+                                  disabled={isSubmittingAction || item.status === 'submitting'}
+                                  className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-hush-bg-dark/72 text-hush-text-primary transition-colors hover:bg-hush-bg-dark disabled:cursor-not-allowed disabled:opacity-50"
+                                  aria-label={`Remove ${item.file.name}`}
+                                >
+                                  <X className="h-4 w-4" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="mt-4 rounded-xl bg-hush-bg-element/70 px-4 py-3 text-sm text-hush-text-accent">
+                          No authority evidence files selected.
+                        </div>
+                      )}
+                    </section>
 
                     <div className="space-y-3">
                       {selectedThread.Messages.map((message) => (

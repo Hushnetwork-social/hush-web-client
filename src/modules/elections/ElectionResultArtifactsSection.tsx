@@ -153,6 +153,8 @@ function getReportArtifactKindLabel(kind: ElectionReportArtifactKindProto): stri
       return 'Outcome projection';
     case ElectionReportArtifactKindProto.ReportArtifactMachineDisputeReviewIndexProjection:
       return 'Dispute projection';
+    case ElectionReportArtifactKindProto.ReportArtifactMachineRestrictedAnomalyIntakeManifest:
+      return 'Restricted anomaly intake manifest';
     default:
       return 'Artifact';
   }

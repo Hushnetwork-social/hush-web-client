@@ -21,6 +21,18 @@ vi.mock('@/lib/grpc/services/elections', () => ({
   },
 }));
 
+vi.mock('./AnomalyEvidenceManifestStatusPanel', () => ({
+  AnomalyEvidenceManifestStatusPanel: ({
+    testId = 'verification-package-anomaly-manifest',
+  }: {
+    testId?: string;
+  }) => (
+    <section data-testid={testId}>
+      Restricted anomaly intake manifest
+    </section>
+  ),
+}));
+
 const exportElectionVerificationPackageMock = vi.mocked(
   electionsService.exportElectionVerificationPackage
 );
@@ -54,6 +66,9 @@ describe('VerificationPackageStatusSection', () => {
     );
     expect(screen.getByText('Export available')).toBeInTheDocument();
     expect(screen.getByText('Verifier: not available')).toBeInTheDocument();
+    expect(screen.getByTestId('verification-package-anomaly-manifest')).toHaveTextContent(
+      'Restricted anomaly intake manifest'
+    );
     expect(screen.getByRole('button', { name: 'Download public package' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Download restricted package' })).toBeEnabled();
 

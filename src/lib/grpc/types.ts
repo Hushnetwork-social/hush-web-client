@@ -943,6 +943,7 @@ export enum ElectionReportArtifactKindProto {
   ReportArtifactMachineAuditProvenanceReportProjection = 10,
   ReportArtifactMachineOutcomeDeterminationProjection = 11,
   ReportArtifactMachineDisputeReviewIndexProjection = 12,
+  ReportArtifactMachineRestrictedAnomalyIntakeManifest = 13,
 }
 
 export enum ElectionReportArtifactFormatProto {
@@ -2657,6 +2658,146 @@ export interface GetElectionAnomalyAuditorRestrictedReviewResponse {
   ActorPublicAddress: string;
   HasReview: boolean;
   Review?: ElectionAnomalyAuditorRestrictedReviewView;
+}
+
+export interface GetElectionAnomalyEvidenceManifestRequest {
+  ElectionId: string;
+  ActorPublicAddress: string;
+  ScopeId: string;
+}
+
+export interface ElectionAnomalyAttachmentContentKeyWrapView {
+  WrapStatusId: string;
+  RecipientKeyFingerprint: string;
+  EncryptedContentKey: string;
+  WrapAlgorithm: string;
+}
+
+export interface ElectionAnomalyAttachmentManifestView {
+  AttachmentManifestId: string;
+  AnomalyThreadId: string;
+  EventId: string;
+  EventHash: string;
+  AttachmentKindId: string;
+  EncryptedPayloadReference: string;
+  EncryptedPayloadHash: string;
+  ContentHash: string;
+  SizeBytes: number;
+  MimeType: string;
+  ValidationStatusId: string;
+  ScannerStatusId: string;
+  PayloadAvailabilityStatusId: string;
+  ClarificationRequestId: string;
+  HasClarificationRequest: boolean;
+  ActorRoleId: string;
+  RecordedAt?: GrpcTimestamp;
+  SourceTransactionId: string;
+  CallerContentKeyWrap?: ElectionAnomalyAttachmentContentKeyWrapView;
+  HasCallerContentKeyWrap: boolean;
+}
+
+export interface ElectionAnomalyEvidenceRedactionView {
+  RedactionEventId: string;
+  AnomalyThreadId: string;
+  EventId: string;
+  EventHash: string;
+  TargetKindId: string;
+  TargetId: string;
+  ReasonCodeId: string;
+  OriginalHash: string;
+  ReplacementManifestHash: string;
+  HasReplacementManifestHash: boolean;
+  TombstoneStatusId: string;
+  HasTombstoneStatus: boolean;
+  RecordedAt?: GrpcTimestamp;
+  SourceTransactionId: string;
+}
+
+export interface ElectionAnomalyEvidenceManifestThreadView {
+  AnomalyThreadId: string;
+  ElectionId: string;
+  CategoryId: string;
+  CaseStateId: string;
+  CurrentThreadHash: string;
+  GovernedDecisionRef: string;
+  HasGovernedDecisionRef: boolean;
+  HasOpenClarificationRequest: boolean;
+  OpenClarificationRequestId: string;
+  HasOpenClarificationRequestId: boolean;
+  CreatedAt?: GrpcTimestamp;
+  UpdatedAt?: GrpcTimestamp;
+  AttachmentManifests: ElectionAnomalyAttachmentManifestView[];
+  Redactions: ElectionAnomalyEvidenceRedactionView[];
+  RecipientStatuses: ElectionAnomalyRestrictedRecipientStatusView[];
+}
+
+export interface ElectionAnomalyEvidenceManifestView {
+  ElectionId: string;
+  ScopeId: string;
+  CanonicalizationId: string;
+  ManifestHash: string;
+  PackageReadinessStatusId: string;
+  PackageReadinessBlockerIds: string[];
+  TotalThreadCount: number;
+  AttachmentManifestCount: number;
+  RedactionCount: number;
+  Threads: ElectionAnomalyEvidenceManifestThreadView[];
+}
+
+export interface GetElectionAnomalyEvidenceManifestResponse {
+  Success: boolean;
+  ErrorMessage: string;
+  ActorPublicAddress: string;
+  HasManifest: boolean;
+  Manifest?: ElectionAnomalyEvidenceManifestView;
+}
+
+export interface StageElectionAnomalyRestrictedPayloadRequest {
+  ElectionId: string;
+  ActorPublicAddress: string;
+  AnomalyThreadId: string;
+  AttachmentKindId: string;
+  EncryptedPayloadBase64: string;
+  EncryptedPayloadHash: string;
+  ContentHash: string;
+  SizeBytes: number;
+  MimeType: string;
+  ClarificationRequestId: string;
+}
+
+export interface StageElectionAnomalyRestrictedPayloadResponse {
+  Success: boolean;
+  ErrorMessage: string;
+  ActorPublicAddress: string;
+  PayloadReference: string;
+  EncryptedPayloadHash: string;
+  ContentHash: string;
+  SizeBytes: number;
+  MimeType: string;
+  ScannerStatusId: string;
+  PayloadAvailabilityStatusId: string;
+  ValidationCode: string;
+}
+
+export interface GetElectionAnomalyRestrictedPayloadRequest {
+  ElectionId: string;
+  ActorPublicAddress: string;
+  PayloadReference: string;
+}
+
+export interface GetElectionAnomalyRestrictedPayloadResponse {
+  Success: boolean;
+  ErrorMessage: string;
+  ActorPublicAddress: string;
+  PayloadReference: string;
+  EncryptedPayloadBase64: string;
+  EncryptedPayloadHash: string;
+  ContentHash: string;
+  SizeBytes: number;
+  MimeType: string;
+  ScannerStatusId: string;
+  PayloadAvailabilityStatusId: string;
+  ValidationCode: string;
 }
 
 export interface GetElectionResultViewRequest {

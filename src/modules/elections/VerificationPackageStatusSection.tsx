@@ -34,6 +34,7 @@ import {
   getSp11VerificationPackagePresentation,
   shortenProtocolPackageHash,
 } from './contracts';
+import { AnomalyEvidenceManifestStatusPanel } from './AnomalyEvidenceManifestStatusPanel';
 import { AvailabilityCard } from './HushVotingWorkspaceShared';
 import { ProtocolPackageBindingPanel } from './ProtocolPackageBindingPanel';
 
@@ -475,6 +476,17 @@ export function VerificationPackageStatusSection({
           label="Restricted package"
           value={getAvailabilityValue(status.RestrictedPackage)}
           accentClass={getAvailabilityAccent(status.RestrictedPackage)}
+        />
+      </div>
+
+      <div className="mt-5">
+        <AnomalyEvidenceManifestStatusPanel
+          electionId={electionId}
+          actorPublicAddress={actorPublicAddress}
+          scopeId="package"
+          title="Restricted anomaly intake manifest"
+          description="Package readiness depends on scanner status, payload availability, recipient wraps, and manifest hash alignment before restricted evidence can be exported."
+          testId="verification-package-anomaly-manifest"
         />
       </div>
 

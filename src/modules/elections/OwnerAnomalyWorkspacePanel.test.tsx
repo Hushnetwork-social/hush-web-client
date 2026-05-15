@@ -7,18 +7,24 @@ import {
   TransactionStatus,
   type ElectionAnomalyOwnerMessageView,
   type ElectionAnomalyOwnerTriageThreadView,
+  type GetElectionAnomalyEvidenceManifestResponse,
   type GetElectionAnomalyOwnerTriageResponse,
   type GetElectionReportAccessGrantsResponse,
 } from '@/lib/grpc';
 import { createElectionRecord, timestamp } from './HushVotingWorkspaceTestUtils';
 import { OwnerAnomalyWorkspacePanel } from './OwnerAnomalyWorkspacePanel';
 import {
+  ELECTION_ANOMALY_ATTACHMENT_KIND_IDS,
+  ELECTION_ANOMALY_ATTACHMENT_VALIDATION_STATUS_IDS,
   ELECTION_ANOMALY_CASE_STATE_IDS,
   ELECTION_ANOMALY_CATEGORY_IDS,
   ELECTION_ANOMALY_MESSAGE_KIND_IDS,
   ELECTION_ANOMALY_RECIPIENT_ROLE_IDS,
   ELECTION_ANOMALY_RECIPIENT_WRAP_STATUS_IDS,
+  ELECTION_ANOMALY_REDACTION_REASON_IDS,
+  ELECTION_ANOMALY_REDACTION_TARGET_KIND_IDS,
   ELECTION_ANOMALY_SEVERITY_CANDIDATE_IDS,
+  ELECTION_ANOMALY_VALIDATION_CODES,
 } from './transactionService';
 
 const {
@@ -33,6 +39,8 @@ const {
   electionsServiceMock: {
     getElectionAnomalyOwnerTriage: vi.fn(),
     getElectionReportAccessGrants: vi.fn(),
+    getElectionAnomalyEvidenceManifest: vi.fn(),
+    stageElectionAnomalyRestrictedPayload: vi.fn(),
   },
   identityServiceMock: {
     getIdentity: vi.fn(),
@@ -40,13 +48,18 @@ const {
   submitTransactionMock: vi.fn(),
   transactionServiceMock: {
     createClassifyElectionAnomalyThreadTransaction: vi.fn(),
+    createElectionAnomalyOwnerAttachmentContentKeyWraps: vi.fn(),
+    createElectionAnomalyRestrictedEvidencePayload: vi.fn(),
+    createRecordElectionAnomalyAttachmentManifestTransaction: vi.fn(),
     createRecordElectionAnomalyAuthorityResponseTransaction: vi.fn(),
     createRecordElectionAnomalyAuditorRecipientRewrapTransaction: vi.fn(),
+    createRecordElectionAnomalyEvidenceRedactionTransaction: vi.fn(),
     createRegisterExternalElectionAnomalyClaimantTransaction: vi.fn(),
     createRequestElectionAnomalyInformationTransaction: vi.fn(),
     decryptElectionAnomalyOwnerMessageBody: vi.fn(),
     decryptElectionAnomalyOwnerMessageContentKey: vi.fn(),
     hashExternalElectionAnomalyClaimantReference: vi.fn(),
+    prepareElectionAnomalyAttachmentManifestMaterial: vi.fn(),
   },
   useElectionsStoreMock: vi.fn(),
   loadElectionMock: vi.fn(),
@@ -87,10 +100,18 @@ vi.mock('./transactionService', async () => {
     ...actual,
     createClassifyElectionAnomalyThreadTransaction: (...args: unknown[]) =>
       transactionServiceMock.createClassifyElectionAnomalyThreadTransaction(...args),
+    createElectionAnomalyOwnerAttachmentContentKeyWraps: (...args: unknown[]) =>
+      transactionServiceMock.createElectionAnomalyOwnerAttachmentContentKeyWraps(...args),
+    createElectionAnomalyRestrictedEvidencePayload: (...args: unknown[]) =>
+      transactionServiceMock.createElectionAnomalyRestrictedEvidencePayload(...args),
+    createRecordElectionAnomalyAttachmentManifestTransaction: (...args: unknown[]) =>
+      transactionServiceMock.createRecordElectionAnomalyAttachmentManifestTransaction(...args),
     createRecordElectionAnomalyAuthorityResponseTransaction: (...args: unknown[]) =>
       transactionServiceMock.createRecordElectionAnomalyAuthorityResponseTransaction(...args),
     createRecordElectionAnomalyAuditorRecipientRewrapTransaction: (...args: unknown[]) =>
       transactionServiceMock.createRecordElectionAnomalyAuditorRecipientRewrapTransaction(...args),
+    createRecordElectionAnomalyEvidenceRedactionTransaction: (...args: unknown[]) =>
+      transactionServiceMock.createRecordElectionAnomalyEvidenceRedactionTransaction(...args),
     createRegisterExternalElectionAnomalyClaimantTransaction: (...args: unknown[]) =>
       transactionServiceMock.createRegisterExternalElectionAnomalyClaimantTransaction(...args),
     createRequestElectionAnomalyInformationTransaction: (...args: unknown[]) =>
@@ -101,6 +122,8 @@ vi.mock('./transactionService', async () => {
       transactionServiceMock.decryptElectionAnomalyOwnerMessageContentKey(...args),
     hashExternalElectionAnomalyClaimantReference: (...args: unknown[]) =>
       transactionServiceMock.hashExternalElectionAnomalyClaimantReference(...args),
+    prepareElectionAnomalyAttachmentManifestMaterial: (...args: unknown[]) =>
+      transactionServiceMock.prepareElectionAnomalyAttachmentManifestMaterial(...args),
   };
 });
 
@@ -256,6 +279,80 @@ function createGrantResponse(): GetElectionReportAccessGrantsResponse {
   };
 }
 
+function createEvidenceManifestResponse(
+  attachmentManifestId = '11111111-1111-1111-1111-111111111111',
+): GetElectionAnomalyEvidenceManifestResponse {
+  return {
+    Success: true,
+    ErrorMessage: '',
+    ActorPublicAddress: 'owner-address',
+    HasManifest: true,
+    Manifest: {
+      ElectionId: 'election-127',
+      ScopeId: 'owner',
+      CanonicalizationId: 'anomaly-intake-manifest-v1',
+      ManifestHash: 'sha256:owner-manifest',
+      PackageReadinessStatusId: 'ready',
+      PackageReadinessBlockerIds: [],
+      TotalThreadCount: 1,
+      AttachmentManifestCount: 1,
+      RedactionCount: 0,
+      Threads: [
+        {
+          AnomalyThreadId: 'thread-1',
+          ElectionId: 'election-127',
+          CategoryId: ELECTION_ANOMALY_CATEGORY_IDS.TRUSTEE_CONTINUITY,
+          CaseStateId: ELECTION_ANOMALY_CASE_STATE_IDS.UNDER_REVIEW,
+          CurrentThreadHash: 'sha256:thread',
+          GovernedDecisionRef: '',
+          HasGovernedDecisionRef: false,
+          HasOpenClarificationRequest: false,
+          OpenClarificationRequestId: '',
+          HasOpenClarificationRequestId: false,
+          CreatedAt: timestamp,
+          UpdatedAt: timestamp,
+          AttachmentManifests: [
+            {
+              AttachmentManifestId: attachmentManifestId,
+              AnomalyThreadId: 'thread-1',
+              EventId: 'event-attachment-1',
+              EventHash: 'sha256:event-attachment',
+              AttachmentKindId: 'authority_evidence',
+              EncryptedPayloadReference: 'restricted-payload-ref-not-for-ui',
+              EncryptedPayloadHash: 'sha256:payload-redaction',
+              ContentHash: 'sha256:content-redaction',
+              SizeBytes: 2048,
+              MimeType: 'application/pdf',
+              ValidationStatusId: 'accepted',
+              ScannerStatusId: 'clear',
+              PayloadAvailabilityStatusId: 'available',
+              ClarificationRequestId: '',
+              HasClarificationRequest: false,
+              ActorRoleId: 'owner-address-not-for-ui',
+              RecordedAt: timestamp,
+              SourceTransactionId: 'tx-attachment-1',
+              HasCallerContentKeyWrap: true,
+              CallerContentKeyWrap: {
+                WrapStatusId: ELECTION_ANOMALY_RECIPIENT_WRAP_STATUS_IDS.AVAILABLE,
+                RecipientKeyFingerprint: 'sha256:owner-key',
+                EncryptedContentKey: 'owner-wrapped-content-key',
+                WrapAlgorithm: 'x25519-aes-gcm',
+              },
+            },
+          ],
+          Redactions: [],
+          RecipientStatuses: [
+            {
+              RecipientRoleId: ELECTION_ANOMALY_RECIPIENT_ROLE_IDS.ELECTION_OWNER,
+              WrapStatusId: ELECTION_ANOMALY_RECIPIENT_WRAP_STATUS_IDS.AVAILABLE,
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
+
 function renderPanel() {
   return render(
     <OwnerAnomalyWorkspacePanel
@@ -288,6 +385,26 @@ describe('OwnerAnomalyWorkspacePanel', () => {
     });
     electionsServiceMock.getElectionAnomalyOwnerTriage.mockResolvedValue(createTriageResponse());
     electionsServiceMock.getElectionReportAccessGrants.mockResolvedValue(createGrantResponse());
+    electionsServiceMock.getElectionAnomalyEvidenceManifest.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      ActorPublicAddress: 'owner-address',
+      HasManifest: false,
+    });
+    electionsServiceMock.stageElectionAnomalyRestrictedPayload.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      ActorPublicAddress: 'owner-address',
+      PayloadReference:
+        'hush-election-anomaly-payload-v1:33333333-3333-3333-3333-333333333333',
+      EncryptedPayloadHash: 'sha256:encrypted-authority-payload',
+      ContentHash: 'sha256:authority-content',
+      SizeBytes: 2048,
+      MimeType: 'application/pdf',
+      ScannerStatusId: 'pending',
+      PayloadAvailabilityStatusId: 'available',
+      ValidationCode: '',
+    });
     identityServiceMock.getIdentity.mockResolvedValue({
       Successfull: true,
       Message: '',
@@ -310,11 +427,48 @@ describe('OwnerAnomalyWorkspacePanel', () => {
     transactionServiceMock.createClassifyElectionAnomalyThreadTransaction.mockResolvedValue({
       signedTransaction: 'signed-classify-tx',
     });
+    transactionServiceMock.createElectionAnomalyRestrictedEvidencePayload.mockResolvedValue({
+      EncryptedPayload: new Uint8Array([21, 22, 23]),
+      ContentKey: 'authority-content-key',
+    });
+    transactionServiceMock.createElectionAnomalyOwnerAttachmentContentKeyWraps.mockResolvedValue([
+      {
+        RecipientRoleId: ELECTION_ANOMALY_RECIPIENT_ROLE_IDS.ELECTION_OWNER,
+        RecipientPublicAddress: 'owner-address',
+        RecipientKeyFingerprint: 'sha256:owner-key',
+        EncryptedContentKey: 'owner-wrapped-content-key',
+        WrapAlgorithm: 'x25519-aes-gcm',
+        WrapStatusId: ELECTION_ANOMALY_RECIPIENT_WRAP_STATUS_IDS.AVAILABLE,
+      },
+      {
+        RecipientRoleId: ELECTION_ANOMALY_RECIPIENT_ROLE_IDS.DESIGNATED_AUDITOR,
+        RecipientPublicAddress: 'auditor-address',
+        RecipientKeyFingerprint: 'sha256:auditor-key',
+        EncryptedContentKey: 'auditor-wrapped-content-key',
+        WrapAlgorithm: 'x25519-aes-gcm',
+        WrapStatusId: ELECTION_ANOMALY_RECIPIENT_WRAP_STATUS_IDS.AVAILABLE,
+      },
+    ]);
+    transactionServiceMock.prepareElectionAnomalyAttachmentManifestMaterial.mockResolvedValue({
+      EncryptedPayloadReference:
+        'hush-election-anomaly-payload-v1:33333333-3333-3333-3333-333333333333',
+      EncryptedPayloadHash: 'sha256:encrypted-authority-payload',
+      ContentHash: 'sha256:authority-content',
+      SizeBytes: 2048,
+    });
+    transactionServiceMock.createRecordElectionAnomalyAttachmentManifestTransaction.mockResolvedValue({
+      signedTransaction: 'signed-authority-evidence-tx',
+      attachmentManifestId: 'authority-manifest-1',
+    });
     transactionServiceMock.createRecordElectionAnomalyAuthorityResponseTransaction.mockResolvedValue({
       signedTransaction: 'signed-response-tx',
     });
     transactionServiceMock.createRecordElectionAnomalyAuditorRecipientRewrapTransaction.mockResolvedValue({
       signedTransaction: 'signed-rewrap-tx',
+    });
+    transactionServiceMock.createRecordElectionAnomalyEvidenceRedactionTransaction.mockResolvedValue({
+      signedTransaction: 'signed-redaction-tx',
+      redactionEventId: 'redaction-event-1',
     });
     transactionServiceMock.createRegisterExternalElectionAnomalyClaimantTransaction.mockResolvedValue({
       signedTransaction: 'signed-external-tx',
@@ -332,6 +486,7 @@ describe('OwnerAnomalyWorkspacePanel', () => {
 
   afterEach(() => {
     cleanup();
+    vi.clearAllMocks();
   });
 
   it('decrypts owner-visible messages without exposing raw ciphertext and blocks terminal state with an open clarification', async () => {
@@ -464,6 +619,132 @@ describe('OwnerAnomalyWorkspacePanel', () => {
     expect(submitTransactionMock).toHaveBeenCalledWith('signed-rewrap-tx');
     expect(await screen.findByText('Auditor rewrap accepted for 1 designated auditor.'))
       .toBeInTheDocument();
+  });
+
+  it('records evidence redaction from the selected manifest row through a signed owner transaction', async () => {
+    const attachmentManifestId = '22222222-2222-2222-2222-222222222222';
+    electionsServiceMock.getElectionAnomalyOwnerTriage.mockResolvedValue(
+      createTriageResponse(undefined, { hasOpenClarification: false }),
+    );
+    electionsServiceMock.getElectionAnomalyEvidenceManifest.mockResolvedValue(
+      createEvidenceManifestResponse(attachmentManifestId),
+    );
+
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Record redaction' }));
+    fireEvent.change(screen.getByLabelText('Redaction reason'), {
+      target: { value: ELECTION_ANOMALY_REDACTION_REASON_IDS.LEGAL_HOLD },
+    });
+    fireEvent.change(screen.getByLabelText('Operational or legal hold reference'), {
+      target: { value: 'legal-hold-42' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Submit signed redaction event' }));
+
+    await waitFor(() => {
+      expect(transactionServiceMock.createRecordElectionAnomalyEvidenceRedactionTransaction)
+        .toHaveBeenCalledWith(expect.objectContaining({
+          ElectionId: 'election-127',
+          AnomalyThreadId: 'thread-1',
+          ActorPublicAddress: 'owner-address',
+          TargetKindId: ELECTION_ANOMALY_REDACTION_TARGET_KIND_IDS.ATTACHMENT_MANIFEST,
+          TargetId: attachmentManifestId,
+          ReasonCodeId: ELECTION_ANOMALY_REDACTION_REASON_IDS.LEGAL_HOLD,
+          OriginalHash: 'sha256:content-redaction',
+          TombstoneStatusId: 'restricted_tombstone',
+          HoldReference: 'legal-hold-42',
+        }));
+    });
+    expect(submitTransactionMock).toHaveBeenCalledWith('signed-redaction-tx');
+    expect(await screen.findByText('Evidence redaction accepted as append-only anomaly history.'))
+      .toBeInTheDocument();
+  });
+
+  it('stages owner authority evidence and records a signed attachment manifest', async () => {
+    electionsServiceMock.getElectionAnomalyOwnerTriage.mockResolvedValue(
+      createTriageResponse(undefined, { hasOpenClarification: false }),
+    );
+
+    renderPanel();
+
+    await screen.findByText('Decrypted owner anomaly body.');
+    const file = new File(['authority evidence pdf'], 'authority-evidence.pdf', {
+      type: 'application/pdf',
+    });
+    fireEvent.change(screen.getByLabelText('Choose authority evidence files'), {
+      target: {
+        files: [file],
+      },
+    });
+
+    expect(await screen.findByText('Payload staged')).toBeInTheDocument();
+    expect(screen.getByText('authority-evidence.pdf')).toBeInTheDocument();
+    expect(screen.getByText('sha256:authority-content')).toBeInTheDocument();
+    expect(
+      screen.queryByText('hush-election-anomaly-payload-v1:33333333-3333-3333-3333-333333333333'),
+    ).not.toBeInTheDocument();
+    expect(electionsServiceMock.stageElectionAnomalyRestrictedPayload)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        ElectionId: 'election-127',
+        ActorPublicAddress: 'owner-address',
+        AnomalyThreadId: 'thread-1',
+        AttachmentKindId: ELECTION_ANOMALY_ATTACHMENT_KIND_IDS.AUTHORITY_EVIDENCE,
+        EncryptedPayloadHash: 'sha256:encrypted-authority-payload',
+        ContentHash: 'sha256:authority-content',
+        SizeBytes: 2048,
+        MimeType: 'application/pdf',
+        ClarificationRequestId: '',
+      }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Record authority evidence' }));
+
+    await waitFor(() => {
+      expect(transactionServiceMock.createRecordElectionAnomalyAttachmentManifestTransaction)
+        .toHaveBeenCalledWith(expect.objectContaining({
+          ElectionId: 'election-127',
+          AnomalyThreadId: 'thread-1',
+          ActorPublicAddress: 'owner-address',
+          AttachmentKindId: ELECTION_ANOMALY_ATTACHMENT_KIND_IDS.AUTHORITY_EVIDENCE,
+          EncryptedPayloadReference:
+            'hush-election-anomaly-payload-v1:33333333-3333-3333-3333-333333333333',
+          EncryptedPayloadHash: 'sha256:encrypted-authority-payload',
+          ContentHash: 'sha256:authority-content',
+          SizeBytes: 2048,
+          MimeType: 'application/pdf',
+          ValidationStatusId: ELECTION_ANOMALY_ATTACHMENT_VALIDATION_STATUS_IDS.PENDING_SCAN,
+          ContentKeyWraps: expect.arrayContaining([
+            expect.objectContaining({
+              RecipientRoleId: ELECTION_ANOMALY_RECIPIENT_ROLE_IDS.ELECTION_OWNER,
+              EncryptedContentKey: 'owner-wrapped-content-key',
+            }),
+            expect.objectContaining({
+              RecipientRoleId: ELECTION_ANOMALY_RECIPIENT_ROLE_IDS.DESIGNATED_AUDITOR,
+              EncryptedContentKey: 'auditor-wrapped-content-key',
+            }),
+          ]),
+        }));
+    });
+    expect(submitTransactionMock).toHaveBeenCalledWith('signed-authority-evidence-tx');
+    expect(await screen.findByText(/Authority evidence manifest accepted/)).toBeInTheDocument();
+  });
+
+  it('rejects unsupported owner authority evidence before staging', async () => {
+    renderPanel();
+
+    await screen.findByText('Decrypted owner anomaly body.');
+    const file = new File(['zip bytes'], 'archive.zip', { type: 'application/zip' });
+    fireEvent.change(screen.getByLabelText('Choose authority evidence files'), {
+      target: {
+        files: [file],
+      },
+    });
+
+    expect(await screen.findByText('Validation rejected')).toBeInTheDocument();
+    expect(screen.getByText(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_MIME_TYPE_INVALID))
+      .toBeInTheDocument();
+    expect(electionsServiceMock.stageElectionAnomalyRestrictedPayload).not.toHaveBeenCalled();
+    expect(transactionServiceMock.createRecordElectionAnomalyAttachmentManifestTransaction)
+      .not.toHaveBeenCalled();
   });
 
   it('submits clarification requests and authority responses through signed owner transactions', async () => {
