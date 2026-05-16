@@ -1531,6 +1531,74 @@ export interface ElectionReportArtifactView {
   RecordedAt: GrpcTimestamp;
 }
 
+export type ElectionAnomalyPublicSummaryCountModeId = 'exact' | 'aggregated' | 'suppressed';
+export type ElectionAnomalyPublicArtifactScanStatusId = 'passed' | 'failed';
+export type ElectionAnomalyPackageReadinessStatusId = 'ready' | 'warning' | 'blocked';
+export type ElectionAnomalyReportGenerationReadOnlyStatusId = 'validated' | 'not_validated';
+export type ElectionAnomalyRetentionEvidenceStatusId =
+  | 'no_anomaly_hold_evidence'
+  | 'open_case_requires_policy_review'
+  | 'restricted_redaction_hold_reference_present'
+  | 'governed_hold_reference_recorded'
+  | 'retention_hold_not_implemented';
+
+export interface ElectionAnomalyPublicSummaryBucketView {
+  CategoryId: string;
+  CountMode: ElectionAnomalyPublicSummaryCountModeId;
+  PublicCount: number;
+  HasPublicCount: boolean;
+  SuppressionReasonIds: string[];
+  SourceCategoryIds: string[];
+}
+
+export interface ElectionAnomalyPublicSummaryView {
+  SchemaId: string;
+  SuppressionPolicyId: string;
+  ElectionId: string;
+  SourceManifestHash: string;
+  HasSourceManifestHash: boolean;
+  TotalThreadCount: number;
+  HasTotalThreadCount: boolean;
+  TotalThreadCountMode: ElectionAnomalyPublicSummaryCountModeId;
+  VisibleBuckets: ElectionAnomalyPublicSummaryBucketView[];
+  AggregatedBucketCount: number;
+  SuppressedThreadCount: number;
+  SuppressionReasonIds: string[];
+  RestrictedManifestArtifactId: string;
+  HasRestrictedManifestArtifactId: boolean;
+  RestrictedManifestHash: string;
+  HasRestrictedManifestHash: boolean;
+  GeneratedAt?: GrpcTimestamp;
+}
+
+export interface ElectionAnomalyRetentionEvidenceStatusView {
+  StatusId: ElectionAnomalyRetentionEvidenceStatusId;
+  GovernedDecisionRefs: string[];
+  RedactionHoldReferenceCount: number;
+  OpenCaseCount: number;
+  EscalatedCaseCount: number;
+  ReadinessBlocksValidationClaims: boolean;
+  Message: string;
+}
+
+export interface ElectionAnomalyReportReadinessView {
+  PublicSummarySchemaId: string;
+  SuppressionPolicyId: string;
+  ForbiddenFieldScanStatusId: ElectionAnomalyPublicArtifactScanStatusId;
+  RestrictedManifestArtifactId: string;
+  HasRestrictedManifestArtifactId: boolean;
+  RestrictedManifestHash: string;
+  HasRestrictedManifestHash: boolean;
+  PackageReadinessStatusId: ElectionAnomalyPackageReadinessStatusId;
+  PackageReadinessBlockerIds: string[];
+  OpenCaseCount: number;
+  EscalatedCaseCount: number;
+  RetentionEvidenceStatusId: ElectionAnomalyRetentionEvidenceStatusId;
+  RetentionEvidenceStatus?: ElectionAnomalyRetentionEvidenceStatusView;
+  HasGovernedLifecycleEvidence: boolean;
+  ReportGenerationReadOnlyStatusId: ElectionAnomalyReportGenerationReadOnlyStatusId;
+}
+
 export interface ProtocolPackageAccessLocationView {
   LocationKind: ProtocolPackageAccessLocationKindProto;
   Label: string;
@@ -2837,6 +2905,8 @@ export interface GetElectionResultViewResponse {
   CeremonySnapshot?: ElectionCeremonyBindingSnapshot;
   ProtocolPackageBinding?: ElectionProtocolPackageBindingView;
   VerificationPackageStatus?: ElectionVerificationPackageStatusView;
+  PublicAnomalySummary?: ElectionAnomalyPublicSummaryView;
+  AnomalyReportReadiness?: ElectionAnomalyReportReadinessView;
 }
 
 export interface GetElectionVerificationPackageStatusResponse {

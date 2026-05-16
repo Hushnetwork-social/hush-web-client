@@ -15,6 +15,7 @@ import { ClosedProgressBanner } from './ClosedProgressBanner';
 import { ElectionAccessBoundaryNotice } from './ElectionAccessBoundaryNotice';
 import { ElectionHubList } from './ElectionHubList';
 import { ElectionWorkspaceHeader } from './ElectionWorkspaceHeader';
+import { HushVotingAnomalyWorkspaceSection } from './HushVotingAnomalyWorkspaceSection';
 import { ArtifactsWorkspaceSummary } from './HushVotingArtifactsSection';
 import { AuditorWorkspaceSummary } from './HushVotingAuditorSection';
 import { OwnerAdminWorkspaceSummary } from './HushVotingOwnerAdminSection';
@@ -482,6 +483,10 @@ export function HushVotingWorkspace({
           <>
             <ElectionWorkspaceHeader entry={effectiveEntry} />
             <ClosedProgressBanner entry={effectiveEntry} />
+            <HushVotingAnomalyWorkspaceSection
+              entry={effectiveEntry}
+              actorPublicAddress={actorPublicAddress}
+            />
 
             {hasPendingInvitationSurface && pendingSelfTrusteeInvitation ? (
               <PendingTrusteeInvitationSummary

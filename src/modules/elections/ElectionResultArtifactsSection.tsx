@@ -1,16 +1,24 @@
 "use client";
 
 import {
+  Archive,
   BarChart3,
   Clock3,
   Download,
+  EyeOff,
   FileDigit,
+  FileWarning,
   KeyRound,
+  LockKeyhole,
   ShieldAlert,
   ShieldCheck,
 } from 'lucide-react';
 import type {
   ElectionRecordView,
+  ElectionAnomalyPublicSummaryBucketView,
+  ElectionAnomalyPublicSummaryView,
+  ElectionAnomalyReportReadinessView,
+  ElectionAnomalyRetentionEvidenceStatusView,
   ElectionReportArtifactView,
   ElectionResultArtifact,
   GetElectionResultViewResponse,
@@ -106,6 +114,75 @@ function formatHash(value?: Uint8Array): string {
   return hex.length <= 24 ? hex : `${hex.slice(0, 12)}...${hex.slice(-8)}`;
 }
 
+function formatCode(value?: string): string {
+  if (!value) {
+    return 'Not recorded';
+  }
+
+  return value
+    .split('_')
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(' ');
+}
+
+function getCountModeLabel(mode: string): string {
+  switch (mode) {
+    case 'exact':
+      return 'Exact';
+    case 'aggregated':
+      return 'Aggregated';
+    case 'suppressed':
+      return 'Suppressed';
+    default:
+      return formatCode(mode);
+  }
+}
+
+function getPublicCountLabel(bucket: ElectionAnomalyPublicSummaryBucketView): string {
+  if (bucket.HasPublicCount) {
+    return String(bucket.PublicCount);
+  }
+
+  return 'Withheld';
+}
+
+function getTotalThreadCountLabel(summary: ElectionAnomalyPublicSummaryView): string {
+  if (summary.HasTotalThreadCount) {
+    return String(summary.TotalThreadCount);
+  }
+
+  return getCountModeLabel(summary.TotalThreadCountMode);
+}
+
+function isNoAnomalySummary(summary: ElectionAnomalyPublicSummaryView): boolean {
+  return summary.HasTotalThreadCount &&
+    summary.TotalThreadCount === 0 &&
+    summary.VisibleBuckets.length === 0;
+}
+
+function isAllSuppressedSummary(summary: ElectionAnomalyPublicSummaryView): boolean {
+  return !isNoAnomalySummary(summary) &&
+    summary.VisibleBuckets.length > 0 &&
+    summary.VisibleBuckets.every((bucket) => !bucket.HasPublicCount);
+}
+
+function SuppressionReasonList({ reasonIds }: { reasonIds: string[] }) {
+  if (reasonIds.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mt-3 flex flex-wrap gap-2 text-xs text-hush-text-accent">
+      {reasonIds.map((reasonId) => (
+        <span key={reasonId} className="rounded-full bg-black/20 px-2 py-1">
+          {formatCode(reasonId)}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function getPackageStatusCopy(
   status: ElectionReportPackageStatusProto
 ): { title: string; body: string; className: string } {
@@ -180,6 +257,341 @@ function downloadReportArtifact(artifact: ElectionReportArtifactView) {
   link.click();
   link.remove();
   window.URL.revokeObjectURL(objectUrl);
+}
+
+function isRestrictedAnomalyReportArtifact(artifact: ElectionReportArtifactView): boolean {
+  return artifact.ArtifactKind ===
+    ElectionReportArtifactKindProto.ReportArtifactMachineRestrictedAnomalyIntakeManifest;
+}
+
+function PublicAnomalySummaryPanel({ summary }: { summary: ElectionAnomalyPublicSummaryView }) {
+  const noAnomaly = isNoAnomalySummary(summary);
+  const allSuppressed = isAllSuppressedSummary(summary);
+
+  return (
+    <section
+      className="rounded-[24px] bg-[#17203a] p-4 shadow-sm shadow-black/10"
+      data-testid="public-anomaly-summary-panel"
+    >
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+            Public anomaly summary
+          </div>
+          <h3 className="mt-2 text-lg font-semibold text-hush-text-primary">
+            Privacy-safe anomaly reporting
+          </h3>
+          <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
+            Counts are published only when the category remains safe to show. Suppressed buckets keep
+            the report honest without exposing submitter identity or private case context.
+          </p>
+        </div>
+        <div className="rounded-xl bg-cyan-500/14 px-3 py-2 text-xs font-medium text-hush-text-primary">
+          {summary.SuppressionPolicyId}
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-2xl bg-cyan-500/12 p-3">
+          <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+            Total threads
+          </div>
+          <div className="mt-3 flex h-16 items-center rounded-xl bg-[#11182c] px-4 text-2xl font-semibold text-hush-text-primary">
+            {getTotalThreadCountLabel(summary)}
+          </div>
+        </div>
+        <div className="rounded-2xl bg-emerald-500/12 p-3">
+          <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+            Visible buckets
+          </div>
+          <div className="mt-3 flex h-16 items-center rounded-xl bg-[#11182c] px-4 text-2xl font-semibold text-hush-text-primary">
+            {summary.VisibleBuckets.length}
+          </div>
+        </div>
+        <div className="rounded-2xl bg-amber-500/12 p-3">
+          <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+            Suppressed threads
+          </div>
+          <div className="mt-3 flex h-16 items-center rounded-xl bg-[#11182c] px-4 text-2xl font-semibold text-hush-text-primary">
+            {summary.SuppressedThreadCount}
+          </div>
+        </div>
+        <div className="rounded-2xl bg-violet-500/12 p-3">
+          <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+            Count mode
+          </div>
+          <div className="mt-3 flex h-16 items-center rounded-xl bg-[#11182c] px-4 text-sm font-semibold text-hush-text-primary">
+            {getCountModeLabel(summary.TotalThreadCountMode)}
+          </div>
+        </div>
+      </div>
+
+      {noAnomaly ? (
+        <div className="mt-4 rounded-2xl bg-emerald-500/12 p-4 text-sm text-emerald-100">
+          No anomaly threads are included in the sealed report package.
+        </div>
+      ) : null}
+
+      {allSuppressed ? (
+        <div className="mt-4 rounded-2xl bg-amber-500/12 p-4 text-sm text-amber-100">
+          All anomaly counts are withheld by the public suppression policy.
+        </div>
+      ) : null}
+
+      {summary.VisibleBuckets.length > 0 ? (
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          {summary.VisibleBuckets.map((bucket) => (
+            <div
+              key={`${bucket.CategoryId}:${bucket.CountMode}`}
+              className="rounded-2xl bg-[#202946] p-4 shadow-sm shadow-black/10"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                    {getCountModeLabel(bucket.CountMode)}
+                  </div>
+                  <div className="mt-2 text-sm font-semibold text-hush-text-primary">
+                    {formatCode(bucket.CategoryId)}
+                  </div>
+                </div>
+                <div className="rounded-xl bg-black/25 px-3 py-2 text-lg font-semibold text-hush-text-primary">
+                  {getPublicCountLabel(bucket)}
+                </div>
+              </div>
+              {bucket.SourceCategoryIds.length > 1 ? (
+                <div className="mt-3 text-xs text-hush-text-accent">
+                  Aggregates {bucket.SourceCategoryIds.length} source categories.
+                </div>
+              ) : null}
+              <SuppressionReasonList reasonIds={bucket.SuppressionReasonIds} />
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      <SuppressionReasonList reasonIds={summary.SuppressionReasonIds} />
+    </section>
+  );
+}
+
+function RetentionEvidenceStatus({
+  status,
+}: {
+  status?: ElectionAnomalyRetentionEvidenceStatusView;
+}) {
+  if (!status) {
+    return null;
+  }
+
+  const toneClass = status.ReadinessBlocksValidationClaims
+    ? 'bg-amber-500/12 text-amber-100 ring-1 ring-amber-300/20'
+    : 'bg-emerald-500/12 text-emerald-100';
+
+  return (
+    <div className={`rounded-2xl p-4 text-sm ${toneClass}`} data-testid="anomaly-retention-status">
+      <div className="flex items-start gap-3">
+        <Archive className="mt-0.5 h-5 w-5" />
+        <div>
+          <div className="font-semibold">{formatCode(status.StatusId)}</div>
+          <div className="mt-2">{status.Message}</div>
+          <div className="mt-3 grid gap-2 text-xs text-hush-text-accent md:grid-cols-3">
+            <span>Open: {status.OpenCaseCount}</span>
+            <span>Escalated: {status.EscalatedCaseCount}</span>
+            <span>Redaction holds: {status.RedactionHoldReferenceCount}</span>
+          </div>
+          {status.GovernedDecisionRefs.length > 0 ? (
+            <div className="mt-3 text-xs text-hush-text-accent">
+              Governed refs: {status.GovernedDecisionRefs.join(', ')}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AnomalyReportReadinessStrip({
+  readiness,
+}: {
+  readiness: ElectionAnomalyReportReadinessView;
+}) {
+  const blocked = readiness.PackageReadinessStatusId === 'blocked' ||
+    readiness.RetentionEvidenceStatus?.ReadinessBlocksValidationClaims;
+
+  return (
+    <section
+      className={`rounded-[24px] bg-[#18213c] p-4 shadow-sm shadow-black/10 ${
+        blocked ? 'ring-1 ring-amber-300/20' : ''
+      }`}
+      data-testid="anomaly-report-readiness-strip"
+    >
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+            Readiness and retention
+          </div>
+          <h3 className="mt-2 text-lg font-semibold text-hush-text-primary">
+            Anomaly package status
+          </h3>
+        </div>
+        <div className="rounded-xl bg-black/20 px-3 py-2 text-xs font-medium text-hush-text-primary">
+          {readiness.ReportGenerationReadOnlyStatusId}
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-2xl bg-cyan-500/12 p-3">
+          <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+            Package readiness
+          </div>
+          <div className="mt-3 rounded-xl bg-[#11182c] px-4 py-3 text-sm font-semibold text-hush-text-primary">
+            {formatCode(readiness.PackageReadinessStatusId)}
+          </div>
+        </div>
+        <div className="rounded-2xl bg-emerald-500/12 p-3">
+          <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+            Public scan
+          </div>
+          <div className="mt-3 rounded-xl bg-[#11182c] px-4 py-3 text-sm font-semibold text-hush-text-primary">
+            {formatCode(readiness.ForbiddenFieldScanStatusId)}
+          </div>
+        </div>
+        <div className="rounded-2xl bg-violet-500/12 p-3">
+          <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+            Open cases
+          </div>
+          <div className="mt-3 rounded-xl bg-[#11182c] px-4 py-3 text-sm font-semibold text-hush-text-primary">
+            {readiness.OpenCaseCount}
+          </div>
+        </div>
+        <div className="rounded-2xl bg-amber-500/12 p-3">
+          <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+            Escalated
+          </div>
+          <div className="mt-3 rounded-xl bg-[#11182c] px-4 py-3 text-sm font-semibold text-hush-text-primary">
+            {readiness.EscalatedCaseCount}
+          </div>
+        </div>
+      </div>
+
+      {readiness.PackageReadinessBlockerIds.length > 0 ? (
+        <div className="mt-4 rounded-2xl bg-amber-500/12 p-4 text-sm text-amber-100">
+          <div className="font-semibold">Readiness blockers</div>
+          <SuppressionReasonList reasonIds={readiness.PackageReadinessBlockerIds} />
+        </div>
+      ) : null}
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        <div className="rounded-2xl bg-black/20 p-4 text-sm text-hush-text-accent">
+          <div className="text-xs font-semibold uppercase tracking-[0.2em]">
+            Restricted manifest ref
+          </div>
+          <div className="mt-2 font-mono text-hush-text-primary">
+            {formatArtifactValue(readiness.RestrictedManifestArtifactId)}
+          </div>
+          <div className="mt-2 font-mono">
+            {formatArtifactValue(readiness.RestrictedManifestHash)}
+          </div>
+        </div>
+        <RetentionEvidenceStatus status={readiness.RetentionEvidenceStatus} />
+      </div>
+    </section>
+  );
+}
+
+function RestrictedAnomalyArtifactRow({
+  artifact,
+  summary,
+  readiness,
+}: {
+  artifact?: ElectionReportArtifactView;
+  summary?: ElectionAnomalyPublicSummaryView;
+  readiness?: ElectionAnomalyReportReadinessView;
+}) {
+  const expectedArtifactId = summary?.RestrictedManifestArtifactId ||
+    readiness?.RestrictedManifestArtifactId ||
+    '';
+  const expectedHash = summary?.RestrictedManifestHash || readiness?.RestrictedManifestHash || '';
+  const hasExpectedReference = Boolean(
+    summary?.HasRestrictedManifestArtifactId ||
+      readiness?.HasRestrictedManifestArtifactId ||
+      expectedArtifactId
+  );
+  const mismatch = Boolean(artifact && expectedArtifactId && artifact.Id !== expectedArtifactId);
+
+  if (!artifact && !hasExpectedReference && !readiness?.PackageReadinessBlockerIds.length) {
+    return null;
+  }
+
+  return (
+    <section
+      className={`rounded-[24px] bg-[#1a2240] p-4 shadow-sm shadow-black/10 ${
+        mismatch ? 'ring-1 ring-red-300/30' : ''
+      }`}
+      data-testid="restricted-anomaly-artifact-row"
+    >
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+            <LockKeyhole className="h-4 w-4" />
+            <span>Restricted anomaly manifest</span>
+          </div>
+          <h3 className="mt-2 text-lg font-semibold text-hush-text-primary">
+            {artifact?.Title ?? 'Restricted artifact reference'}
+          </h3>
+          <div className="mt-2 text-sm text-hush-text-accent">
+            {artifact
+              ? 'Download is available for the current report-package role.'
+              : 'The sealed report records a restricted manifest reference, but no downloadable artifact is visible in this view.'}
+          </div>
+        </div>
+        {artifact ? (
+          <button
+            type="button"
+            onClick={() => downloadReportArtifact(artifact)}
+            className="inline-flex items-center gap-2 rounded-xl bg-hush-purple/20 px-3 py-2 text-sm text-hush-text-primary transition-colors hover:bg-hush-purple/28"
+            data-testid="restricted-anomaly-artifact-download"
+          >
+            <Download className="h-4 w-4" />
+            <span>Download</span>
+          </button>
+        ) : (
+          <div className="inline-flex items-center gap-2 rounded-xl bg-amber-500/12 px-3 py-2 text-sm text-amber-100">
+            <EyeOff className="h-4 w-4" />
+            <span>Not visible</span>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <div className="rounded-2xl bg-violet-500/12 p-3 text-sm text-hush-text-primary">
+          <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+            Expected id
+          </div>
+          <div className="mt-2 font-mono">{formatArtifactValue(expectedArtifactId)}</div>
+        </div>
+        <div className="rounded-2xl bg-cyan-500/12 p-3 text-sm text-hush-text-primary">
+          <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+            Expected hash
+          </div>
+          <div className="mt-2 font-mono">{formatArtifactValue(expectedHash)}</div>
+        </div>
+        <div className="rounded-2xl bg-emerald-500/12 p-3 text-sm text-hush-text-primary">
+          <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+            Visible file
+          </div>
+          <div className="mt-2">{artifact?.FileName ?? 'None'}</div>
+        </div>
+      </div>
+
+      {mismatch ? (
+        <div className="mt-4 flex items-start gap-3 rounded-2xl bg-red-500/12 p-4 text-sm text-red-100">
+          <FileWarning className="mt-0.5 h-5 w-5" />
+          <div>Restricted manifest artifact id does not match the public report reference.</div>
+        </div>
+      ) : null}
+    </section>
+  );
 }
 
 function ResultArtifactCard({
@@ -331,6 +743,8 @@ function ResultArtifactCard({
 }
 
 function ReportArtifactCatalogCard({ artifact }: { artifact: ElectionReportArtifactView }) {
+  const restrictedAnomalyArtifact = isRestrictedAnomalyReportArtifact(artifact);
+
   return (
     <section
       className="rounded-[24px] bg-[#1a2240] p-4 shadow-sm shadow-black/10"
@@ -385,14 +799,20 @@ function ReportArtifactCatalogCard({ artifact }: { artifact: ElectionReportArtif
         </div>
       </div>
 
-      <details className="mt-4 rounded-2xl bg-black/20 p-3">
-        <summary className="cursor-pointer text-sm font-medium text-hush-text-primary">
-          Open content
-        </summary>
-        <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-xs text-hush-text-accent">
-          {artifact.Content}
-        </pre>
-      </details>
+      {restrictedAnomalyArtifact ? (
+        <div className="mt-4 rounded-2xl bg-amber-500/12 p-3 text-sm text-amber-100">
+          Restricted manifest content is available by download only.
+        </div>
+      ) : (
+        <details className="mt-4 rounded-2xl bg-black/20 p-3">
+          <summary className="cursor-pointer text-sm font-medium text-hush-text-primary">
+            Open content
+          </summary>
+          <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-xs text-hush-text-accent">
+            {artifact.Content}
+          </pre>
+        </details>
+      )}
     </section>
   );
 }
@@ -411,6 +831,12 @@ export function ElectionResultArtifactsSection({
   const unofficialResult = showResults && !officialResult ? resultView?.UnofficialResult : null;
   const latestReportPackage = resultView?.LatestReportPackage;
   const visibleReportArtifacts = resultView?.VisibleReportArtifacts ?? [];
+  const publicAnomalySummary = resultView?.PublicAnomalySummary;
+  const anomalyReportReadiness = resultView?.AnomalyReportReadiness;
+  const restrictedAnomalyArtifact = visibleReportArtifacts.find(isRestrictedAnomalyReportArtifact);
+  const catalogReportArtifacts = visibleReportArtifacts.filter(
+    (artifact) => !isRestrictedAnomalyReportArtifact(artifact)
+  );
   const ceremonySnapshot = resultView?.CeremonySnapshot;
   const closedProgressStatus =
     resultView?.ClosedProgressStatus ?? election.ClosedProgressStatus;
@@ -638,15 +1064,31 @@ export function ElectionResultArtifactsSection({
             />
           ) : null}
 
+          {publicAnomalySummary ? (
+            <PublicAnomalySummaryPanel summary={publicAnomalySummary} />
+          ) : null}
+
+          {anomalyReportReadiness ? (
+            <AnomalyReportReadinessStrip readiness={anomalyReportReadiness} />
+          ) : null}
+
+          {publicAnomalySummary || anomalyReportReadiness || restrictedAnomalyArtifact ? (
+            <RestrictedAnomalyArtifactRow
+              artifact={restrictedAnomalyArtifact}
+              summary={publicAnomalySummary}
+              readiness={anomalyReportReadiness}
+            />
+          ) : null}
+
           {latestReportPackage.FailureReason ? (
             <div className="rounded-xl bg-red-500/12 p-4 text-sm text-red-100">
               {latestReportPackage.FailureReason}
             </div>
           ) : null}
 
-          {visibleReportArtifacts.length > 0 ? (
+          {catalogReportArtifacts.length > 0 ? (
             <div className="space-y-4" data-testid="report-package-catalog">
-              {visibleReportArtifacts.map((artifact) => (
+              {catalogReportArtifacts.map((artifact) => (
                 <ReportArtifactCatalogCard key={artifact.Id} artifact={artifact} />
               ))}
             </div>

@@ -2,6 +2,8 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   ElectionRecordView,
+  ElectionAnomalyPublicSummaryView,
+  ElectionAnomalyReportReadinessView,
   ElectionReportArtifactView,
   ElectionReportPackageSummaryView,
   ElectionResultArtifact,
@@ -188,6 +190,90 @@ function createReportArtifact(
   };
 }
 
+function createPublicAnomalySummary(
+  overrides?: Partial<ElectionAnomalyPublicSummaryView>
+): ElectionAnomalyPublicSummaryView {
+  return {
+    SchemaId: 'public-anomaly-summary-v1',
+    SuppressionPolicyId: 'anomaly-public-summary-v1',
+    ElectionId: 'election-1',
+    SourceManifestHash: 'sha256:manifest',
+    HasSourceManifestHash: true,
+    TotalThreadCount: 7,
+    HasTotalThreadCount: true,
+    TotalThreadCountMode: 'exact',
+    VisibleBuckets: [
+      {
+        CategoryId: 'ballot_casting_or_receipt_anomaly',
+        CountMode: 'exact',
+        PublicCount: 4,
+        HasPublicCount: true,
+        SuppressionReasonIds: [],
+        SourceCategoryIds: ['ballot_casting_or_receipt_anomaly'],
+      },
+      {
+        CategoryId: 'other_process_anomaly',
+        CountMode: 'aggregated',
+        PublicCount: 3,
+        HasPublicCount: true,
+        SuppressionReasonIds: ['low_count_category'],
+        SourceCategoryIds: [
+          'access_or_authentication_anomaly',
+          'trustee_continuity_anomaly',
+        ],
+      },
+      {
+        CategoryId: 'security_or_integrity_concern',
+        CountMode: 'suppressed',
+        PublicCount: 0,
+        HasPublicCount: false,
+        SuppressionReasonIds: ['restricted_evidence_only'],
+        SourceCategoryIds: ['security_or_integrity_concern'],
+      },
+    ],
+    AggregatedBucketCount: 2,
+    SuppressedThreadCount: 1,
+    SuppressionReasonIds: ['low_count_category', 'restricted_evidence_only'],
+    RestrictedManifestArtifactId: 'restricted-anomaly-artifact-1',
+    HasRestrictedManifestArtifactId: true,
+    RestrictedManifestHash: 'sha256:restricted-manifest',
+    HasRestrictedManifestHash: true,
+    GeneratedAt: timestamp,
+    ...overrides,
+  };
+}
+
+function createAnomalyReportReadiness(
+  overrides?: Partial<ElectionAnomalyReportReadinessView>
+): ElectionAnomalyReportReadinessView {
+  return {
+    PublicSummarySchemaId: 'public-anomaly-summary-v1',
+    SuppressionPolicyId: 'anomaly-public-summary-v1',
+    ForbiddenFieldScanStatusId: 'passed',
+    RestrictedManifestArtifactId: 'restricted-anomaly-artifact-1',
+    HasRestrictedManifestArtifactId: true,
+    RestrictedManifestHash: 'sha256:restricted-manifest',
+    HasRestrictedManifestHash: true,
+    PackageReadinessStatusId: 'ready',
+    PackageReadinessBlockerIds: [],
+    OpenCaseCount: 0,
+    EscalatedCaseCount: 0,
+    RetentionEvidenceStatusId: 'governed_hold_reference_recorded',
+    RetentionEvidenceStatus: {
+      StatusId: 'governed_hold_reference_recorded',
+      GovernedDecisionRefs: ['gov-42'],
+      RedactionHoldReferenceCount: 0,
+      OpenCaseCount: 0,
+      EscalatedCaseCount: 1,
+      ReadinessBlocksValidationClaims: false,
+      Message: 'Governed anomaly lifecycle evidence is recorded by reference.',
+    },
+    HasGovernedLifecycleEvidence: true,
+    ReportGenerationReadOnlyStatusId: 'validated',
+    ...overrides,
+  };
+}
+
 function createCeremonySnapshot(overrides?: {
   ProfileId?: string;
   TrusteeCount?: number;
@@ -316,16 +402,157 @@ describe('ElectionResultArtifactsSection', () => {
     );
     expect(screen.getByTestId('report-package-catalog')).toHaveTextContent('Final manifest');
     expect(screen.getByTestId('report-package-catalog')).toHaveTextContent('Outcome projection');
-    expect(screen.getByTestId('report-package-catalog')).toHaveTextContent(
-      'Restricted anomaly intake manifest'
+    expect(screen.getByTestId('restricted-anomaly-artifact-row')).toHaveTextContent(
+      'Restricted anomaly manifest'
     );
     expect(screen.queryByText('Named roster')).not.toBeInTheDocument();
+    expect(screen.queryByText('{"packageReadinessStatusId":"ready"}')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('report-artifact-download-report-artifact-1'));
 
     expect(window.URL.createObjectURL).toHaveBeenCalledTimes(1);
     expect(HTMLAnchorElement.prototype.click).toHaveBeenCalledTimes(1);
     expect(window.URL.revokeObjectURL).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders public anomaly summary, readiness, retention, and restricted artifact status', () => {
+    render(
+      <ElectionResultArtifactsSection
+        election={createElectionRecord()}
+        resultView={createResultView({
+          CeremonySnapshot: createCeremonySnapshot(),
+          CanViewReportPackage: true,
+          LatestReportPackage: createReportPackage(),
+          PublicAnomalySummary: createPublicAnomalySummary(),
+          AnomalyReportReadiness: createAnomalyReportReadiness(),
+          VisibleReportArtifacts: [
+            createReportArtifact({
+              Id: 'restricted-anomaly-artifact-1',
+              ArtifactKind:
+                ElectionReportArtifactKindProto.ReportArtifactMachineRestrictedAnomalyIntakeManifest,
+              Format: ElectionReportArtifactFormatProto.ReportArtifactJson,
+              Title: 'Restricted anomaly manifest',
+              FileName: 'restricted-anomaly-intake-manifest.json',
+              MediaType: 'application/json',
+              Content: '{"submitterActorPublicAddress":"private-address"}',
+              PairedArtifactId: '',
+            }),
+          ],
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('public-anomaly-summary-panel')).toHaveTextContent(
+      'Privacy-safe anomaly reporting'
+    );
+    expect(screen.getByTestId('public-anomaly-summary-panel')).toHaveTextContent(
+      'Ballot Casting Or Receipt Anomaly'
+    );
+    expect(screen.getByTestId('public-anomaly-summary-panel')).toHaveTextContent(
+      'Aggregates 2 source categories.'
+    );
+    expect(screen.getByTestId('public-anomaly-summary-panel')).toHaveTextContent('Withheld');
+    expect(screen.getByTestId('anomaly-report-readiness-strip')).toHaveTextContent(
+      'Governed Hold Reference Recorded'
+    );
+    expect(screen.getByTestId('anomaly-retention-status')).toHaveTextContent('gov-42');
+    expect(screen.getByTestId('restricted-anomaly-artifact-row')).toHaveTextContent(
+      'Download is available'
+    );
+    expect(screen.queryByText('private-address')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('restricted-anomaly-artifact-download'));
+
+    expect(window.URL.createObjectURL).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders no-anomaly summary state without restricted artifact content', () => {
+    render(
+      <ElectionResultArtifactsSection
+        election={createElectionRecord()}
+        resultView={createResultView({
+          CeremonySnapshot: createCeremonySnapshot(),
+          CanViewReportPackage: true,
+          LatestReportPackage: createReportPackage(),
+          PublicAnomalySummary: createPublicAnomalySummary({
+            TotalThreadCount: 0,
+            HasTotalThreadCount: true,
+            TotalThreadCountMode: 'exact',
+            VisibleBuckets: [],
+            AggregatedBucketCount: 0,
+            SuppressedThreadCount: 0,
+            SuppressionReasonIds: [],
+            RestrictedManifestArtifactId: '',
+            HasRestrictedManifestArtifactId: false,
+            RestrictedManifestHash: '',
+            HasRestrictedManifestHash: false,
+          }),
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('public-anomaly-summary-panel')).toHaveTextContent(
+      'No anomaly threads are included'
+    );
+    expect(screen.queryByTestId('restricted-anomaly-artifact-row')).not.toBeInTheDocument();
+  });
+
+  it('renders blocked readiness and missing restricted artifact reference states', () => {
+    render(
+      <ElectionResultArtifactsSection
+        election={createElectionRecord()}
+        resultView={createResultView({
+          CeremonySnapshot: createCeremonySnapshot(),
+          CanViewReportPackage: true,
+          LatestReportPackage: createReportPackage(),
+          PublicAnomalySummary: createPublicAnomalySummary({
+            TotalThreadCount: 0,
+            HasTotalThreadCount: false,
+            TotalThreadCountMode: 'suppressed',
+            VisibleBuckets: [
+              {
+                CategoryId: 'security_or_integrity_concern',
+                CountMode: 'suppressed',
+                PublicCount: 0,
+                HasPublicCount: false,
+                SuppressionReasonIds: ['restricted_evidence_only'],
+                SourceCategoryIds: ['security_or_integrity_concern'],
+              },
+            ],
+            AggregatedBucketCount: 0,
+            SuppressedThreadCount: 2,
+            SuppressionReasonIds: ['restricted_evidence_only'],
+          }),
+          AnomalyReportReadiness: createAnomalyReportReadiness({
+            PackageReadinessStatusId: 'blocked',
+            PackageReadinessBlockerIds: ['payload_missing'],
+            OpenCaseCount: 1,
+            RetentionEvidenceStatusId: 'open_case_requires_policy_review',
+            RetentionEvidenceStatus: {
+              StatusId: 'open_case_requires_policy_review',
+              GovernedDecisionRefs: [],
+              RedactionHoldReferenceCount: 0,
+              OpenCaseCount: 1,
+              EscalatedCaseCount: 0,
+              ReadinessBlocksValidationClaims: true,
+              Message: 'Open anomaly cases require policy review.',
+            },
+          }),
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('anomaly-report-readiness-strip')).toHaveTextContent('Blocked');
+    expect(screen.getByTestId('public-anomaly-summary-panel')).toHaveTextContent(
+      'All anomaly counts are withheld'
+    );
+    expect(screen.getByTestId('anomaly-report-readiness-strip')).toHaveTextContent(
+      'Payload Missing'
+    );
+    expect(screen.getByTestId('anomaly-retention-status')).toHaveTextContent(
+      'Open anomaly cases require policy review.'
+    );
+    expect(screen.getByTestId('restricted-anomaly-artifact-row')).toHaveTextContent('Not visible');
   });
 
   it('keeps ordinary participants on the official-result-only path', () => {

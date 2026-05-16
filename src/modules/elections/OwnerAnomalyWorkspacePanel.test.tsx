@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { AnchorHTMLAttributes, ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -14,6 +14,7 @@ import {
 import { createElectionRecord, timestamp } from './HushVotingWorkspaceTestUtils';
 import { OwnerAnomalyWorkspacePanel } from './OwnerAnomalyWorkspacePanel';
 import {
+  ELECTION_ANOMALY_ACTOR_ROLE_CONTEXT_IDS,
   ELECTION_ANOMALY_ATTACHMENT_KIND_IDS,
   ELECTION_ANOMALY_ATTACHMENT_VALIDATION_STATUS_IDS,
   ELECTION_ANOMALY_CASE_STATE_IDS,
@@ -566,7 +567,7 @@ describe('OwnerAnomalyWorkspacePanel', () => {
     const triageSection = await screen.findByTestId('owner-anomaly-triage');
     expect(triageSection).toHaveTextContent('Showing 3 of 3 cases');
     expect(screen.getByText('thread-continuity')).toBeInTheDocument();
-    expect(screen.getByText('thread-external')).toBeInTheDocument();
+    expect(screen.getAllByText('thread-external').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('thread-counting')).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('Queue category filter'), {
@@ -576,7 +577,7 @@ describe('OwnerAnomalyWorkspacePanel', () => {
     await waitFor(() => {
       expect(triageSection).toHaveTextContent('Showing 1 of 3 cases');
     });
-    expect(screen.getByText('thread-external')).toBeInTheDocument();
+    expect(screen.getAllByText('thread-external').length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText('thread-continuity')).not.toBeInTheDocument();
     expect(screen.queryByText('thread-counting')).not.toBeInTheDocument();
 
@@ -587,7 +588,7 @@ describe('OwnerAnomalyWorkspacePanel', () => {
       expect(triageSection).toHaveTextContent('Showing 1 of 3 cases');
     });
     expect(screen.getByText('thread-continuity')).toBeInTheDocument();
-    expect(screen.queryByText('thread-external')).not.toBeInTheDocument();
+    expect(within(triageSection).queryByText('thread-external')).not.toBeInTheDocument();
   });
 
   it('rewraps pending auditor recipients for the selected message', async () => {
@@ -792,6 +793,43 @@ describe('OwnerAnomalyWorkspacePanel', () => {
       .toBeInTheDocument();
   });
 
+  it('requests clarification for registered external claimant threads through the thread action', async () => {
+    const externalThread = createThread({
+      AnomalyThreadId: 'external-thread-1',
+      CategoryId: ELECTION_ANOMALY_CATEGORY_IDS.EXTERNAL_OBJECTION_OR_COMPLAINT,
+      CaseStateId: ELECTION_ANOMALY_CASE_STATE_IDS.SUBMITTED,
+      SubmitterActorPublicAddress: 'owner-address',
+      SubmitterRoleContextId: ELECTION_ANOMALY_ACTOR_ROLE_CONTEXT_IDS.EXTERNAL_CLAIMANT_REGISTRAR,
+      HasOpenClarificationRequest: false,
+      OpenClarificationRequestId: '',
+      HasOpenClarificationRequestId: false,
+    });
+    electionsServiceMock.getElectionAnomalyOwnerTriage.mockResolvedValue(
+      createTriageResponse(undefined, { threads: [externalThread] }),
+    );
+
+    renderPanel();
+
+    await screen.findByText('external-thread-1');
+    fireEvent.change(screen.getByLabelText('Clarification request body'), {
+      target: { value: 'Please provide the missing claimant detail.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Request clarification' }));
+
+    await waitFor(() => {
+      expect(transactionServiceMock.createRequestElectionAnomalyInformationTransaction)
+        .toHaveBeenCalledWith(expect.objectContaining({
+          ElectionId: 'election-127',
+          AnomalyThreadId: 'external-thread-1',
+          OriginalSubmitterPublicAddress: 'owner-address',
+          Body: 'Please provide the missing claimant detail.',
+        }));
+    });
+    expect(submitTransactionMock).toHaveBeenCalledWith('signed-clarification-tx');
+    expect(await screen.findByText('Clarification request accepted. The submitter can now answer one bounded response.'))
+      .toBeInTheDocument();
+  });
+
   it('submits classification and external claimant actions through signed owner transactions', async () => {
     electionsServiceMock.getElectionAnomalyOwnerTriage.mockResolvedValue(
       createTriageResponse(undefined, { hasOpenClarification: false }),
@@ -840,6 +878,64 @@ describe('OwnerAnomalyWorkspacePanel', () => {
         }));
     });
     expect(submitTransactionMock).toHaveBeenCalledWith('signed-external-tx');
+  });
+
+  it('shows existing external claimant anomalies only in the owner case queue', async () => {
+    const externalThread = createThread({
+      AnomalyThreadId: 'external-thread-1',
+      CategoryId: ELECTION_ANOMALY_CATEGORY_IDS.EXTERNAL_OBJECTION_OR_COMPLAINT,
+      CaseStateId: ELECTION_ANOMALY_CASE_STATE_IDS.AUTHORITY_REQUESTED_INFORMATION,
+      SubmitterRoleContextId: ELECTION_ANOMALY_ACTOR_ROLE_CONTEXT_IDS.EXTERNAL_CLAIMANT_REGISTRAR,
+      HasOpenClarificationRequest: true,
+      OpenClarificationRequestId: 'external-clarification-1',
+      HasOpenClarificationRequestId: true,
+    });
+    electionsServiceMock.getElectionAnomalyOwnerTriage.mockResolvedValue(
+      createTriageResponse(undefined, { threads: [externalThread] }),
+    );
+
+    renderPanel();
+
+    expect((await screen.findAllByText('external-thread-1')).length).toBeGreaterThan(0);
+    expect(screen.queryByTestId('owner-anomaly-external-claimant'))
+      .not.toBeInTheDocument();
+    expect(screen.queryByTestId('owner-anomaly-external-claimant-existing'))
+      .not.toBeInTheDocument();
+    expect(screen.queryByText(/authority handling for a claimant reference/))
+      .not.toBeInTheDocument();
+    expect(screen.queryByText(/handled in the owner case queue below/))
+      .not.toBeInTheDocument();
+    expect(screen.getAllByText('Awaiting information').length).toBeGreaterThan(0);
+    expect(screen.queryByLabelText('External claimant reference')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('External claimant anomaly body')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Review as authority' }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Show in case queue' }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Review external objection' }))
+      .not.toBeInTheDocument();
+  });
+
+  it('keeps normal external-objection category threads out of the external claimant bridge', async () => {
+    const ownerExternalCategoryThread = createThread({
+      AnomalyThreadId: 'owner-external-category-thread',
+      CategoryId: ELECTION_ANOMALY_CATEGORY_IDS.EXTERNAL_OBJECTION_OR_COMPLAINT,
+      SubmitterRoleContextId: ELECTION_ANOMALY_ACTOR_ROLE_CONTEXT_IDS.ELECTION_OWNER,
+      HasOpenClarificationRequest: false,
+      OpenClarificationRequestId: '',
+      HasOpenClarificationRequestId: false,
+    });
+    electionsServiceMock.getElectionAnomalyOwnerTriage.mockResolvedValue(
+      createTriageResponse(undefined, { threads: [ownerExternalCategoryThread] }),
+    );
+
+    renderPanel();
+
+    expect(await screen.findByText('owner-external-category-thread')).toBeInTheDocument();
+    expect(screen.queryByTestId('owner-anomaly-external-claimant-existing'))
+      .not.toBeInTheDocument();
+    expect(screen.getByLabelText('External claimant reference')).toBeInTheDocument();
+    expect(screen.getByLabelText('External claimant anomaly body')).toBeInTheDocument();
   });
 
   it('recovers duplicate external claimant submissions by refreshing triage', async () => {

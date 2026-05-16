@@ -21,6 +21,7 @@ export type CollapsibleSurfaceSectionProps = {
   summary: ReactNode;
   defaultExpanded: boolean;
   actions?: ReactNode;
+  onExpansionChange?: (isExpanded: boolean) => void;
   children: ReactNode;
 };
 
@@ -33,6 +34,7 @@ export function CollapsibleSurfaceSection({
   summary,
   defaultExpanded,
   actions,
+  onExpansionChange,
   children,
 }: CollapsibleSurfaceSectionProps) {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
@@ -65,7 +67,13 @@ export function CollapsibleSurfaceSection({
 
           <button
             type="button"
-            onClick={() => setIsExpanded((current) => !current)}
+            onClick={() => {
+              setIsExpanded((current) => {
+                const next = !current;
+                onExpansionChange?.(next);
+                return next;
+              });
+            }}
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-transparent px-4 py-2 text-sm font-medium text-hush-text-primary transition-colors hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
             aria-expanded={isExpanded}
             data-testid={toggleTestId ?? `${testId}-toggle`}

@@ -276,6 +276,7 @@ describe('OwnerAdminWorkspaceSummary', () => {
       'href',
       '/elections/owner?electionId=election-ready'
     );
+    expect(screen.queryByRole('link', { name: 'My anomaly thread' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Anomaly triage' })).toHaveAttribute(
       'href',
       '/elections/election-ready/owner/anomaly'

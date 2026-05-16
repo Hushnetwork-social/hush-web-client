@@ -84,3 +84,25 @@ button:focus {
     border-radius: 18px 18px 18px 4px;
   }
 }
+
+@layer components {
+  .hush-form-control {
+    color-scheme: dark;
+    background-color: rgba(35, 48, 75, 0.9);
+    color: var(--hush-text-primary);
+    caret-color: var(--hush-text-primary);
+  }
+
+  .hush-form-control::placeholder {
+    color: rgba(196, 181, 253, 0.58);
+    opacity: 1;
+  }
+
+  .hush-form-control:-webkit-autofill,
+  .hush-form-control:-webkit-autofill:hover,
+  .hush-form-control:-webkit-autofill:focus {
+    -webkit-text-fill-color: var(--hush-text-primary);
+    box-shadow: 0 0 0 1000px rgba(35, 48, 75, 0.9) inset;
+    transition: background-color 9999s ease-out;
+  }
+}

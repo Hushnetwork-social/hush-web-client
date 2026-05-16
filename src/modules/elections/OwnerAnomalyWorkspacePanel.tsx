@@ -36,6 +36,7 @@ import {
 import { getLifecycleLabel } from './contracts';
 import { sectionClass } from './HushVotingWorkspaceShared';
 import {
+  ELECTION_ANOMALY_ACTOR_ROLE_CONTEXT_IDS,
   ELECTION_ANOMALY_ATTACHMENT_KIND_IDS,
   ELECTION_ANOMALY_ATTACHMENT_VALIDATION_STATUS_IDS,
   ELECTION_ANOMALY_AUTHORITY_EVIDENCE_MAX_BYTES,
@@ -158,6 +159,12 @@ const QUEUE_MODE_OPTIONS = [
 type QueueMode = typeof QUEUE_MODE_OPTIONS[number][0];
 
 const AUTHORITY_EVIDENCE_ACCEPTED_MIME_LABELS = 'PDF, PNG, JPG, TXT, CSV, JSON';
+const ANOMALY_FIELD_CLASS =
+  'mt-2 w-full rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-2 text-sm text-hush-text-primary outline-none transition-colors placeholder:text-hush-text-accent/60 focus:border-hush-purple disabled:cursor-not-allowed disabled:opacity-60';
+const ANOMALY_TEXTAREA_CLASS =
+  'mt-3 min-h-28 w-full rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-3 text-sm leading-6 text-hush-text-primary outline-none transition-colors placeholder:text-hush-text-accent/60 focus:border-hush-purple disabled:cursor-not-allowed disabled:opacity-60';
+const ANOMALY_SELECT_CLASS =
+  'mt-2 w-full rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-2 text-sm text-hush-text-primary outline-none transition-colors focus:border-hush-purple';
 
 function formatEvidenceSize(bytes: number): string {
   if (bytes < 1024) {
@@ -311,6 +318,10 @@ function threadMatchesQueueMode(
     default:
       return true;
   }
+}
+
+function isExternalClaimantThread(thread: ElectionAnomalyOwnerTriageThreadView): boolean {
+  return thread.SubmitterRoleContextId === ELECTION_ANOMALY_ACTOR_ROLE_CONTEXT_IDS.EXTERNAL_CLAIMANT_REGISTRAR;
 }
 
 function getDesignatedAuditorGrants(
@@ -621,6 +632,11 @@ export function OwnerAnomalyWorkspacePanel({
   const hasActiveQueueFilters = queueMode !== 'all' ||
     queueCategoryFilter !== 'all' ||
     queueCaseStateFilter !== 'all';
+  const externalClaimantThreads = useMemo(
+    () => triageThreads.filter(isExternalClaimantThread),
+    [triageThreads],
+  );
+  const existingExternalClaimantThread = externalClaimantThreads[0] ?? null;
   const selectedThread = useMemo<ElectionAnomalyOwnerTriageThreadView | null>(() => {
     if (filteredTriageThreads.length === 0) {
       return null;
@@ -632,6 +648,11 @@ export function OwnerAnomalyWorkspacePanel({
   const terminalStateDisabled = Boolean(
     selectedThread?.HasOpenClarificationRequest &&
     TERMINAL_CASE_STATES.has(caseStateId),
+  );
+  const awaitingStateWithoutRequestDisabled = Boolean(
+    selectedThread &&
+    !selectedThread.HasOpenClarificationRequest &&
+    caseStateId === ELECTION_ANOMALY_CASE_STATE_IDS.AUTHORITY_REQUESTED_INFORMATION,
   );
   const selectedPendingAuditorMessages = useMemo(
     () => selectedThread?.Messages.filter(hasPendingDesignatedAuditorWrap) ?? [],
@@ -1021,7 +1042,7 @@ export function OwnerAnomalyWorkspacePanel({
   }
 
   async function handleClassificationSubmit(): Promise<void> {
-    if (!selectedThread || terminalStateDisabled) {
+    if (!selectedThread || terminalStateDisabled || awaitingStateWithoutRequestDisabled) {
       return;
     }
 
@@ -1278,6 +1299,89 @@ export function OwnerAnomalyWorkspacePanel({
           </div>
         </header>
 
+        <section className={sectionClass} data-testid="owner-anomaly-continuity-handoff">
+          <div className="text-xs font-semibold uppercase tracking-[0.24em] text-hush-text-accent">
+            Election operational state
+          </div>
+          <div className="mt-3 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+            <div>
+              <h2 className="text-xl font-semibold text-hush-text-primary">
+                Continuity evidence, not lifecycle mutation
+              </h2>
+              <p className="mt-2 max-w-4xl text-sm leading-7 text-hush-text-accent">
+                A trustee lost-key report is intake evidence until a separate governed continuity
+                decision acts. FEAT-127 does not void the election, mark KeyLost, hold
+                certification, or finalize.
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 xl:min-w-[420px]">
+              <div className="rounded-2xl bg-hush-bg-dark/72 px-5 py-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Lifecycle
+                </div>
+                <div className="mt-2 text-lg font-semibold text-hush-text-primary">
+                  {election ? getLifecycleLabel(election.LifecycleState) : 'Loading'}
+                </div>
+              </div>
+              <div className="rounded-2xl bg-hush-bg-dark/72 px-5 py-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-hush-text-accent">
+                  Continuity
+                </div>
+                <div className="mt-2 text-lg font-semibold text-hush-text-primary">
+                  {triage?.GovernedContinuityHandoffStatusId.replaceAll('_', ' ') || 'loading'}
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {!existingExternalClaimantThread ? (
+          <section className={sectionClass} data-testid="owner-anomaly-external-claimant">
+            <div className="text-xs font-semibold uppercase tracking-[0.24em] text-hush-text-accent">
+              External claimant intake
+            </div>
+            <h2 className="mt-2 text-xl font-semibold text-hush-text-primary">
+              Register external objection
+            </h2>
+            <p className="mt-2 max-w-4xl text-sm leading-7 text-hush-text-accent">
+              The claimant reference is hashed before signing. Put narrative detail in the
+              encrypted anomaly body, not in the public reference field.
+            </p>
+            <div className="mt-4 grid gap-4 xl:grid-cols-[0.85fr_1.15fr]">
+              <label className="text-sm text-hush-text-accent">
+                Local claimant reference
+                <input
+                  value={externalReference}
+                  onChange={(event) => setExternalReference(event.target.value)}
+                  className={ANOMALY_FIELD_CLASS}
+                  placeholder="Local case reference"
+                  aria-label="External claimant reference"
+                />
+              </label>
+              <div className="rounded-xl bg-hush-bg-dark/72 px-4 py-3 text-xs text-hush-text-accent">
+                Hash preview: <span className="break-all text-hush-text-primary">{externalReferenceHash || 'Enter a reference'}</span>
+              </div>
+            </div>
+            <textarea
+              value={externalBody}
+              onChange={(event) => setExternalBody(event.target.value)}
+              maxLength={1000}
+              className={`${ANOMALY_TEXTAREA_CLASS} mt-4`}
+              placeholder="Describe the external objection. Do not put identity detail in the local reference."
+              aria-label="External claimant anomaly body"
+            />
+            <button
+              type="button"
+              onClick={() => void handleExternalClaimantSubmit()}
+              disabled={isSubmittingAction || !externalReference.trim() || !externalBody.trim()}
+              className="mt-4 inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Send className="h-4 w-4" />
+              <span>Register external anomaly</span>
+            </button>
+          </section>
+        ) : null}
+
         <section className={sectionClass} data-testid="owner-anomaly-triage">
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div>
@@ -1366,7 +1470,7 @@ export function OwnerAnomalyWorkspacePanel({
                       <select
                         value={queueCategoryFilter}
                         onChange={(event) => setQueueCategoryFilter(event.target.value)}
-                        className="mt-2 w-full rounded-xl bg-hush-bg-element px-3 py-2 text-hush-text-primary"
+                        className={ANOMALY_SELECT_CLASS}
                         aria-label="Queue category filter"
                       >
                         <option value="all">All categories</option>
@@ -1380,7 +1484,7 @@ export function OwnerAnomalyWorkspacePanel({
                       <select
                         value={queueCaseStateFilter}
                         onChange={(event) => setQueueCaseStateFilter(event.target.value)}
-                        className="mt-2 w-full rounded-xl bg-hush-bg-element px-3 py-2 text-hush-text-primary"
+                        className={ANOMALY_SELECT_CLASS}
                         aria-label="Queue case state filter"
                       >
                         <option value="all">All states</option>
@@ -1760,7 +1864,7 @@ export function OwnerAnomalyWorkspacePanel({
                           <select
                             value={categoryId}
                             onChange={(event) => setCategoryId(event.target.value)}
-                            className="mt-2 w-full rounded-xl bg-hush-bg-element px-3 py-2 text-hush-text-primary"
+                            className={ANOMALY_SELECT_CLASS}
                             aria-label="Anomaly category"
                           >
                             {CATEGORY_OPTIONS.map(([id, label]) => (
@@ -1773,11 +1877,20 @@ export function OwnerAnomalyWorkspacePanel({
                           <select
                             value={caseStateId}
                             onChange={(event) => setCaseStateId(event.target.value)}
-                            className="mt-2 w-full rounded-xl bg-hush-bg-element px-3 py-2 text-hush-text-primary"
+                            className={ANOMALY_SELECT_CLASS}
                             aria-label="Anomaly case state"
                           >
                             {CASE_STATE_OPTIONS.map(([id, label]) => (
-                              <option key={id} value={id}>{label}</option>
+                              <option
+                                key={id}
+                                value={id}
+                                disabled={
+                                  id === ELECTION_ANOMALY_CASE_STATE_IDS.AUTHORITY_REQUESTED_INFORMATION &&
+                                  !selectedThread.HasOpenClarificationRequest
+                                }
+                              >
+                                {label}
+                              </option>
                             ))}
                           </select>
                         </label>
@@ -1786,7 +1899,7 @@ export function OwnerAnomalyWorkspacePanel({
                           <select
                             value={severityCandidateId}
                             onChange={(event) => setSeverityCandidateId(event.target.value)}
-                            className="mt-2 w-full rounded-xl bg-hush-bg-element px-3 py-2 text-hush-text-primary"
+                            className={ANOMALY_SELECT_CLASS}
                             aria-label="Anomaly severity candidate"
                           >
                             {SEVERITY_OPTIONS.map(([id, label]) => (
@@ -1799,7 +1912,7 @@ export function OwnerAnomalyWorkspacePanel({
                           <input
                             value={governedDecisionRef}
                             onChange={(event) => setGovernedDecisionRef(event.target.value)}
-                            className="mt-2 w-full rounded-xl bg-hush-bg-element px-3 py-2 text-hush-text-primary"
+                            className={ANOMALY_FIELD_CLASS}
                             placeholder="Separate governed decision id"
                             aria-label="Governed decision reference"
                           />
@@ -1810,10 +1923,19 @@ export function OwnerAnomalyWorkspacePanel({
                           Terminal classification requires the open clarification request to close first.
                         </div>
                       ) : null}
+                      {awaitingStateWithoutRequestDisabled ? (
+                        <div className="mt-3 rounded-xl bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+                          Use Request clarification to move this case into Awaiting information, so the thread gets a response id the submitter can answer.
+                        </div>
+                      ) : null}
                       <button
                         type="button"
                         onClick={() => void handleClassificationSubmit()}
-                        disabled={isSubmittingAction || terminalStateDisabled}
+                        disabled={
+                          isSubmittingAction ||
+                          terminalStateDisabled ||
+                          awaitingStateWithoutRequestDisabled
+                        }
                         className="mt-4 inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {isSubmittingAction ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
@@ -1831,7 +1953,7 @@ export function OwnerAnomalyWorkspacePanel({
                           onChange={(event) => setClarificationBody(event.target.value)}
                           disabled={selectedThread.HasOpenClarificationRequest}
                           maxLength={ELECTION_ANOMALY_CLARIFICATION_BODY_MAX_CHARACTERS}
-                          className="mt-3 min-h-28 w-full rounded-xl bg-hush-bg-element px-3 py-2 text-sm text-hush-text-primary disabled:opacity-60"
+                          className={ANOMALY_TEXTAREA_CLASS}
                           aria-label="Clarification request body"
                         />
                         <button
@@ -1856,7 +1978,7 @@ export function OwnerAnomalyWorkspacePanel({
                           value={responseBody}
                           onChange={(event) => setResponseBody(event.target.value)}
                           maxLength={ELECTION_ANOMALY_CLARIFICATION_BODY_MAX_CHARACTERS}
-                          className="mt-3 min-h-28 w-full rounded-xl bg-hush-bg-element px-3 py-2 text-sm text-hush-text-primary"
+                          className={ANOMALY_TEXTAREA_CLASS}
                           aria-label="Authority response body"
                         />
                         <button
@@ -1875,69 +1997,6 @@ export function OwnerAnomalyWorkspacePanel({
               </div>
             </>
           ) : null}
-        </section>
-
-        <section className={sectionClass} data-testid="owner-anomaly-external-claimant">
-          <div className="text-xs font-semibold uppercase tracking-[0.24em] text-hush-text-accent">
-            External claimant bridge
-          </div>
-          <h2 className="mt-2 text-xl font-semibold text-hush-text-primary">
-            Register external objection
-          </h2>
-          <p className="mt-2 max-w-4xl text-sm leading-7 text-hush-text-accent">
-            The claimant reference is hashed before signing. Put narrative detail in the encrypted
-            anomaly body, not in the public reference field.
-          </p>
-          <div className="mt-4 grid gap-4 xl:grid-cols-[0.85fr_1.15fr]">
-            <label className="text-sm text-hush-text-accent">
-              Local claimant reference
-              <input
-                value={externalReference}
-                onChange={(event) => setExternalReference(event.target.value)}
-                className="mt-2 w-full rounded-xl bg-hush-bg-dark/72 px-3 py-2 text-hush-text-primary"
-                aria-label="External claimant reference"
-              />
-            </label>
-            <div className="rounded-xl bg-hush-bg-dark/72 px-4 py-3 text-xs text-hush-text-accent">
-              Hash preview: <span className="break-all text-hush-text-primary">{externalReferenceHash || 'Enter a reference'}</span>
-            </div>
-          </div>
-          <textarea
-            value={externalBody}
-            onChange={(event) => setExternalBody(event.target.value)}
-            maxLength={1000}
-            className="mt-4 min-h-28 w-full rounded-xl bg-hush-bg-dark/72 px-3 py-2 text-sm text-hush-text-primary"
-            aria-label="External claimant anomaly body"
-          />
-          <button
-            type="button"
-            onClick={() => void handleExternalClaimantSubmit()}
-            disabled={isSubmittingAction || !externalReference.trim() || !externalBody.trim()}
-            className="mt-4 inline-flex items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <Send className="h-4 w-4" />
-            <span>Register external anomaly</span>
-          </button>
-        </section>
-
-        <section className={sectionClass} data-testid="owner-anomaly-continuity-handoff">
-          <div className="text-xs font-semibold uppercase tracking-[0.24em] text-hush-text-accent">
-            Governed continuity handoff
-          </div>
-          <h2 className="mt-2 text-xl font-semibold text-hush-text-primary">
-            Continuity evidence, not lifecycle mutation
-          </h2>
-          <p className="mt-2 max-w-4xl text-sm leading-7 text-hush-text-accent">
-            A trustee lost-key report is intake evidence until a separate governed continuity
-            decision acts. FEAT-127 does not void the election, mark KeyLost, hold certification, or
-            finalize.
-          </p>
-          <div className="mt-4 rounded-2xl bg-hush-bg-dark/72 px-5 py-4 text-sm text-hush-text-accent">
-            Current handoff state:{' '}
-            <span className="font-semibold text-hush-text-primary">
-              {triage?.GovernedContinuityHandoffStatusId.replaceAll('_', ' ') || 'loading'}
-            </span>
-          </div>
         </section>
 
         {feedback ? (

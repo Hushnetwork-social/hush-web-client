@@ -467,6 +467,9 @@ export function VoterWorkspaceSummary({
   const primaryHref = entry.CanClaimIdentity
     ? `/elections/${entry.Election.ElectionId}/eligibility`
     : `/elections/${entry.Election.ElectionId}/voter`;
+  const anomalyHref = entry.CanClaimIdentity
+    ? primaryHref
+    : `/elections/${entry.Election.ElectionId}/anomaly`;
   const primaryLabel = entry.CanClaimIdentity
     ? 'Open identity and eligibility'
     : isOpenElection
@@ -909,7 +912,7 @@ export function VoterWorkspaceSummary({
             </div>
           </div>
           <Link
-            href={primaryHref}
+            href={anomalyHref}
             className="inline-flex self-start items-center gap-2 rounded-xl bg-hush-bg-element/80 px-4 py-2 text-sm font-medium whitespace-nowrap text-hush-text-primary transition-colors hover:bg-hush-bg-element focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple"
           >
             {isLoadingAnomalyThread ? (
@@ -917,7 +920,7 @@ export function VoterWorkspaceSummary({
             ) : (
               <FileWarning className="h-4 w-4" />
             )}
-            <span>{entry.CanClaimIdentity ? 'Open eligibility' : 'Open report'}</span>
+            <span>{entry.CanClaimIdentity ? 'Open eligibility' : 'Open anomaly thread'}</span>
           </Link>
         </div>
       </div>

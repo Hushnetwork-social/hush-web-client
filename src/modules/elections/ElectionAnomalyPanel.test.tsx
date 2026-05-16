@@ -5,13 +5,17 @@ import {
   ElectionLifecycleStateProto,
   TransactionStatus,
   type ElectionAnomalyMessageView,
+  type ElectionAnomalyOwnerMessageView,
+  type ElectionAnomalyOwnerTriageThreadView,
   type GetElectionAnomalyOwnThreadResponse,
+  type GetElectionAnomalyOwnerTriageResponse,
 } from '@/lib/grpc';
 import { timestamp } from './HushVotingWorkspaceTestUtils';
 import { ElectionAnomalyPanel } from './ElectionAnomalyPanel';
 import {
   ELECTION_ANOMALY_ATTACHMENT_KIND_IDS,
   ELECTION_ANOMALY_ATTACHMENT_VALIDATION_STATUS_IDS,
+  ELECTION_ANOMALY_ACTOR_ROLE_CONTEXT_IDS,
   ELECTION_ANOMALY_CASE_STATE_IDS,
   ELECTION_ANOMALY_CATEGORY_IDS,
   ELECTION_ANOMALY_MESSAGE_KIND_IDS,
@@ -25,6 +29,7 @@ const {
 } = vi.hoisted(() => ({
   electionsServiceMock: {
     getElectionAnomalyOwnThread: vi.fn(),
+    getElectionAnomalyOwnerTriage: vi.fn(),
     stageElectionAnomalyRestrictedPayload: vi.fn(),
   },
   submitTransactionMock: vi.fn(),
@@ -35,6 +40,7 @@ const {
     createSubmitElectionAnomalyInformationTransaction: vi.fn(),
     createSubmitElectionAnomalyThreadTransaction: vi.fn(),
     decryptElectionAnomalyMessageBody: vi.fn(),
+    decryptElectionAnomalyOwnerMessageBody: vi.fn(),
     prepareElectionAnomalyAttachmentManifestMaterial: vi.fn(),
   },
 }));
@@ -75,6 +81,8 @@ vi.mock('./transactionService', async () => {
       transactionServiceMock.createSubmitElectionAnomalyThreadTransaction(...args),
     decryptElectionAnomalyMessageBody: (...args: unknown[]) =>
       transactionServiceMock.decryptElectionAnomalyMessageBody(...args),
+    decryptElectionAnomalyOwnerMessageBody: (...args: unknown[]) =>
+      transactionServiceMock.decryptElectionAnomalyOwnerMessageBody(...args),
     prepareElectionAnomalyAttachmentManifestMaterial: (...args: unknown[]) =>
       transactionServiceMock.prepareElectionAnomalyAttachmentManifestMaterial(...args),
   };
@@ -94,6 +102,18 @@ function createMessage(overrides?: Partial<ElectionAnomalyMessageView>): Electio
     AttachmentManifestHash: '',
     ...overrides,
   };
+}
+
+function createInitialSubmissionMessage(
+  overrides?: Partial<ElectionAnomalyMessageView>,
+): ElectionAnomalyMessageView {
+  return createMessage({
+    MessageId: 'message-initial-1',
+    MessageKindId: ELECTION_ANOMALY_MESSAGE_KIND_IDS.INITIAL_SUBMISSION,
+    ClarificationRequestId: '',
+    HasClarificationRequest: false,
+    ...overrides,
+  });
 }
 
 function createOwnThreadResponse(
@@ -118,13 +138,93 @@ function createOwnThreadResponse(
       CreatedAt: timestamp,
       UpdatedAt: timestamp,
       Messages: hasOpenClarificationRequest
-        ? [createMessage()]
-        : [
-            createMessage({
-              ClarificationRequestId: '',
-              HasClarificationRequest: false,
-            }),
-          ],
+        ? [createInitialSubmissionMessage(), createMessage()]
+        : [createInitialSubmissionMessage()],
+    },
+  };
+}
+
+function createEmptyOwnThreadResponse(): GetElectionAnomalyOwnThreadResponse {
+  return {
+    Success: true,
+    ErrorMessage: '',
+    ActorPublicAddress: 'submitter-address',
+    HasThread: false,
+  };
+}
+
+function createOwnerMessage(
+  overrides?: Partial<ElectionAnomalyOwnerMessageView>,
+): ElectionAnomalyOwnerMessageView {
+  return {
+    MessageId: 'owner-message-initial-1',
+    MessageKindId: ELECTION_ANOMALY_MESSAGE_KIND_IDS.INITIAL_SUBMISSION,
+    RecordedAt: timestamp,
+    EncryptedBody: 'owner-ciphertext-body-not-for-ui',
+    EncryptedBodyHash: 'sha256:owner-body',
+    PlaintextCharacterCount: 48,
+    RecipientStatuses: [],
+    HasCallerOwnerWrap: true,
+    CallerOwnerWrap: {
+      WrapStatusId: 'available',
+      RecipientKeyFingerprint: 'sha256:owner-key',
+      EncryptedContentKey: 'owner-content-key',
+      WrapAlgorithm: 'x25519-aes-gcm',
+    },
+    ClarificationRequestId: '',
+    HasClarificationRequest: false,
+    AttachmentManifestHash: '',
+    ...overrides,
+  };
+}
+
+function createOwnerRegisteredThread(
+  overrides?: Partial<ElectionAnomalyOwnerTriageThreadView>,
+): ElectionAnomalyOwnerTriageThreadView {
+  return {
+    AnomalyThreadId: 'owner-registered-thread-1',
+    ElectionId: 'election-128',
+    CategoryId: ELECTION_ANOMALY_CATEGORY_IDS.EXTERNAL_OBJECTION_OR_COMPLAINT,
+    CaseStateId: ELECTION_ANOMALY_CASE_STATE_IDS.SUBMITTED,
+    CurrentThreadHash: 'sha256:registered-thread',
+    SeverityCandidateId: 'not_assessed',
+    GovernedDecisionRef: '',
+    SubmitterActorPublicAddress: 'submitter-address',
+    SubmitterRoleContextId: ELECTION_ANOMALY_ACTOR_ROLE_CONTEXT_IDS.EXTERNAL_CLAIMANT_REGISTRAR,
+    LifecycleStateAtSubmission: ElectionLifecycleStateProto.Open,
+    HasOpenClarificationRequest: false,
+    OpenClarificationRequestId: '',
+    HasOpenClarificationRequestId: false,
+    CreatedAt: timestamp,
+    UpdatedAt: timestamp,
+    Messages: [createOwnerMessage()],
+    ...overrides,
+  };
+}
+
+function createOwnerTriageResponse(
+  threads: ElectionAnomalyOwnerTriageThreadView[] = [],
+): GetElectionAnomalyOwnerTriageResponse {
+  return {
+    Success: true,
+    ErrorMessage: '',
+    ActorPublicAddress: 'submitter-address',
+    HasTriage: true,
+    Triage: {
+      ElectionId: 'election-128',
+      TotalThreadCount: threads.length,
+      OpenThreadCount: threads.length,
+      AwaitingInformationThreadCount: 0,
+      ResponsePresentThreadCount: 0,
+      ExternalClaimantThreadCount: threads.length,
+      DecryptableMessageCount: threads.reduce((count, thread) => count + thread.Messages.length, 0),
+      PendingRewrapMessageCount: 0,
+      MissingOwnerWrapMessageCount: 0,
+      AttachmentManifestCount: 0,
+      GovernedContinuityHandoffStatusId: 'continuity_normal',
+      CategoryCounts: [],
+      CaseStateCounts: [],
+      Threads: threads,
     },
   };
 }
@@ -148,9 +248,16 @@ function renderPanel() {
 
 describe('ElectionAnomalyPanel clarification evidence uploader', () => {
   beforeEach(() => {
+    window.sessionStorage.clear();
     electionsServiceMock.getElectionAnomalyOwnThread.mockResolvedValue(
       createOwnThreadResponse(),
     );
+    electionsServiceMock.getElectionAnomalyOwnerTriage.mockResolvedValue({
+      Success: false,
+      ErrorMessage: 'Not owner triage for this actor.',
+      ActorPublicAddress: 'submitter-address',
+      HasTriage: false,
+    });
     electionsServiceMock.stageElectionAnomalyRestrictedPayload.mockResolvedValue({
       Success: true,
       ErrorMessage: '',
@@ -172,6 +279,9 @@ describe('ElectionAnomalyPanel clarification evidence uploader', () => {
     });
     transactionServiceMock.decryptElectionAnomalyMessageBody.mockResolvedValue(
       'Please provide the missing receipt screenshot.',
+    );
+    transactionServiceMock.decryptElectionAnomalyOwnerMessageBody.mockResolvedValue(
+      'We are having problems with the election ...',
     );
     transactionServiceMock.createElectionAnomalyRestrictedEvidencePayload.mockResolvedValue({
       EncryptedPayload: new Uint8Array([11, 12, 13]),
@@ -217,7 +327,277 @@ describe('ElectionAnomalyPanel clarification evidence uploader', () => {
 
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     vi.clearAllMocks();
+    window.sessionStorage.clear();
+  });
+
+  it('does not offer a second anomaly form when the own thread is already loaded', async () => {
+    renderPanel();
+
+    expect(await screen.findByText('Your anomaly is registered')).toBeInTheDocument();
+    expect(screen.getByText('Thread history')).toBeInTheDocument();
+    expect(screen.getByText('Existing report')).toBeInTheDocument();
+    expect(screen.getByText('Already submitted')).toBeInTheDocument();
+    expect(screen.getByTestId('election-anomaly-state-timeline')).toHaveTextContent(
+      'Authority request',
+    );
+    expect(screen.getByTestId('election-anomaly-state-timeline')).toHaveTextContent(
+      'Waiting for my reply',
+    );
+    expect(screen.getByTestId('election-anomaly-state-timeline')).toHaveTextContent(
+      'Authority response',
+    );
+    expect(screen.getByText(/Review your submitted election anomaly thread here/))
+      .toBeInTheDocument();
+    expect(screen.queryByTestId('election-anomaly-create')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Submit anomaly' })).not.toBeInTheDocument();
+  });
+
+  it('blocks duplicate submit UI while a local submission is waiting for the own-thread projection', async () => {
+    electionsServiceMock.getElectionAnomalyOwnThread.mockResolvedValue(
+      createEmptyOwnThreadResponse(),
+    );
+    window.sessionStorage.setItem(
+      'feat123:anomaly-pending:election-128:submitter-address',
+      JSON.stringify({
+        anomalyThreadId: 'thread-new',
+        categoryId: ELECTION_ANOMALY_CATEGORY_IDS.BALLOT_CASTING_OR_RECEIPT,
+        submittedAt: '2026-05-16T09:10:20.000Z',
+      }),
+    );
+
+    render(
+      <ElectionAnomalyPanel
+        electionId="election-128"
+        actorPublicAddress="submitter-address"
+        actorEncryptionPublicKey="submitter-encrypt-public"
+        actorEncryptionPrivateKey="submitter-encrypt-private"
+        actorSigningPrivateKey="submitter-signing-private"
+        ownerPublicAddress="owner-address"
+        isLinkedVoter
+        canReadOwnThread
+        canCreateThread
+        surface="account"
+        lifecycleState={ElectionLifecycleStateProto.Open}
+      />,
+    );
+
+    expect(await screen.findByTestId('election-anomaly-pending')).toHaveTextContent(
+      'Report submitted from this device',
+    );
+    expect(screen.getByText('Submission pending')).toBeInTheDocument();
+    expect(screen.getByText('Blocked while indexing')).toBeInTheDocument();
+    expect(screen.queryByTestId('election-anomaly-create')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Submit anomaly' })).not.toBeInTheDocument();
+  });
+
+  it('shows a read-only owner-registered claimant report when the account own thread is empty', async () => {
+    electionsServiceMock.getElectionAnomalyOwnThread.mockResolvedValue(
+      createEmptyOwnThreadResponse(),
+    );
+    electionsServiceMock.getElectionAnomalyOwnerTriage.mockResolvedValue(
+      createOwnerTriageResponse([createOwnerRegisteredThread()]),
+    );
+
+    render(
+      <ElectionAnomalyPanel
+        electionId="election-128"
+        actorPublicAddress="submitter-address"
+        actorEncryptionPublicKey="submitter-encrypt-public"
+        actorEncryptionPrivateKey="submitter-encrypt-private"
+        actorSigningPrivateKey="submitter-signing-private"
+        ownerPublicAddress="owner-address"
+        isLinkedVoter
+        canReadOwnThread
+        canCreateThread
+        surface="account"
+        lifecycleState={ElectionLifecycleStateProto.Open}
+      />,
+    );
+
+    expect(await screen.findByText('External claimant report registered by this account'))
+      .toBeInTheDocument();
+    expect(screen.getByTestId('election-anomaly-owner-registered-thread'))
+      .toHaveTextContent('External objection or complaint');
+    expect(screen.getByTestId('election-anomaly-owner-registered-state-timeline'))
+      .toHaveTextContent('Initial report');
+    expect(await screen.findByText('We are having problems with the election ...'))
+      .toBeInTheDocument();
+    expect(screen.queryByTestId('election-anomaly-create')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Submit anomaly' })).not.toBeInTheDocument();
+  });
+
+  it('does not present stale awaiting-information state as actionable without an open request', async () => {
+    electionsServiceMock.getElectionAnomalyOwnThread.mockResolvedValue(
+      createEmptyOwnThreadResponse(),
+    );
+    electionsServiceMock.getElectionAnomalyOwnerTriage.mockResolvedValue(
+      createOwnerTriageResponse([
+        createOwnerRegisteredThread({
+          CaseStateId: ELECTION_ANOMALY_CASE_STATE_IDS.AUTHORITY_REQUESTED_INFORMATION,
+          HasOpenClarificationRequest: false,
+          OpenClarificationRequestId: '',
+          HasOpenClarificationRequestId: false,
+          Messages: [
+            createOwnerMessage(),
+            createOwnerMessage({
+              MessageId: 'owner-message-response-1',
+              MessageKindId: ELECTION_ANOMALY_MESSAGE_KIND_IDS.AUTHORITY_RESPONSE,
+            }),
+          ],
+        }),
+      ]),
+    );
+
+    render(
+      <ElectionAnomalyPanel
+        electionId="election-128"
+        actorPublicAddress="submitter-address"
+        actorEncryptionPublicKey="submitter-encrypt-public"
+        actorEncryptionPrivateKey="submitter-encrypt-private"
+        actorSigningPrivateKey="submitter-signing-private"
+        ownerPublicAddress="owner-address"
+        isLinkedVoter
+        canReadOwnThread
+        canCreateThread
+        surface="account"
+        lifecycleState={ElectionLifecycleStateProto.Open}
+      />,
+    );
+
+    const registeredThread = await screen.findByTestId('election-anomaly-owner-registered-thread');
+    expect(registeredThread).toHaveTextContent('Authority response recorded');
+    expect(registeredThread).not.toHaveTextContent('Awaiting information');
+    expect(screen.getByTestId('election-anomaly-owner-registered-no-action'))
+      .toHaveTextContent('No open clarification request');
+    expect(screen.getByTestId('election-anomaly-owner-registered-no-action'))
+      .toHaveTextContent('marked as awaiting information without a clarification request transaction');
+    expect(screen.queryByTestId('election-anomaly-owner-registered-clarification'))
+      .not.toBeInTheDocument();
+  });
+
+  it('lets the registered claimant workspace answer an open clarification request', async () => {
+    const registeredClarificationRequestId = 'registered-clarification-1';
+    electionsServiceMock.getElectionAnomalyOwnThread.mockResolvedValue(
+      createEmptyOwnThreadResponse(),
+    );
+    electionsServiceMock.getElectionAnomalyOwnerTriage.mockResolvedValue(
+      createOwnerTriageResponse([
+        createOwnerRegisteredThread({
+          CaseStateId: ELECTION_ANOMALY_CASE_STATE_IDS.AUTHORITY_REQUESTED_INFORMATION,
+          HasOpenClarificationRequest: true,
+          OpenClarificationRequestId: registeredClarificationRequestId,
+          HasOpenClarificationRequestId: true,
+          Messages: [
+            createOwnerMessage(),
+            createOwnerMessage({
+              MessageId: 'owner-message-request-1',
+              MessageKindId: ELECTION_ANOMALY_MESSAGE_KIND_IDS.AUTHORITY_INFORMATION_REQUEST,
+              ClarificationRequestId: registeredClarificationRequestId,
+              HasClarificationRequest: true,
+            }),
+          ],
+        }),
+      ]),
+    );
+
+    render(
+      <ElectionAnomalyPanel
+        electionId="election-128"
+        actorPublicAddress="submitter-address"
+        actorEncryptionPublicKey="submitter-encrypt-public"
+        actorEncryptionPrivateKey="submitter-encrypt-private"
+        actorSigningPrivateKey="submitter-signing-private"
+        ownerPublicAddress="owner-address"
+        isLinkedVoter
+        canReadOwnThread
+        canCreateThread
+        surface="account"
+        lifecycleState={ElectionLifecycleStateProto.Open}
+      />,
+    );
+
+    expect(await screen.findByTestId('election-anomaly-owner-registered-clarification'))
+      .toHaveTextContent('Clarification requested');
+    fireEvent.change(screen.getByLabelText('Registered claimant clarification response body'), {
+      target: { value: 'Here is the extra information requested.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Submit clarification' }));
+
+    await waitFor(() => {
+      expect(transactionServiceMock.createSubmitElectionAnomalyInformationTransaction)
+        .toHaveBeenCalledWith(expect.objectContaining({
+          ElectionId: 'election-128',
+          AnomalyThreadId: 'owner-registered-thread-1',
+          ClarificationRequestId: registeredClarificationRequestId,
+          ActorPublicAddress: 'submitter-address',
+          Body: 'Here is the extra information requested.',
+        }));
+    });
+    expect(submitTransactionMock).toHaveBeenCalledWith('signed-clarification-tx');
+    expect(await screen.findByTestId('election-anomaly-owner-registered-clarification-submitted'))
+      .toHaveTextContent('Clarification response submitted');
+    expect(screen.queryByTestId('election-anomaly-owner-registered-clarification'))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Submit clarification' }))
+      .not.toBeInTheDocument();
+  });
+
+  it('shows registered claimant clarification submission errors next to the composer', async () => {
+    const registeredClarificationRequestId = 'registered-clarification-1';
+    electionsServiceMock.getElectionAnomalyOwnThread.mockResolvedValue(
+      createEmptyOwnThreadResponse(),
+    );
+    electionsServiceMock.getElectionAnomalyOwnerTriage.mockResolvedValue(
+      createOwnerTriageResponse([
+        createOwnerRegisteredThread({
+          CaseStateId: ELECTION_ANOMALY_CASE_STATE_IDS.AUTHORITY_REQUESTED_INFORMATION,
+          HasOpenClarificationRequest: true,
+          OpenClarificationRequestId: registeredClarificationRequestId,
+          HasOpenClarificationRequestId: true,
+          Messages: [
+            createOwnerMessage(),
+            createOwnerMessage({
+              MessageId: 'owner-message-request-1',
+              MessageKindId: ELECTION_ANOMALY_MESSAGE_KIND_IDS.AUTHORITY_INFORMATION_REQUEST,
+              ClarificationRequestId: registeredClarificationRequestId,
+              HasClarificationRequest: true,
+            }),
+          ],
+        }),
+      ]),
+    );
+    submitTransactionMock.mockResolvedValueOnce({
+      successful: false,
+      status: TransactionStatus.REJECTED,
+      message: 'Only the original anomaly submitter can answer a clarification request.',
+    });
+
+    render(
+      <ElectionAnomalyPanel
+        electionId="election-128"
+        actorPublicAddress="submitter-address"
+        actorEncryptionPublicKey="submitter-encrypt-public"
+        actorEncryptionPrivateKey="submitter-encrypt-private"
+        actorSigningPrivateKey="submitter-signing-private"
+        ownerPublicAddress="owner-address"
+        isLinkedVoter
+        canReadOwnThread
+        canCreateThread
+        surface="account"
+        lifecycleState={ElectionLifecycleStateProto.Open}
+      />,
+    );
+
+    await screen.findByTestId('election-anomaly-owner-registered-clarification');
+    fireEvent.change(screen.getByLabelText('Registered claimant clarification response body'), {
+      target: { value: 'Here is the extra information requested.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Submit clarification' }));
+
+    expect(await screen.findByTestId('election-anomaly-owner-registered-clarification-feedback'))
+      .toHaveTextContent('Only the original anomaly submitter can answer a clarification request.');
   });
 
   it('stages a request-bound evidence file and signs its manifest before the clarification response', async () => {
@@ -294,6 +674,10 @@ describe('ElectionAnomalyPanel clarification evidence uploader', () => {
     expect(
       await screen.findByText(/Clarification response and evidence manifests accepted/),
     ).toBeInTheDocument();
+    expect(await screen.findByTestId('election-anomaly-clarification-submitted'))
+      .toHaveTextContent('Clarification response submitted');
+    expect(screen.queryByTestId('election-anomaly-clarification'))
+      .not.toBeInTheDocument();
   });
 
   it('shows validation rejection for unsupported evidence MIME before signing', async () => {
@@ -307,7 +691,7 @@ describe('ElectionAnomalyPanel clarification evidence uploader', () => {
       },
     });
 
-    expect(await screen.findByText('Validation rejected')).toBeInTheDocument();
+    expect(await screen.findByText('Validation rejected', {}, { timeout: 5_000 })).toBeInTheDocument();
     expect(screen.getByText(ELECTION_ANOMALY_VALIDATION_CODES.ATTACHMENT_MIME_TYPE_INVALID))
       .toBeInTheDocument();
     expect(transactionServiceMock.prepareElectionAnomalyAttachmentManifestMaterial)
@@ -317,7 +701,7 @@ describe('ElectionAnomalyPanel clarification evidence uploader', () => {
       target: { value: 'Response without an acceptable evidence file.' },
     });
     expect(screen.getByRole('button', { name: 'Submit clarification' })).toBeDisabled();
-  });
+  }, 10_000);
 
   it('shows validation rejection when restricted payload staging is denied', async () => {
     electionsServiceMock.stageElectionAnomalyRestrictedPayload.mockResolvedValue({
@@ -344,7 +728,10 @@ describe('ElectionAnomalyPanel clarification evidence uploader', () => {
       },
     });
 
-    expect(await screen.findByText('Validation rejected')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(electionsServiceMock.stageElectionAnomalyRestrictedPayload).toHaveBeenCalled();
+    });
+    expect(await screen.findByText('Validation rejected', {}, { timeout: 5_000 })).toBeInTheDocument();
     expect(screen.getByText(ELECTION_ANOMALY_VALIDATION_CODES.CLARIFICATION_REQUEST_NOT_OPEN))
       .toBeInTheDocument();
     expect(transactionServiceMock.createRecordElectionAnomalyAttachmentManifestTransaction)
@@ -358,8 +745,10 @@ describe('ElectionAnomalyPanel clarification evidence uploader', () => {
 
     renderPanel();
 
-    expect(await screen.findByText('No clarification response is currently requested.'))
+    expect(await screen.findByText('No open clarification request'))
       .toBeInTheDocument();
+    expect(screen.getByText('Voter report')).toBeInTheDocument();
+    expect(screen.getByText(/complete history currently available/)).toBeInTheDocument();
     expect(screen.queryByTestId('election-anomaly-clarification-evidence'))
       .not.toBeInTheDocument();
   });

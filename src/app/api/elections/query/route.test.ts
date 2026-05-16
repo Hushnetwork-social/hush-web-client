@@ -424,6 +424,104 @@ describe('POST /api/elections/query', () => {
     );
   });
 
+  it('passes through typed anomaly fields on signed result-view queries', async () => {
+    const typedResultPayload = {
+      Success: true,
+      ErrorMessage: '',
+      ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+      CanViewReportPackage: true,
+      VisibleReportArtifacts: [],
+      PublicAnomalySummary: {
+        SchemaId: 'public-anomaly-summary-v1',
+        SuppressionPolicyId: 'anomaly-public-summary-v1',
+        ElectionId: 'election-1',
+        SourceManifestHash: '',
+        HasSourceManifestHash: false,
+        TotalThreadCount: 0,
+        HasTotalThreadCount: false,
+        TotalThreadCountMode: 'suppressed',
+        VisibleBuckets: [
+          {
+            CategoryId: 'security_or_integrity_concern',
+            CountMode: 'suppressed',
+            PublicCount: 0,
+            HasPublicCount: false,
+            SuppressionReasonIds: ['restricted_evidence_only'],
+            SourceCategoryIds: ['security_or_integrity_concern'],
+          },
+        ],
+        AggregatedBucketCount: 0,
+        SuppressedThreadCount: 1,
+        SuppressionReasonIds: ['restricted_evidence_only'],
+        RestrictedManifestArtifactId: '',
+        HasRestrictedManifestArtifactId: false,
+        RestrictedManifestHash: '',
+        HasRestrictedManifestHash: false,
+        GeneratedAt: { seconds: 1, nanos: 0 },
+      },
+      AnomalyReportReadiness: {
+        PublicSummarySchemaId: 'public-anomaly-summary-v1',
+        SuppressionPolicyId: 'anomaly-public-summary-v1',
+        ForbiddenFieldScanStatusId: 'passed',
+        RestrictedManifestArtifactId: '',
+        HasRestrictedManifestArtifactId: false,
+        RestrictedManifestHash: '',
+        HasRestrictedManifestHash: false,
+        PackageReadinessStatusId: 'blocked',
+        PackageReadinessBlockerIds: ['payload_missing'],
+        OpenCaseCount: 1,
+        EscalatedCaseCount: 0,
+        RetentionEvidenceStatusId: 'open_case_requires_policy_review',
+        RetentionEvidenceStatus: {
+          StatusId: 'open_case_requires_policy_review',
+          GovernedDecisionRefs: [],
+          RedactionHoldReferenceCount: 0,
+          OpenCaseCount: 1,
+          EscalatedCaseCount: 0,
+          ReadinessBlocksValidationClaims: true,
+          Message: 'Open anomaly cases require policy review.',
+        },
+        HasGovernedLifecycleEvidence: false,
+        ReportGenerationReadOnlyStatusId: 'validated',
+      },
+    };
+    toObjectMock.mockReturnValueOnce(typedResultPayload);
+    const { POST } = await import('./route');
+    const resultRequest = {
+      ElectionId: 'election-1',
+      ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+    };
+    const signedHeaders = await createElectionQueryAuthHeaders(
+      'GetElectionResultView',
+      resultRequest,
+      TEST_CREDENTIALS
+    );
+
+    const response = await POST(
+      new Request('http://localhost/api/elections/query', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...signedHeaders,
+        },
+        body: JSON.stringify({
+          method: 'GetElectionResultView',
+          request: resultRequest,
+        }),
+      }) as never
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(typedResultPayload);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:4666/rpcHush.HushElections/GetElectionResultView',
+      expect.objectContaining({
+        headers: expect.objectContaining(signedHeaders),
+      })
+    );
+  });
+
   it('passes through a signed actor-bound election directory search', async () => {
     const { POST } = await import('./route');
     const signedHeaders = await createElectionQueryAuthHeaders(

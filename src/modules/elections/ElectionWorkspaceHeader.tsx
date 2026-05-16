@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import type { ElectionHubEntryView } from '@/lib/grpc';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, FileWarning } from 'lucide-react';
 import {
   formatTimestamp,
   getElectionHubDisplayActionLabel,
@@ -16,6 +16,15 @@ type ElectionWorkspaceHeaderProps = {
 };
 
 export function ElectionWorkspaceHeader({ entry }: ElectionWorkspaceHeaderProps) {
+  const canOpenOwnAnomaly =
+    !entry.CanClaimIdentity &&
+    (
+      entry.ActorRoles.IsOwnerAdmin ||
+      entry.ActorRoles.IsTrustee ||
+      entry.ActorRoles.IsVoter ||
+      entry.ActorRoles.IsDesignatedAuditor
+    );
+
   return (
     <section className="pt-1">
       <Link
@@ -53,6 +62,15 @@ export function ElectionWorkspaceHeader({ entry }: ElectionWorkspaceHeaderProps)
           {getElectionHubDisplayActionLabel(entry)}
         </div>
         <RoleBadgeCluster roles={entry.ActorRoles} />
+        {canOpenOwnAnomaly ? (
+          <Link
+            href={`/elections/${entry.Election.ElectionId}/anomaly`}
+            className="inline-flex items-center gap-2 rounded-xl bg-hush-bg-dark/80 px-4 py-2 text-sm font-medium text-hush-text-primary transition-colors hover:bg-hush-bg-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple"
+          >
+            <FileWarning className="h-4 w-4" />
+            <span>My anomaly thread</span>
+          </Link>
+        ) : null}
       </div>
     </section>
   );

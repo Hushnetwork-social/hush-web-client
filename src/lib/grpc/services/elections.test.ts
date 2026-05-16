@@ -587,6 +587,110 @@ describe('electionsService query proxy', () => {
     );
   });
 
+  it('returns typed anomaly report fields from the result view query', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          Success: true,
+          ErrorMessage: '',
+          ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+          CanViewParticipantEncryptedResults: true,
+          OfficialResultVisibilityPolicy: 1,
+          ClosedProgressStatus: 0,
+          CanViewReportPackage: true,
+          CanRetryFailedPackageFinalization: false,
+          VisibleReportArtifacts: [],
+          PublicAnomalySummary: {
+            SchemaId: 'public-anomaly-summary-v1',
+            SuppressionPolicyId: 'anomaly-public-summary-v1',
+            ElectionId: 'election-result',
+            SourceManifestHash: 'sha256:manifest',
+            HasSourceManifestHash: true,
+            TotalThreadCount: 0,
+            HasTotalThreadCount: false,
+            TotalThreadCountMode: 'suppressed',
+            VisibleBuckets: [
+              {
+                CategoryId: 'security_or_integrity_concern',
+                CountMode: 'suppressed',
+                PublicCount: 0,
+                HasPublicCount: false,
+                SuppressionReasonIds: ['restricted_evidence_only'],
+                SourceCategoryIds: ['security_or_integrity_concern'],
+              },
+            ],
+            AggregatedBucketCount: 0,
+            SuppressedThreadCount: 2,
+            SuppressionReasonIds: ['restricted_evidence_only'],
+            RestrictedManifestArtifactId: '11111111-1111-1111-1111-111111111111',
+            HasRestrictedManifestArtifactId: true,
+            RestrictedManifestHash: 'sha256:manifest',
+            HasRestrictedManifestHash: true,
+            GeneratedAt: { seconds: 1, nanos: 0 },
+          },
+          AnomalyReportReadiness: {
+            PublicSummarySchemaId: 'public-anomaly-summary-v1',
+            SuppressionPolicyId: 'anomaly-public-summary-v1',
+            ForbiddenFieldScanStatusId: 'passed',
+            RestrictedManifestArtifactId: '11111111-1111-1111-1111-111111111111',
+            HasRestrictedManifestArtifactId: true,
+            RestrictedManifestHash: 'sha256:manifest',
+            HasRestrictedManifestHash: true,
+            PackageReadinessStatusId: 'blocked',
+            PackageReadinessBlockerIds: ['payload_missing'],
+            OpenCaseCount: 1,
+            EscalatedCaseCount: 0,
+            RetentionEvidenceStatusId: 'open_case_requires_policy_review',
+            RetentionEvidenceStatus: {
+              StatusId: 'open_case_requires_policy_review',
+              GovernedDecisionRefs: [],
+              RedactionHoldReferenceCount: 0,
+              OpenCaseCount: 1,
+              EscalatedCaseCount: 0,
+              ReadinessBlocksValidationClaims: true,
+              Message: 'Open anomaly cases require policy review.',
+            },
+            HasGovernedLifecycleEvidence: false,
+            ReportGenerationReadOnlyStatusId: 'validated',
+          },
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+    );
+
+    const response = await electionsService.getElectionResultView({
+      ElectionId: 'election-result',
+      ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/elections/query', {
+      method: 'POST',
+      headers: expect.objectContaining({
+        'Content-Type': 'application/json',
+        'x-hush-election-query-signatory': TEST_CREDENTIALS.signingPublicKey,
+        'x-hush-election-query-signed-at': expect.any(String),
+        'x-hush-election-query-signature': expect.any(String),
+      }),
+      body: JSON.stringify({
+        method: 'GetElectionResultView',
+        request: {
+          ElectionId: 'election-result',
+          ActorPublicAddress: TEST_CREDENTIALS.signingPublicKey,
+        },
+      }),
+    });
+    expect(response.PublicAnomalySummary?.TotalThreadCountMode).toBe('suppressed');
+    expect(response.PublicAnomalySummary?.VisibleBuckets[0].HasPublicCount).toBe(false);
+    expect(response.AnomalyReportReadiness?.PackageReadinessStatusId).toBe('blocked');
+    expect(response.AnomalyReportReadiness?.RetentionEvidenceStatus?.ReadinessBlocksValidationClaims).toBe(true);
+  });
+
   it('posts restricted anomaly payload staging requests to the signed proxy', async () => {
     const fetchMock = vi.mocked(fetch);
     fetchMock.mockResolvedValue(
