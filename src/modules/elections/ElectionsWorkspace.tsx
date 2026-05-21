@@ -105,6 +105,7 @@ import { ElectionEligibilityWorkspaceSection } from "./ElectionEligibilityWorksp
 import { ElectionFinalizationWorkspaceSection } from "./ElectionFinalizationWorkspaceSection";
 import { ProtocolPackageBindingPanel } from "./ProtocolPackageBindingPanel";
 import { useElectionsStore } from "./useElectionsStore";
+import { OwnerVoidDangerZoneSection } from "./VoidElectionPanels";
 
 type ElectionsWorkspaceProps = {
   ownerPublicAddress: string;
@@ -549,6 +550,8 @@ export function ElectionsWorkspace({
     restartElectionCeremony,
     retryGovernedProposalExecution,
     updateDraft,
+    retryVoidPublication,
+    voidElection,
   } = useElectionsStore();
 
   const [draft, setDraft] = useState<ElectionDraftInput>(() =>
@@ -4450,6 +4453,19 @@ export function ElectionsWorkspace({
                     testId="elections-protocol-package-sealed-refs"
                   />
                 </div>
+              ) : null}
+
+              {election ? (
+                <OwnerVoidDangerZoneSection
+                  election={election}
+                  actorPublicAddress={ownerPublicAddress}
+                  actorPublicEncryptAddress={ownerEncryptionPublicKey ?? ""}
+                  actorPrivateEncryptKeyHex={ownerEncryptionPrivateKey ?? ""}
+                  signingPrivateKeyHex={ownerSigningPrivateKey}
+                  isSubmitting={isSubmitting}
+                  onVoidElection={voidElection}
+                  onRetryVoidPublication={retryVoidPublication}
+                />
               ) : null}
               </section>
             )}

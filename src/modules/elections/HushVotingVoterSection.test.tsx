@@ -312,6 +312,90 @@ describe('VoterWorkspaceSummary', () => {
     });
   });
 
+  it('shows VOID voter status without any final inclusion claim', async () => {
+    const entry = createHubEntry(
+      'election-void',
+      ElectionLifecycleStateProto.Voided,
+      'Voided Election',
+      {
+        ActorRoles: {
+          IsOwnerAdmin: false,
+          IsTrustee: false,
+          IsVoter: true,
+          IsDesignatedAuditor: false,
+        },
+        CanViewParticipantResults: true,
+        HasUnofficialResult: true,
+        HasOfficialResult: true,
+      }
+    );
+
+    electionsServiceMock.getElectionVotingView.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      HasAcceptedAt: true,
+      ReceiptId: 'rcpt-void-1',
+      AcceptanceId: 'acceptance-void-1',
+      ServerProof: 'server-proof-void-1',
+      PersonalParticipationStatus: ElectionParticipationStatusProto.ParticipationCountedAsVoted,
+    });
+    electionsServiceMock.verifyElectionReceipt.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      ActorPublicAddress: 'actor-address',
+      ElectionId: 'election-void',
+      LifecycleState: ElectionLifecycleStateProto.Voided,
+      HasAcceptedCheckoff: true,
+      ReceiptMatchesAcceptedCheckoff: true,
+      ParticipationCountedAsVoted: true,
+      TallyVerificationAvailable: false,
+      VerifiedReceiptId: 'rcpt-void-1',
+      VerifiedAcceptanceId: 'acceptance-void-1',
+      VerifiedServerProof: 'server-proof-void-1',
+    });
+
+    render(
+      <VoterWorkspaceSummary
+        entry={entry}
+        actorPublicAddress="actor-address"
+        resultView={createResultView({
+          OfficialResult: createResultArtifact(),
+        })}
+      />
+    );
+
+    expect(await screen.findByTestId('voter-void-status-panel')).toHaveTextContent(
+      'This election is VOID'
+    );
+    expect(screen.getByRole('link', { name: 'Open VOID status' })).toHaveAttribute(
+      'href',
+      '#hush-voting-section-artifacts'
+    );
+    expect(screen.getByText('No current result claim')).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByTestId('hush-voting-verify-receipt-trigger'));
+    fireEvent.change(screen.getByTestId('hush-voting-receipt-input'), {
+      target: {
+        value: [
+          'Election ID: election-void',
+          'Receipt ID: rcpt-void-1',
+          'Acceptance ID: acceptance-void-1',
+          'Server Proof: server-proof-void-1',
+        ].join('\n'),
+      },
+    });
+    fireEvent.click(screen.getByTestId('hush-voting-verify-receipt-submit'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('hush-voting-receipt-result')).toHaveTextContent(
+        'Vote right consumed before VOID'
+      );
+    });
+    expect(screen.getByTestId('hush-voting-receipt-result')).toHaveTextContent(
+      'No counted or final inclusion claim is available'
+    );
+  });
+
   it('projects SP-04 ceremony state without voter-facing protocol package refs', async () => {
     const entry = createHubEntry(
       'election-open',

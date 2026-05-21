@@ -14,6 +14,7 @@ import {
   getElectionHubSuggestedActionLabel,
   getElectionWorkspaceSectionOrder,
   formatArtifactValue,
+  getLifecycleLabel,
 } from './contracts';
 
 const timestamp = { seconds: 1_711_410_000, nanos: 0 };
@@ -241,5 +242,28 @@ describe('election hub contract helpers', () => {
       '1234567890ab...stuvwxyz'
     );
     expect(formatArtifactValue({ raw: [1, 2, 3], length: 32 })).toContain('{"raw":[1,2');
+  });
+
+  it('treats VOID as terminal status without promoting superseded result claims', () => {
+    const entry = createHubEntry('election-void', ElectionLifecycleStateProto.Voided, {
+      ActorRoles: {
+        IsOwnerAdmin: true,
+        IsTrustee: false,
+        IsVoter: true,
+        IsDesignatedAuditor: false,
+      },
+      CanViewReportPackage: true,
+      HasUnofficialResult: true,
+      HasOfficialResult: true,
+    });
+
+    expect(getLifecycleLabel(ElectionLifecycleStateProto.Voided)).toBe('VOID');
+    expect(getElectionHubDisplayActionLabel(entry)).toBe('Open VOID status');
+    expect(getElectionHubNarrative(entry)).toContain('void decision is terminal');
+    expect(getElectionWorkspaceSectionOrder(entry)).toEqual([
+      'owner-admin',
+      'voter',
+      'artifacts',
+    ]);
   });
 });

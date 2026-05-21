@@ -63,9 +63,11 @@ import {
   createElectionReportAccessGrantTransaction,
   createElectionTrusteeInvitationTransaction,
   createOpenElectionTransaction,
+  createRetryVoidPublicationTransaction,
   createRefreshProtocolPackageBindingTransaction,
   createRejectElectionTrusteeInvitationTransaction,
   createSubmitElectionFinalizationShareTransaction,
+  createVoidElectionTransaction,
   hasElectionAnomalyDuplicateThreadValidation,
   hashExternalElectionAnomalyClaimantReference,
   prepareElectionAnomalyAttachmentManifestMaterial,
@@ -620,6 +622,155 @@ describe('transactionService encrypted election envelope helpers', () => {
     expect(decryptedPayload.ActionPayload.ActorPublicAddress).toBe(ownerSigningPublicKey);
     expect(decryptedPayload.ActionPayload.RequiredWarningCodes).toEqual([1, 2]);
     expect(decryptedPayload.ActionPayload.TrusteePolicyExecutionReference).toBe('trustee-policy-ref');
+  });
+
+  it('creates an encrypted void-election envelope with public justification and evidence refs', async () => {
+    const ownerSigningPrivateKeyHex = '1111111111111111111111111111111111111111111111111111111111111111';
+    const ownerEncryptionPrivateKeyHex = '2222222222222222222222222222222222222222222222222222222222222222';
+    const nodeEncryptionPrivateKeyHex = '3333333333333333333333333333333333333333333333333333333333333333';
+    const electionPrivateKeyHex = '5555555555555555555555555555555555555555555555555555555555555555';
+    const ownerSigningPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(ownerSigningPrivateKeyHex), true),
+    );
+    const ownerEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(ownerEncryptionPrivateKeyHex), true),
+    );
+    const nodeEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(nodeEncryptionPrivateKeyHex), true),
+    );
+    const actorEncryptedElectionPrivateKey = await eciesEncrypt(
+      electionPrivateKeyHex,
+      ownerEncryptionPublicKey,
+    );
+
+    blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
+      NodePublicEncryptAddress: nodeEncryptionPublicKey,
+      ElectionEnvelopeVersion: 'election-envelope-v2.1',
+    });
+    electionsServiceMock.getElectionEnvelopeAccess.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      ActorEncryptedElectionPrivateKey: actorEncryptedElectionPrivateKey,
+    });
+
+    const { signedTransaction } = await createVoidElectionTransaction(
+      'election-123',
+      ownerSigningPublicKey,
+      ownerEncryptionPublicKey,
+      ownerEncryptionPrivateKeyHex,
+      'Trustee threshold could not be satisfied after the close ceremony.',
+      [
+        {
+          Id: 'evidence-ref-1',
+          ReferenceKind: 3,
+          ReferenceId: 'board-minute-2026-05-21',
+          InternalRecordId: null,
+          ExternalReference: 'Minutes approved by the election owner.',
+          ReferenceHash: 'sha256:abc',
+          Visibility: 1,
+          RecordedAt: '2026-05-21T20:00:00.000Z',
+        },
+      ],
+      ownerSigningPrivateKeyHex,
+    );
+
+    const parsedTransaction = JSON.parse(signedTransaction) as {
+      PayloadKind: string;
+      Payload: {
+        ActorEncryptedElectionPrivateKey: string;
+        EncryptedPayload: string;
+      };
+    };
+
+    const actorElectionPrivateKey = await eciesDecrypt(
+      parsedTransaction.Payload.ActorEncryptedElectionPrivateKey,
+      ownerEncryptionPrivateKeyHex,
+    );
+    const decryptedPayloadJson = await eciesDecrypt(
+      parsedTransaction.Payload.EncryptedPayload,
+      actorElectionPrivateKey,
+    );
+    const decryptedPayload = JSON.parse(decryptedPayloadJson) as {
+      ActionType: string;
+      ActionPayload: {
+        ActorPublicAddress: string;
+        PublicJustification: string;
+        EvidenceReferences: Array<{ ReferenceId: string; ExternalReference: string }>;
+      };
+    };
+
+    expect(parsedTransaction.PayloadKind).toBe(ENCRYPTED_ELECTION_ENVELOPE_PAYLOAD_KIND);
+    expect(decryptedPayload.ActionType).toBe('void_election');
+    expect(decryptedPayload.ActionPayload.ActorPublicAddress).toBe(ownerSigningPublicKey);
+    expect(decryptedPayload.ActionPayload.PublicJustification).toContain('Trustee threshold');
+    expect(decryptedPayload.ActionPayload.EvidenceReferences[0].ReferenceId).toBe(
+      'board-minute-2026-05-21',
+    );
+  });
+
+  it('creates an encrypted retry-void-publication envelope for the owner actor', async () => {
+    const ownerSigningPrivateKeyHex = '1111111111111111111111111111111111111111111111111111111111111111';
+    const ownerEncryptionPrivateKeyHex = '2222222222222222222222222222222222222222222222222222222222222222';
+    const nodeEncryptionPrivateKeyHex = '3333333333333333333333333333333333333333333333333333333333333333';
+    const electionPrivateKeyHex = '5555555555555555555555555555555555555555555555555555555555555555';
+    const ownerSigningPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(ownerSigningPrivateKeyHex), true),
+    );
+    const ownerEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(ownerEncryptionPrivateKeyHex), true),
+    );
+    const nodeEncryptionPublicKey = bytesToHex(
+      secp256k1.getPublicKey(hexToBytes(nodeEncryptionPrivateKeyHex), true),
+    );
+    const actorEncryptedElectionPrivateKey = await eciesEncrypt(
+      electionPrivateKeyHex,
+      ownerEncryptionPublicKey,
+    );
+
+    blockchainServiceMock.getElectionEnvelopeContext.mockResolvedValue({
+      NodePublicEncryptAddress: nodeEncryptionPublicKey,
+      ElectionEnvelopeVersion: 'election-envelope-v2.1',
+    });
+    electionsServiceMock.getElectionEnvelopeAccess.mockResolvedValue({
+      Success: true,
+      ErrorMessage: '',
+      ActorEncryptedElectionPrivateKey: actorEncryptedElectionPrivateKey,
+    });
+
+    const { signedTransaction } = await createRetryVoidPublicationTransaction(
+      'election-123',
+      ownerSigningPublicKey,
+      ownerEncryptionPublicKey,
+      ownerEncryptionPrivateKeyHex,
+      'void-decision-1',
+      ownerSigningPrivateKeyHex,
+    );
+
+    const parsedTransaction = JSON.parse(signedTransaction) as {
+      Payload: {
+        ActorEncryptedElectionPrivateKey: string;
+        EncryptedPayload: string;
+      };
+    };
+    const actorElectionPrivateKey = await eciesDecrypt(
+      parsedTransaction.Payload.ActorEncryptedElectionPrivateKey,
+      ownerEncryptionPrivateKeyHex,
+    );
+    const decryptedPayloadJson = await eciesDecrypt(
+      parsedTransaction.Payload.EncryptedPayload,
+      actorElectionPrivateKey,
+    );
+    const decryptedPayload = JSON.parse(decryptedPayloadJson) as {
+      ActionType: string;
+      ActionPayload: {
+        ActorPublicAddress: string;
+        VoidDecisionId: string;
+      };
+    };
+
+    expect(decryptedPayload.ActionType).toBe('retry_void_publication');
+    expect(decryptedPayload.ActionPayload.ActorPublicAddress).toBe(ownerSigningPublicKey);
+    expect(decryptedPayload.ActionPayload.VoidDecisionId).toBe('void-decision-1');
   });
 
   it('creates an encrypted protocol-package refresh envelope for the owner actor', async () => {

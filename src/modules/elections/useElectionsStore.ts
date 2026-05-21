@@ -60,11 +60,14 @@ import {
   createRevokeElectionTrusteeInvitationTransaction,
   createRestartElectionCeremonyTransaction,
   createRetryElectionGovernedProposalExecutionTransaction,
+  createRetryVoidPublicationTransaction,
   createStartElectionCeremonyTransaction,
   createStartElectionGovernedProposalTransaction,
   createSubmitElectionFinalizationShareTransaction,
   createSubmitElectionCeremonyMaterialTransaction,
   createUpdateElectionDraftTransaction,
+  createVoidElectionTransaction,
+  type ElectionVoidEvidenceReferencePayload,
 } from './transactionService';
 
 export type ElectionsFeedbackTone = 'success' | 'error';
@@ -284,6 +287,19 @@ interface ElectionsState {
     signingPrivateKeyHex: string
   ) => Promise<boolean>;
   finalizeElection: (
+    actorPublicEncryptAddress: string,
+    actorPrivateEncryptKeyHex: string,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
+  voidElection: (
+    publicJustification: string,
+    evidenceReferences: ElectionVoidEvidenceReferencePayload[],
+    actorPublicEncryptAddress: string,
+    actorPrivateEncryptKeyHex: string,
+    signingPrivateKeyHex: string
+  ) => Promise<boolean>;
+  retryVoidPublication: (
+    voidDecisionId: string,
     actorPublicEncryptAddress: string,
     actorPrivateEncryptKeyHex: string,
     signingPrivateKeyHex: string
@@ -3040,6 +3056,168 @@ export const useElectionsStore = create<ElectionsState>((set, get) => ({
     } catch (error) {
       set({
         feedback: buildThrownErrorFeedback(error, 'Failed to finalize election.'),
+      });
+      return false;
+    } finally {
+      set({ isSubmitting: false });
+    }
+  },
+
+  voidElection: async (
+    publicJustification,
+    evidenceReferences,
+    actorPublicEncryptAddress,
+    actorPrivateEncryptKeyHex,
+    signingPrivateKeyHex
+  ) => {
+    const electionId = get().selectedElectionId;
+    const ownerPublicAddress = get().ownerPublicAddress;
+
+    if (
+      !electionId ||
+      !ownerPublicAddress ||
+      !publicJustification.trim() ||
+      !actorPublicEncryptAddress ||
+      !actorPrivateEncryptKeyHex ||
+      !signingPrivateKeyHex
+    ) {
+      return false;
+    }
+
+    set({
+      isSubmitting: true,
+      feedback: null,
+      error: null,
+    });
+
+    try {
+      const { signedTransaction } = await createVoidElectionTransaction(
+        electionId,
+        ownerPublicAddress,
+        actorPublicEncryptAddress,
+        actorPrivateEncryptKeyHex,
+        publicJustification.trim(),
+        evidenceReferences,
+        signingPrivateKeyHex,
+      );
+
+      const submitResult = await submitTransaction(signedTransaction);
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit void election transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Election void submitted.',
+          details: ['Waiting for block confirmation before the VOID state appears in the query view.'],
+        },
+      });
+
+      const indexedElection = await waitForIndexedElectionMatch(
+        electionId,
+        (response) => response.Election?.LifecycleState === ElectionLifecycleStateProto.Voided,
+      );
+      if (!indexedElection) {
+        return false;
+      }
+
+      await get().loadElection(electionId);
+      await get().loadOwnerDashboard(ownerPublicAddress);
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'Election voided.',
+          details: [],
+        },
+      });
+      return true;
+    } catch (error) {
+      set({
+        feedback: buildThrownErrorFeedback(error, 'Failed to void election.'),
+      });
+      return false;
+    } finally {
+      set({ isSubmitting: false });
+    }
+  },
+
+  retryVoidPublication: async (
+    voidDecisionId,
+    actorPublicEncryptAddress,
+    actorPrivateEncryptKeyHex,
+    signingPrivateKeyHex
+  ) => {
+    const electionId = get().selectedElectionId;
+    const ownerPublicAddress = get().ownerPublicAddress;
+
+    if (
+      !electionId ||
+      !ownerPublicAddress ||
+      !voidDecisionId.trim() ||
+      !actorPublicEncryptAddress ||
+      !actorPrivateEncryptKeyHex ||
+      !signingPrivateKeyHex
+    ) {
+      return false;
+    }
+
+    set({
+      isSubmitting: true,
+      feedback: null,
+      error: null,
+    });
+
+    try {
+      const { signedTransaction } = await createRetryVoidPublicationTransaction(
+        electionId,
+        ownerPublicAddress,
+        actorPublicEncryptAddress,
+        actorPrivateEncryptKeyHex,
+        voidDecisionId.trim(),
+        signingPrivateKeyHex,
+      );
+
+      const submitResult = await submitTransaction(signedTransaction);
+      if (!submitResult.successful) {
+        set({
+          feedback: {
+            tone: 'error',
+            message: submitResult.message || 'Failed to submit VOID publication retry transaction.',
+            details: [],
+          },
+        });
+        return false;
+      }
+
+      const indexedElection = await waitForIndexedElectionMatch(
+        electionId,
+        (response) => response.Election?.LifecycleState === ElectionLifecycleStateProto.Voided,
+      );
+      if (!indexedElection) {
+        return false;
+      }
+
+      await get().loadElection(electionId);
+      await get().loadOwnerDashboard(ownerPublicAddress);
+      set({
+        feedback: {
+          tone: 'success',
+          message: 'VOID publication retry submitted.',
+          details: [],
+        },
+      });
+      return true;
+    } catch (error) {
+      set({
+        feedback: buildThrownErrorFeedback(error, 'Failed to retry VOID publication.'),
       });
       return false;
     } finally {

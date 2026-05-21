@@ -15,6 +15,7 @@ const LIFECYCLE_GROUP_ORDER = [
   ElectionLifecycleStateProto.Open,
   ElectionLifecycleStateProto.Draft,
   ElectionLifecycleStateProto.Closed,
+  ElectionLifecycleStateProto.Voided,
   ElectionLifecycleStateProto.Finalized,
 ] as const;
 

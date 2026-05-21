@@ -2,11 +2,13 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ElectionClosedProgressStatusProto,
+  ElectionLifecycleStateProto,
   ElectionVerificationArtifactVisibilityProto,
   ElectionVerificationPackageBlockerProto,
   ElectionVerificationPackageStatusProto,
   ElectionVerificationPackageViewProto,
   ElectionVerifierOverallStatusProto,
+  ElectionVoidPublicationAttemptStatusProto,
 } from '@/lib/grpc';
 import { electionsService } from '@/lib/grpc/services/elections';
 import { VerificationPackageStatusSection } from './VerificationPackageStatusSection';
@@ -76,6 +78,71 @@ describe('VerificationPackageStatusSection', () => {
 
     expect(screen.getByTestId('verification-package-protocol-refs')).toHaveTextContent(
       'Draft/private'
+    );
+  });
+
+  it('renders public VOID publication status instead of a result/export claim', () => {
+    render(
+      <VerificationPackageStatusSection
+        electionId="void-election"
+        actorPublicAddress="owner-address"
+        status={createVerificationPackageStatus({
+          ElectionId: 'void-election',
+          ActorPublicAddress: 'owner-address',
+          Status: ElectionVerificationPackageStatusProto.VerificationPackageVoided,
+          StatusMessage: 'Election VOID package is sealed.',
+          LastVerifierResult: {
+            OverallStatus: ElectionVerifierOverallStatusProto.ElectionVerifierWarn,
+            VerifierVersion: 'hv-verifier-v1',
+            PackageHash: 'void-package-hash',
+            PassedCount: 5,
+            WarningCount: 1,
+            FailedCount: 0,
+            NotApplicableCount: 2,
+            Message: 'Election is VOID.',
+            HasVerifiedAt: false,
+            ResultCode: 'election_voided',
+          },
+          VoidPublicationStatus: {
+            VoidDecisionId: 'void-decision-1',
+            PublicationAttemptId: 'void-publication-1',
+            Status: ElectionVoidPublicationAttemptStatusProto.VoidPublicationSealed,
+            AttemptNumber: 1,
+            PublicStatusArtifactRef: 'public/void-status.json',
+            VoidPackageArtifactRef: 'public/void-package.zip',
+            PackageHash: 'abc123',
+            FailureCode: '',
+            FailureReason: '',
+            AttemptedAt: { seconds: 1_774_120_000, nanos: 0 },
+            SealedAt: { seconds: 1_774_120_100, nanos: 0 },
+            HasSealedAt: true,
+            AttemptedByPublicAddress: 'owner-address',
+            CanRetry: false,
+            PublicJustification: 'Trustee quorum was lost and finalization cannot continue.',
+            PublicJustificationHash: 'justification-hash',
+            PreviousLifecycleState: ElectionLifecycleStateProto.Closed,
+            ResultingLifecycleState: ElectionLifecycleStateProto.Voided,
+            ActorPublicAddress: 'owner-address',
+            ActorRole: 'ElectionOwner',
+            SourceTransactionId: 'tx-void-1',
+            SourceBlockHeight: 42,
+            SourceBlockId: 'block-42',
+            DecidedAt: { seconds: 1_774_119_900, nanos: 0 },
+            HasDecidedAt: true,
+          },
+        })}
+      />
+    );
+
+    expect(screen.getByText('Election VOID')).toBeInTheDocument();
+    expect(screen.getByTestId('verification-package-void-status')).toHaveTextContent(
+      'Trustee quorum was lost'
+    );
+    expect(screen.getByTestId('verification-package-void-status')).toHaveTextContent(
+      'election_voided'
+    );
+    expect(screen.getByTestId('verification-package-void-status')).toHaveTextContent(
+      'No current final result claim exists'
     );
   });
 

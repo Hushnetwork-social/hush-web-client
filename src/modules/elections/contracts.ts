@@ -231,6 +231,7 @@ const LIFECYCLE_LABELS: Record<ElectionLifecycleStateProto, string> = {
   [ElectionLifecycleStateProto.Open]: 'Open',
   [ElectionLifecycleStateProto.Closed]: 'Closed',
   [ElectionLifecycleStateProto.Finalized]: 'Finalized',
+  [ElectionLifecycleStateProto.Voided]: 'VOID',
 };
 
 const BINDING_LABELS: Record<ElectionBindingStatusProto, string> = {
@@ -2616,6 +2617,17 @@ export function canFinalizeElection(election?: ElectionRecordView): boolean {
     election.GovernanceMode === ElectionGovernanceModeProto.AdminOnly;
 }
 
+export function canVoidElection(election?: ElectionRecordView): boolean {
+  return (
+    !!election &&
+    (
+      election.LifecycleState === ElectionLifecycleStateProto.Draft ||
+      election.LifecycleState === ElectionLifecycleStateProto.Open ||
+      election.LifecycleState === ElectionLifecycleStateProto.Closed
+    )
+  );
+}
+
 function buildPendingGovernedReason(
   actionType: ElectionGovernedActionTypeProto,
   election: ElectionRecordView
@@ -3350,6 +3362,10 @@ export function getElectionHubDisplayActionLabel(
     | 'HasOfficialResult'
   >
 ): string {
+  if (entry.Election.LifecycleState === ElectionLifecycleStateProto.Voided) {
+    return 'Open VOID status';
+  }
+
   if (entry.HasOfficialResult) {
     return 'Review official result';
   }
@@ -3441,6 +3457,10 @@ export function getPublishedResultNarrative(
   >,
   audience: PublishedResultNarrativeAudience = resolveClosedProgressNarrativeAudience(entry)
 ): ClosedProgressBannerState | null {
+  if (entry.Election.LifecycleState === ElectionLifecycleStateProto.Voided) {
+    return null;
+  }
+
   if (!entry.HasUnofficialResult && !entry.HasOfficialResult) {
     return null;
   }
@@ -3702,6 +3722,36 @@ export function getClosedProgressBannerState(
   return getClosedProgressNarrative(entry);
 }
 
+export function getVoidedElectionNarrative(
+  entry: Pick<ElectionHubEntryView, 'Election' | 'ActorRoles'>
+): ClosedProgressBannerState | null {
+  if (entry.Election.LifecycleState !== ElectionLifecycleStateProto.Voided) {
+    return null;
+  }
+
+  if (entry.ActorRoles.IsOwnerAdmin) {
+    return {
+      title: 'Election VOID',
+      description:
+        'The ElectionOwner void decision is terminal. Review the VOID publication status, public justification, package refs, and retry publication only if the sealed VOID package failed.',
+    };
+  }
+
+  if (entry.ActorRoles.IsVoter) {
+    return {
+      title: 'Election VOID',
+      description:
+        'This election is VOID. Your own vote-right status may remain visible where safe, but there is no current counted or final inclusion claim.',
+    };
+  }
+
+  return {
+    title: 'Election VOID',
+    description:
+      'The election has a terminal VOID decision. Public output exposes the decision refs, VOID package refs, verifier result, and public justification without result claims.',
+  };
+}
+
 export function getElectionHubNarrative(
   entry: Pick<
     ElectionHubEntryView,
@@ -3714,6 +3764,7 @@ export function getElectionHubNarrative(
   >
 ): string {
   return (
+    getVoidedElectionNarrative(entry)?.description ||
     getPublishedResultNarrative(entry)?.description ||
     getClosedProgressNarrative(entry)?.description ||
     entry.SuggestedActionReason ||
@@ -3732,9 +3783,10 @@ export function getElectionWorkspaceSectionOrder(
   const canOpenVoterSurface = entry.ActorRoles.IsVoter || entry.CanClaimIdentity;
   const isOpenVoter =
     canOpenVoterSurface && entry.Election.LifecycleState === ElectionLifecycleStateProto.Open;
-  const hasPublishedResult = entry.HasUnofficialResult || entry.HasOfficialResult;
+  const isVoided = entry.Election.LifecycleState === ElectionLifecycleStateProto.Voided;
+  const hasPublishedResult = !isVoided && (entry.HasUnofficialResult || entry.HasOfficialResult);
   const hasWorkspaceArtifactSurface =
-    entry.CanViewReportPackage || entry.CanViewNamedParticipationRoster;
+    entry.CanViewReportPackage || entry.CanViewNamedParticipationRoster || isVoided;
 
   if (hasPublishedResult) {
     sections.push('results');

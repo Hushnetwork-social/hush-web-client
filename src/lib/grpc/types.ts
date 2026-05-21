@@ -718,6 +718,7 @@ export enum ElectionLifecycleStateProto {
   Open = 1,
   Closed = 2,
   Finalized = 3,
+  Voided = 4,
 }
 
 export enum ElectionClassProto {
@@ -927,6 +928,12 @@ export enum OfficialResultVisibilityPolicyProto {
 export enum ElectionReportPackageStatusProto {
   ReportPackageGenerationFailed = 0,
   ReportPackageSealed = 1,
+  ReportPackageSupersededByVoid = 2,
+}
+
+export enum ElectionReportPackageKindProto {
+  ReportPackageFinalResult = 0,
+  ReportPackageVoid = 1,
 }
 
 export enum ElectionReportArtifactKindProto {
@@ -944,16 +951,27 @@ export enum ElectionReportArtifactKindProto {
   ReportArtifactMachineOutcomeDeterminationProjection = 11,
   ReportArtifactMachineDisputeReviewIndexProjection = 12,
   ReportArtifactMachineRestrictedAnomalyIntakeManifest = 13,
+  ReportArtifactMachineVoidDecision = 14,
+  ReportArtifactHumanVoidSummary = 15,
+  ReportArtifactMachineVoidPublicStatus = 16,
+  ReportArtifactMachineVoidSupersededArtifacts = 17,
+  ReportArtifactMachineVoidVerifierResult = 18,
+  ReportArtifactHumanRestrictedVoidEvidenceIndex = 19,
+  ReportArtifactMachineRestrictedHistoricalUnofficialResult = 20,
+  ReportArtifactMachineVoidPackageManifest = 21,
+  ReportArtifactMachineVoidPackageArchive = 22,
 }
 
 export enum ElectionReportArtifactFormatProto {
   ReportArtifactMarkdown = 0,
   ReportArtifactJson = 1,
+  ReportArtifactBinary = 2,
 }
 
 export enum ElectionReportArtifactAccessScopeProto {
   ReportArtifactOwnerAuditorOnly = 0,
   ReportArtifactOwnerAuditorTrustee = 1,
+  ReportArtifactPublic = 2,
 }
 
 export enum ElectionReportAccessGrantRoleProto {
@@ -1015,6 +1033,7 @@ export enum ElectionVerificationPackageStatusProto {
   VerificationPackageProtocolRefsBlocked = 3,
   VerificationPackageExportFailed = 4,
   VerificationPackageReady = 5,
+  VerificationPackageVoided = 6,
 }
 
 export enum ElectionVerificationPackageBlockerProto {
@@ -1026,6 +1045,7 @@ export enum ElectionVerificationPackageBlockerProto {
   VerificationPackageBlockerUnauthorized = 5,
   VerificationPackageBlockerProfileMismatch = 6,
   VerificationPackageBlockerExportFailed = 7,
+  VerificationPackageBlockerElectionVoided = 8,
 }
 
 export enum ElectionVerifierOverallStatusProto {
@@ -1033,6 +1053,12 @@ export enum ElectionVerifierOverallStatusProto {
   ElectionVerifierWarn = 1,
   ElectionVerifierFail = 2,
   ElectionVerifierNotAvailable = 3,
+}
+
+export enum ElectionVoidPublicationAttemptStatusProto {
+  VoidPublicationPending = 0,
+  VoidPublicationGenerationFailed = 1,
+  VoidPublicationSealed = 2,
 }
 
 export enum ElectionClosedProgressStatusProto {
@@ -1512,6 +1538,12 @@ export interface ElectionReportPackageSummaryView {
   SealedAt?: GrpcTimestamp;
   HasSealedAt: boolean;
   AttemptedByPublicAddress: string;
+  PackageKind?: ElectionReportPackageKindProto;
+  VoidDecisionId?: string;
+  VoidPublicationAttemptId?: string;
+  SupersededByVoidDecisionId?: string;
+  SupersededAt?: GrpcTimestamp;
+  HasSupersededAt?: boolean;
 }
 
 export interface ElectionReportArtifactView {
@@ -1641,6 +1673,11 @@ export interface ElectionVerificationPackageExportAvailabilityView {
   PackageId: string;
   PackageHash: string;
   CanRetry: boolean;
+  PackageKind?: ElectionReportPackageKindProto;
+  VoidDecisionId?: string;
+  VoidPublicationAttemptId?: string;
+  PublicStatusArtifactRef?: string;
+  VoidPackageArtifactRef?: string;
 }
 
 export interface ElectionVerifierResultSummaryView {
@@ -1654,6 +1691,35 @@ export interface ElectionVerifierResultSummaryView {
   Message: string;
   VerifiedAt?: GrpcTimestamp;
   HasVerifiedAt: boolean;
+  ResultCode?: string;
+}
+
+export interface ElectionVoidPublicationStatusView {
+  VoidDecisionId: string;
+  PublicationAttemptId: string;
+  Status: ElectionVoidPublicationAttemptStatusProto;
+  AttemptNumber: number;
+  PublicStatusArtifactRef: string;
+  VoidPackageArtifactRef: string;
+  PackageHash: string;
+  FailureCode: string;
+  FailureReason: string;
+  AttemptedAt?: GrpcTimestamp;
+  SealedAt?: GrpcTimestamp;
+  HasSealedAt: boolean;
+  AttemptedByPublicAddress: string;
+  CanRetry: boolean;
+  PublicJustification: string;
+  PublicJustificationHash: string;
+  PreviousLifecycleState: ElectionLifecycleStateProto;
+  ResultingLifecycleState: ElectionLifecycleStateProto;
+  ActorPublicAddress: string;
+  ActorRole: string;
+  SourceTransactionId: string;
+  SourceBlockHeight: number;
+  SourceBlockId: string;
+  DecidedAt?: GrpcTimestamp;
+  HasDecidedAt: boolean;
 }
 
 export interface ElectionVerificationPackageStatusView {
@@ -1674,6 +1740,7 @@ export interface ElectionVerificationPackageStatusView {
   Sp09ExternalReview?: ElectionSp09ExternalReviewStatusView;
   Sp10OperationalSecurity?: ElectionSp10OperationalSecurityStatusView;
   Sp11RegulatoryClaim?: ElectionSp11RegulatoryClaimStatusView;
+  VoidPublicationStatus?: ElectionVoidPublicationStatusView;
 }
 
 export interface ElectionSp04EvidenceStatusView {

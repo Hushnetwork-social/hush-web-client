@@ -29,6 +29,7 @@ import {
   ElectionReportArtifactAccessScopeProto,
   ElectionReportArtifactFormatProto,
   ElectionReportArtifactKindProto,
+  ElectionReportPackageKindProto,
   ElectionReportPackageStatusProto,
   ElectionResultArtifactKindProto,
   ElectionResultArtifactVisibilityProto,
@@ -47,6 +48,7 @@ import {
   getSecrecyBoundaryCopy,
 } from './contracts';
 import { ProtocolPackageBindingPanel } from './ProtocolPackageBindingPanel';
+import { SupersededArtifactNotice } from './VoidElectionPanels';
 
 type ElectionResultArtifactsSectionProps = {
   election?: ElectionRecordView;
@@ -192,6 +194,12 @@ function getPackageStatusCopy(
         title: 'Sealed package available',
         body: 'Machine and human canonical artifacts were generated together from the frozen evidence set.',
         className: 'bg-green-500/12 text-green-100',
+      };
+    case ElectionReportPackageStatusProto.ReportPackageSupersededByVoid:
+      return {
+        title: 'Historical package superseded by VOID',
+        body: 'This package is preserved as historical evidence, but it is no longer a current final-result claim.',
+        className: 'bg-amber-500/12 text-amber-100',
       };
     default:
       return {
@@ -827,8 +835,9 @@ export function ElectionResultArtifactsSection({
     return null;
   }
 
-  const officialResult = showResults ? resultView?.OfficialResult : null;
-  const unofficialResult = showResults && !officialResult ? resultView?.UnofficialResult : null;
+  const isVoided = election.LifecycleState === ElectionLifecycleStateProto.Voided;
+  const officialResult = showResults && !isVoided ? resultView?.OfficialResult : null;
+  const unofficialResult = showResults && !isVoided && !officialResult ? resultView?.UnofficialResult : null;
   const latestReportPackage = resultView?.LatestReportPackage;
   const visibleReportArtifacts = resultView?.VisibleReportArtifacts ?? [];
   const publicAnomalySummary = resultView?.PublicAnomalySummary;
@@ -852,6 +861,8 @@ export function ElectionResultArtifactsSection({
   const ReportPackageStatusIcon =
     latestReportPackage?.Status === ElectionReportPackageStatusProto.ReportPackageSealed
       ? ShieldCheck
+      : latestReportPackage?.Status === ElectionReportPackageStatusProto.ReportPackageSupersededByVoid
+        ? FileWarning
       : ShieldAlert;
   const shouldShowClosedProgress =
     showResults &&
@@ -1062,6 +1073,31 @@ export function ElectionResultArtifactsSection({
               mode="evidence"
               testId="report-package-protocol-package-refs"
             />
+          ) : null}
+
+          {latestReportPackage.Status === ElectionReportPackageStatusProto.ReportPackageSupersededByVoid ? (
+            <SupersededArtifactNotice
+              voidDecisionId={
+                latestReportPackage.SupersededByVoidDecisionId ||
+                latestReportPackage.VoidDecisionId ||
+                resultView?.VerificationPackageStatus?.VoidPublicationStatus?.VoidDecisionId
+              }
+              currentVoidPackageRef={
+                resultView?.VerificationPackageStatus?.VoidPublicationStatus?.VoidPackageArtifactRef ||
+                latestReportPackage.VoidPublicationAttemptId
+              }
+              verifierResultCode={resultView?.VerificationPackageStatus?.LastVerifierResult?.ResultCode}
+            />
+          ) : null}
+
+          {latestReportPackage.PackageKind === ElectionReportPackageKindProto.ReportPackageVoid ? (
+            <div className="rounded-2xl bg-red-500/10 p-4 text-sm text-red-100" data-testid="void-report-package-notice">
+              <div className="font-semibold">VOID package</div>
+              <div className="mt-2 leading-6">
+                This package records the terminal VOID publication. It does not contain a current
+                result claim.
+              </div>
+            </div>
           ) : null}
 
           {publicAnomalySummary ? (

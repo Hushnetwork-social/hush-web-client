@@ -1397,6 +1397,28 @@ export interface FinalizeElectionPayload {
   FinalEncryptedTallyHash: string | null;
 }
 
+export interface ElectionVoidEvidenceReferencePayload {
+  Id: string;
+  ReferenceKind: number;
+  ReferenceId: string;
+  InternalRecordId: string | null;
+  ExternalReference: string | null;
+  ReferenceHash: string | null;
+  Visibility: number;
+  RecordedAt: string;
+}
+
+export interface VoidElectionActionPayload {
+  ActorPublicAddress: string;
+  PublicJustification: string;
+  EvidenceReferences: ElectionVoidEvidenceReferencePayload[];
+}
+
+export interface RetryVoidPublicationActionPayload {
+  ActorPublicAddress: string;
+  VoidDecisionId: string;
+}
+
 const ENCRYPTED_ELECTION_ACTION_TYPES = {
   CREATE_DRAFT: 'create_draft',
   UPDATE_DRAFT: 'update_draft',
@@ -1419,6 +1441,8 @@ const ENCRYPTED_ELECTION_ACTION_TYPES = {
   OPEN_ELECTION: 'open_election',
   CLOSE_ELECTION: 'close_election',
   FINALIZE_ELECTION: 'finalize_election',
+  VOID_ELECTION: 'void_election',
+  RETRY_VOID_PUBLICATION: 'retry_void_publication',
   SUBMIT_ANOMALY_THREAD: 'submit_anomaly_thread',
   REQUEST_ANOMALY_INFORMATION: 'request_anomaly_information',
   SUBMIT_ANOMALY_INFORMATION: 'submit_anomaly_information',
@@ -3226,6 +3250,62 @@ export async function createFinalizeElectionTransaction(
         ActorPublicAddress: actorPublicAddress,
         AcceptedBallotSetHash: acceptedBallotSetHash,
         FinalEncryptedTallyHash: finalEncryptedTallyHash,
+      },
+      signingPrivateKeyHex,
+    );
+
+  return {
+    signedTransaction: encryptedEnvelope.signedTransaction,
+  };
+}
+
+export async function createVoidElectionTransaction(
+  electionId: string,
+  actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
+  publicJustification: string,
+  evidenceReferences: ElectionVoidEvidenceReferencePayload[],
+  signingPrivateKeyHex: string,
+): Promise<{ signedTransaction: string }> {
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<VoidElectionActionPayload>(
+      electionId,
+      actorPublicAddress,
+      actorPublicEncryptAddress,
+      actorPrivateEncryptKeyHex,
+      ENCRYPTED_ELECTION_ACTION_TYPES.VOID_ELECTION,
+      {
+        ActorPublicAddress: actorPublicAddress,
+        PublicJustification: publicJustification,
+        EvidenceReferences: evidenceReferences,
+      },
+      signingPrivateKeyHex,
+    );
+
+  return {
+    signedTransaction: encryptedEnvelope.signedTransaction,
+  };
+}
+
+export async function createRetryVoidPublicationTransaction(
+  electionId: string,
+  actorPublicAddress: string,
+  actorPublicEncryptAddress: string,
+  actorPrivateEncryptKeyHex: string,
+  voidDecisionId: string,
+  signingPrivateKeyHex: string,
+): Promise<{ signedTransaction: string }> {
+  const encryptedEnvelope =
+    await createEncryptedElectionEnvelopeTransaction<RetryVoidPublicationActionPayload>(
+      electionId,
+      actorPublicAddress,
+      actorPublicEncryptAddress,
+      actorPrivateEncryptKeyHex,
+      ENCRYPTED_ELECTION_ACTION_TYPES.RETRY_VOID_PUBLICATION,
+      {
+        ActorPublicAddress: actorPublicAddress,
+        VoidDecisionId: voidDecisionId,
       },
       signingPrivateKeyHex,
     );

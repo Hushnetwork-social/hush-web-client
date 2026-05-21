@@ -35,6 +35,7 @@ import {
   CollapsibleSurfaceSection,
 } from './HushVotingWorkspaceShared';
 import { ElectionReceiptTruthPanel } from './ElectionReceiptTruthPanel';
+import { VoterVoidStatusPanel } from './VoidElectionPanels';
 
 type ParsedAcceptedBallotReceipt = {
   electionId: string;
@@ -121,6 +122,15 @@ function buildVoterEligibilityStatusCopy(
   votingView: GetElectionVotingViewResponse | null,
   hasAcceptedReceipt: boolean
 ): VoterEligibilityStatusCopy {
+  if (entry.Election.LifecycleState === ElectionLifecycleStateProto.Voided) {
+    return {
+      title: 'Election VOID',
+      detail:
+        'No counted or final inclusion claim is available for this election. Vote-right consumed status is shown only when this voter already has safe voter-owned evidence.',
+      tone: 'warning',
+    };
+  }
+
   if (entry.CanClaimIdentity) {
     return {
       title: 'Eligibility identity required',
@@ -231,6 +241,13 @@ function buildCountedSetStatusItem({
   label: string;
   complete: boolean;
 } {
+  if (lifecycleState === ElectionLifecycleStateProto.Voided) {
+    return {
+      label: 'Final inclusion is unavailable because this election is VOID.',
+      complete: false,
+    };
+  }
+
   if (lifecycleState === ElectionLifecycleStateProto.Finalized && hasOfficialResult) {
     return {
       label: 'This accepted vote is included in the finalized counted set used for the official result.',
@@ -273,6 +290,7 @@ function buildHubReceiptVerificationFeedbackFromResponse(
   const isPostCloseReceipt =
     response.LifecycleState === ElectionLifecycleStateProto.Closed ||
     response.LifecycleState === ElectionLifecycleStateProto.Finalized;
+  const isVoidedReceipt = response.LifecycleState === ElectionLifecycleStateProto.Voided;
   const requiresCommitmentConfirmation =
     isPostCloseReceipt || hasProvidedCommitment || hasRetainedCommitment;
   const commitmentMatchesRetainedRecord =
@@ -380,6 +398,34 @@ function buildHubReceiptVerificationFeedbackFromResponse(
     };
   }
 
+  if (isVoidedReceipt) {
+    return {
+      tone: 'warning',
+      title: response.ParticipationCountedAsVoted
+        ? 'Vote right consumed before VOID'
+        : 'Receipt matches, but this election is VOID',
+      detail:
+        'The receipt matches this voter record where safe to check, but the election is VOID. No counted or final inclusion claim is available.',
+      verifiedAt,
+      statusItems: [
+        {
+          label: 'This voter is marked as voted in this election.',
+          complete: response.ParticipationCountedAsVoted,
+        },
+        ...(boundReceiptStatusItem
+          ? [
+              {
+                ...boundReceiptStatusItem,
+                complete: serverConfirmedBoundReceipt,
+              },
+            ]
+          : []),
+        finalCountStatusItem,
+        ...(commitmentStatusItem ? [commitmentStatusItem] : []),
+      ],
+    };
+  }
+
   if (requiresCommitmentConfirmation && !commitmentMatchesRetainedRecord) {
     const warningDetail = response.ParticipationCountedAsVoted
       ? hasProvidedCommitment && !hasRetainedCommitment
@@ -461,16 +507,21 @@ export function VoterWorkspaceSummary({
   resultView,
 }: VoterWorkspaceSummaryProps) {
   const isOpenElection = entry.Election.LifecycleState === ElectionLifecycleStateProto.Open;
+  const isVoidedElection = entry.Election.LifecycleState === ElectionLifecycleStateProto.Voided;
   const showCommitmentFieldInReceiptTemplate =
     entry.Election.LifecycleState === ElectionLifecycleStateProto.Closed ||
     entry.Election.LifecycleState === ElectionLifecycleStateProto.Finalized;
-  const primaryHref = entry.CanClaimIdentity
+  const primaryHref = isVoidedElection
+    ? '#hush-voting-section-artifacts'
+    : entry.CanClaimIdentity
     ? `/elections/${entry.Election.ElectionId}/eligibility`
     : `/elections/${entry.Election.ElectionId}/voter`;
   const anomalyHref = entry.CanClaimIdentity
     ? primaryHref
     : `/elections/${entry.Election.ElectionId}/anomaly`;
-  const primaryLabel = entry.CanClaimIdentity
+  const primaryLabel = isVoidedElection
+    ? 'Open VOID status'
+    : entry.CanClaimIdentity
     ? 'Open identity and eligibility'
     : isOpenElection
       ? 'Open ballot workflow'
@@ -497,10 +548,13 @@ export function VoterWorkspaceSummary({
     [entry]
   );
   const needsVoterAction =
-    entry.CanClaimIdentity ||
-    entry.SuggestedAction === ElectionHubNextActionHintProto.ElectionHubActionVoterClaimIdentity ||
-    entry.SuggestedAction === ElectionHubNextActionHintProto.ElectionHubActionVoterCastBallot ||
-    (isOpenElection && !hasAcceptedReceipt);
+    !isVoidedElection &&
+    (
+      entry.CanClaimIdentity ||
+      entry.SuggestedAction === ElectionHubNextActionHintProto.ElectionHubActionVoterClaimIdentity ||
+      entry.SuggestedAction === ElectionHubNextActionHintProto.ElectionHubActionVoterCastBallot ||
+      (isOpenElection && !hasAcceptedReceipt)
+    );
   const receiptContextBindingStatus =
     receiptVotingView?.Election?.BindingStatus ?? entry.Election.BindingStatus;
   const receiptContextSelectedProfileDevOnly =
@@ -567,6 +621,15 @@ export function VoterWorkspaceSummary({
   }, [anomalyThread, entry.CanClaimIdentity, isAnomalyWindowOpen]);
 
   const voterSurfaceSummary = useMemo(() => {
+    if (isVoidedElection) {
+      return (
+        <>
+          <span className="font-semibold text-hush-text-primary">Election VOID.</span> No counted or
+          final inclusion claim is available for this election.
+        </>
+      );
+    }
+
     if (entry.CanClaimIdentity) {
       return (
         <>
@@ -626,6 +689,7 @@ export function VoterWorkspaceSummary({
     entry.Election.LifecycleState,
     hasAcceptedReceipt,
     isOpenElection,
+    isVoidedElection,
     publishedResultState,
     closedVoterState,
   ]);
@@ -815,21 +879,23 @@ export function VoterWorkspaceSummary({
       eyebrow="Voter Surface"
       title="Participation and result review"
       description={
-        entry.CanClaimIdentity
+        isVoidedElection
+          ? 'This election is VOID. Voter-owned vote-right status remains visible only where safe, and no final inclusion claim is shown.'
+          : entry.CanClaimIdentity
           ? 'This election still needs a voter identity or eligibility review before the ballot surface can open.'
           : isOpenElection
             ? 'The election is open for this voter. Open the ballot screen to review options and continue with the current ballot-submission flow for this build.'
             : 'Voting controls are no longer active. This surface stays available only for voter-specific context and receipt verification.'
       }
       summary={voterSurfaceSummary}
-      defaultExpanded={needsVoterAction}
+      defaultExpanded={isVoidedElection || needsVoterAction}
       actions={
         <>
           <Link
             href={primaryHref}
             className="inline-flex self-start items-center gap-2 rounded-xl bg-hush-purple px-4 py-2 text-sm font-medium whitespace-nowrap text-white transition-colors hover:bg-hush-purple/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-dark"
           >
-            <Vote className="h-4 w-4" />
+            {isVoidedElection ? <FileWarning className="h-4 w-4" /> : <Vote className="h-4 w-4" />}
             <span>{primaryLabel}</span>
           </Link>
 
@@ -847,6 +913,13 @@ export function VoterWorkspaceSummary({
         </>
       }
     >
+      {isVoidedElection ? (
+        <VoterVoidStatusPanel
+          voteRightConsumed={hasAcceptedReceipt}
+          hasKnownVoteRightStatus={!entry.CanClaimIdentity && Boolean(receiptVotingView)}
+        />
+      ) : null}
+
       <div className="grid gap-4 md:grid-cols-3">
         <AvailabilityCard label="Lifecycle" value={getLifecycleLabel(entry.Election.LifecycleState)} />
         <AvailabilityCard
@@ -857,13 +930,21 @@ export function VoterWorkspaceSummary({
         <AvailabilityCard
           label="Results"
           value={
-            entry.HasOfficialResult
+            isVoidedElection
+              ? 'No current result claim'
+              : entry.HasOfficialResult
               ? 'Official result available'
               : entry.HasUnofficialResult
                 ? 'Participant result available'
                 : 'No result artifact yet'
           }
-          accentClass={entry.HasOfficialResult || entry.HasUnofficialResult ? 'text-green-100' : undefined}
+          accentClass={
+            isVoidedElection
+              ? 'text-red-100'
+              : entry.HasOfficialResult || entry.HasUnofficialResult
+                ? 'text-green-100'
+                : undefined
+          }
         />
       </div>
 

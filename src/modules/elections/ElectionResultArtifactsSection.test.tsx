@@ -19,6 +19,7 @@ import {
   ElectionReportArtifactAccessScopeProto,
   ElectionReportArtifactFormatProto,
   ElectionReportArtifactKindProto,
+  ElectionReportPackageKindProto,
   ElectionReportPackageStatusProto,
   ElectionResultArtifactKindProto,
   ElectionResultArtifactVisibilityProto,
@@ -772,5 +773,36 @@ describe('ElectionResultArtifactsSection', () => {
     expect(screen.getByTestId('election-results-progress')).toHaveTextContent(
       'The election is closed and the result workflow is running.'
     );
+  });
+
+  it('marks superseded historical packages without exposing them as current results', () => {
+    render(
+      <ElectionResultArtifactsSection
+        election={createElectionRecord({
+          LifecycleState: ElectionLifecycleStateProto.Voided,
+        })}
+        resultView={createResultView({
+          CanViewReportPackage: true,
+          LatestReportPackage: createReportPackage({
+            Status: ElectionReportPackageStatusProto.ReportPackageSupersededByVoid,
+            PackageKind: ElectionReportPackageKindProto.ReportPackageResult,
+            SupersededByVoidDecisionId: 'void-decision-1',
+            HasSupersededAt: true,
+            SupersededAt: timestamp,
+          }),
+          OfficialResult: createResultArtifact({
+            ArtifactKind: ElectionResultArtifactKindProto.ElectionResultArtifactOfficial,
+          }),
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('report-package-summary')).toHaveTextContent(
+      'Historical package superseded by VOID'
+    );
+    expect(screen.getByTestId('superseded-artifact-notice')).toHaveTextContent(
+      'not a current final-result claim'
+    );
+    expect(screen.queryByTestId('election-official-result')).not.toBeInTheDocument();
   });
 });
