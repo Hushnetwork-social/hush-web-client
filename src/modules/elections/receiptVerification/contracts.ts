@@ -405,7 +405,7 @@ function issue(
   return new ReceiptValidationError({ code, path, message });
 }
 
-function assertNoDuplicateJsonKeys(source: string): void {
+export function assertNoDuplicateJsonKeys(source: string): void {
   const parser = new DuplicateKeyJsonParser(source);
   parser.parse();
 }

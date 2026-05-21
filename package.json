@@ -46,6 +46,7 @@
     "bip39": "^3.1.0",
     "emoji-picker-react": "^4.16.1",
     "ffjavascript": "^0.2.45",
+    "fflate": "^0.8.3",
     "grpc-web": "^1.5.0",
     "heic2any": "^0.0.4",
     "lucide-react": "^0.468.0",

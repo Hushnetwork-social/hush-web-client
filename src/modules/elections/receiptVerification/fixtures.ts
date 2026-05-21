@@ -18,7 +18,7 @@ export const FEAT136_SAMPLE_PACKAGE_HASH =
 export const FEAT136_SAMPLE_VERIFIER_PROFILE_ID = 'public_anonymous_v1';
 export const FEAT136_SAMPLE_RECEIPT_COMMITMENT = 'receipt-a';
 export const FEAT136_SAMPLE_RECEIPT_COMMITMENT_SCHEME =
-  'hushvoting-sp04-receipt-commitment-sha256-v1';
+  'sha256(receipt_secret|prepared_ballot_hash|accepted_ballot_id)';
 export const FEAT136_SAMPLE_PREPARED_BALLOT_HASH = 'prepared-final-a';
 export const FEAT136_SAMPLE_BALLOT_DEFINITION_HASH =
   'NRASoflgGqzNd3Y/lR7Haz1FDI2k5Pzhj5YChdYFfHc=';
