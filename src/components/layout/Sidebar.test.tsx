@@ -180,7 +180,7 @@ describe('Sidebar', () => {
       expect(defaultProps.onNavSelect).toHaveBeenCalledWith('open-voting');
     });
 
-    it('should render voting-app navigation with HushFeeds and HushSocial', () => {
+    it('should render voting-app navigation with receipt verifier and cross-app links', () => {
       render(
         <Sidebar
           {...defaultProps}
@@ -190,6 +190,7 @@ describe('Sidebar', () => {
       );
 
       expect(screen.getByText('Election Hub')).toBeInTheDocument();
+      expect(screen.getByText('Verify receipt')).toBeInTheDocument();
       expect(screen.getByText('HushFeeds!')).toBeInTheDocument();
       expect(screen.getByText('HushSocial!')).toBeInTheDocument();
       expect(screen.queryByText('Create Group')).not.toBeInTheDocument();
@@ -203,6 +204,24 @@ describe('Sidebar', () => {
 
       expect(onGuestAction).toHaveBeenCalledTimes(1);
       expect(defaultProps.onNavSelect).not.toHaveBeenCalled();
+    });
+
+    it('allows guest users to open the public receipt verifier navigation item', () => {
+      const onGuestAction = vi.fn();
+      render(
+        <Sidebar
+          {...defaultProps}
+          activeApp="voting"
+          selectedNav="verify-receipt"
+          guestMode={true}
+          onGuestAction={onGuestAction}
+        />,
+      );
+
+      fireEvent.click(screen.getByText('Verify receipt'));
+
+      expect(defaultProps.onNavSelect).toHaveBeenCalledWith('verify-receipt');
+      expect(onGuestAction).not.toHaveBeenCalled();
     });
   });
 

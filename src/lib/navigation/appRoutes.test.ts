@@ -6,7 +6,9 @@ import {
   getAppDisplayName,
   LEGACY_DASHBOARD_ROUTE,
   getSocialPostRoute,
+  isSafePublicReturnRoute,
   isSafeSocialReturnRoute,
+  PUBLIC_RECEIPT_VERIFIER_ROUTE,
   resolveAuthSuccessRoute,
   SOCIAL_HOME_ROUTE,
   SOCIAL_POST_ROUTE,
@@ -40,8 +42,11 @@ describe('appRoutes', () => {
     expect(getSocialPostRoute('abc 123')).toBe(`${SOCIAL_POST_ROUTE}/abc%20123`);
   });
 
-  it('builds auth routes with optional safe social return targets', () => {
+  it('builds auth routes with optional safe public return targets', () => {
     expect(getAuthRoute('/social/post/post-123')).toBe('/auth?returnTo=%2Fsocial%2Fpost%2Fpost-123');
+    expect(getAuthRoute(PUBLIC_RECEIPT_VERIFIER_ROUTE)).toBe(
+      '/auth?returnTo=%2Fverify-receipt',
+    );
     expect(getAuthRoute('/feeds')).toBe(AUTH_ROUTE);
     expect(getAuthRoute(null)).toBe(AUTH_ROUTE);
   });
@@ -60,8 +65,17 @@ describe('appRoutes', () => {
     expect(isSafeSocialReturnRoute('/\\evil')).toBe(false);
   });
 
-  it('resolves auth success to safe social return routes or feeds fallback', () => {
+  it('allows the public receipt verifier as a safe public return route', () => {
+    expect(isSafePublicReturnRoute(PUBLIC_RECEIPT_VERIFIER_ROUTE)).toBe(true);
+    expect(isSafePublicReturnRoute('/verify-receipt?source=nav')).toBe(true);
+    expect(isSafePublicReturnRoute('/elections')).toBe(false);
+  });
+
+  it('resolves auth success to safe public return routes or feeds fallback', () => {
     expect(resolveAuthSuccessRoute('/social/post/post-123')).toBe('/social/post/post-123');
+    expect(resolveAuthSuccessRoute(PUBLIC_RECEIPT_VERIFIER_ROUTE)).toBe(
+      PUBLIC_RECEIPT_VERIFIER_ROUTE,
+    );
     expect(resolveAuthSuccessRoute('/feeds')).toBe(FEEDS_HOME_ROUTE);
     expect(resolveAuthSuccessRoute('https://example.com/social/post/post-123')).toBe(FEEDS_HOME_ROUTE);
     expect(resolveAuthSuccessRoute(null)).toBe(FEEDS_HOME_ROUTE);
@@ -78,6 +92,7 @@ describe('appRoutes', () => {
     expect(getActiveAppFromPath('/social/post/1')).toBe('social');
     expect(getActiveAppFromPath('/elections')).toBe('voting');
     expect(getActiveAppFromPath('/account/elections')).toBe('voting');
+    expect(getActiveAppFromPath(PUBLIC_RECEIPT_VERIFIER_ROUTE)).toBe('voting');
     expect(getActiveAppFromPath('/feeds')).toBe('feeds');
     expect(getActiveAppFromPath('/unknown')).toBe('feeds');
   });

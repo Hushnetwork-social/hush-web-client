@@ -4,6 +4,7 @@ export const FEEDS_HOME_ROUTE = '/feeds';
 export const SOCIAL_HOME_ROUTE = '/social';
 export const SOCIAL_POST_ROUTE = `${SOCIAL_HOME_ROUTE}/post`;
 export const VOTING_HOME_ROUTE = '/elections';
+export const PUBLIC_RECEIPT_VERIFIER_ROUTE = '/verify-receipt';
 export const AUTH_ROUTE = '/auth';
 export const LEGACY_DASHBOARD_ROUTE = '/dashboard';
 
@@ -40,7 +41,7 @@ export function getSocialPostRoute(postId: string): string {
 }
 
 export function getAuthRoute(returnTo?: string | null): string {
-  if (!isSafeSocialReturnRoute(returnTo)) {
+  if (!isSafeAuthReturnRoute(returnTo)) {
     return AUTH_ROUTE;
   }
 
@@ -52,6 +53,18 @@ export function resolveEntryRoute(isAuthenticated: boolean): string {
 }
 
 export function isSafeSocialReturnRoute(returnTo: string | null | undefined): returnTo is string {
+  return isSafeAuthReturnRoute(returnTo, (pathname) => pathname.startsWith(SOCIAL_HOME_ROUTE));
+}
+
+export function isSafePublicReturnRoute(returnTo: string | null | undefined): returnTo is string {
+  return isSafeAuthReturnRoute(returnTo, (pathname) => pathname === PUBLIC_RECEIPT_VERIFIER_ROUTE);
+}
+
+function isSafeAuthReturnRoute(
+  returnTo: string | null | undefined,
+  allowPathname: (pathname: string) => boolean = (pathname) =>
+    pathname.startsWith(SOCIAL_HOME_ROUTE) || pathname === PUBLIC_RECEIPT_VERIFIER_ROUTE,
+): returnTo is string {
   if (!returnTo || !returnTo.startsWith('/') || returnTo.startsWith('//') || returnTo.includes('\\')) {
     return false;
   }
@@ -59,14 +72,14 @@ export function isSafeSocialReturnRoute(returnTo: string | null | undefined): re
   try {
     const baseUrl = new URL('https://hushnetwork.local');
     const candidateUrl = new URL(returnTo, baseUrl);
-    return candidateUrl.origin === baseUrl.origin && candidateUrl.pathname.startsWith(SOCIAL_HOME_ROUTE);
+    return candidateUrl.origin === baseUrl.origin && allowPathname(candidateUrl.pathname);
   } catch {
     return false;
   }
 }
 
 export function resolveAuthSuccessRoute(returnTo: string | null | undefined): string {
-  return isSafeSocialReturnRoute(returnTo) ? returnTo : FEEDS_HOME_ROUTE;
+  return isSafeAuthReturnRoute(returnTo) ? returnTo : FEEDS_HOME_ROUTE;
 }
 
 export function normalizeLegacyAppRoute(pathname: string): string {
@@ -83,6 +96,7 @@ export function getActiveAppFromPath(pathname: string): AppId {
   if (
     pathname.startsWith(`${VOTING_HOME_ROUTE}/`) ||
     pathname === VOTING_HOME_ROUTE ||
+    pathname === PUBLIC_RECEIPT_VERIFIER_ROUTE ||
     pathname === '/account/elections' ||
     pathname.startsWith('/account/elections/')
   ) {

@@ -3217,6 +3217,11 @@ export interface GetElectionVotingViewResponse {
   ChallengeSatisfied: boolean;
   Sp04BlockerCode: string;
   Sp04BlockerMessage: string;
+  HasReceiptPublicPackageBinding: boolean;
+  ReceiptPublicPackageId: string;
+  ReceiptPublicPackageHash: string;
+  ReceiptPublicVerifierProfileId: string;
+  ReceiptPublicPackageBindingUnavailableReason: string;
 }
 
 export interface GetElectionsByOwnerResponse {

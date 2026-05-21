@@ -345,6 +345,11 @@ describe('VoterWorkspaceSummary', () => {
       Sp04Required: true,
       ChallengeSatisfied: false,
       Sp04BlockerMessage: 'Challenge required before cast',
+      HasReceiptPublicPackageBinding: false,
+      ReceiptPublicPackageId: '',
+      ReceiptPublicPackageHash: '',
+      ReceiptPublicVerifierProfileId: '',
+      ReceiptPublicPackageBindingUnavailableReason: '',
     });
 
     render(

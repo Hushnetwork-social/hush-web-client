@@ -20,6 +20,7 @@ import {
   getAppDisplayName,
   getAppHomeRoute,
   getAuthRoute,
+  PUBLIC_RECEIPT_VERIFIER_ROUTE,
   VOTING_HOME_ROUTE,
 } from "@/lib/navigation/appRoutes";
 import { SocialMenuPanel } from "@/components/social/SocialMenuPanel";
@@ -57,6 +58,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const pathname = usePathname();
   const isSocialRoute = pathname.startsWith("/social");
   const isVotingRoute = pathname.startsWith("/elections");
+  const isPublicReceiptVerifierRoute = pathname === PUBLIC_RECEIPT_VERIFIER_ROUTE;
   const {
     isAuthenticated,
     balance,
@@ -72,6 +74,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     selectFeed,
   } = useAppStore();
   const isGuestSocialRoute = isSocialRoute && !isAuthenticated;
+  const isGuestPublicVerifierRoute = isPublicReceiptVerifierRoute && !isAuthenticated;
+  const isGuestShellRoute = isGuestSocialRoute || isGuestPublicVerifierRoute;
   const blockHeight = useBlockchainStore((state) => state.blockHeight);
   const [isMobile, setIsMobile] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
@@ -98,14 +102,14 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     // Small delay to allow store rehydration from localStorage
     const timer = setTimeout(() => {
       setIsCheckingAuth(false);
-      if (!isAuthenticated && !isSocialRoute) {
+      if (!isAuthenticated && !isSocialRoute && !isPublicReceiptVerifierRoute) {
         debugLog('[Dashboard] Not authenticated, redirecting to /auth');
         router.replace("/auth");
       }
     }, 100);
 
     return () => clearTimeout(timer);
-  }, [isAuthenticated, isSocialRoute, router]);
+  }, [isAuthenticated, isPublicReceiptVerifierRoute, isSocialRoute, router]);
 
   // Get user info from store
   const userDisplayName = currentUser?.displayName || "User";
@@ -169,6 +173,13 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       setSelectedNav("open-voting");
       setActiveApp("voting");
       router.push(VOTING_HOME_ROUTE);
+      return;
+    }
+
+    if (id === "verify-receipt") {
+      setSelectedNav("verify-receipt");
+      setActiveApp("voting");
+      router.push(PUBLIC_RECEIPT_VERIFIER_ROUTE);
       return;
     }
 
@@ -282,7 +293,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   }, [performLogout]);
 
   // Show loading while checking auth
-  if (isCheckingAuth || (!isAuthenticated && !isSocialRoute)) {
+  if (isCheckingAuth || (!isAuthenticated && !isSocialRoute && !isPublicReceiptVerifierRoute)) {
     return (
       <div className="min-h-screen bg-hush-bg-dark flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-hush-purple" />
@@ -319,7 +330,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               onDownloadKeys={handleDownloadKeys}
               onAccountDetails={handleAccountDetails}
               onLogout={handleLogout}
-              guestMode={isGuestSocialRoute}
+              guestMode={isGuestShellRoute}
               onGuestAction={handleGuestSocialAction}
               guestActionLabel="Create User"
               guestActionInitials="CU"
@@ -329,8 +340,11 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                   guestMode={isGuestSocialRoute}
                   onGuestAction={handleGuestSocialAction}
                 />
-              ) : activeApp === "voting" || isVotingRoute ? (
-                <VotingMenuPanel />
+              ) : activeApp === "voting" || isVotingRoute || isPublicReceiptVerifierRoute ? (
+                <VotingMenuPanel
+                  guestMode={isGuestShellRoute}
+                  onGuestAction={handleGuestSocialAction}
+                />
               ) : <FeedList />}
             </Sidebar>
 
@@ -368,7 +382,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               onDownloadKeys={handleDownloadKeys}
               onAccountDetails={handleAccountDetails}
               onLogout={handleLogout}
-              guestMode={isGuestSocialRoute}
+              guestMode={isGuestShellRoute}
               onGuestAction={handleGuestSocialAction}
               guestActionLabel="Create User"
               guestActionInitials="CU"

@@ -51,6 +51,14 @@ import { ElectionAnomalyPanel } from './ElectionAnomalyPanel';
 import { ElectionReceiptTruthPanel } from './ElectionReceiptTruthPanel';
 import { ElectionResultArtifactsSection } from './ElectionResultArtifactsSection';
 import { getLifecycleLabel } from './contracts';
+import {
+  RECEIPT_EXPORTED_BY,
+  RECEIPT_EXPORT_FILE_EXTENSION,
+  RECEIPT_EXPORT_SCHEMA,
+  RECEIPT_EXPORT_SCHEMA_VERSION,
+  type HushVotingReceiptExport,
+  type HushVotingReceiptProof,
+} from './receiptVerification';
 
 type ElectionVotingPanelProps = {
   electionId: string;
@@ -101,6 +109,22 @@ type LocalReceipt = {
   ballotDefinitionVersion?: number;
   receiptCommitment?: string;
   receiptCommitmentScheme?: string;
+  expectedPackageId?: string;
+  expectedPackageHash?: string;
+  expectedVerifierProfileId?: string;
+  packageBindingUnavailableReason?: string;
+};
+
+type StrictReceiptExportSource = LocalReceipt & {
+  preparedBallotHash: string;
+  receiptCommitment: string;
+  receiptCommitmentScheme: string;
+};
+
+type PackageBoundReceiptExportSource = StrictReceiptExportSource & {
+  expectedPackageId: string;
+  expectedPackageHash: string;
+  expectedVerifierProfileId: string;
 };
 
 type CastDraft = {
@@ -149,7 +173,8 @@ type Sp04ChallengeState = {
 const pendingStorageKey = (electionId: string) => `feat099:pending:${electionId}`;
 const receiptStorageKey = (electionId: string) => `feat099:receipt:${electionId}`;
 const SP04_LOCAL_VERIFIER_VERSION = 'hushvoting-sp04-local-verifier-v1';
-const SP04_RECEIPT_COMMITMENT_SCHEME = 'hushvoting-sp04-receipt-commitment-sha256-v1';
+const SP04_RECEIPT_COMMITMENT_SCHEME =
+  'sha256(receipt_secret|prepared_ballot_hash|accepted_ballot_id)';
 const SP04_PREPARED_PACKAGE_TTL_MS = 15 * 60 * 1000;
 const sectionClass = 'rounded-3xl bg-hush-bg-element/90 px-6 py-5 shadow-lg shadow-black/10';
 const insetCardClass = 'rounded-2xl bg-hush-bg-dark/72 px-5 py-4 shadow-sm shadow-black/10';
@@ -681,47 +706,69 @@ function saveLocalReceipt(electionId: string, receipt: LocalReceipt): void {
   }
 }
 
-function buildReceiptText(
+function canBuildStrictReceiptExport(
+  receipt: LocalReceipt | null,
+): receipt is StrictReceiptExportSource {
+  return Boolean(
+    receipt?.electionId &&
+      receipt.receiptCommitment &&
+      receipt.receiptCommitmentScheme &&
+      receipt.preparedBallotHash,
+  );
+}
+
+function hasPackageBoundReceiptExport(
+  receipt: LocalReceipt | null,
+): receipt is PackageBoundReceiptExportSource {
+  return Boolean(
+    receipt?.expectedPackageId &&
+      receipt.expectedPackageHash &&
+      receipt.expectedVerifierProfileId,
+  );
+}
+
+function buildReceiptExport(
   receipt: LocalReceipt,
-  lifecycleState?: ElectionLifecycleStateProto,
-): string {
-  const lines = [
-    'Accepted Ballot Receipt',
-    `Election ID: ${receipt.electionId}`,
-    `Receipt ID: ${receipt.receiptId}`,
-    `Acceptance ID: ${receipt.acceptanceId}`,
-    `Accepted At: ${receipt.acceptedAt}`,
-    `Server Proof: ${receipt.serverProof}`,
-  ];
-
-  if (shouldIncludeReceiptCommitment(lifecycleState)) {
-    lines.splice(
-      5,
-      0,
-      `Ballot Package Commitment: ${receipt.ballotPackageCommitment || '(not retained on this device)'}`,
-    );
+  receiptGeneratedAt: string = new Date().toISOString(),
+): HushVotingReceiptExport | null {
+  if (!canBuildStrictReceiptExport(receipt)) {
+    return null;
   }
 
-  if (receipt.ballotDefinitionHash) {
-    lines.push(`Ballot Definition Hash: ${receipt.ballotDefinitionHash}`);
-  }
+  const receiptProof: HushVotingReceiptProof = {
+    electionId: receipt.electionId,
+    receiptCommitment: receipt.receiptCommitment,
+    receiptCommitmentScheme: receipt.receiptCommitmentScheme,
+    preparedBallotHash: receipt.preparedBallotHash,
+  };
+
   if (receipt.ballotDefinitionVersion !== undefined) {
-    lines.push(`Ballot Definition Version: ${receipt.ballotDefinitionVersion}`);
+    receiptProof.ballotDefinitionVersion = receipt.ballotDefinitionVersion;
   }
-  if (receipt.preparedBallotId) {
-    lines.push(`Prepared Ballot ID: ${receipt.preparedBallotId}`);
+  if (receipt.ballotDefinitionHash) {
+    receiptProof.ballotDefinitionHash = receipt.ballotDefinitionHash;
   }
-  if (receipt.preparedBallotHash) {
-    lines.push(`Prepared Ballot Hash: ${receipt.preparedBallotHash}`);
-  }
-  if (receipt.receiptCommitment) {
-    lines.push(`Receipt Commitment: ${receipt.receiptCommitment}`);
-  }
-  if (receipt.receiptCommitmentScheme) {
-    lines.push(`Receipt Commitment Scheme: ${receipt.receiptCommitmentScheme}`);
+  if (hasPackageBoundReceiptExport(receipt)) {
+    receiptProof.expectedPackageId = receipt.expectedPackageId;
+    receiptProof.expectedPackageHash = receipt.expectedPackageHash;
+    receiptProof.expectedVerifierProfileId = receipt.expectedVerifierProfileId;
   }
 
-  return lines.join('\n');
+  return {
+    schema: RECEIPT_EXPORT_SCHEMA,
+    schemaVersion: RECEIPT_EXPORT_SCHEMA_VERSION,
+    receiptProof,
+    exportEnvelope: {
+      receiptGeneratedAt,
+      exportedBy: RECEIPT_EXPORTED_BY,
+      exporterVersion: 'hush-web-client',
+    },
+  };
+}
+
+function buildReceiptExportJson(receipt: LocalReceipt): string | null {
+  const receiptExport = buildReceiptExport(receipt);
+  return receiptExport ? `${JSON.stringify(receiptExport, null, 2)}\n` : null;
 }
 
 function createReceiptFromVotingView(
@@ -769,6 +816,18 @@ function createReceiptFromVotingView(
       votingView.ReceiptCommitmentScheme ||
       pendingSubmission?.receiptCommitmentScheme ||
       existingReceipt?.receiptCommitmentScheme,
+    expectedPackageId: votingView.HasReceiptPublicPackageBinding
+      ? votingView.ReceiptPublicPackageId
+      : existingReceipt?.expectedPackageId,
+    expectedPackageHash: votingView.HasReceiptPublicPackageBinding
+      ? votingView.ReceiptPublicPackageHash
+      : existingReceipt?.expectedPackageHash,
+    expectedVerifierProfileId: votingView.HasReceiptPublicPackageBinding
+      ? votingView.ReceiptPublicVerifierProfileId
+      : existingReceipt?.expectedVerifierProfileId,
+    packageBindingUnavailableReason:
+      votingView.ReceiptPublicPackageBindingUnavailableReason ||
+      existingReceipt?.packageBindingUnavailableReason,
   };
 }
 
@@ -1304,6 +1363,9 @@ export function ElectionVotingPanel({
   const shouldShowReceiptCommitment = shouldIncludeReceiptCommitment(
     election?.LifecycleState,
   );
+  const canExportReceiptJson = canBuildStrictReceiptExport(actionableReceipt);
+  const hasPackageBoundReceipt = hasPackageBoundReceiptExport(actionableReceipt);
+  const isFinalizedElection = election?.LifecycleState === ElectionLifecycleStateProto.Finalized;
   const hasBoundaryContext = !!(
     votingView?.OpenArtifactId &&
     votingView?.EligibleSetHash &&
@@ -2261,13 +2323,15 @@ export function ElectionVotingPanel({
     }
 
     try {
+      const receiptJson = buildReceiptExportJson(actionableReceipt);
+      if (!receiptJson) {
+        throw new Error('Receipt proof is not available for JSON export yet.');
+      }
       if (!navigator.clipboard?.writeText) {
         throw new Error('Clipboard access is unavailable on this device.');
       }
-      await navigator.clipboard.writeText(
-        buildReceiptText(actionableReceipt, detail?.Election?.LifecycleState),
-      );
-      setFeedback({ tone: 'success', message: 'Receipt copied locally.' });
+      await navigator.clipboard.writeText(receiptJson);
+      setFeedback({ tone: 'success', message: 'Receipt JSON copied locally.' });
     } catch (error) {
       setFeedback({
         tone: 'error',
@@ -2282,17 +2346,23 @@ export function ElectionVotingPanel({
       return;
     }
 
-    const blob = new Blob(
-      [buildReceiptText(actionableReceipt, detail?.Election?.LifecycleState)],
-      { type: 'text/plain;charset=utf-8' },
-    );
+    const receiptJson = buildReceiptExportJson(actionableReceipt);
+    if (!receiptJson) {
+      setFeedback({
+        tone: 'error',
+        message: 'Receipt proof is not available for JSON export yet.',
+      });
+      return;
+    }
+
+    const blob = new Blob([receiptJson], { type: 'application/json;charset=utf-8' });
     const objectUrl = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = objectUrl;
-    link.download = `accepted-ballot-receipt-${actionableReceipt.receiptId}.txt`;
+    link.download = `accepted-ballot-receipt-${actionableReceipt.receiptId}${RECEIPT_EXPORT_FILE_EXTENSION}`;
     link.click();
     window.URL.revokeObjectURL(objectUrl);
-    setFeedback({ tone: 'success', message: 'Receipt downloaded locally.' });
+    setFeedback({ tone: 'success', message: 'Receipt JSON downloaded locally.' });
   }
 
   async function handleVerifyReceipt(): Promise<void> {
@@ -2519,8 +2589,22 @@ export function ElectionVotingPanel({
                         ) : null}
                         {actionableReceipt.receiptCommitment ? (
                           <div className="text-green-100/80">
-                            This receipt proves acceptance and later inclusion. It does not prove
-                            which option was selected.
+                            {hasPackageBoundReceipt
+                              ? 'This receipt can be exported with finalized package binding. It does not prove which option was selected.'
+                              : 'This receipt supports consumed-right status before finalization. Counted inclusion is verified later against a finalized public package.'}
+                          </div>
+                        ) : null}
+                        {hasPackageBoundReceipt ? (
+                          <div data-testid="voting-receipt-package-binding">
+                            Package binding:{' '}
+                            <span className="font-mono">
+                              {truncateMiddle(actionableReceipt.expectedPackageId ?? '')}
+                            </span>
+                          </div>
+                        ) : isFinalizedElection && actionableReceipt.packageBindingUnavailableReason ? (
+                          <div className="text-amber-100" data-testid="voting-receipt-package-binding-unavailable">
+                            Package-bound export is not available yet:{' '}
+                            {actionableReceipt.packageBindingUnavailableReason}
                           </div>
                         ) : null}
                         {shouldShowReceiptCommitment ? (
@@ -2541,8 +2625,14 @@ export function ElectionVotingPanel({
                         ) : null}
                         {!shouldShowReceiptCommitment ? (
                           <div className="text-green-100/80">
-                            Open-election receipts stay compact and include only the fields used for
-                            this check. Additional receipt details appear after the election closes.
+                            Open-election receipts confirm consumed-right status only. Counted
+                            inclusion is verified after finalization with the public package.
+                          </div>
+                        ) : null}
+                        {!canExportReceiptJson ? (
+                          <div className="text-amber-100" data-testid="voting-receipt-export-unavailable">
+                            Receipt JSON export needs a receipt commitment, commitment scheme, and
+                            prepared ballot hash from the accepted vote record.
                           </div>
                         ) : null}
                       </div>
@@ -2564,8 +2654,8 @@ export function ElectionVotingPanel({
                         election.
                       </p>
                       <p className="text-green-100/70">
-                        After the election closes, a separate check can confirm whether the vote was
-                        included in the final count.
+                        After finalization, export the receipt JSON and verify it against the
+                        finalized public package to check counted inclusion.
                       </p>
                     </div>
                     <button
@@ -2589,22 +2679,22 @@ export function ElectionVotingPanel({
                   <button
                     type="button"
                     onClick={() => void handleCopyReceipt()}
-                    disabled={!actionableReceipt}
+                    disabled={!canExportReceiptJson}
                     className="inline-flex items-center gap-2 rounded-xl bg-green-500 px-4 py-2.5 text-sm font-medium text-green-950 transition-colors hover:bg-green-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-200 focus-visible:ring-offset-2 focus-visible:ring-offset-green-950/10 disabled:cursor-not-allowed disabled:opacity-50"
                     data-testid="voting-copy-receipt"
                   >
                     <Copy className="h-4 w-4" />
-                    <span>Copy receipt</span>
+                    <span>Copy receipt JSON</span>
                   </button>
                   <button
                     type="button"
                     onClick={handleDownloadReceipt}
-                    disabled={!actionableReceipt}
+                    disabled={!canExportReceiptJson}
                     className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-emerald-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 focus-visible:ring-offset-green-950/10 disabled:cursor-not-allowed disabled:opacity-50"
                     data-testid="voting-download-receipt"
                   >
                     <Download className="h-4 w-4" />
-                    <span>Download receipt</span>
+                    <span>Download receipt JSON</span>
                   </button>
                 </div>
               </>

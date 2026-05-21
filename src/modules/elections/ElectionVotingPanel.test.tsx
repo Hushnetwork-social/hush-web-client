@@ -223,6 +223,11 @@ function createVotingViewResponse(
     ChallengeSatisfied: false,
     Sp04BlockerCode: '',
     Sp04BlockerMessage: '',
+    HasReceiptPublicPackageBinding: false,
+    ReceiptPublicPackageId: '',
+    ReceiptPublicPackageHash: '',
+    ReceiptPublicVerifierProfileId: '',
+    ReceiptPublicPackageBindingUnavailableReason: '',
     ...overrides,
   };
 }
@@ -312,6 +317,20 @@ describe('ElectionVotingPanel', () => {
     });
     transactionServiceMock.createAcceptElectionBallotCastTransaction.mockResolvedValue({
       signedTransaction: 'signed-cast-transaction',
+    });
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: vi.fn().mockResolvedValue(undefined),
+      },
+    });
+    Object.defineProperty(window.URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn(() => 'blob:receipt-json'),
+    });
+    Object.defineProperty(window.URL, 'revokeObjectURL', {
+      configurable: true,
+      value: vi.fn(),
     });
   });
 
@@ -737,7 +756,7 @@ describe('ElectionVotingPanel', () => {
     expect(screen.getByRole('dialog')).toHaveAttribute('aria-modal', 'true');
   });
 
-  it('keeps receipt actions available when the accepted checkoff exists but the original commitment was not retained locally', async () => {
+  it('keeps status verification available but disables JSON export when receipt proof is missing', async () => {
     electionsServiceMock.getElectionVotingView.mockResolvedValue(
       createVotingViewResponse({
         CommitmentRegistered: true,
@@ -765,11 +784,14 @@ describe('ElectionVotingPanel', () => {
 
     expect(await screen.findByTestId('voting-accepted-panel')).toBeInTheDocument();
     expect(
-      screen.getByText(/Open-election receipts stay compact and include only the fields used for this check/i),
+      screen.getByText(/Open-election receipts confirm consumed-right status only/i),
     ).toBeInTheDocument();
-    expect(screen.getByTestId('voting-copy-receipt')).toBeEnabled();
-    expect(screen.getByTestId('voting-download-receipt')).toBeEnabled();
+    expect(screen.getByTestId('voting-copy-receipt')).toBeDisabled();
+    expect(screen.getByTestId('voting-download-receipt')).toBeDisabled();
     expect(screen.getByTestId('voting-verify-receipt')).toBeEnabled();
+    expect(screen.getByTestId('voting-receipt-export-unavailable')).toHaveTextContent(
+      'Receipt JSON export needs',
+    );
 
     fireEvent.click(screen.getByTestId('voting-verify-receipt'));
 
@@ -778,6 +800,48 @@ describe('ElectionVotingPanel', () => {
         'This voter is marked as voted',
       );
     });
+  });
+
+  it('does not expose receipt actions when no accepted ballot exists', async () => {
+    electionsServiceMock.getElectionVotingView.mockResolvedValue(createVotingViewResponse());
+
+    render(
+      <ElectionVotingPanel
+        electionId="election-1"
+        actorPublicAddress="actor-public-key"
+        actorEncryptionPublicKey="actor-encryption-public-key"
+        actorEncryptionPrivateKey="actor-encryption-private-key"
+        actorSigningPrivateKey="actor-signing-private-key"
+      />,
+    );
+
+    expect(await screen.findByTestId('voting-option-option-a')).toBeInTheDocument();
+    expect(screen.queryByTestId('voting-accepted-panel')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('voting-copy-receipt')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('voting-download-receipt')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('voting-verify-receipt')).not.toBeInTheDocument();
+  });
+
+  it('does not expose receipt actions when the voting view is unavailable', async () => {
+    electionsServiceMock.getElectionVotingView.mockRejectedValue(
+      new Error('Voting view unavailable'),
+    );
+
+    render(
+      <ElectionVotingPanel
+        electionId="election-1"
+        actorPublicAddress="actor-public-key"
+        actorEncryptionPublicKey="actor-encryption-public-key"
+        actorEncryptionPrivateKey="actor-encryption-private-key"
+        actorSigningPrivateKey="actor-signing-private-key"
+      />,
+    );
+
+    expect(await screen.findByText('Election data is unavailable.')).toBeInTheDocument();
+    expect(screen.queryByTestId('voting-accepted-panel')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('voting-copy-receipt')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('voting-download-receipt')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('voting-verify-receipt')).not.toBeInTheDocument();
   });
 
   it('gates SP-04 final cast until the current selection challenge passes', async () => {
@@ -875,7 +939,7 @@ describe('ElectionVotingPanel', () => {
         PreparedBallotId: 'prepared-final-1',
         PreparedBallotHash: 'prepared-final-hash-1',
         ReceiptCommitment: 'receipt-commitment-1',
-        ReceiptCommitmentScheme: 'hushvoting-sp04-receipt-commitment-sha256-v1',
+        ReceiptCommitmentScheme: 'sha256(receipt_secret|prepared_ballot_hash|accepted_ballot_id)',
       }),
     );
 
@@ -899,9 +963,134 @@ describe('ElectionVotingPanel', () => {
       'Ballot definition',
     );
     expect(screen.getByTestId('voting-accepted-panel')).toHaveTextContent(
-      'does not prove',
+      'Counted inclusion is verified later',
     );
     expect(screen.queryByText('Candidate A')).not.toBeInTheDocument();
+  });
+
+  it('copies a package-less strict receipt JSON only after the voter requests it', async () => {
+    electionsServiceMock.getElectionVotingView.mockResolvedValue(
+      createVotingViewResponse({
+        CommitmentRegistered: true,
+        HasCommitmentRegisteredAt: true,
+        CommitmentRegisteredAt: timestamp,
+        HasAcceptedAt: true,
+        AcceptedAt: timestamp,
+        PersonalParticipationStatus:
+          ElectionParticipationStatusProto.ParticipationCountedAsVoted,
+        ReceiptId: 'receipt-json-1',
+        AcceptanceId: 'acceptance-json-1',
+        ServerProof: 'server-proof-json-1',
+        PreparedBallotHash: 'prepared-final-hash-1',
+        ReceiptCommitment: 'receipt-commitment-1',
+        ReceiptCommitmentScheme: 'sha256(receipt_secret|prepared_ballot_hash|accepted_ballot_id)',
+        BallotDefinitionVersion: 1,
+        BallotDefinitionHash: 'ballot-definition-hash-1',
+      }),
+    );
+
+    render(
+      <ElectionVotingPanel
+        electionId="election-1"
+        actorPublicAddress="actor-public-key"
+        actorEncryptionPublicKey="actor-encryption-public-key"
+        actorEncryptionPrivateKey="actor-encryption-private-key"
+        actorSigningPrivateKey="actor-signing-private-key"
+      />,
+    );
+
+    const writeText = vi.mocked(navigator.clipboard.writeText);
+    expect(await screen.findByTestId('voting-copy-receipt')).toBeEnabled();
+    expect(writeText).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('voting-copy-receipt'));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    const receipt = JSON.parse(String(writeText.mock.calls[0]?.[0]));
+    expect(receipt.schema).toBe('hushvoting.receipt.export');
+    expect(receipt.schemaVersion).toBe(1);
+    expect(receipt.receiptProof).toMatchObject({
+      electionId: 'election-1',
+      receiptCommitment: 'receipt-commitment-1',
+      receiptCommitmentScheme: 'sha256(receipt_secret|prepared_ballot_hash|accepted_ballot_id)',
+      preparedBallotHash: 'prepared-final-hash-1',
+      ballotDefinitionVersion: 1,
+      ballotDefinitionHash: 'ballot-definition-hash-1',
+    });
+    expect(receipt.receiptProof.expectedPackageId).toBeUndefined();
+    expect(JSON.stringify(receipt)).not.toContain('server-proof-json-1');
+    expect(JSON.stringify(receipt)).not.toContain('acceptance-json-1');
+    expect(JSON.stringify(receipt)).not.toContain('Candidate A');
+  });
+
+  it('downloads a package-bound strict receipt JSON after finalization only when requested', async () => {
+    electionsServiceMock.getElection.mockResolvedValue(
+      createElectionResponse({
+        Election: createElectionRecord({
+          LifecycleState: ElectionLifecycleStateProto.Finalized,
+        }),
+      }),
+    );
+    electionsServiceMock.getElectionVotingView.mockResolvedValue(
+      createVotingViewResponse({
+        HasAcceptedAt: true,
+        AcceptedAt: timestamp,
+        PersonalParticipationStatus:
+          ElectionParticipationStatusProto.ParticipationCountedAsVoted,
+        ReceiptId: 'receipt-package-bound-1',
+        AcceptanceId: 'acceptance-package-bound-1',
+        ServerProof: 'server-proof-package-bound-1',
+        PreparedBallotHash: 'prepared-final-hash-1',
+        ReceiptCommitment: 'receipt-commitment-1',
+        ReceiptCommitmentScheme: 'sha256(receipt_secret|prepared_ballot_hash|accepted_ballot_id)',
+        BallotDefinitionVersion: 1,
+        BallotDefinitionHash: 'ballot-definition-hash-1',
+        HasReceiptPublicPackageBinding: true,
+        ReceiptPublicPackageId: 'HushElectionPackage-election-1',
+        ReceiptPublicPackageHash: `sha256:${'a'.repeat(64)}`,
+        ReceiptPublicVerifierProfileId: 'public_anonymous_v1',
+      }),
+    );
+
+    render(
+      <ElectionVotingPanel
+        electionId="election-1"
+        actorPublicAddress="actor-public-key"
+        actorEncryptionPublicKey="actor-encryption-public-key"
+        actorEncryptionPrivateKey="actor-encryption-private-key"
+        actorSigningPrivateKey="actor-signing-private-key"
+      />,
+    );
+
+    const acceptedToggle = await screen.findByTestId('voting-accepted-panel-toggle');
+    if (acceptedToggle.getAttribute('aria-expanded') === 'false') {
+      fireEvent.click(acceptedToggle);
+    }
+    expect(await screen.findByTestId('voting-receipt-package-binding')).toHaveTextContent(
+      'HushElec...ection-1',
+    );
+    const createObjectURL = vi.mocked(window.URL.createObjectURL);
+    expect(createObjectURL).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('voting-download-receipt'));
+
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    const blob = createObjectURL.mock.calls[0]?.[0] as Blob;
+    expect(blob.type).toBe('application/json;charset=utf-8');
+    const receiptText = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(blob);
+    });
+    const receipt = JSON.parse(receiptText);
+    expect(receipt.receiptProof).toMatchObject({
+      expectedPackageId: 'HushElectionPackage-election-1',
+      expectedPackageHash: `sha256:${'a'.repeat(64)}`,
+      expectedVerifierProfileId: 'public_anonymous_v1',
+    });
+    expect(JSON.stringify(receipt)).not.toContain('server-proof-package-bound-1');
+    expect(JSON.stringify(receipt)).not.toContain('acceptance-package-bound-1');
   });
 
   it('moves published results above the voter diagnostics and keeps the secondary sections collapsed', async () => {
