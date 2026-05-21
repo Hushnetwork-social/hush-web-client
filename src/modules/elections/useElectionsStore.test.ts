@@ -39,6 +39,8 @@ const { electionsServiceMock, identityServiceMock, blockchainServiceMock, transa
     transactionServiceMock: {
       createRecordElectionCeremonySelfTestSuccessTransaction: vi.fn(),
       createElectionReportAccessGrantTransaction: vi.fn(),
+      createVoidElectionTransaction: vi.fn(),
+      createRetryVoidPublicationTransaction: vi.fn(),
     },
   }));
 
@@ -62,6 +64,10 @@ vi.mock('./transactionService', async () => {
       transactionServiceMock.createRecordElectionCeremonySelfTestSuccessTransaction(...args),
     createElectionReportAccessGrantTransaction: (...args: unknown[]) =>
       transactionServiceMock.createElectionReportAccessGrantTransaction(...args),
+    createVoidElectionTransaction: (...args: unknown[]) =>
+      transactionServiceMock.createVoidElectionTransaction(...args),
+    createRetryVoidPublicationTransaction: (...args: unknown[]) =>
+      transactionServiceMock.createRetryVoidPublicationTransaction(...args),
   };
 });
 
@@ -254,6 +260,8 @@ describe('useElectionsStore FEAT-103 hub state', () => {
     blockchainServiceMock.submitTransaction.mockReset();
     transactionServiceMock.createRecordElectionCeremonySelfTestSuccessTransaction.mockReset();
     transactionServiceMock.createElectionReportAccessGrantTransaction.mockReset();
+    transactionServiceMock.createVoidElectionTransaction.mockReset();
+    transactionServiceMock.createRetryVoidPublicationTransaction.mockReset();
   });
 
   it('loads the actor-scoped hub and selects the first election by default', async () => {
@@ -341,6 +349,96 @@ describe('useElectionsStore FEAT-103 hub state', () => {
     expect(blockchainServiceMock.submitTransaction).toHaveBeenCalledWith('signed-grant-tx');
     expect(state.reportAccessGrants).toHaveLength(1);
     expect(state.feedback?.tone).toBe('success');
+  });
+
+  it('submits a void-election transaction and waits for the voided lifecycle state', async () => {
+    useElectionsStore.setState({
+      actorPublicAddress: 'actor-address',
+      ownerPublicAddress: 'actor-address',
+      selectedElectionId: 'election-1',
+      hubEntries: [createHubEntry('election-1', ElectionLifecycleStateProto.Open, 'Open Election')],
+    });
+
+    transactionServiceMock.createVoidElectionTransaction.mockResolvedValue({
+      signedTransaction: 'signed-void-tx',
+    });
+    blockchainServiceMock.submitTransaction.mockResolvedValue({
+      successful: true,
+      message: '',
+    });
+    electionsServiceMock.getElection.mockResolvedValue(
+      createElectionResponse('election-1', ElectionLifecycleStateProto.Voided, 'Voided Election')
+    );
+    electionsServiceMock.getElectionHubView.mockResolvedValue({
+      ...createHubViewResponse(),
+      Elections: [createHubEntry('election-1', ElectionLifecycleStateProto.Voided, 'Voided Election')],
+    });
+    electionsServiceMock.getElectionReportAccessGrants.mockResolvedValue(createGrantResponse([]));
+
+    const result = await useElectionsStore.getState().voidElection(
+      ' Trustee threshold could not be satisfied after the close ceremony. ',
+      [],
+      'actor-encrypt-address',
+      'actor-private-encrypt-key',
+      'actor-signing-private-key'
+    );
+
+    expect(result).toBe(true);
+    expect(transactionServiceMock.createVoidElectionTransaction).toHaveBeenCalledWith(
+      'election-1',
+      'actor-address',
+      'actor-encrypt-address',
+      'actor-private-encrypt-key',
+      'Trustee threshold could not be satisfied after the close ceremony.',
+      [],
+      'actor-signing-private-key'
+    );
+    expect(blockchainServiceMock.submitTransaction).toHaveBeenCalledWith('signed-void-tx');
+    expect(useElectionsStore.getState().feedback?.message).toBe('Election voided.');
+  });
+
+  it('submits a retry-void-publication transaction and refreshes the voided election view', async () => {
+    useElectionsStore.setState({
+      actorPublicAddress: 'actor-address',
+      ownerPublicAddress: 'actor-address',
+      selectedElectionId: 'election-1',
+      hubEntries: [createHubEntry('election-1', ElectionLifecycleStateProto.Voided, 'Voided Election')],
+    });
+
+    transactionServiceMock.createRetryVoidPublicationTransaction.mockResolvedValue({
+      signedTransaction: 'signed-retry-void-tx',
+    });
+    blockchainServiceMock.submitTransaction.mockResolvedValue({
+      successful: true,
+      message: '',
+    });
+    electionsServiceMock.getElection.mockResolvedValue(
+      createElectionResponse('election-1', ElectionLifecycleStateProto.Voided, 'Voided Election')
+    );
+    electionsServiceMock.getElectionHubView.mockResolvedValue({
+      ...createHubViewResponse(),
+      Elections: [createHubEntry('election-1', ElectionLifecycleStateProto.Voided, 'Voided Election')],
+    });
+    electionsServiceMock.getElectionReportAccessGrants.mockResolvedValue(createGrantResponse([]));
+
+    const result = await useElectionsStore.getState().retryVoidPublication(
+      'void-decision-1',
+      'actor-encrypt-address',
+      'actor-private-encrypt-key',
+      'actor-signing-private-key'
+    );
+
+    expect(result).toBe(true);
+    expect(transactionServiceMock.createRetryVoidPublicationTransaction).toHaveBeenCalledWith(
+      'election-1',
+      'actor-address',
+      'actor-encrypt-address',
+      'actor-private-encrypt-key',
+      'void-decision-1',
+      'actor-signing-private-key'
+    );
+    expect(blockchainServiceMock.submitTransaction).toHaveBeenCalledWith('signed-retry-void-tx');
+    expect(useElectionsStore.getState().feedback?.message).toBe('VOID publication retry submitted.');
   });
 
   it('waits past stale returned-cycle timestamps before marking trustee self-test as recorded', async () => {

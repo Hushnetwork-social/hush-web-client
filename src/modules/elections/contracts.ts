@@ -231,6 +231,7 @@ const LIFECYCLE_LABELS: Record<ElectionLifecycleStateProto, string> = {
   [ElectionLifecycleStateProto.Open]: 'Open',
   [ElectionLifecycleStateProto.Closed]: 'Closed',
   [ElectionLifecycleStateProto.Finalized]: 'Finalized',
+  [ElectionLifecycleStateProto.Voided]: 'Voided',
 };
 
 const BINDING_LABELS: Record<ElectionBindingStatusProto, string> = {
