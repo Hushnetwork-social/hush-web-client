@@ -2,7 +2,7 @@
 
 import type { ElectionHubEntryView } from '@/lib/grpc';
 import { ElectionLifecycleStateProto } from '@/lib/grpc';
-import { ArrowRight, CheckCircle2, LockKeyhole, Vote } from 'lucide-react';
+import { ArrowRight, CheckCircle2, FileWarning, LockKeyhole, Vote } from 'lucide-react';
 import {
   formatTimestamp,
   getElectionHubDisplayActionLabel,
@@ -18,6 +18,10 @@ type ElectionHubCardProps = {
 };
 
 function getResultCopy(entry: ElectionHubEntryView): string | null {
+  if (entry.Election.LifecycleState === ElectionLifecycleStateProto.Voided) {
+    return 'VOID status available';
+  }
+
   if (entry.HasOfficialResult) {
     return 'Official result available';
   }
@@ -35,6 +39,11 @@ function getResultCopy(entry: ElectionHubEntryView): string | null {
 
 export function ElectionHubCard({ entry, isSelected, onSelect }: ElectionHubCardProps) {
   const resultCopy = getResultCopy(entry);
+  const isVoided = entry.Election.LifecycleState === ElectionLifecycleStateProto.Voided;
+  const ResultBadgeIcon = isVoided ? FileWarning : CheckCircle2;
+  const resultBadgeClassName = isVoided
+    ? 'border-red-500/30 bg-red-500/10 text-red-100'
+    : 'border-green-500/30 bg-green-500/10 text-green-100';
   const isFinalizedCompact =
     entry.Election.LifecycleState === ElectionLifecycleStateProto.Finalized;
   const buttonClassName = isFinalizedCompact
@@ -67,8 +76,8 @@ export function ElectionHubCard({ entry, isSelected, onSelect }: ElectionHubCard
               </h3>
               <RoleBadgeCluster roles={entry.ActorRoles} compact />
               {resultCopy ? (
-                <span className={`${statusBadgeClassName} border-green-500/30 bg-green-500/10 text-green-100`}>
-                  <CheckCircle2 className="h-3.5 w-3.5" />
+                <span className={`${statusBadgeClassName} ${resultBadgeClassName}`}>
+                  <ResultBadgeIcon className="h-3.5 w-3.5" />
                   <span>{resultCopy}</span>
                 </span>
               ) : null}
@@ -120,8 +129,8 @@ export function ElectionHubCard({ entry, isSelected, onSelect }: ElectionHubCard
               <span>{getElectionHubDisplayActionLabel(entry)}</span>
             </span>
             {resultCopy ? (
-              <span className={`${statusBadgeClassName} border-green-500/30 bg-green-500/10 text-green-100`}>
-                <CheckCircle2 className="h-3.5 w-3.5" />
+              <span className={`${statusBadgeClassName} ${resultBadgeClassName}`}>
+                <ResultBadgeIcon className="h-3.5 w-3.5" />
                 <span>{resultCopy}</span>
               </span>
             ) : null}

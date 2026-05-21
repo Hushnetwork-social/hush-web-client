@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { AlertCircle, CheckCircle2, Loader2, ShieldAlert } from 'lucide-react';
 import {
   ElectionClosedProgressStatusProto,
+  ElectionLifecycleStateProto,
   ElectionResultArtifactKindProto,
   OfficialResultVisibilityPolicyProto,
   type GetElectionResponse,
@@ -220,23 +221,32 @@ export function HushVotingWorkspace({
       return null;
     }
 
+    const isVoided = activeEntry.Election.LifecycleState === ElectionLifecycleStateProto.Voided;
     const hasUnofficialResult =
-      activeEntry.HasUnofficialResult ||
-      Boolean(activeDetail?.Election?.UnofficialResultArtifactId) ||
-      Boolean(effectiveResultView?.UnofficialResult);
+      !isVoided &&
+      (
+        activeEntry.HasUnofficialResult ||
+        Boolean(activeDetail?.Election?.UnofficialResultArtifactId) ||
+        Boolean(effectiveResultView?.UnofficialResult)
+      );
     const hasOfficialResult =
-      activeEntry.HasOfficialResult ||
-      Boolean(activeDetail?.Election?.OfficialResultArtifactId) ||
-      Boolean(effectiveResultView?.OfficialResult);
+      !isVoided &&
+      (
+        activeEntry.HasOfficialResult ||
+        Boolean(activeDetail?.Election?.OfficialResultArtifactId) ||
+        Boolean(effectiveResultView?.OfficialResult)
+      );
 
     return {
       ...activeEntry,
       HasUnofficialResult: hasUnofficialResult,
       HasOfficialResult: hasOfficialResult,
       CanViewParticipantResults:
-        activeEntry.CanViewParticipantResults || hasUnofficialResult || hasOfficialResult,
+        !isVoided && (activeEntry.CanViewParticipantResults || hasUnofficialResult || hasOfficialResult),
       CanViewReportPackage:
-        activeEntry.CanViewReportPackage || Boolean(effectiveResultView?.CanViewReportPackage),
+        activeEntry.CanViewReportPackage ||
+        Boolean(effectiveResultView?.CanViewReportPackage) ||
+        isVoided,
     };
   }, [activeDetail, activeEntry, effectiveResultView]);
 
@@ -259,6 +269,7 @@ export function HushVotingWorkspace({
     }
 
     const shouldLoadResultView =
+      activeEntry.Election.LifecycleState === ElectionLifecycleStateProto.Voided ||
       activeEntry.CanViewParticipantResults ||
       activeEntry.CanViewReportPackage ||
       activeEntry.HasUnofficialResult ||
@@ -575,6 +586,7 @@ export function HushVotingWorkspace({
                       detail={activeDetail}
                       resultView={effectiveResultView}
                       isLoadingResultView={isLoadingResultView}
+                      actorPublicAddress={actorPublicAddress}
                     />
                   );
                 default:

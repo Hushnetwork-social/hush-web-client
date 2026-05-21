@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import type { ElectionHubEntryView } from '@/lib/grpc';
+import { ElectionLifecycleStateProto } from '@/lib/grpc';
 import { ArrowLeft, FileWarning } from 'lucide-react';
 import {
   formatTimestamp,
@@ -16,6 +17,7 @@ type ElectionWorkspaceHeaderProps = {
 };
 
 export function ElectionWorkspaceHeader({ entry }: ElectionWorkspaceHeaderProps) {
+  const isVoided = entry.Election.LifecycleState === ElectionLifecycleStateProto.Voided;
   const canOpenOwnAnomaly =
     !entry.CanClaimIdentity &&
     (
@@ -36,7 +38,11 @@ export function ElectionWorkspaceHeader({ entry }: ElectionWorkspaceHeaderProps)
       </Link>
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <span className="rounded-full border border-hush-purple/30 bg-hush-purple/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-hush-purple">
+        <span className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] ${
+          isVoided
+            ? 'border-red-500/30 bg-red-500/10 text-red-100'
+            : 'border-hush-purple/30 bg-hush-purple/10 text-hush-purple'
+        }`}>
           {getLifecycleLabel(entry.Election.LifecycleState)}
         </span>
         <span className="rounded-full border border-hush-bg-light bg-hush-bg-dark px-3 py-1 text-xs text-hush-text-accent">

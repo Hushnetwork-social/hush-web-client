@@ -37,6 +37,7 @@ import {
 import { AnomalyEvidenceManifestStatusPanel } from './AnomalyEvidenceManifestStatusPanel';
 import { AvailabilityCard } from './HushVotingWorkspaceShared';
 import { ProtocolPackageBindingPanel } from './ProtocolPackageBindingPanel';
+import { VoidPublicationStatusDetails } from './VoidElectionPanels';
 
 type VerificationPackageStatusSectionProps = {
   electionId: string;
@@ -91,6 +92,12 @@ function getStatusCopy(statusValue: ElectionVerificationPackageStatusProto): {
       return {
         label: 'Export failed',
         body: 'The latest package export attempt failed and needs attention.',
+        className: 'bg-red-500/12 text-red-100',
+      };
+    case ElectionVerificationPackageStatusProto.VerificationPackageVoided:
+      return {
+        label: 'Election VOID',
+        body: 'This election has a terminal VOID decision. Export status is replaced by public VOID package refs and verifier result evidence.',
         className: 'bg-red-500/12 text-red-100',
       };
     default:
@@ -478,6 +485,12 @@ export function VerificationPackageStatusSection({
           accentClass={getAvailabilityAccent(status.RestrictedPackage)}
         />
       </div>
+
+      {status.VoidPublicationStatus ? (
+        <div className="mt-5" data-testid="verification-package-void-status">
+          <VoidPublicationStatusDetails status={status} />
+        </div>
+      ) : null}
 
       <div className="mt-5">
         <AnomalyEvidenceManifestStatusPanel

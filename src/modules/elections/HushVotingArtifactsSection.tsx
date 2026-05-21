@@ -6,18 +6,21 @@ import type {
   GetElectionResponse,
   GetElectionResultViewResponse,
 } from '@/lib/grpc';
+import { ElectionLifecycleStateProto } from '@/lib/grpc';
 import { ElectionResultArtifactsSection } from './ElectionResultArtifactsSection';
 import {
   AvailabilityCard,
   CollapsibleSurfaceSection,
 } from './HushVotingWorkspaceShared';
 import { VerificationPackageStatusSection } from './VerificationPackageStatusSection';
+import { PublicVoidStatusPanel } from './VoidElectionPanels';
 
 type ArtifactsWorkspaceSummaryProps = {
   entry: ElectionHubEntryView;
   detail: GetElectionResponse | null;
   resultView: GetElectionResultViewResponse | null;
   isLoadingResultView: boolean;
+  actorPublicAddress: string;
 };
 
 export function ArtifactsWorkspaceSummary({
@@ -25,17 +28,24 @@ export function ArtifactsWorkspaceSummary({
   detail,
   resultView,
   isLoadingResultView,
+  actorPublicAddress,
 }: ArtifactsWorkspaceSummaryProps) {
   const hasPublishedResult =
     entry.HasUnofficialResult ||
     entry.HasOfficialResult ||
     Boolean(resultView?.UnofficialResult || resultView?.OfficialResult);
+  const isVoided = entry.Election.LifecycleState === ElectionLifecycleStateProto.Voided;
   const hasReportPackage = Boolean(
     resultView?.CanViewReportPackage && resultView?.LatestReportPackage
   );
   const hasArtifactAccess =
-    entry.CanViewReportPackage || entry.CanViewNamedParticipationRoster || hasReportPackage;
-  const artifactsSummary = hasReportPackage ? (
+    entry.CanViewReportPackage || entry.CanViewNamedParticipationRoster || hasReportPackage || isVoided;
+  const artifactsSummary = isVoided ? (
+    <>
+      <span className="font-semibold text-hush-text-primary">Election VOID.</span>{' '}
+      Review the public VOID status, public justification, package refs, and verifier result.
+    </>
+  ) : hasReportPackage ? (
     <>
       <span className="font-semibold text-hush-text-primary">Report package available.</span>{' '}
       Package access is now available as a separate surface from the published election result.
@@ -58,9 +68,11 @@ export function ArtifactsWorkspaceSummary({
       toggleTestId="hush-voting-artifacts-toggle"
       eyebrow="Boundary Artifacts"
       title="Artifact and package availability"
-      description="Package access, named roster boundaries, and report artifacts remain separate from the election result review surface."
+      description={isVoided
+        ? 'VOID status and package refs remain public-safe and separate from historical result artifacts.'
+        : 'Package access, named roster boundaries, and report artifacts remain separate from the election result review surface.'}
       summary={artifactsSummary}
-      defaultExpanded={!hasPublishedResult && hasReportPackage}
+      defaultExpanded={isVoided || (!hasPublishedResult && hasReportPackage)}
       actions={
         hasReportPackage ? (
           <a
@@ -74,11 +86,12 @@ export function ArtifactsWorkspaceSummary({
         ) : null
       }
     >
-      <div className="space-y-4">
-        <div className="text-sm text-hush-text-accent">
-          This section stays focused on package and artifact boundaries so published results can stay
-          in their own dedicated review step.
-        </div>
+        <div className="space-y-4">
+          <div className="text-sm text-hush-text-accent">
+          {isVoided
+            ? 'This section stays focused on the VOID publication boundary. Historical result artifacts are not current result claims.'
+            : 'This section stays focused on package and artifact boundaries so published results can stay in their own dedicated review step.'}
+          </div>
 
         <div className="grid gap-4 md:grid-cols-2">
           <AvailabilityCard
@@ -103,6 +116,14 @@ export function ArtifactsWorkspaceSummary({
           <div className="rounded-2xl bg-hush-bg-dark/60 px-4 py-3 text-sm text-hush-text-accent">
             Loading artifact and report-package details for this actor.
           </div>
+        ) : null}
+
+        {isVoided ? (
+          <PublicVoidStatusPanel
+            electionId={entry.Election.ElectionId}
+            actorPublicAddress={resultView?.ActorPublicAddress || actorPublicAddress}
+            initialStatus={resultView?.VerificationPackageStatus}
+          />
         ) : null}
 
         {resultView?.VerificationPackageStatus?.IsVisible ? (

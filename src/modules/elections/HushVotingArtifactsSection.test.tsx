@@ -62,6 +62,7 @@ describe('ArtifactsWorkspaceSummary', () => {
           VisibleReportArtifacts: [createReportArtifact()],
         })}
         isLoadingResultView={false}
+        actorPublicAddress="actor-address"
       />
     );
 
@@ -113,6 +114,7 @@ describe('ArtifactsWorkspaceSummary', () => {
           }),
         })}
         isLoadingResultView={false}
+        actorPublicAddress="actor-address"
       />
     );
 
@@ -162,6 +164,7 @@ describe('ArtifactsWorkspaceSummary', () => {
           }),
         })}
         isLoadingResultView={false}
+        actorPublicAddress="voter-address"
       />
     );
 

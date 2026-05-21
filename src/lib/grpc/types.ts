@@ -1709,6 +1709,17 @@ export interface ElectionVoidPublicationStatusView {
   HasSealedAt: boolean;
   AttemptedByPublicAddress: string;
   CanRetry: boolean;
+  PublicJustification: string;
+  PublicJustificationHash: string;
+  PreviousLifecycleState: ElectionLifecycleStateProto;
+  ResultingLifecycleState: ElectionLifecycleStateProto;
+  ActorPublicAddress: string;
+  ActorRole: string;
+  SourceTransactionId: string;
+  SourceBlockHeight: number;
+  SourceBlockId: string;
+  DecidedAt?: GrpcTimestamp;
+  HasDecidedAt: boolean;
 }
 
 export interface ElectionVerificationPackageStatusView {

@@ -75,6 +75,7 @@ const {
       getElectionCeremonyActionView: vi.fn(),
       getElectionOpenReadiness: vi.fn(),
       getElectionReportAccessGrants: vi.fn(),
+      getElectionVerificationPackageStatus: vi.fn(),
       getElectionsByOwner: vi.fn(),
       inviteElectionTrustee: vi.fn(),
       openElection: vi.fn(),
@@ -100,10 +101,12 @@ const {
       createRestartElectionCeremonyTransaction: vi.fn(),
       createRetryElectionGovernedProposalExecutionTransaction: vi.fn(),
       createRefreshProtocolPackageBindingTransaction: vi.fn(),
+      createRetryVoidPublicationTransaction: vi.fn(),
       createStartElectionCeremonyTransaction: vi.fn(),
       createStartElectionGovernedProposalTransaction: vi.fn(),
       createSubmitElectionFinalizationShareTransaction: vi.fn(),
       createUpdateElectionDraftTransaction: vi.fn(),
+      createVoidElectionTransaction: vi.fn(),
     },
     identityServiceMock: {
       getIdentity: vi.fn(),
@@ -157,6 +160,8 @@ vi.mock("./transactionService", () => ({
     transactionServiceMock.createRefreshProtocolPackageBindingTransaction(
       ...args,
     ),
+  createRetryVoidPublicationTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createRetryVoidPublicationTransaction(...args),
   createStartElectionCeremonyTransaction: (...args: unknown[]) =>
     transactionServiceMock.createStartElectionCeremonyTransaction(...args),
   createStartElectionGovernedProposalTransaction: (...args: unknown[]) =>
@@ -169,6 +174,8 @@ vi.mock("./transactionService", () => ({
     ),
   createUpdateElectionDraftTransaction: (...args: unknown[]) =>
     transactionServiceMock.createUpdateElectionDraftTransaction(...args),
+  createVoidElectionTransaction: (...args: unknown[]) =>
+    transactionServiceMock.createVoidElectionTransaction(...args),
 }));
 
 const timestamp = { seconds: 1_711_410_000, nanos: 0 };
@@ -677,6 +684,11 @@ describe("ElectionsWorkspace", () => {
       CanManageGrants: true,
       DeniedReason: "",
     });
+    electionsServiceMock.getElectionVerificationPackageStatus.mockResolvedValue({
+      Success: true,
+      ErrorMessage: "",
+      Status: undefined,
+    });
     electionsServiceMock.createElectionDraft.mockResolvedValue(
       createCommandResponse(),
     );
@@ -755,6 +767,9 @@ describe("ElectionsWorkspace", () => {
         signedTransaction: "signed-refresh-protocol-package-transaction",
       },
     );
+    transactionServiceMock.createRetryVoidPublicationTransaction.mockResolvedValue({
+      signedTransaction: "signed-retry-void-publication-transaction",
+    });
     transactionServiceMock.createOpenElectionTransaction.mockResolvedValue({
       signedTransaction: "signed-open-election-transaction",
     });
@@ -790,6 +805,9 @@ describe("ElectionsWorkspace", () => {
         signedTransaction: "signed-restart-election-ceremony-transaction",
       },
     );
+    transactionServiceMock.createVoidElectionTransaction.mockResolvedValue({
+      signedTransaction: "signed-void-election-transaction",
+    });
   });
 
   it("separates the saved election list from the current draft save panel", async () => {
