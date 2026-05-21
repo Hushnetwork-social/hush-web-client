@@ -223,6 +223,11 @@ function createVotingViewResponse(
     ChallengeSatisfied: false,
     Sp04BlockerCode: '',
     Sp04BlockerMessage: '',
+    HasReceiptPublicPackageBinding: false,
+    ReceiptPublicPackageId: '',
+    ReceiptPublicPackageHash: '',
+    ReceiptPublicVerifierProfileId: '',
+    ReceiptPublicPackageBindingUnavailableReason: '',
     ...overrides,
   };
 }
