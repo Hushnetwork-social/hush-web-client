@@ -1,4 +1,13 @@
-import { Globe, Search, PlusSquare, MessageSquare, PlusCircle, UsersRound, Vote } from "lucide-react";
+import {
+  FileCheck2,
+  Globe,
+  Search,
+  PlusSquare,
+  MessageSquare,
+  PlusCircle,
+  UsersRound,
+  Vote,
+} from "lucide-react";
 import type { AppId } from "@/stores/useAppStore";
 
 export interface AppNavItem {
@@ -7,6 +16,7 @@ export interface AppNavItem {
   icon: React.ReactNode;
   comingSoon?: boolean;
   badgeCount?: number;
+  guestAllowed?: boolean;
 }
 
 export function getAppNavItems(activeApp: AppId, crossAppBadges: Record<AppId, number>): AppNavItem[] {
@@ -31,6 +41,12 @@ export function getAppNavItems(activeApp: AppId, crossAppBadges: Record<AppId, n
   if (activeApp === "voting") {
     return [
       { id: "open-voting", label: "Election Hub", icon: <Vote className="w-5 h-5" /> },
+      {
+        id: "verify-receipt",
+        label: "Verify receipt",
+        icon: <FileCheck2 className="w-5 h-5" />,
+        guestAllowed: true,
+      },
       {
         id: "switch-feeds",
         label: "HushFeeds!",

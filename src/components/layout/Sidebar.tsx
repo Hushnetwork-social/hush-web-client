@@ -48,7 +48,11 @@ export function Sidebar({
     <aside className="w-[280px] flex-shrink-0 flex flex-col min-h-0 max-h-full overflow-hidden">
       {/* Navigation Menu */}
       <nav className="flex-shrink-0 bg-hush-bg-element p-2 space-y-1 mb-1">
-        {navItems.map((item) => (
+        {navItems.map((item) => {
+          const isGuestBlocked = guestMode && !item.guestAllowed;
+          const isSelected = selectedNav === item.id && !item.comingSoon && !isGuestBlocked;
+
+          return (
           <button
             key={item.id}
             type="button"
@@ -57,20 +61,20 @@ export function Sidebar({
               if (item.comingSoon) {
                 return;
               }
-              if (guestMode) {
+              if (isGuestBlocked) {
                 onGuestAction?.();
                 return;
               }
               onNavSelect(item.id);
             }}
             disabled={item.comingSoon}
-            aria-disabled={guestMode || item.comingSoon}
+            aria-disabled={isGuestBlocked || item.comingSoon}
             className={`
               w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl
               transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-element
-              ${item.comingSoon ? "cursor-not-allowed opacity-60" : guestMode ? "cursor-pointer opacity-75" : "cursor-pointer"}
+              ${item.comingSoon ? "cursor-not-allowed opacity-60" : isGuestBlocked ? "cursor-pointer opacity-75" : "cursor-pointer"}
               ${
-                selectedNav === item.id && !item.comingSoon && !guestMode
+                isSelected
                   ? "bg-hush-purple text-hush-bg-dark"
                   : "text-hush-text-accent hover:bg-hush-bg-hover"
               }
@@ -92,7 +96,8 @@ export function Sidebar({
               </span>
             )}
           </button>
-        ))}
+          );
+        })}
       </nav>
 
       {/* Feed List Area - scrollable, shrinks if needed but doesn't grow beyond content */}

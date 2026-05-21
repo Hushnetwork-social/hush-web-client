@@ -5,6 +5,7 @@ import {
   getAppHomeRoute,
   getFeedNavigationRoute,
   normalizeLegacyAppRoute,
+  PUBLIC_RECEIPT_VERIFIER_ROUTE,
   resolveEntryRoute,
   shouldClearBadgesOnAppSwitch,
   SOCIAL_HOME_ROUTE,
@@ -89,6 +90,7 @@ describe('app shell integration', () => {
     expect(getActiveAppFromPath('/social/post/1')).toBe('social');
     expect(getActiveAppFromPath('/elections')).toBe('voting');
     expect(getActiveAppFromPath('/elections/election-1')).toBe('voting');
+    expect(getActiveAppFromPath(PUBLIC_RECEIPT_VERIFIER_ROUTE)).toBe('voting');
     expect(getActiveAppFromPath('/feeds')).toBe('feeds');
     expect(VOTING_HOME_ROUTE).toBe('/elections');
 

@@ -29,6 +29,7 @@ type RenderNavItem = {
   hideLabel?: boolean;
   ariaLabel?: string;
   isActive?: boolean;
+  guestAllowed?: boolean;
 };
 
 const SOCIAL_MOBILE_MENU_ITEMS = [
@@ -95,12 +96,16 @@ export function BottomNav({
   return (
     <nav className="bg-hush-bg-element border-t border-hush-bg-dark px-2 py-2 relative">
       <div className="flex items-center justify-around">
-        {navItems.map((item) => (
+        {navItems.map((item) => {
+          const isGuestBlocked = guestMode && !item.guestAllowed;
+          const isActive = (item.isActive ?? selectedNav === item.id) && !isGuestBlocked;
+
+          return (
           <button
             key={item.id}
             type="button"
             onClick={() => {
-              if (guestMode) {
+              if (isGuestBlocked) {
                 onGuestAction?.();
                 return;
               }
@@ -115,14 +120,14 @@ export function BottomNav({
             className={`
               flex flex-col items-center space-y-0.5 px-3 py-2 rounded-lg
               transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple focus-visible:ring-offset-2 focus-visible:ring-offset-hush-bg-element
-              ${guestMode ? "cursor-pointer opacity-75" : "cursor-pointer"}
+              ${isGuestBlocked ? "cursor-pointer opacity-75" : "cursor-pointer"}
               ${
-                (item.isActive ?? selectedNav === item.id) && !guestMode
+                isActive
                   ? "text-hush-purple"
                   : "text-hush-text-accent hover:bg-hush-bg-hover"
               }
             `}
-            aria-disabled={guestMode}
+            aria-disabled={isGuestBlocked}
             aria-label={item.ariaLabel ?? item.label}
             aria-haspopup={item.id === "social-menu" ? "menu" : undefined}
             aria-expanded={item.id === "social-menu" ? showSocialMenu : undefined}
@@ -140,7 +145,8 @@ export function BottomNav({
               </span>
             )}
           </button>
-        ))}
+          );
+        })}
 
         {/* Profile Button */}
         <button
