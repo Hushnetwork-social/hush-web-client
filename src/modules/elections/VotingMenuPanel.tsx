@@ -1,9 +1,14 @@
 "use client";
 
-import { PlusCircle, Search, Vote } from 'lucide-react';
+import { Gauge, PlusCircle, Search, Vote } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAppStore } from '@/stores';
 import { VOTING_HOME_ROUTE } from '@/lib/navigation/appRoutes';
+import {
+  getReadinessDashboardClientRouteGate,
+  READINESS_DASHBOARD_NAV_ID,
+  READINESS_DASHBOARD_ROUTE,
+} from '@/lib/readinessDashboard/routeGate';
 
 interface VotingMenuPanelProps {
   guestMode?: boolean;
@@ -17,8 +22,11 @@ export function VotingMenuPanel({
   const router = useRouter();
   const pathname = usePathname();
   const setSelectedNav = useAppStore((state) => state.setSelectedNav);
+  const readinessDashboardGate = getReadinessDashboardClientRouteGate();
   const activeView =
-    pathname.startsWith('/elections/owner')
+    pathname.startsWith(READINESS_DASHBOARD_ROUTE)
+      ? 'readiness'
+      : pathname.startsWith('/elections/owner')
       ? 'create'
       : pathname.startsWith('/elections/search')
         ? 'search'
@@ -104,6 +112,29 @@ export function VotingMenuPanel({
           <span>Create Election</span>
         </span>
       </button>
+
+      {readinessDashboardGate.enabled ? (
+        <button
+          type="button"
+          data-testid="voting-menu-readiness"
+          onClick={() => {
+            if (guestMode) {
+              onGuestAction?.();
+              return;
+            }
+
+            setSelectedNav(READINESS_DASHBOARD_NAV_ID);
+            router.push(READINESS_DASHBOARD_ROUTE);
+          }}
+          aria-disabled={guestMode}
+          className={getButtonClassName(activeView === 'readiness')}
+        >
+          <span className="inline-flex items-center gap-2">
+            <Gauge className="h-4 w-4" />
+            <span>Readiness</span>
+          </span>
+        </button>
+      ) : null}
     </div>
   );
 }

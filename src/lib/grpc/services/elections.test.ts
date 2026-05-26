@@ -876,11 +876,14 @@ describe('electionsService query proxy', () => {
       ElectionId: 'election-public-1',
     });
 
+    const [, requestInit] = fetchMock.mock.calls[0];
+    const headers = requestInit?.headers as Record<string, string>;
+
     expect(fetchMock).toHaveBeenCalledWith('/api/elections/query', {
       method: 'POST',
-      headers: {
+      headers: expect.objectContaining({
         'Content-Type': 'application/json',
-      },
+      }),
       body: JSON.stringify({
         method: 'GetElection',
         request: {
@@ -888,6 +891,9 @@ describe('electionsService query proxy', () => {
         },
       }),
     });
+    expect(headers['x-hush-election-query-signatory']).toBeUndefined();
+    expect(headers['x-hush-election-query-signed-at']).toBeUndefined();
+    expect(headers['x-hush-election-query-signature']).toBeUndefined();
   });
 
   it('signs getElection when actor credentials are present', async () => {
