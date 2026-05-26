@@ -54,9 +54,12 @@ export function getReadinessDashboardClientRouteGate(
   input: ReadinessDashboardRouteGateInput = {}
 ): ReadinessDashboardClientGate {
   const env = input.env ?? process.env;
-  const enabledByFlag = env[READINESS_DASHBOARD_CLIENT_ENV_FLAG] === 'true';
+  const isProduction = env.NODE_ENV === 'production';
+  const enabledByFlag =
+    env[READINESS_DASHBOARD_CLIENT_ENV_FLAG] === 'true' ||
+    (!isProduction && env[READINESS_DASHBOARD_CLIENT_ENV_FLAG] !== 'false');
   const productionBlocked =
-    env.NODE_ENV === 'production' &&
+    isProduction &&
     env[READINESS_DASHBOARD_CLIENT_PRODUCTION_ENV_FLAG] !== 'true';
 
   return {
@@ -76,15 +79,24 @@ export function getReadinessDashboardServerRouteGate(
   input: ReadinessDashboardServerRouteGateInput = {}
 ): ReadinessDashboardServerGate {
   const env = input.env ?? process.env;
-  const enabledByFlag = env[READINESS_DASHBOARD_SERVER_ENV_FLAG] === 'true';
+  const isProduction = env.NODE_ENV === 'production';
+  const enabledByFlag =
+    env[READINESS_DASHBOARD_SERVER_ENV_FLAG] === 'true' ||
+    (!isProduction && env[READINESS_DASHBOARD_SERVER_ENV_FLAG] !== 'false');
   const productionBlocked =
-    env.NODE_ENV === 'production' &&
+    isProduction &&
     env[READINESS_DASHBOARD_SERVER_PRODUCTION_ENV_FLAG] !== 'true';
   const publicKey = normalizePublicKey(input.publicKey);
   const allowedPublicKeys = parseAllowedReadinessDashboardPublicKeys(
     env[READINESS_DASHBOARD_ALLOWED_PUBLIC_KEYS_ENV]
   );
-  const allowed = publicKey !== null && allowedPublicKeys.has(publicKey);
+  const allowsAnyDevelopmentKey =
+    !isProduction &&
+    (env[READINESS_DASHBOARD_ALLOWED_PUBLIC_KEYS_ENV] === undefined ||
+      allowedPublicKeys.has('*'));
+  const allowed =
+    publicKey !== null &&
+    (allowedPublicKeys.has(publicKey) || allowsAnyDevelopmentKey);
 
   return {
     route: READINESS_DASHBOARD_ROUTE,

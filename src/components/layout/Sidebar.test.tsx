@@ -8,7 +8,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import {
   READINESS_DASHBOARD_CLIENT_ENV_FLAG,
-  READINESS_DASHBOARD_NAV_ID,
 } from '@/lib/readinessDashboard/routeGate';
 import { Sidebar } from './Sidebar';
 
@@ -203,19 +202,17 @@ describe('Sidebar', () => {
       expect(screen.queryByText('Create Group')).not.toBeInTheDocument();
     });
 
-    it('renders the readiness dashboard inside voting navigation when enabled', () => {
+    it('keeps the internal readiness dashboard out of primary voting navigation when enabled', () => {
       vi.stubEnv(READINESS_DASHBOARD_CLIENT_ENV_FLAG, 'true');
       render(
         <Sidebar
           {...defaultProps}
           activeApp="voting"
-          selectedNav={READINESS_DASHBOARD_NAV_ID}
+          selectedNav="open-voting"
         />
       );
 
-      fireEvent.click(screen.getByText('Readiness'));
-
-      expect(defaultProps.onNavSelect).toHaveBeenCalledWith(READINESS_DASHBOARD_NAV_ID);
+      expect(screen.queryByText('Readiness')).not.toBeInTheDocument();
     });
 
     it('routes guest sidebar nav clicks through guest action', () => {

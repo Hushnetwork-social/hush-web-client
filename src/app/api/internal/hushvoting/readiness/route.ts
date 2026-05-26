@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { NextResponse } from 'next/server';
 import {
   READINESS_DASHBOARD_PUBLIC_KEY_HEADER,
@@ -25,6 +26,26 @@ function blockedResponse(
   };
 
   return NextResponse.json(body, { status });
+}
+
+function getReadinessRegisterRoot(): string | null {
+  const configuredRoot = process.env[READINESS_DASHBOARD_REGISTER_ROOT_ENV]?.trim();
+
+  if (configuredRoot) {
+    return configuredRoot;
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    return null;
+  }
+
+  return path.resolve(
+    process.cwd(),
+    '..',
+    'hush-documents',
+    'PrivateServer_ElectronicVoting',
+    'HushVoting-Readiness-Register'
+  );
 }
 
 export async function GET(request: Request) {
@@ -60,7 +81,7 @@ export async function GET(request: Request) {
 
   try {
     const source = await loadReadinessDashboardSource({
-      root: process.env[READINESS_DASHBOARD_REGISTER_ROOT_ENV],
+      root: getReadinessRegisterRoot(),
     });
     const dashboard = projectReadinessDashboard(source, gate);
     const state =

@@ -71,6 +71,29 @@ export function VotingMenuPanel({
         </span>
       </button>
 
+      {readinessDashboardGate.enabled ? (
+        <button
+          type="button"
+          data-testid="voting-menu-readiness"
+          onClick={() => {
+            if (guestMode) {
+              onGuestAction?.();
+              return;
+            }
+
+            setSelectedNav(READINESS_DASHBOARD_NAV_ID);
+            router.push(READINESS_DASHBOARD_ROUTE);
+          }}
+          aria-disabled={guestMode}
+          className={getButtonClassName(activeView === 'readiness')}
+        >
+          <span className="inline-flex items-center gap-2">
+            <Gauge className="h-4 w-4" />
+            <span>Readiness</span>
+          </span>
+        </button>
+      ) : null}
+
       <button
         type="button"
         data-testid="voting-menu-search"
@@ -112,29 +135,6 @@ export function VotingMenuPanel({
           <span>Create Election</span>
         </span>
       </button>
-
-      {readinessDashboardGate.enabled ? (
-        <button
-          type="button"
-          data-testid="voting-menu-readiness"
-          onClick={() => {
-            if (guestMode) {
-              onGuestAction?.();
-              return;
-            }
-
-            setSelectedNav(READINESS_DASHBOARD_NAV_ID);
-            router.push(READINESS_DASHBOARD_ROUTE);
-          }}
-          aria-disabled={guestMode}
-          className={getButtonClassName(activeView === 'readiness')}
-        >
-          <span className="inline-flex items-center gap-2">
-            <Gauge className="h-4 w-4" />
-            <span>Readiness</span>
-          </span>
-        </button>
-      ) : null}
     </div>
   );
 }

@@ -63,7 +63,7 @@ describe('VotingMenuPanel', () => {
     expect(pushMock).toHaveBeenCalledWith('/elections/owner?mode=new');
   });
 
-  it('routes readiness clicks inside the HushVoting menu when the internal gate is enabled', () => {
+  it('routes readiness clicks inside the HushVoting menu when enabled', () => {
     vi.stubEnv(READINESS_DASHBOARD_CLIENT_ENV_FLAG, 'true');
     render(<VotingMenuPanel />);
 
@@ -119,5 +119,16 @@ describe('VotingMenuPanel', () => {
     render(<VotingMenuPanel />);
 
     expect(screen.queryByTestId('voting-menu-readiness')).not.toBeInTheDocument();
+  });
+
+  it('keeps the FEAT-142 readiness dashboard discoverable after election hub when enabled', () => {
+    vi.stubEnv(READINESS_DASHBOARD_CLIENT_ENV_FLAG, 'true');
+    render(<VotingMenuPanel />);
+
+    const menuButtons = screen.getAllByRole('button');
+
+    expect(menuButtons[0]).toHaveTextContent('Election Hub');
+    expect(menuButtons[1]).toHaveTextContent('Readiness');
+    expect(menuButtons[2]).toHaveTextContent('Search Election');
   });
 });

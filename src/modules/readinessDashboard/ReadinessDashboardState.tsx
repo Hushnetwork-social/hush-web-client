@@ -8,7 +8,7 @@ import type {
 const stateCopy: Record<ReadinessDashboardApiState, { title: string; body: string }> = {
   disabled: {
     title: 'Readiness dashboard disabled',
-    body: 'The internal HushVoting menu item is disabled by configuration and no private readiness data was loaded.',
+    body: 'The internal dashboard is disabled by configuration and no private readiness data was loaded.',
   },
   production_blocked: {
     title: 'Production access blocked',
@@ -57,14 +57,14 @@ export function ReadinessDashboardState({
     return (
       <section className="h-full overflow-y-auto bg-hush-bg-dark px-4 py-6 text-hush-text-primary sm:px-6">
         <section className="mx-auto grid max-w-7xl gap-4" data-testid="readiness-loading">
-          <div className="h-28 rounded-lg bg-hush-bg-light/50" />
+          <div className="h-28 rounded-xl bg-hush-bg-element/80" />
           <div className="grid gap-3 md:grid-cols-4">
-            <div className="h-28 rounded-lg bg-hush-bg-light/40" />
-            <div className="h-28 rounded-lg bg-hush-bg-light/40" />
-            <div className="h-28 rounded-lg bg-hush-bg-light/40" />
-            <div className="h-28 rounded-lg bg-hush-bg-light/40" />
+            <div className="h-28 rounded-xl bg-hush-bg-element/65" />
+            <div className="h-28 rounded-xl bg-hush-bg-element/65" />
+            <div className="h-28 rounded-xl bg-hush-bg-element/65" />
+            <div className="h-28 rounded-xl bg-hush-bg-element/65" />
           </div>
-          <div className="h-80 rounded-lg bg-hush-bg-light/35" />
+          <div className="h-80 rounded-xl bg-hush-bg-element/55" />
         </section>
       </section>
     );
@@ -77,7 +77,7 @@ export function ReadinessDashboardState({
   return (
     <section className="h-full overflow-y-auto bg-hush-bg-dark px-4 py-6 text-hush-text-primary sm:px-6">
       <section
-        className="mx-auto max-w-5xl rounded-lg bg-hush-bg-light/60 p-5 shadow-sm"
+        className="mx-auto max-w-5xl rounded-xl bg-hush-bg-element/95 p-5 shadow-sm shadow-black/15"
         data-testid={`readiness-state-${state}`}
         role={state === 'ready' ? undefined : 'alert'}
       >

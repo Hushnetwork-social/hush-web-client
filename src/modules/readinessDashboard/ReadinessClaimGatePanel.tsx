@@ -1,4 +1,5 @@
 import { CheckCircle2, CircleAlert, XCircle } from 'lucide-react';
+import type { CSSProperties } from 'react';
 import type { ReadinessClaimGateView } from '@/lib/readinessDashboard';
 
 function formatLabel(value: string): string {
@@ -8,28 +9,57 @@ function formatLabel(value: string): string {
 function getTone(severity: ReadinessClaimGateView['severity']) {
   if (severity === 'green') {
     return {
-      className: 'bg-emerald-400/12 text-emerald-100',
+      className: 'text-emerald-100',
       icon: CheckCircle2,
     };
   }
 
   if (severity === 'amber') {
     return {
-      className: 'bg-amber-300/14 text-amber-100',
+      className: 'text-amber-100',
       icon: CircleAlert,
     };
   }
 
   return {
-    className: 'bg-red-400/14 text-red-100',
+    className: 'text-red-50',
     icon: XCircle,
+  };
+}
+
+function claimStyle(severity: ReadinessClaimGateView['severity']): CSSProperties {
+  if (severity === 'red') {
+    return {
+      backgroundColor: 'rgba(127, 29, 29, 0.92)',
+      boxShadow: 'inset 4px 0 0 rgba(248, 113, 113, 1)',
+    };
+  }
+
+  if (severity === 'amber') {
+    return {
+      backgroundColor: 'rgba(252, 211, 77, 0.14)',
+    };
+  }
+
+  return {
+    backgroundColor: 'rgba(52, 211, 153, 0.12)',
+  };
+}
+
+function claimBadgeStyle(severity: ReadinessClaimGateView['severity']): CSSProperties | undefined {
+  if (severity !== 'red') {
+    return undefined;
+  }
+
+  return {
+    backgroundColor: 'rgb(185, 28, 28)',
   };
 }
 
 export function ReadinessClaimGatePanel({ claims }: { claims: ReadinessClaimGateView[] }) {
   return (
     <section
-      className="rounded-lg bg-hush-bg-light/55 p-4"
+      className="rounded-xl bg-hush-bg-element/95 p-4 shadow-sm shadow-black/15"
       data-testid="readiness-claim-gates"
       aria-labelledby="readiness-claim-gates-heading"
     >
@@ -37,7 +67,7 @@ export function ReadinessClaimGatePanel({ claims }: { claims: ReadinessClaimGate
         <h2 id="readiness-claim-gates-heading" className="text-lg font-semibold">
           Claim Gates
         </h2>
-        <span className="rounded-full bg-hush-bg-dark/60 px-3 py-1 text-xs font-semibold text-hush-text-accent">
+        <span className="rounded-full bg-hush-bg-dark/70 px-3 py-1 text-xs font-semibold text-hush-text-accent">
           Score cannot bypass blockers
         </span>
       </div>
@@ -49,7 +79,11 @@ export function ReadinessClaimGatePanel({ claims }: { claims: ReadinessClaimGate
             claim.blockedWording || claim.limitationWording || claim.allowedWording || claim.status;
 
           return (
-            <article key={claim.claimLevel} className={`rounded-md px-3 py-3 ${tone.className}`}>
+            <article
+              key={claim.claimLevel}
+              className={`rounded-lg px-3 py-3 ${tone.className}`}
+              style={claimStyle(claim.severity)}
+            >
               <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <div className="flex items-start gap-2">
                   <Icon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
@@ -58,7 +92,14 @@ export function ReadinessClaimGatePanel({ claims }: { claims: ReadinessClaimGate
                     <p className="mt-1 text-sm opacity-90">{wording}</p>
                   </div>
                 </div>
-                <span className="shrink-0 rounded-full bg-hush-bg-dark/45 px-2 py-1 text-xs font-semibold">
+                <span
+                  className={`shrink-0 rounded-full px-2 py-1 text-xs font-semibold ${
+                    claim.severity === 'red'
+                      ? 'text-white'
+                      : 'bg-hush-bg-dark/55'
+                  }`}
+                  style={claimBadgeStyle(claim.severity)}
+                >
                   {claim.severity} / {claim.status}
                 </span>
               </div>

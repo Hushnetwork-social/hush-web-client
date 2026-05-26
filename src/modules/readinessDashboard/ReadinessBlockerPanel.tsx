@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import type { ReadinessBlockerView } from '@/lib/readinessDashboard';
 
 function formatLabel(value: string): string {
@@ -6,20 +7,63 @@ function formatLabel(value: string): string {
 
 function blockerClass(severity: ReadinessBlockerView['severity']) {
   if (severity === 'red') {
-    return 'bg-red-400/14 text-red-100';
+    return 'text-red-50';
   }
 
   if (severity === 'amber') {
-    return 'bg-amber-300/14 text-amber-100';
+    return 'text-amber-100';
   }
 
-  return 'bg-emerald-400/12 text-emerald-100';
+  return 'text-emerald-100';
+}
+
+function blockerStyle(severity: ReadinessBlockerView['severity']): CSSProperties {
+  if (severity === 'red') {
+    return {
+      backgroundColor: 'rgba(127, 29, 29, 0.92)',
+      boxShadow: 'inset 4px 0 0 rgba(248, 113, 113, 1)',
+    };
+  }
+
+  if (severity === 'amber') {
+    return {
+      backgroundColor: 'rgba(252, 211, 77, 0.14)',
+      boxShadow: 'inset 3px 0 0 rgba(252, 211, 77, 0.54)',
+    };
+  }
+
+  return {
+    backgroundColor: 'rgba(52, 211, 153, 0.12)',
+    boxShadow: 'inset 3px 0 0 rgba(52, 211, 153, 0.44)',
+  };
+}
+
+function blockerBadgeClass(severity: ReadinessBlockerView['severity']) {
+  if (severity === 'red') {
+    return 'text-white';
+  }
+
+  if (severity === 'amber') {
+    return 'bg-amber-950/55 text-amber-100';
+  }
+
+  return 'bg-emerald-950/55 text-emerald-100';
+}
+
+function blockerBadgeStyle(severity: ReadinessBlockerView['severity']): CSSProperties | undefined {
+  if (severity !== 'red') {
+    return undefined;
+  }
+
+  return {
+    backgroundColor: 'rgb(185, 28, 28)',
+  };
 }
 
 export function ReadinessBlockerPanel({ blockers }: { blockers: ReadinessBlockerView[] }) {
   return (
     <section
-      className="rounded-lg bg-hush-bg-light/55 p-4"
+      className="rounded-xl bg-hush-bg-element/95 p-4 shadow-sm shadow-black/15"
       data-testid="readiness-blockers"
       aria-labelledby="readiness-blockers-heading"
     >
@@ -27,7 +71,7 @@ export function ReadinessBlockerPanel({ blockers }: { blockers: ReadinessBlocker
         <h2 id="readiness-blockers-heading" className="text-lg font-semibold">
           Active Blockers
         </h2>
-        <span className="rounded-full bg-hush-bg-dark/60 px-3 py-1 text-xs font-semibold text-hush-text-accent">
+        <span className="rounded-full bg-hush-bg-dark/70 px-3 py-1 text-xs font-semibold text-hush-text-accent">
           {blockers.filter((blocker) => blocker.status !== 'resolved').length} open
         </span>
       </div>
@@ -35,7 +79,8 @@ export function ReadinessBlockerPanel({ blockers }: { blockers: ReadinessBlocker
         {blockers.map((blocker) => (
           <article
             key={blocker.blockerId}
-            className={`rounded-md px-3 py-3 ${blockerClass(blocker.severity)}`}
+            className={`rounded-lg px-3 py-3 ${blockerClass(blocker.severity)}`}
+            style={blockerStyle(blocker.severity)}
           >
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <div>
@@ -46,7 +91,10 @@ export function ReadinessBlockerPanel({ blockers }: { blockers: ReadinessBlocker
                   {blocker.acceptanceGateIds.join(', ')}
                 </p>
               </div>
-              <span className="shrink-0 rounded-full bg-hush-bg-dark/45 px-2 py-1 text-xs font-semibold">
+              <span
+                className={`shrink-0 rounded-full px-2 py-1 text-xs font-semibold ${blockerBadgeClass(blocker.severity)}`}
+                style={blockerBadgeStyle(blocker.severity)}
+              >
                 {blocker.severity} / {blocker.status}
               </span>
             </div>

@@ -115,8 +115,8 @@ export function ReadinessDashboardPage({
 
   return (
     <section className="h-full overflow-y-auto bg-hush-bg-dark px-4 py-5 text-hush-text-primary sm:px-6">
-      <div className="mx-auto flex max-w-7xl flex-col gap-4">
-        <header className="rounded-lg bg-hush-bg-light/60 p-4">
+      <div className="mx-auto flex max-w-7xl flex-col gap-5">
+        <header className="rounded-xl bg-hush-bg-element/95 p-5 shadow-sm shadow-black/20">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-hush-text-accent">
@@ -128,10 +128,10 @@ export function ReadinessDashboardPage({
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2 text-sm text-hush-text-accent">
-              <span className="rounded-full bg-hush-bg-dark/60 px-3 py-1 font-semibold">
+              <span className="rounded-full bg-hush-bg-dark/70 px-3 py-1 font-semibold">
                 {dashboard.register.registerVersionId}
               </span>
-              <span className="rounded-full bg-hush-bg-dark/60 px-3 py-1 font-semibold">
+              <span className="rounded-full bg-hush-bg-dark/70 px-3 py-1 font-semibold">
                 {dashboard.register.status}
               </span>
               <span>{READINESS_DASHBOARD_ROUTE}</span>
@@ -141,7 +141,7 @@ export function ReadinessDashboardPage({
 
         {dashboard.register.warnings.length > 0 ? (
           <section
-            className="rounded-lg bg-amber-300/14 p-4 text-amber-100"
+            className="rounded-xl bg-amber-300/14 p-4 text-amber-100 shadow-sm shadow-black/10"
             role="alert"
             data-testid="readiness-warning"
           >

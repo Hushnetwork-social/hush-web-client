@@ -23,15 +23,15 @@ export function ReadinessChildFeatureTable({
 }) {
   return (
     <section
-      className="rounded-lg bg-hush-bg-light/55 p-4"
+      className="rounded-xl bg-hush-bg-element/95 p-4 shadow-sm shadow-black/15"
       aria-labelledby="readiness-child-features-heading"
     >
       <h2 id="readiness-child-features-heading" className="text-lg font-semibold">
         EPIC-015 Child Feature Readiness
       </h2>
-      <div className="mt-4 overflow-x-auto">
+      <div className="mt-4 overflow-x-auto rounded-lg bg-hush-bg-dark/35">
         <table className="min-w-full text-left text-sm">
-          <thead className="text-xs uppercase tracking-wide text-hush-text-accent">
+          <thead className="bg-hush-bg-dark/55 text-xs uppercase tracking-wide text-hush-text-accent">
             <tr>
               <th scope="col" className="px-3 py-2">Feature</th>
               <th scope="col" className="px-3 py-2">Implementation</th>
@@ -43,7 +43,7 @@ export function ReadinessChildFeatureTable({
           </thead>
           <tbody>
             {features.map((feature) => (
-              <tr key={feature.featureId} className="odd:bg-hush-bg-dark/35">
+              <tr key={feature.featureId} className="odd:bg-hush-bg-dark/30">
                 <td className="min-w-60 px-3 py-3">
                   <p className="font-semibold">{feature.featureId}</p>
                   <p className="mt-1 text-hush-text-accent">{feature.title}</p>

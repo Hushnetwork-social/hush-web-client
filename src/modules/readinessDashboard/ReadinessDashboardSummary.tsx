@@ -18,19 +18,19 @@ function MetricTile({
 }) {
   const toneClass =
     tone === 'green'
-      ? 'bg-emerald-400/12 text-emerald-100'
+      ? 'bg-emerald-400/14 text-emerald-100'
       : tone === 'amber'
-        ? 'bg-amber-300/14 text-amber-100'
+        ? 'bg-amber-300/16 text-amber-100'
         : tone === 'red'
           ? 'bg-red-400/14 text-red-100'
-          : 'bg-sky-300/12 text-sky-100';
+          : 'bg-sky-300/14 text-sky-100';
 
   return (
-    <section className="rounded-lg bg-hush-bg-light/55 p-4">
+    <section className="rounded-xl bg-hush-bg-element/95 p-4 shadow-sm shadow-black/15">
       <p className="text-xs font-semibold uppercase tracking-wide text-hush-text-accent">
         {label}
       </p>
-      <div className={`mt-3 rounded-md px-3 py-3 ${toneClass}`}>
+      <div className={`mt-3 rounded-lg px-3 py-3 ${toneClass}`}>
         <p className="break-words text-xl font-semibold">{value}</p>
       </div>
       <p className="mt-2 text-sm text-hush-text-accent">{detail}</p>

@@ -39,6 +39,7 @@ describe('ReadinessDashboardPage', () => {
         gate={getReadinessDashboardClientRouteGate({
           env: {
             NODE_ENV: 'development',
+            [READINESS_DASHBOARD_CLIENT_ENV_FLAG]: 'false',
           },
         })}
       />
