@@ -23,6 +23,10 @@ import {
   PUBLIC_RECEIPT_VERIFIER_ROUTE,
   VOTING_HOME_ROUTE,
 } from "@/lib/navigation/appRoutes";
+import {
+  READINESS_DASHBOARD_NAV_ID,
+  READINESS_DASHBOARD_ROUTE,
+} from "@/lib/readinessDashboard/routeGate";
 import { SocialMenuPanel } from "@/components/social/SocialMenuPanel";
 import { VotingMenuPanel } from "@/modules/elections/VotingMenuPanel";
 
@@ -180,6 +184,13 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       setSelectedNav("verify-receipt");
       setActiveApp("voting");
       router.push(PUBLIC_RECEIPT_VERIFIER_ROUTE);
+      return;
+    }
+
+    if (id === READINESS_DASHBOARD_NAV_ID) {
+      setSelectedNav(READINESS_DASHBOARD_NAV_ID);
+      setActiveApp("voting");
+      router.push(READINESS_DASHBOARD_ROUTE);
       return;
     }
 

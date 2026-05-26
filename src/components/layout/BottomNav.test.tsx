@@ -6,6 +6,10 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import {
+  READINESS_DASHBOARD_CLIENT_ENV_FLAG,
+  READINESS_DASHBOARD_NAV_ID,
+} from '@/lib/readinessDashboard/routeGate';
 import { BottomNav } from './BottomNav';
 
 describe('BottomNav', () => {
@@ -19,6 +23,8 @@ describe('BottomNav', () => {
   };
 
   beforeEach(() => {
+    vi.unstubAllEnvs();
+    vi.stubEnv(READINESS_DASHBOARD_CLIENT_ENV_FLAG, 'false');
     vi.clearAllMocks();
   });
 
@@ -229,7 +235,23 @@ describe('BottomNav', () => {
       expect(screen.getByText('Verify receipt')).toBeInTheDocument();
       expect(screen.getByText('HushFeeds!')).toBeInTheDocument();
       expect(screen.getByText('HushSocial!')).toBeInTheDocument();
+      expect(screen.queryByText('Readiness')).not.toBeInTheDocument();
       expect(screen.queryByText('Create Group')).not.toBeInTheDocument();
+    });
+
+    it('renders the readiness dashboard inside voting bottom navigation when enabled', () => {
+      vi.stubEnv(READINESS_DASHBOARD_CLIENT_ENV_FLAG, 'true');
+      render(
+        <BottomNav
+          {...defaultProps}
+          activeApp="voting"
+          selectedNav={READINESS_DASHBOARD_NAV_ID}
+        />
+      );
+
+      fireEvent.click(screen.getByText('Readiness'));
+
+      expect(defaultProps.onNavSelect).toHaveBeenCalledWith(READINESS_DASHBOARD_NAV_ID);
     });
 
     it('routes guest bottom-nav clicks through guest action', () => {

@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
+import {
+  READINESS_DASHBOARD_CLIENT_ENV_FLAG,
+  READINESS_DASHBOARD_NAV_ID,
+  READINESS_DASHBOARD_ROUTE,
+} from '@/lib/readinessDashboard/routeGate';
 import { VotingMenuPanel } from './VotingMenuPanel';
 
 const setSelectedNavMock = vi.fn();
@@ -23,6 +28,8 @@ vi.mock('@/stores', () => ({
 
 describe('VotingMenuPanel', () => {
   beforeEach(() => {
+    vi.unstubAllEnvs();
+    vi.stubEnv(READINESS_DASHBOARD_CLIENT_ENV_FLAG, 'false');
     setSelectedNavMock.mockReset();
     pushMock.mockReset();
     guestActionMock.mockReset();
@@ -56,6 +63,16 @@ describe('VotingMenuPanel', () => {
     expect(pushMock).toHaveBeenCalledWith('/elections/owner?mode=new');
   });
 
+  it('routes readiness clicks inside the HushVoting menu when the internal gate is enabled', () => {
+    vi.stubEnv(READINESS_DASHBOARD_CLIENT_ENV_FLAG, 'true');
+    render(<VotingMenuPanel />);
+
+    fireEvent.click(screen.getByTestId('voting-menu-readiness'));
+
+    expect(setSelectedNavMock).toHaveBeenCalledWith(READINESS_DASHBOARD_NAV_ID);
+    expect(pushMock).toHaveBeenCalledWith(READINESS_DASHBOARD_ROUTE);
+  });
+
   it('highlights the active voting route like the social shell menu', () => {
     pathnameMock = '/elections/search';
     render(<VotingMenuPanel />);
@@ -70,6 +87,15 @@ describe('VotingMenuPanel', () => {
 
     expect(screen.getByTestId('voting-menu-hub').className).toContain('bg-hush-purple');
     expect(screen.getByTestId('voting-menu-search').className).toContain('border');
+  });
+
+  it('highlights readiness as an internal HushVoting menu route', () => {
+    vi.stubEnv(READINESS_DASHBOARD_CLIENT_ENV_FLAG, 'true');
+    pathnameMock = READINESS_DASHBOARD_ROUTE;
+    render(<VotingMenuPanel />);
+
+    expect(screen.getByTestId('voting-menu-readiness').className).toContain('bg-hush-purple');
+    expect(screen.getByTestId('voting-menu-hub').className).toContain('border');
   });
 
   it('routes guest clicks through the provided guest action', () => {
@@ -87,5 +113,11 @@ describe('VotingMenuPanel', () => {
 
     expect(screen.queryByText(/mobile benchmark/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/FEAT-121/i)).not.toBeInTheDocument();
+  });
+
+  it('keeps the FEAT-142 readiness dashboard out of the HushVoting menu until enabled', () => {
+    render(<VotingMenuPanel />);
+
+    expect(screen.queryByTestId('voting-menu-readiness')).not.toBeInTheDocument();
   });
 });

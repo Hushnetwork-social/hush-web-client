@@ -1,6 +1,7 @@
 import {
   FileCheck2,
   Globe,
+  Gauge,
   Search,
   PlusSquare,
   MessageSquare,
@@ -8,6 +9,10 @@ import {
   UsersRound,
   Vote,
 } from "lucide-react";
+import {
+  getReadinessDashboardClientRouteGate,
+  READINESS_DASHBOARD_NAV_ID,
+} from "@/lib/readinessDashboard/routeGate";
 import type { AppId } from "@/stores/useAppStore";
 
 export interface AppNavItem {
@@ -39,7 +44,8 @@ export function getAppNavItems(activeApp: AppId, crossAppBadges: Record<AppId, n
   }
 
   if (activeApp === "voting") {
-    return [
+    const readinessDashboardGate = getReadinessDashboardClientRouteGate();
+    const votingNavItems: AppNavItem[] = [
       { id: "open-voting", label: "Election Hub", icon: <Vote className="w-5 h-5" /> },
       {
         id: "verify-receipt",
@@ -47,6 +53,17 @@ export function getAppNavItems(activeApp: AppId, crossAppBadges: Record<AppId, n
         icon: <FileCheck2 className="w-5 h-5" />,
         guestAllowed: true,
       },
+    ];
+
+    if (readinessDashboardGate.enabled) {
+      votingNavItems.push({
+        id: READINESS_DASHBOARD_NAV_ID,
+        label: "Readiness",
+        icon: <Gauge className="w-5 h-5" />,
+      });
+    }
+
+    votingNavItems.push(
       {
         id: "switch-feeds",
         label: "HushFeeds!",
@@ -59,7 +76,9 @@ export function getAppNavItems(activeApp: AppId, crossAppBadges: Record<AppId, n
         icon: <Globe className="w-5 h-5" />,
         badgeCount: crossAppBadges.social,
       },
-    ];
+    );
+
+    return votingNavItems;
   }
 
   return [
