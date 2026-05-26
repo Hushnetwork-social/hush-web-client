@@ -354,9 +354,26 @@ export interface SubmitAttachmentBlob {
   encryptedThumbnail: Uint8Array | null;
 }
 
+export interface SubmitWebClientDeploymentProofObservation {
+  schemaVersion?: string;
+  componentId?: string;
+  deploymentProofId?: string;
+  deploymentTarget?: string;
+  sourceRef?: string;
+  webArtifactHash?: string;
+  clientBundleHash?: string;
+  packageHash?: string;
+  publicPackageRef?: string;
+  deploymentProtocolVersion?: string;
+  evidenceStatus?: string;
+  observationScope: string;
+  generatedAtUtc?: string;
+}
+
 export function buildSubmitTransactionRequest(
   signedTransaction: string,
   attachments?: SubmitAttachmentBlob[],
+  webClientDeploymentProof?: SubmitWebClientDeploymentProofObservation,
 ): Uint8Array {
   // For messages with large binary attachments, we must avoid number[] spreading
   // which causes call stack overflow. Instead, collect Uint8Array chunks and
@@ -380,7 +397,38 @@ export function buildSubmitTransactionRequest(
     }
   }
 
+  if (webClientDeploymentProof) {
+    const proofChunks = buildWebClientDeploymentProofObservationChunks(webClientDeploymentProof);
+    chunks.push(encodeMessageFromChunks(3, proofChunks));
+  }
+
   return concatUint8Arrays(chunks);
+}
+
+function buildWebClientDeploymentProofObservationChunks(
+  proof: SubmitWebClientDeploymentProofObservation,
+): Uint8Array[] {
+  const chunks: Uint8Array[] = [];
+  pushOptionalString(chunks, 1, proof.schemaVersion);
+  pushOptionalString(chunks, 2, proof.componentId);
+  pushOptionalString(chunks, 3, proof.deploymentProofId);
+  pushOptionalString(chunks, 4, proof.deploymentTarget);
+  pushOptionalString(chunks, 5, proof.sourceRef);
+  pushOptionalString(chunks, 6, proof.webArtifactHash);
+  pushOptionalString(chunks, 7, proof.clientBundleHash);
+  pushOptionalString(chunks, 8, proof.packageHash);
+  pushOptionalString(chunks, 9, proof.publicPackageRef);
+  pushOptionalString(chunks, 10, proof.deploymentProtocolVersion);
+  pushOptionalString(chunks, 11, proof.evidenceStatus);
+  pushOptionalString(chunks, 12, proof.observationScope);
+  pushOptionalString(chunks, 13, proof.generatedAtUtc);
+  return chunks;
+}
+
+function pushOptionalString(chunks: Uint8Array[], fieldNumber: number, value: string | undefined): void {
+  if (value && value.trim().length > 0) {
+    chunks.push(new Uint8Array(encodeString(fieldNumber, value.trim())));
+  }
 }
 
 export function buildSearchByDisplayNameRequest(partialDisplayName: string): Uint8Array {

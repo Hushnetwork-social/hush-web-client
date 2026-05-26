@@ -8,6 +8,12 @@ import {
   ELECTION_QUERY_AUTH_HEADERS,
   validateElectionQueryAuth,
 } from '@/lib/grpc/electionQueryAuth';
+import {
+  getMissingWebClientDeploymentProofHeaders,
+  getWebClientDeploymentProofObservationFromHeaders,
+  getWebClientDeploymentProofHeadersFromMetadata,
+  normalizeWebClientDeploymentProofMetadata,
+} from '@/lib/deploymentProof/webClientDeploymentProofContract';
 
 const SERVICE_NAME = 'rpcHush.HushElections';
 const PACKAGE_NAME = 'rpcHush';
@@ -54,14 +60,13 @@ type GrpcUrlCandidate = {
   url: string;
 };
 
-function getGrpcUrlCandidates(forwardedHeaders: Record<string, string>): string[] {
+function getGrpcUrlCandidates(isSignedForwardedQuery: boolean): string[] {
   const candidates = [
     { explicit: true, url: process.env.GRPC_SERVER_URL },
     { explicit: true, url: process.env.NEXT_PUBLIC_GRPC_URL },
     { explicit: false, url: 'http://localhost:4666' },
     { explicit: false, url: DEFAULT_PUBLIC_GRPC_URL },
   ];
-  const isSignedForwardedQuery = Object.keys(forwardedHeaders).length > 0;
   const seen = new Set<string>();
 
   return candidates
@@ -91,10 +96,11 @@ async function grpcCallWithFallback(
   service: string,
   method: string,
   requestBytes: Uint8Array,
-  forwardedHeaders: Record<string, string>
+  forwardedHeaders: Record<string, string>,
+  isSignedForwardedQuery: boolean
 ): Promise<{ grpcUrl: string; messageBytes: Uint8Array }> {
   const frame = createGrpcFrame(requestBytes);
-  const grpcUrls = getGrpcUrlCandidates(forwardedHeaders);
+  const grpcUrls = getGrpcUrlCandidates(isSignedForwardedQuery);
   let lastError: Error | null = null;
 
   for (const grpcUrl of grpcUrls) {
@@ -157,7 +163,7 @@ async function grpcCallWithFallback(
   throw lastError ?? new Error(`No gRPC endpoints were available for ${service}/${method}`);
 }
 
-function getForwardedElectionQueryHeaders(headers: Headers): Record<string, string> {
+function getForwardedElectionQueryAuthHeaders(headers: Headers): Record<string, string> {
   const forwarded: Record<string, string> = {};
   for (const headerName of Object.values(ELECTION_QUERY_AUTH_HEADERS)) {
     const value = headers.get(headerName)?.trim();
@@ -167,6 +173,24 @@ function getForwardedElectionQueryHeaders(headers: Headers): Record<string, stri
   }
 
   return forwarded;
+}
+
+function getForwardedWebClientDeploymentProofHeaders(headers: Headers): Record<string, string> {
+  const observation = getWebClientDeploymentProofObservationFromHeaders(headers, 'election_query');
+
+  if (observation.evidenceStatus === 'missing') {
+    return getMissingWebClientDeploymentProofHeaders(observation.observationScope);
+  }
+
+  const normalized = normalizeWebClientDeploymentProofMetadata(observation);
+  if (!normalized.ok) {
+    throw new Error(`${normalized.code}: ${normalized.message}`);
+  }
+
+  return getWebClientDeploymentProofHeadersFromMetadata(
+    normalized.metadata,
+    observation.observationScope
+  );
 }
 
 function resolveFirstExistingPath(label: string, candidates: string[]): string {
@@ -259,12 +283,18 @@ export async function POST(request: NextRequest) {
 
     const requestMessage = requestType.fromObject(body.request ?? {});
     const requestBytes = requestType.encode(requestMessage).finish();
-    const forwardedHeaders = getForwardedElectionQueryHeaders(request.headers);
+    const forwardedAuthHeaders = getForwardedElectionQueryAuthHeaders(request.headers);
+    const forwardedProofHeaders = getForwardedWebClientDeploymentProofHeaders(request.headers);
+    const forwardedHeaders = {
+      ...forwardedAuthHeaders,
+      ...forwardedProofHeaders,
+    };
     const { messageBytes } = await grpcCallWithFallback(
       SERVICE_NAME,
       method,
       requestBytes,
-      forwardedHeaders
+      forwardedHeaders,
+      Object.keys(forwardedAuthHeaders).length > 0
     );
 
     const decoded = responseType.decode(messageBytes);
@@ -281,12 +311,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(payload);
   } catch (error) {
     console.error('[API] Election query proxy failed:', error);
+    const isWebClientProofValidationError =
+      error instanceof Error && error.message.startsWith('webclient_proof_');
+
     return NextResponse.json(
       {
         success: false,
         message: error instanceof Error ? error.message : 'Election query proxy failed',
       },
-      { status: 502 }
+      { status: isWebClientProofValidationError ? 400 : 502 }
     );
   }
 }

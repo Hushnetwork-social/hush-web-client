@@ -49,6 +49,7 @@ import {
   isSignedElectionQueryMethod,
   supportsOptionalElectionQueryAuth,
 } from '../electionQueryAuth';
+import { getWebClientDeploymentProofHeaders } from '@/lib/deploymentProof/webClientDeploymentProof';
 
 const ELECTIONS_QUERY_PROXY_URL = '/api/elections/query';
 
@@ -58,6 +59,7 @@ async function proxyElectionQuery<TRequest, TResponse>(
 ): Promise<TResponse> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    ...getWebClientDeploymentProofHeaders('election_query'),
   };
   const credentials = useAppStore.getState().credentials;
 

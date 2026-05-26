@@ -8,6 +8,7 @@
 
 import { buildApiUrl } from '@/lib/api-config';
 import { TransactionStatus } from '@/lib/grpc';
+import { getWebClientDeploymentProofMetadata } from '@/lib/deploymentProof/webClientDeploymentProof';
 
 /**
  * Fetches the current blockchain height from the API.
@@ -47,7 +48,11 @@ export async function submitTransaction(
   const response = await fetch(buildApiUrl('/api/blockchain/submit'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ signedTransaction, attachments }),
+    body: JSON.stringify({
+      signedTransaction,
+      attachments,
+      webClientDeploymentProof: getWebClientDeploymentProofMetadata(),
+    }),
   });
 
   if (!response.ok) {

@@ -135,11 +135,26 @@ describe('BlockchainService', () => {
 
       expect(result.successful).toBe(true);
       expect(result.message).toBe('OK');
-      expect(mockFetch).toHaveBeenCalledWith('/api/blockchain/submit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ signedTransaction: 'signed-tx-json' }),
-      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/blockchain/submit',
+        expect.objectContaining({
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: expect.any(String),
+        })
+      );
+      const requestInit = mockFetch.mock.calls[0]?.[1] as RequestInit;
+      const payload = JSON.parse(requestInit.body as string);
+      expect(payload).toEqual(
+        expect.objectContaining({
+          signedTransaction: 'signed-tx-json',
+          webClientDeploymentProof: expect.objectContaining({
+            schemaVersion: 'hush-webclient-deployment-proof-handshake-v1',
+            componentId: 'hush-web-client',
+          }),
+        })
+      );
+      expect(payload.webClientDeploymentProof).not.toHaveProperty('observationScope');
     });
 
     it('should handle failed transaction', async () => {

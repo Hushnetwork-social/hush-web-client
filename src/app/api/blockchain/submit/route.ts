@@ -9,6 +9,13 @@ import {
   parseSubmitTransactionResponse,
   type SubmitAttachmentBlob,
 } from '@/lib/grpc/grpc-web-helper';
+import {
+  WEBCLIENT_DEPLOYMENT_PROOF_COMPONENT_ID,
+  WEBCLIENT_DEPLOYMENT_PROOF_SCHEMA_VERSION,
+  WEBCLIENT_DEPLOYMENT_PROTOCOL_VERSION,
+  normalizeWebClientDeploymentProofMetadata,
+  type WebClientDeploymentProofObservation,
+} from '@/lib/deploymentProof/webClientDeploymentProofContract';
 
 
 export async function POST(request: NextRequest) {
@@ -35,7 +42,14 @@ export async function POST(request: NextRequest) {
       }));
     }
 
-    const requestBytes = buildSubmitTransactionRequest(signedTransaction, attachments);
+    const webClientDeploymentProof = resolveSubmitWebClientDeploymentProofObservation(
+      body.webClientDeploymentProof
+    );
+    const requestBytes = buildSubmitTransactionRequest(
+      signedTransaction,
+      attachments,
+      webClientDeploymentProof
+    );
     const responseBytes = await grpcCall(
       'rpcHush.HushBlockchain',
       'SubmitSignedTransaction',
@@ -60,9 +74,36 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('[API] Transaction submission failed:', error);
+    const isWebClientProofValidationError =
+      error instanceof Error && error.message.startsWith('webclient_proof_');
+
     return NextResponse.json(
-      { error: 'Failed to submit transaction' },
-      { status: 502 }
+      { error: isWebClientProofValidationError ? error.message : 'Failed to submit transaction' },
+      { status: isWebClientProofValidationError ? 400 : 502 }
     );
   }
+}
+
+function resolveSubmitWebClientDeploymentProofObservation(
+  value: unknown
+): WebClientDeploymentProofObservation {
+  if (!value) {
+    return {
+      schemaVersion: WEBCLIENT_DEPLOYMENT_PROOF_SCHEMA_VERSION,
+      componentId: WEBCLIENT_DEPLOYMENT_PROOF_COMPONENT_ID,
+      deploymentProtocolVersion: WEBCLIENT_DEPLOYMENT_PROTOCOL_VERSION,
+      evidenceStatus: 'missing',
+      observationScope: 'submit_transaction',
+    };
+  }
+
+  const normalized = normalizeWebClientDeploymentProofMetadata(value);
+  if (!normalized.ok) {
+    throw new Error(`${normalized.code}: ${normalized.message}`);
+  }
+
+  return {
+    ...normalized.metadata,
+    observationScope: 'submit_transaction',
+  };
 }
