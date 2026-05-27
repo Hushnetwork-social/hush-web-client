@@ -7,7 +7,9 @@ import {
   CheckCircle2,
   FileJson,
   Info,
+  Keyboard,
   Loader2,
+  QrCode,
   RotateCcw,
   ShieldAlert,
   ShieldCheck,
@@ -18,10 +20,13 @@ import { useAppStore } from '@/stores';
 import {
   PACKAGE_ZIP_MAX_BYTES,
   RECEIPT_FILE_MAX_BYTES,
+  ReceiptChannelPayloadValidationError,
+  decodeReceiptChannelPayload,
   hasReceiptPackageBinding,
   parseReceiptExportJson,
   verifyReceiptInPackage,
   type HushVotingReceiptExport,
+  type ReceiptChannelPayloadIssue,
   type ReceiptVerificationIssue,
   type ReceiptVerificationResult,
   type ReceiptVerificationResultCategory,
@@ -40,6 +45,7 @@ interface ReceiptPreview {
   electionId: string;
   packageBound: boolean;
   generatedAt: string;
+  sourceLabel: string;
 }
 
 interface ResultCopy {
@@ -47,6 +53,15 @@ interface ResultCopy {
   body: string;
   recovery: string;
   tone: 'success' | 'warning' | 'error';
+}
+
+type ReceiptSourceMode = 'file' | 'qr_paste' | 'manual_payload';
+
+interface ReceiptSourceOption {
+  id: ReceiptSourceMode;
+  label: string;
+  icon: typeof FileJson;
+  description: string;
 }
 
 const RESULT_COPY: Record<ReceiptVerificationResultCategory, ResultCopy> = {
@@ -108,6 +123,27 @@ const CHECK_STEPS = [
   'SP-04 receipt set',
   'Accepted ballot set',
   'Receipt inclusion',
+];
+
+const RECEIPT_SOURCE_OPTIONS: ReceiptSourceOption[] = [
+  {
+    id: 'file',
+    label: 'File',
+    icon: FileJson,
+    description: 'Import one .hush-receipt.json export.',
+  },
+  {
+    id: 'qr_paste',
+    label: 'QR / Paste',
+    icon: QrCode,
+    description: 'Paste a QR-ready receipt payload.',
+  },
+  {
+    id: 'manual_payload',
+    label: 'Manual Payload',
+    icon: Keyboard,
+    description: 'Paste a segmented compact payload.',
+  },
 ];
 
 function defaultVerifyReceipt(input: {
@@ -181,6 +217,15 @@ function mapIssueMessage(issue: ReceiptVerificationIssue): string {
   return [issue.code, issue.path, issue.message].filter(Boolean).join(' - ');
 }
 
+function mapPayloadIssueToReceiptIssue(issue: ReceiptChannelPayloadIssue): ReceiptVerificationIssue {
+  return {
+    family: 'receipt',
+    code: issue.code,
+    path: issue.path,
+    message: issue.message,
+  };
+}
+
 function readFileAsText(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -213,7 +258,12 @@ export function PublicReceiptVerifier({
   const setActiveApp = useAppStore((state) => state.setActiveApp);
   const receiptInputRef = useRef<HTMLInputElement>(null);
   const packageInputRef = useRef<HTMLInputElement>(null);
+  const [receiptSourceMode, setReceiptSourceMode] = useState<ReceiptSourceMode>('file');
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [receiptJson, setReceiptJson] = useState('');
+  const [receiptPayloadText, setReceiptPayloadText] = useState('');
+  const [receiptPayloadIssue, setReceiptPayloadIssue] =
+    useState<ReceiptChannelPayloadIssue | null>(null);
   const [receiptPreview, setReceiptPreview] = useState<ReceiptPreview | null>(null);
   const [receiptWarning, setReceiptWarning] = useState('');
   const [receiptError, setReceiptError] = useState('');
@@ -227,7 +277,8 @@ export function PublicReceiptVerifier({
     setSelectedNav('verify-receipt');
   }, [setActiveApp, setSelectedNav]);
 
-  const canVerify = Boolean(receiptFile && packageFile && !receiptError && !packageError);
+  const hasReceiptInput = Boolean(receiptJson) || Boolean(receiptPayloadIssue && receiptPayloadText.trim());
+  const canVerify = Boolean(hasReceiptInput && packageFile && !receiptError && !packageError);
   const resultCopy = result ? RESULT_COPY[result.category] : null;
   const resultClasses = resultCopy ? resultToneClasses(resultCopy.tone) : null;
   const ResultIcon = resultClasses?.icon;
@@ -269,6 +320,8 @@ export function PublicReceiptVerifier({
     const file = fileList?.[0] ?? null;
     setResult(null);
     setReceiptFile(null);
+    setReceiptJson('');
+    setReceiptPayloadIssue(null);
     setReceiptPreview(null);
     setReceiptWarning('');
     setReceiptError('');
@@ -295,14 +348,67 @@ export function PublicReceiptVerifier({
     setReceiptFile(file);
     try {
       const text = await readFileAsText(file);
+      setReceiptJson(text);
       const parsed = parseReceiptExportJson(text);
       setReceiptPreview({
         electionId: parsed.receiptProof.electionId,
         packageBound: hasReceiptPackageBinding(parsed.receiptProof),
         generatedAt: parsed.exportEnvelope.receiptGeneratedAt,
+        sourceLabel: 'Receipt file',
       });
     } catch {
       setReceiptWarning('Receipt schema will be checked during verification.');
+    }
+  }
+
+  function handleReceiptSourceModeSelected(mode: ReceiptSourceMode): void {
+    if (mode === receiptSourceMode) {
+      return;
+    }
+
+    setReceiptSourceMode(mode);
+    clearReceipt();
+  }
+
+  function handleReceiptPayloadChanged(value: string): void {
+    setReceiptPayloadText(value);
+    setReceiptJson('');
+    setReceiptPayloadIssue(null);
+    setReceiptPreview(null);
+    setReceiptWarning('');
+    setReceiptError('');
+    setResult(null);
+
+    if (!value.trim()) {
+      return;
+    }
+
+    try {
+      const decoded = decodeReceiptChannelPayload(value);
+      const parsed = parseReceiptExportJson(decoded.receiptJson);
+      setReceiptJson(decoded.receiptJson);
+      setReceiptPreview({
+        electionId: parsed.receiptProof.electionId,
+        packageBound: hasReceiptPackageBinding(parsed.receiptProof),
+        generatedAt: parsed.exportEnvelope.receiptGeneratedAt,
+        sourceLabel:
+          decoded.payload.channel === 'manual_payload'
+            ? 'Manual receipt payload'
+            : 'QR-ready receipt payload',
+      });
+    } catch (error) {
+      if (error instanceof ReceiptChannelPayloadValidationError) {
+        setReceiptPayloadIssue(error.issue);
+        setReceiptWarning(error.issue.message);
+        return;
+      }
+
+      setReceiptPayloadIssue({
+        code: 'invalid_payload_format',
+        path: '$',
+        message: 'Receipt payload could not be decoded.',
+      });
+      setReceiptWarning('Receipt payload could not be decoded.');
     }
   }
 
@@ -335,17 +441,23 @@ export function PublicReceiptVerifier({
   }
 
   async function handleVerify(): Promise<void> {
-    if (!receiptFile || !packageFile) {
+    if (!packageFile || (!receiptJson && !receiptPayloadIssue)) {
       return;
     }
 
     setIsVerifying(true);
     setResult(null);
     try {
-      const [receiptJson, packageZipBytes] = await Promise.all([
-        readFileAsText(receiptFile),
-        readFileAsArrayBuffer(packageFile),
-      ]);
+      if (!receiptJson && receiptPayloadIssue) {
+        setResult({
+          category: 'invalid_receipt',
+          warnings: [],
+          issues: [mapPayloadIssueToReceiptIssue(receiptPayloadIssue)],
+        });
+        return;
+      }
+
+      const packageZipBytes = await readFileAsArrayBuffer(packageFile);
       setResult(await verifyReceipt({ receiptJson, packageZipBytes }));
     } catch (error) {
       setResult({
@@ -366,6 +478,9 @@ export function PublicReceiptVerifier({
 
   function clearReceipt(): void {
     setReceiptFile(null);
+    setReceiptJson('');
+    setReceiptPayloadText('');
+    setReceiptPayloadIssue(null);
     setReceiptPreview(null);
     setReceiptWarning('');
     setReceiptError('');
@@ -420,19 +535,17 @@ export function PublicReceiptVerifier({
         </header>
 
         <section className="grid gap-4 xl:grid-cols-2" aria-label="Verifier inputs">
-          <FilePickerPanel
-            icon={<FileJson className="h-5 w-5" />}
-            title="1. Receipt JSON"
-            description="Choose one .hush-receipt.json file exported from the Vote/Election Workspace."
-            inputTestId="receipt-verifier-receipt-input"
-            buttonLabel="Choose receipt"
-            accept=".json,.hush-receipt.json,application/json"
+          <ReceiptSourcePanel
+            mode={receiptSourceMode}
             file={receiptFile}
+            payloadText={receiptPayloadText}
             error={receiptError}
             warning={receiptWarning}
             preview={receiptPreview}
             inputRef={receiptInputRef}
+            onModeSelected={handleReceiptSourceModeSelected}
             onFileSelected={(files) => void handleReceiptSelected(files)}
+            onPayloadChanged={handleReceiptPayloadChanged}
             onClear={clearReceipt}
           />
           <FilePickerPanel
@@ -555,6 +668,203 @@ export function PublicReceiptVerifier({
           </section>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+function ReceiptSourcePanel({
+  mode,
+  file,
+  payloadText,
+  error,
+  warning,
+  preview,
+  inputRef,
+  onModeSelected,
+  onFileSelected,
+  onPayloadChanged,
+  onClear,
+}: {
+  mode: ReceiptSourceMode;
+  file: File | null;
+  payloadText: string;
+  error: string;
+  warning: string;
+  preview: ReceiptPreview | null;
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  onModeSelected: (mode: ReceiptSourceMode) => void;
+  onFileSelected: (files: FileList | null) => void;
+  onPayloadChanged: (value: string) => void;
+  onClear: () => void;
+}) {
+  const activeOption = RECEIPT_SOURCE_OPTIONS.find((option) => option.id === mode) ??
+    RECEIPT_SOURCE_OPTIONS[0];
+  const ActiveIcon = activeOption.icon;
+  const isFileMode = mode === 'file';
+
+  return (
+    <div className="rounded-3xl bg-hush-bg-element/90 px-6 py-5 shadow-lg shadow-black/10">
+      <div className="flex items-start gap-3">
+        <div className="rounded-2xl bg-teal-500/12 p-3 text-teal-100">
+          <ActiveIcon className="h-5 w-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-lg font-semibold">1. Receipt source</h2>
+          <p className="mt-1 text-sm leading-6 text-hush-text-accent">
+            Choose one receipt source. Every mode resolves to the same receipt proof before local
+            verification.
+          </p>
+        </div>
+      </div>
+
+      <div
+        className="mt-5 grid gap-2 sm:grid-cols-3"
+        role="radiogroup"
+        aria-label="Receipt source mode"
+      >
+        {RECEIPT_SOURCE_OPTIONS.map((option) => {
+          const OptionIcon = option.icon;
+          const selected = option.id === mode;
+          return (
+            <button
+              key={option.id}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              onClick={() => onModeSelected(option.id)}
+              className={`min-h-24 rounded-2xl px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple ${
+                selected
+                  ? 'bg-hush-purple text-hush-bg-dark'
+                  : 'bg-hush-bg-dark/65 text-hush-text-primary hover:bg-hush-bg-hover'
+              }`}
+              data-testid={`receipt-verifier-source-mode-${option.id}`}
+            >
+              <span className="flex items-center gap-2 text-sm font-semibold">
+                <OptionIcon className="h-4 w-4" />
+                {option.label}
+              </span>
+              <span className="mt-2 block text-xs leading-5 opacity-80">{option.description}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div
+        className={`mt-5 rounded-2xl px-4 py-4 ${
+          error
+            ? 'bg-red-500/12 text-red-100'
+            : preview
+              ? 'bg-teal-500/12 text-teal-100'
+              : warning
+                ? 'bg-amber-500/12 text-amber-100'
+                : 'bg-hush-bg-dark/65 text-hush-text-primary'
+        }`}
+      >
+        {isFileMode ? (
+          file ? (
+            <ReceiptSelectedSummary
+              file={file}
+              preview={preview}
+              warning={warning}
+              onClear={onClear}
+            />
+          ) : (
+            <div className="space-y-3">
+              <p className="text-sm text-hush-text-accent">No receipt file selected.</p>
+              <button
+                type="button"
+                onClick={() => inputRef.current?.click()}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-hush-purple px-4 py-2.5 text-sm font-semibold text-hush-bg-dark transition-colors hover:bg-hush-purple-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple"
+              >
+                Choose receipt
+              </button>
+            </div>
+          )
+        ) : (
+          <div className="space-y-3">
+            <label
+              htmlFor="receipt-verifier-payload-input"
+              className="block text-sm font-semibold"
+            >
+              {mode === 'qr_paste' ? 'QR-ready payload' : 'Manual receipt payload'}
+            </label>
+            <textarea
+              id="receipt-verifier-payload-input"
+              data-testid="receipt-verifier-payload-input"
+              value={payloadText}
+              onChange={(event) => onPayloadChanged(event.target.value)}
+              rows={7}
+              spellCheck={false}
+              className="min-h-44 w-full resize-y rounded-2xl bg-hush-bg-dark/85 px-4 py-3 font-mono text-sm text-hush-text-primary outline-none placeholder:text-hush-text-accent focus-visible:ring-2 focus-visible:ring-hush-purple"
+              placeholder="HVR1..."
+            />
+            {preview ? <ReceiptPreviewGrid preview={preview} /> : null}
+            {warning ? <div className="text-sm text-amber-100">{warning}</div> : null}
+            {payloadText ? (
+              <button
+                type="button"
+                onClick={onClear}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-black/20 px-3 py-2 text-sm font-medium transition-colors hover:bg-black/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple"
+              >
+                <X className="h-4 w-4" />
+                <span>Clear payload</span>
+              </button>
+            ) : null}
+          </div>
+        )}
+        {error ? <div className="mt-3 text-sm text-red-100">{error}</div> : null}
+      </div>
+
+      <input
+        ref={inputRef}
+        data-testid="receipt-verifier-receipt-input"
+        className="sr-only"
+        type="file"
+        accept=".json,.hush-receipt.json,application/json"
+        onChange={(event) => onFileSelected(event.target.files)}
+      />
+    </div>
+  );
+}
+
+function ReceiptSelectedSummary({
+  file,
+  preview,
+  warning,
+  onClear,
+}: {
+  file: File;
+  preview?: ReceiptPreview | null;
+  warning?: string;
+  onClear: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+      <div className="min-w-0 space-y-1 text-sm">
+        <div className="font-semibold break-all">{file.name}</div>
+        <div className="text-hush-text-accent">{formatBytes(file.size)}</div>
+        {preview ? <ReceiptPreviewGrid preview={preview} /> : null}
+        {warning ? <div className="mt-2 text-amber-100">{warning}</div> : null}
+      </div>
+      <button
+        type="button"
+        onClick={onClear}
+        className="inline-flex items-center justify-center gap-2 rounded-xl bg-black/20 px-3 py-2 text-sm font-medium transition-colors hover:bg-black/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple"
+      >
+        <X className="h-4 w-4" />
+        <span>Remove</span>
+      </button>
+    </div>
+  );
+}
+
+function ReceiptPreviewGrid({ preview }: { preview: ReceiptPreview }) {
+  return (
+    <div className="mt-3 grid gap-2 sm:grid-cols-4">
+      <MiniValue label="Source" value={preview.sourceLabel} />
+      <MiniValue label="Election" value={preview.electionId} />
+      <MiniValue label="Binding" value={preview.packageBound ? 'Package-bound' : 'Package-less'} />
+      <MiniValue label="Generated" value={preview.generatedAt} />
     </div>
   );
 }
