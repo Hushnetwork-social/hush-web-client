@@ -1,7 +1,11 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PublicReceiptVerifier } from './PublicReceiptVerifier';
-import type { ReceiptVerificationResult } from './receiptVerification';
+import {
+  encodeReceiptChannelPayload,
+  parseReceiptExportJson,
+  type ReceiptVerificationResult,
+} from './receiptVerification';
 
 vi.mock('@/stores', () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
@@ -66,10 +70,14 @@ async function selectValidInputs(): Promise<void> {
   fireEvent.change(screen.getByTestId('receipt-verifier-receipt-input'), {
     target: { files: [createReceiptFile()] },
   });
+  selectPackageInput();
+  await waitFor(() => expect(screen.getByTestId('receipt-verifier-submit')).toBeEnabled());
+}
+
+function selectPackageInput(): void {
   fireEvent.change(screen.getByTestId('receipt-verifier-package-input'), {
     target: { files: [createPackageFile()] },
   });
-  await waitFor(() => expect(screen.getByTestId('receipt-verifier-submit')).toBeEnabled());
 }
 
 describe('PublicReceiptVerifier', () => {
@@ -95,7 +103,7 @@ describe('PublicReceiptVerifier', () => {
       target: { files: [createPackageFile()] },
     });
 
-    expect(screen.getByTestId('receipt-verifier-submit')).toBeEnabled();
+    await waitFor(() => expect(screen.getByTestId('receipt-verifier-submit')).toBeEnabled());
   });
 
   it('runs browser-local verification and renders safe success evidence', async () => {
@@ -114,6 +122,67 @@ describe('PublicReceiptVerifier', () => {
     );
     expect(screen.getByTestId('receipt-verifier-evidence')).not.toHaveTextContent('Candidate A');
     expect(screen.getByTestId('receipt-verifier-evidence')).not.toHaveTextContent('server-proof');
+  });
+
+  it('accepts a QR-ready payload and verifies it through the same receipt JSON path', async () => {
+    const verifyReceipt = vi.fn().mockResolvedValue(successResult());
+    const payload = encodeReceiptChannelPayload(parseReceiptExportJson(receiptJson), 'qr_ready');
+    render(<PublicReceiptVerifier verifyReceipt={verifyReceipt} />);
+
+    fireEvent.click(screen.getByTestId('receipt-verifier-source-mode-qr_paste'));
+    fireEvent.change(screen.getByTestId('receipt-verifier-payload-input'), {
+      target: { value: payload },
+    });
+    selectPackageInput();
+
+    await waitFor(() => expect(screen.getByTestId('receipt-verifier-submit')).toBeEnabled());
+    fireEvent.click(screen.getByTestId('receipt-verifier-submit'));
+
+    await waitFor(() => expect(verifyReceipt).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(verifyReceipt.mock.calls[0][0].receiptJson)).toEqual(JSON.parse(receiptJson));
+    expect(await screen.findByTestId('receipt-verifier-result-verified_included')).toHaveTextContent(
+      'Receipt included',
+    );
+  });
+
+  it('accepts a segmented manual payload and keeps the finalized package ZIP required', async () => {
+    const verifyReceipt = vi.fn().mockResolvedValue(successResult());
+    const payload = encodeReceiptChannelPayload(parseReceiptExportJson(receiptJson), 'manual_payload');
+    const segmented = payload.match(/.{1,22}/g)?.join('\n') ?? payload;
+    render(<PublicReceiptVerifier verifyReceipt={verifyReceipt} />);
+
+    fireEvent.click(screen.getByTestId('receipt-verifier-source-mode-manual_payload'));
+    fireEvent.change(screen.getByTestId('receipt-verifier-payload-input'), {
+      target: { value: segmented },
+    });
+
+    await waitFor(() => expect(screen.getByText('Manual receipt payload')).toBeInTheDocument());
+    expect(screen.getByTestId('receipt-verifier-submit')).toBeDisabled();
+
+    selectPackageInput();
+    await waitFor(() => expect(screen.getByTestId('receipt-verifier-submit')).toBeEnabled());
+    fireEvent.click(screen.getByTestId('receipt-verifier-submit'));
+
+    await waitFor(() => expect(verifyReceipt).toHaveBeenCalledTimes(1));
+  });
+
+  it('maps malformed channel payloads to invalid_receipt when verification is requested', async () => {
+    const verifyReceipt = vi.fn();
+    render(<PublicReceiptVerifier verifyReceipt={verifyReceipt} />);
+
+    fireEvent.click(screen.getByTestId('receipt-verifier-source-mode-qr_paste'));
+    fireEvent.change(screen.getByTestId('receipt-verifier-payload-input'), {
+      target: { value: 'HVR1.%%%%.deadbeefdeadbeef' },
+    });
+    selectPackageInput();
+
+    await waitFor(() => expect(screen.getByTestId('receipt-verifier-submit')).toBeEnabled());
+    fireEvent.click(screen.getByTestId('receipt-verifier-submit'));
+
+    expect(
+      await screen.findByTestId('receipt-verifier-result-invalid_receipt'),
+    ).toHaveTextContent('invalid_payload_encoding');
+    expect(verifyReceipt).not.toHaveBeenCalled();
   });
 
   it('shows a warning result when inclusion is valid but not clean package-bound success', async () => {
