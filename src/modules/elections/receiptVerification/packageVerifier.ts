@@ -98,14 +98,14 @@ interface VerifierProfile {
   profileId: string;
 }
 
-interface AcceptedBallotSet {
+export interface AcceptedBallotSet {
   electionId: string;
   acceptedBallotCount: number;
   acceptedBallotInventoryHash: string;
   acceptedBallots: AcceptedBallotRecord[];
 }
 
-interface AcceptedBallotRecord {
+export interface AcceptedBallotRecord {
   ballotNullifier: string;
   encryptedBallotPackage: string;
   proofBundle: string;
@@ -116,7 +116,7 @@ interface AcceptedBallotRecord {
   ballotDefinitionHash?: string;
 }
 
-interface Sp04ReceiptCommitmentRecord {
+export interface Sp04ReceiptCommitmentRecord {
   acceptedBallotId: string;
   preparedBallotId: string;
   acceptedAt: string;
@@ -125,13 +125,13 @@ interface Sp04ReceiptCommitmentRecord {
   receiptCommitmentScheme: string;
 }
 
-interface Sp04Evidence {
+export interface Sp04Evidence {
   electionId: string;
   acceptedBoundReceiptCount: number;
   receiptCommitmentSetHash: string;
 }
 
-interface FinalizedReceiptPackage {
+export interface FinalizedReceiptPackage {
   identity: ReceiptVerificationPackageIdentity;
   acceptedBallotSet: AcceptedBallotSet;
   sp04ReceiptCommitments: Sp04ReceiptCommitmentRecord[];
