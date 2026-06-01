@@ -79,12 +79,16 @@ function buildWarnings(register: RawReadinessRegister): string[] {
     warnings.push('Score is below the minimum confidence threshold.');
   }
 
+  if (register.score.total < register.score.strongerTargetScore) {
+    warnings.push('Hush-owned 95+ internal audit target remains open.');
+  }
+
   if (
     register.claimLevels.some(
       (claim) => claim.blockerSeverity === 'red' && claim.status === 'blocked'
     )
   ) {
-    warnings.push('One or more claim gates remain red even if future scores increase.');
+    warnings.push('One or more current claim gates remain blocked.');
   }
 
   return warnings;
@@ -244,6 +248,7 @@ export function projectReadinessDashboard(
     })),
     dimensions: register.dimensions.map(mapDimension),
     blockers: register.blockers
+      .filter((blocker) => blocker.status !== 'superseded')
       .map(mapBlocker)
       .sort((left, right) => {
         const severityWeight = { red: 0, amber: 1, green: 2 };

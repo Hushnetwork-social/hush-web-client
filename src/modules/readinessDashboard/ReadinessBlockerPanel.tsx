@@ -72,7 +72,7 @@ export function ReadinessBlockerPanel({ blockers }: { blockers: ReadinessBlocker
           Active Blockers
         </h2>
         <span className="rounded-full bg-hush-bg-dark/70 px-3 py-1 text-xs font-semibold text-hush-text-accent">
-          {blockers.filter((blocker) => blocker.status !== 'resolved').length} open
+          {blockers.filter((blocker) => blocker.status === 'open').length} open
         </span>
       </div>
       <div className="mt-4 grid gap-2">

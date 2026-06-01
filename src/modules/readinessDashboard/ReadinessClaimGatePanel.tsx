@@ -1,4 +1,4 @@
-import { CheckCircle2, CircleAlert, XCircle } from 'lucide-react';
+import { CheckCircle2, CircleAlert, Clock3, Landmark, XCircle } from 'lucide-react';
 import type { CSSProperties } from 'react';
 import type { ReadinessClaimGateView } from '@/lib/readinessDashboard';
 
@@ -6,15 +6,29 @@ function formatLabel(value: string): string {
   return value.replace(/_/g, ' ');
 }
 
-function getTone(severity: ReadinessClaimGateView['severity']) {
-  if (severity === 'green') {
+function getTone(claim: ReadinessClaimGateView) {
+  if (claim.status === 'future_gated') {
+    return {
+      className: 'text-sky-100',
+      icon: Clock3,
+    };
+  }
+
+  if (claim.status === 'external_boundary') {
+    return {
+      className: 'text-slate-100',
+      icon: Landmark,
+    };
+  }
+
+  if (claim.severity === 'green') {
     return {
       className: 'text-emerald-100',
       icon: CheckCircle2,
     };
   }
 
-  if (severity === 'amber') {
+  if (claim.severity === 'amber') {
     return {
       className: 'text-amber-100',
       icon: CircleAlert,
@@ -27,15 +41,27 @@ function getTone(severity: ReadinessClaimGateView['severity']) {
   };
 }
 
-function claimStyle(severity: ReadinessClaimGateView['severity']): CSSProperties {
-  if (severity === 'red') {
+function claimStyle(claim: ReadinessClaimGateView): CSSProperties {
+  if (claim.status === 'future_gated') {
+    return {
+      backgroundColor: 'rgba(14, 116, 144, 0.22)',
+    };
+  }
+
+  if (claim.status === 'external_boundary') {
+    return {
+      backgroundColor: 'rgba(100, 116, 139, 0.24)',
+    };
+  }
+
+  if (claim.severity === 'red') {
     return {
       backgroundColor: 'rgba(127, 29, 29, 0.92)',
       boxShadow: 'inset 4px 0 0 rgba(248, 113, 113, 1)',
     };
   }
 
-  if (severity === 'amber') {
+  if (claim.severity === 'amber') {
     return {
       backgroundColor: 'rgba(252, 211, 77, 0.14)',
     };
@@ -46,8 +72,20 @@ function claimStyle(severity: ReadinessClaimGateView['severity']): CSSProperties
   };
 }
 
-function claimBadgeStyle(severity: ReadinessClaimGateView['severity']): CSSProperties | undefined {
-  if (severity !== 'red') {
+function claimBadgeStyle(claim: ReadinessClaimGateView): CSSProperties | undefined {
+  if (claim.status === 'future_gated') {
+    return {
+      backgroundColor: 'rgba(8, 47, 73, 0.72)',
+    };
+  }
+
+  if (claim.status === 'external_boundary') {
+    return {
+      backgroundColor: 'rgba(15, 23, 42, 0.72)',
+    };
+  }
+
+  if (claim.severity !== 'red') {
     return undefined;
   }
 
@@ -73,7 +111,7 @@ export function ReadinessClaimGatePanel({ claims }: { claims: ReadinessClaimGate
       </div>
       <div className="mt-4 grid gap-2">
         {claims.map((claim) => {
-          const tone = getTone(claim.severity);
+          const tone = getTone(claim);
           const Icon = tone.icon;
           const wording =
             claim.blockedWording || claim.limitationWording || claim.allowedWording || claim.status;
@@ -82,7 +120,7 @@ export function ReadinessClaimGatePanel({ claims }: { claims: ReadinessClaimGate
             <article
               key={claim.claimLevel}
               className={`rounded-lg px-3 py-3 ${tone.className}`}
-              style={claimStyle(claim.severity)}
+              style={claimStyle(claim)}
             >
               <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <div className="flex items-start gap-2">
@@ -94,11 +132,13 @@ export function ReadinessClaimGatePanel({ claims }: { claims: ReadinessClaimGate
                 </div>
                 <span
                   className={`shrink-0 rounded-full px-2 py-1 text-xs font-semibold ${
-                    claim.severity === 'red'
+                    claim.severity === 'red' ||
+                    claim.status === 'future_gated' ||
+                    claim.status === 'external_boundary'
                       ? 'text-white'
                       : 'bg-hush-bg-dark/55'
                   }`}
-                  style={claimBadgeStyle(claim.severity)}
+                  style={claimBadgeStyle(claim)}
                 >
                   {claim.severity} / {claim.status}
                 </span>

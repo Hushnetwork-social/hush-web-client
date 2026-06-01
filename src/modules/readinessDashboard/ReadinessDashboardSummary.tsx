@@ -43,7 +43,9 @@ export function ReadinessDashboardSummary({
 }: {
   dashboard: ReadinessDashboardViewModel;
 }) {
-  const currentClaim = dashboard.claims.find((claim) => claim.status !== 'blocked');
+  const currentClaim = [...dashboard.claims]
+    .reverse()
+    .find((claim) => claim.status !== 'blocked' && claim.severity !== 'red');
   const dataTone =
     dashboard.register.dataHealth === 'current'
       ? 'green'
@@ -56,7 +58,7 @@ export function ReadinessDashboardSummary({
       <MetricTile
         label="Score"
         value={`${dashboard.score.total} / 100`}
-        detail={`Threshold: ${formatLabel(dashboard.score.thresholdBand)}`}
+        detail={`Target: ${dashboard.score.strongerTargetScore}+ (${formatLabel(dashboard.score.thresholdBand)})`}
         tone={dashboard.score.thresholdBand === 'below_minimum' ? 'amber' : 'green'}
       />
       <MetricTile
