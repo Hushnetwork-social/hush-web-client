@@ -576,14 +576,31 @@ export function PublicReceiptVerifier({
           return;
         }
 
-        setReceiptJson(lookup.entry.receiptJson);
+        const lookupEntry = lookup.entry;
+        if (!lookupEntry) {
+          setResult({
+            category: 'verification_unavailable',
+            warnings: [],
+            issues: [
+              {
+                family: 'runtime',
+                code: 'compact_code_resolved_entry_missing',
+                message: 'Compact-code lookup resolved without a receipt entry.',
+              },
+            ],
+            packageIdentity: lookup.packageIdentity,
+          });
+          return;
+        }
+
+        setReceiptJson(lookupEntry.receiptJson);
         setReceiptPreview({
-          electionId: lookup.entry.receiptExport.receiptProof.electionId,
-          packageBound: hasReceiptPackageBinding(lookup.entry.receiptExport.receiptProof),
-          generatedAt: lookup.entry.receiptExport.exportEnvelope.receiptGeneratedAt,
+          electionId: lookupEntry.receiptExport.receiptProof.electionId,
+          packageBound: hasReceiptPackageBinding(lookupEntry.receiptExport.receiptProof),
+          generatedAt: lookupEntry.receiptExport.exportEnvelope.receiptGeneratedAt,
           sourceLabel: 'Compact code',
         });
-        setResult(await verifyReceipt({ receiptJson: lookup.entry.receiptJson, packageZipBytes }));
+        setResult(await verifyReceipt({ receiptJson: lookupEntry.receiptJson, packageZipBytes }));
         return;
       }
 
