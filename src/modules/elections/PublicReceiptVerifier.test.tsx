@@ -2,8 +2,10 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PublicReceiptVerifier } from './PublicReceiptVerifier';
 import {
+  QrCameraScanError,
   encodeReceiptChannelPayload,
   parseReceiptExportJson,
+  type CompactReceiptLookupResult,
   type ReceiptVerificationResult,
 } from './receiptVerification';
 
@@ -88,6 +90,11 @@ describe('PublicReceiptVerifier', () => {
   it('keeps verification disabled until one receipt JSON and one package ZIP are selected', async () => {
     render(<PublicReceiptVerifier verifyReceipt={vi.fn()} />);
 
+    expect(screen.getByTestId('receipt-verifier-source-mode-file')).toHaveTextContent('File');
+    expect(screen.getByTestId('receipt-verifier-source-mode-camera_qr')).toHaveTextContent('Camera QR');
+    expect(screen.getByTestId('receipt-verifier-source-mode-qr_paste')).toHaveTextContent('QR / Paste');
+    expect(screen.getByTestId('receipt-verifier-source-mode-compact_code')).toHaveTextContent('Compact Code');
+    expect(screen.getByTestId('receipt-verifier-source-mode-manual_payload')).toHaveTextContent('Manual Payload');
     expect(screen.getByTestId('receipt-verifier-submit')).toBeDisabled();
 
     fireEvent.change(screen.getByTestId('receipt-verifier-receipt-input'), {
@@ -145,6 +152,55 @@ describe('PublicReceiptVerifier', () => {
     );
   });
 
+  it('accepts a camera-scanned QR payload and keeps package verification local', async () => {
+    const verifyReceipt = vi.fn().mockResolvedValue(successResult());
+    const payload = encodeReceiptChannelPayload(parseReceiptExportJson(receiptJson), 'qr_ready');
+    const stop = vi.fn();
+    const startCameraScan = vi.fn(async ({ onDecoded }) => {
+      onDecoded(payload);
+      return { stop };
+    });
+    render(
+      <PublicReceiptVerifier
+        verifyReceipt={verifyReceipt}
+        startCameraScan={startCameraScan}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('receipt-verifier-source-mode-camera_qr'));
+    fireEvent.click(screen.getByTestId('receipt-verifier-camera-start'));
+
+    await waitFor(() => expect(screen.getByText('Camera QR payload')).toBeInTheDocument());
+    selectPackageInput();
+    await waitFor(() => expect(screen.getByTestId('receipt-verifier-submit')).toBeEnabled());
+    fireEvent.click(screen.getByTestId('receipt-verifier-submit'));
+
+    await waitFor(() => expect(verifyReceipt).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(verifyReceipt.mock.calls[0][0].receiptJson)).toEqual(JSON.parse(receiptJson));
+    expect(startCameraScan).toHaveBeenCalledTimes(1);
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps camera permission denial recoverable without clearing fallback modes', async () => {
+    const startCameraScan = vi.fn(async () => {
+      throw new QrCameraScanError({
+        code: 'camera_permission_denied',
+        message: 'Camera access was blocked by the browser. Use QR / Paste, Compact Code, Manual Payload, or File instead.',
+      });
+    });
+    render(<PublicReceiptVerifier verifyReceipt={vi.fn()} startCameraScan={startCameraScan} />);
+
+    fireEvent.click(screen.getByTestId('receipt-verifier-source-mode-camera_qr'));
+    fireEvent.click(screen.getByTestId('receipt-verifier-camera-start'));
+
+    expect(
+      await screen.findByText(/Camera access was blocked by the browser/i),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId('receipt-verifier-source-mode-qr_paste')).toBeInTheDocument();
+    expect(screen.getByTestId('receipt-verifier-source-mode-compact_code')).toBeInTheDocument();
+    expect(screen.getByTestId('receipt-verifier-submit')).toBeDisabled();
+  });
+
   it('accepts a segmented manual payload and keeps the finalized package ZIP required', async () => {
     const verifyReceipt = vi.fn().mockResolvedValue(successResult());
     const payload = encodeReceiptChannelPayload(parseReceiptExportJson(receiptJson), 'manual_payload');
@@ -182,6 +238,89 @@ describe('PublicReceiptVerifier', () => {
     expect(
       await screen.findByTestId('receipt-verifier-result-invalid_receipt'),
     ).toHaveTextContent('invalid_payload_encoding');
+    expect(verifyReceipt).not.toHaveBeenCalled();
+  });
+
+  it('resolves a compact code against the selected package before package verification', async () => {
+    const verifyReceipt = vi.fn().mockResolvedValue(successResult());
+    const compactReceipt = {
+      ...JSON.parse(receiptJson),
+      receiptProof: {
+        ...JSON.parse(receiptJson).receiptProof,
+        receiptCommitment: 'receipt-commitment-from-compact-code',
+      },
+    };
+    const compactReceiptJson = JSON.stringify(compactReceipt);
+    const resolveCompactCode = vi.fn((): CompactReceiptLookupResult => ({
+      category: 'resolved',
+      issues: [],
+      packageIdentity: successResult().packageIdentity,
+      compactCode: {
+        raw: 'ABCDE23456789WXYZ',
+        display: 'HVC1-ABCDE-2345-6789-WXYZ',
+        packageHint: 'ABCDE',
+        proofCode: '23456789WXYZ',
+      },
+      entry: {
+        compactCode: 'HVC1-ABCDE-2345-6789-WXYZ',
+        receiptExport: compactReceipt,
+        receiptJson: compactReceiptJson,
+        receiptCommitment: 'receipt-commitment-from-compact-code',
+        preparedBallotHash: 'prepared-ballot-hash-1',
+      },
+    }));
+    render(
+      <PublicReceiptVerifier
+        verifyReceipt={verifyReceipt}
+        resolveCompactCode={resolveCompactCode}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('receipt-verifier-source-mode-compact_code'));
+    fireEvent.change(screen.getByTestId('receipt-verifier-compact-code-input'), {
+      target: { value: 'HVC1-ABCDE-2345-6789-WXYZ' },
+    });
+    expect(screen.getByTestId('receipt-verifier-submit')).toBeDisabled();
+    selectPackageInput();
+    await waitFor(() => expect(screen.getByTestId('receipt-verifier-submit')).toBeEnabled());
+    fireEvent.click(screen.getByTestId('receipt-verifier-submit'));
+
+    await waitFor(() => expect(resolveCompactCode).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(verifyReceipt).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(verifyReceipt.mock.calls[0][0].receiptJson)).toEqual(compactReceipt);
+  });
+
+  it('fails compact codes closed when package lookup cannot find a proof', async () => {
+    const verifyReceipt = vi.fn();
+    const resolveCompactCode = vi.fn((): CompactReceiptLookupResult => ({
+      category: 'not_found',
+      issues: [
+        {
+          family: 'inclusion',
+          code: 'compact_code_not_found',
+          message: 'Compact code was not found in the selected finalized package.',
+        },
+      ],
+      packageIdentity: successResult().packageIdentity,
+    }));
+    render(
+      <PublicReceiptVerifier
+        verifyReceipt={verifyReceipt}
+        resolveCompactCode={resolveCompactCode}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('receipt-verifier-source-mode-compact_code'));
+    fireEvent.change(screen.getByTestId('receipt-verifier-compact-code-input'), {
+      target: { value: 'HVC1-ABCDE-2345-6789-WXYZ' },
+    });
+    selectPackageInput();
+    await waitFor(() => expect(screen.getByTestId('receipt-verifier-submit')).toBeEnabled());
+    fireEvent.click(screen.getByTestId('receipt-verifier-submit'));
+
+    expect(
+      await screen.findByTestId('receipt-verifier-result-not_found'),
+    ).toHaveTextContent('compact_code_not_found');
     expect(verifyReceipt).not.toHaveBeenCalled();
   });
 

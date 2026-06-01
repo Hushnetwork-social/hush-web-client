@@ -4,8 +4,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   Archive,
+  Camera,
   CheckCircle2,
   FileJson,
+  Hash,
   Info,
   Keyboard,
   Loader2,
@@ -21,11 +23,19 @@ import {
   PACKAGE_ZIP_MAX_BYTES,
   RECEIPT_FILE_MAX_BYTES,
   ReceiptChannelPayloadValidationError,
+  QrCameraScanError,
   decodeReceiptChannelPayload,
   hasReceiptPackageBinding,
   parseReceiptExportJson,
+  resolveCompactReceiptCode,
+  startQrCameraScan,
   verifyReceiptInPackage,
+  type CompactReceiptLookupCategory,
+  type CompactReceiptLookupResult,
   type HushVotingReceiptExport,
+  type QrCameraIssue,
+  type QrCameraScanOptions,
+  type QrScannerControls,
   type ReceiptChannelPayloadIssue,
   type ReceiptVerificationIssue,
   type ReceiptVerificationResult,
@@ -37,8 +47,16 @@ type ReceiptVerifier = (input: {
   packageZipBytes: ArrayBuffer;
 }) => ReceiptVerificationResult | Promise<ReceiptVerificationResult>;
 
+type QrCameraScanStarter = (options: QrCameraScanOptions) => Promise<QrScannerControls>;
+type CompactReceiptResolver = (input: {
+  compactCode: string;
+  packageZipBytes: ArrayBuffer;
+}) => CompactReceiptLookupResult;
+
 interface PublicReceiptVerifierProps {
   verifyReceipt?: ReceiptVerifier;
+  startCameraScan?: QrCameraScanStarter;
+  resolveCompactCode?: CompactReceiptResolver;
 }
 
 interface ReceiptPreview {
@@ -55,7 +73,7 @@ interface ResultCopy {
   tone: 'success' | 'warning' | 'error';
 }
 
-type ReceiptSourceMode = 'file' | 'qr_paste' | 'manual_payload';
+type ReceiptSourceMode = 'file' | 'camera_qr' | 'qr_paste' | 'compact_code' | 'manual_payload';
 
 interface ReceiptSourceOption {
   id: ReceiptSourceMode;
@@ -133,10 +151,22 @@ const RECEIPT_SOURCE_OPTIONS: ReceiptSourceOption[] = [
     description: 'Import one .hush-receipt.json export.',
   },
   {
+    id: 'camera_qr',
+    label: 'Camera QR',
+    icon: Camera,
+    description: 'Scan a physical receipt QR locally.',
+  },
+  {
     id: 'qr_paste',
     label: 'QR / Paste',
     icon: QrCode,
     description: 'Paste a QR-ready receipt payload.',
+  },
+  {
+    id: 'compact_code',
+    label: 'Compact Code',
+    icon: Hash,
+    description: 'Resolve a short code against the package.',
   },
   {
     id: 'manual_payload',
@@ -253,17 +283,24 @@ function readFileAsArrayBuffer(file: File): Promise<ArrayBuffer> {
 
 export function PublicReceiptVerifier({
   verifyReceipt = defaultVerifyReceipt,
+  startCameraScan = startQrCameraScan,
+  resolveCompactCode = resolveCompactReceiptCode,
 }: PublicReceiptVerifierProps) {
   const setSelectedNav = useAppStore((state) => state.setSelectedNav);
   const setActiveApp = useAppStore((state) => state.setActiveApp);
   const receiptInputRef = useRef<HTMLInputElement>(null);
   const packageInputRef = useRef<HTMLInputElement>(null);
+  const cameraVideoRef = useRef<HTMLVideoElement>(null);
+  const cameraControlsRef = useRef<QrScannerControls | null>(null);
   const [receiptSourceMode, setReceiptSourceMode] = useState<ReceiptSourceMode>('file');
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [receiptJson, setReceiptJson] = useState('');
   const [receiptPayloadText, setReceiptPayloadText] = useState('');
   const [receiptPayloadIssue, setReceiptPayloadIssue] =
     useState<ReceiptChannelPayloadIssue | null>(null);
+  const [compactCodeText, setCompactCodeText] = useState('');
+  const [cameraState, setCameraState] = useState<'idle' | 'starting' | 'scanning'>('idle');
+  const [cameraIssue, setCameraIssue] = useState<QrCameraIssue | null>(null);
   const [receiptPreview, setReceiptPreview] = useState<ReceiptPreview | null>(null);
   const [receiptWarning, setReceiptWarning] = useState('');
   const [receiptError, setReceiptError] = useState('');
@@ -277,7 +314,17 @@ export function PublicReceiptVerifier({
     setSelectedNav('verify-receipt');
   }, [setActiveApp, setSelectedNav]);
 
-  const hasReceiptInput = Boolean(receiptJson) || Boolean(receiptPayloadIssue && receiptPayloadText.trim());
+  useEffect(
+    () => () => {
+      cameraControlsRef.current?.stop();
+      cameraControlsRef.current = null;
+    },
+    [],
+  );
+
+  const hasReceiptInput = receiptSourceMode === 'compact_code'
+    ? Boolean(compactCodeText.trim())
+    : Boolean(receiptJson) || Boolean(receiptPayloadIssue && receiptPayloadText.trim());
   const canVerify = Boolean(hasReceiptInput && packageFile && !receiptError && !packageError);
   const resultCopy = result ? RESULT_COPY[result.category] : null;
   const resultClasses = resultCopy ? resultToneClasses(resultCopy.tone) : null;
@@ -370,7 +417,10 @@ export function PublicReceiptVerifier({
     clearReceipt();
   }
 
-  function handleReceiptPayloadChanged(value: string): void {
+  function handleReceiptPayloadChanged(
+    value: string,
+    options: { sourceLabel?: string } = {},
+  ): void {
     setReceiptPayloadText(value);
     setReceiptJson('');
     setReceiptPayloadIssue(null);
@@ -391,10 +441,11 @@ export function PublicReceiptVerifier({
         electionId: parsed.receiptProof.electionId,
         packageBound: hasReceiptPackageBinding(parsed.receiptProof),
         generatedAt: parsed.exportEnvelope.receiptGeneratedAt,
-        sourceLabel:
+        sourceLabel: options.sourceLabel ?? (
           decoded.payload.channel === 'manual_payload'
             ? 'Manual receipt payload'
-            : 'QR-ready receipt payload',
+            : 'QR-ready receipt payload'
+        ),
       });
     } catch (error) {
       if (error instanceof ReceiptChannelPayloadValidationError) {
@@ -410,6 +461,65 @@ export function PublicReceiptVerifier({
       });
       setReceiptWarning('Receipt payload could not be decoded.');
     }
+  }
+
+  function handleCompactCodeChanged(value: string): void {
+    setCompactCodeText(value);
+    setReceiptJson('');
+    setReceiptPayloadIssue(null);
+    setReceiptPreview(null);
+    setReceiptWarning('');
+    setReceiptError('');
+    setResult(null);
+  }
+
+  async function handleCameraStart(): Promise<void> {
+    const videoElement = cameraVideoRef.current;
+    if (!videoElement) {
+      return;
+    }
+
+    stopCameraScan();
+    setCameraState('starting');
+    setCameraIssue(null);
+    setReceiptWarning('');
+    setReceiptError('');
+    setResult(null);
+
+    try {
+      let decodedDuringStart = false;
+      const controls = await startCameraScan({
+        videoElement,
+        onDecoded: (payloadText) => {
+          decodedDuringStart = true;
+          stopCameraScan();
+          setCameraIssue(null);
+          handleReceiptPayloadChanged(payloadText, { sourceLabel: 'Camera QR payload' });
+        },
+        onIssue: (issue) => {
+          setCameraIssue(issue);
+          setReceiptWarning(issue.message);
+        },
+      });
+      if (decodedDuringStart) {
+        controls.stop();
+        return;
+      }
+
+      cameraControlsRef.current = controls;
+      setCameraState('scanning');
+    } catch (error) {
+      const issue = cameraIssueFromError(error);
+      setCameraIssue(issue);
+      setReceiptWarning(issue.message);
+      setCameraState('idle');
+    }
+  }
+
+  function stopCameraScan(): void {
+    cameraControlsRef.current?.stop();
+    cameraControlsRef.current = null;
+    setCameraState('idle');
   }
 
   function handlePackageSelected(fileList: FileList | null): void {
@@ -441,13 +551,42 @@ export function PublicReceiptVerifier({
   }
 
   async function handleVerify(): Promise<void> {
-    if (!packageFile || (!receiptJson && !receiptPayloadIssue)) {
+    if (!packageFile || !hasReceiptInput) {
       return;
     }
 
     setIsVerifying(true);
     setResult(null);
     try {
+      const packageZipBytes = await readFileAsArrayBuffer(packageFile);
+
+      if (receiptSourceMode === 'compact_code') {
+        const lookup = resolveCompactCode({
+          compactCode: compactCodeText,
+          packageZipBytes,
+        });
+
+        if (lookup.category !== 'resolved') {
+          setResult({
+            category: mapCompactLookupCategory(lookup.category),
+            warnings: [],
+            issues: lookup.issues,
+            packageIdentity: lookup.packageIdentity,
+          });
+          return;
+        }
+
+        setReceiptJson(lookup.entry.receiptJson);
+        setReceiptPreview({
+          electionId: lookup.entry.receiptExport.receiptProof.electionId,
+          packageBound: hasReceiptPackageBinding(lookup.entry.receiptExport.receiptProof),
+          generatedAt: lookup.entry.receiptExport.exportEnvelope.receiptGeneratedAt,
+          sourceLabel: 'Compact code',
+        });
+        setResult(await verifyReceipt({ receiptJson: lookup.entry.receiptJson, packageZipBytes }));
+        return;
+      }
+
       if (!receiptJson && receiptPayloadIssue) {
         setResult({
           category: 'invalid_receipt',
@@ -457,7 +596,6 @@ export function PublicReceiptVerifier({
         return;
       }
 
-      const packageZipBytes = await readFileAsArrayBuffer(packageFile);
       setResult(await verifyReceipt({ receiptJson, packageZipBytes }));
     } catch (error) {
       setResult({
@@ -477,10 +615,13 @@ export function PublicReceiptVerifier({
   }
 
   function clearReceipt(): void {
+    stopCameraScan();
     setReceiptFile(null);
     setReceiptJson('');
     setReceiptPayloadText('');
     setReceiptPayloadIssue(null);
+    setCompactCodeText('');
+    setCameraIssue(null);
     setReceiptPreview(null);
     setReceiptWarning('');
     setReceiptError('');
@@ -539,13 +680,20 @@ export function PublicReceiptVerifier({
             mode={receiptSourceMode}
             file={receiptFile}
             payloadText={receiptPayloadText}
+            compactCodeText={compactCodeText}
+            cameraState={cameraState}
+            cameraIssue={cameraIssue}
             error={receiptError}
             warning={receiptWarning}
             preview={receiptPreview}
             inputRef={receiptInputRef}
+            cameraVideoRef={cameraVideoRef}
             onModeSelected={handleReceiptSourceModeSelected}
             onFileSelected={(files) => void handleReceiptSelected(files)}
             onPayloadChanged={handleReceiptPayloadChanged}
+            onCompactCodeChanged={handleCompactCodeChanged}
+            onCameraStart={() => void handleCameraStart()}
+            onCameraStop={stopCameraScan}
             onClear={clearReceipt}
           />
           <FilePickerPanel
@@ -676,25 +824,39 @@ function ReceiptSourcePanel({
   mode,
   file,
   payloadText,
+  compactCodeText,
+  cameraState,
+  cameraIssue,
   error,
   warning,
   preview,
   inputRef,
+  cameraVideoRef,
   onModeSelected,
   onFileSelected,
   onPayloadChanged,
+  onCompactCodeChanged,
+  onCameraStart,
+  onCameraStop,
   onClear,
 }: {
   mode: ReceiptSourceMode;
   file: File | null;
   payloadText: string;
+  compactCodeText: string;
+  cameraState: 'idle' | 'starting' | 'scanning';
+  cameraIssue: QrCameraIssue | null;
   error: string;
   warning: string;
   preview: ReceiptPreview | null;
   inputRef: React.RefObject<HTMLInputElement | null>;
+  cameraVideoRef: React.RefObject<HTMLVideoElement | null>;
   onModeSelected: (mode: ReceiptSourceMode) => void;
   onFileSelected: (files: FileList | null) => void;
   onPayloadChanged: (value: string) => void;
+  onCompactCodeChanged: (value: string) => void;
+  onCameraStart: () => void;
+  onCameraStop: () => void;
   onClear: () => void;
 }) {
   const activeOption = RECEIPT_SOURCE_OPTIONS.find((option) => option.id === mode) ??
@@ -718,7 +880,7 @@ function ReceiptSourcePanel({
       </div>
 
       <div
-        className="mt-5 grid gap-2 sm:grid-cols-3"
+        className="mt-5 grid gap-2 sm:grid-cols-2 xl:grid-cols-5"
         role="radiogroup"
         aria-label="Receipt source mode"
       >
@@ -732,7 +894,7 @@ function ReceiptSourcePanel({
               role="radio"
               aria-checked={selected}
               onClick={() => onModeSelected(option.id)}
-              className={`min-h-24 rounded-2xl px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple ${
+              className={`min-h-28 rounded-2xl px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple ${
                 selected
                   ? 'bg-hush-purple text-hush-bg-dark'
                   : 'bg-hush-bg-dark/65 text-hush-text-primary hover:bg-hush-bg-hover'
@@ -780,6 +942,75 @@ function ReceiptSourcePanel({
               </button>
             </div>
           )
+        ) : mode === 'camera_qr' ? (
+          <div className="space-y-4">
+            <div className="overflow-hidden rounded-2xl bg-black/35">
+              <video
+                ref={cameraVideoRef}
+                data-testid="receipt-verifier-camera-video"
+                className="aspect-video w-full bg-black object-cover"
+                muted
+                playsInline
+              />
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={onCameraStart}
+                disabled={cameraState === 'starting' || cameraState === 'scanning'}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-hush-purple px-4 py-2.5 text-sm font-semibold text-hush-bg-dark transition-colors hover:bg-hush-purple-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple disabled:cursor-not-allowed disabled:opacity-60"
+                data-testid="receipt-verifier-camera-start"
+              >
+                {cameraState === 'starting' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
+                <span>{cameraState === 'starting' ? 'Starting camera' : 'Start camera'}</span>
+              </button>
+              {cameraState === 'scanning' ? (
+                <button
+                  type="button"
+                  onClick={onCameraStop}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-black/20 px-3 py-2.5 text-sm font-medium transition-colors hover:bg-black/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple"
+                  data-testid="receipt-verifier-camera-stop"
+                >
+                  <X className="h-4 w-4" />
+                  <span>Stop scan</span>
+                </button>
+              ) : null}
+            </div>
+            {preview ? <ReceiptPreviewGrid preview={preview} /> : null}
+            {cameraIssue ? <div className="text-sm text-amber-100">{cameraIssue.message}</div> : null}
+          </div>
+        ) : mode === 'compact_code' ? (
+          <div className="space-y-3">
+            <label
+              htmlFor="receipt-verifier-compact-code-input"
+              className="block text-sm font-semibold"
+            >
+              Package-bound compact code
+            </label>
+            <input
+              id="receipt-verifier-compact-code-input"
+              data-testid="receipt-verifier-compact-code-input"
+              value={compactCodeText}
+              onChange={(event) => onCompactCodeChanged(event.target.value)}
+              spellCheck={false}
+              className="w-full rounded-2xl bg-hush-bg-dark/85 px-4 py-3 font-mono text-sm uppercase text-hush-text-primary outline-none placeholder:text-hush-text-accent focus-visible:ring-2 focus-visible:ring-hush-purple"
+              placeholder="HVC1-ABCDE-2345-6789-WXYZ"
+            />
+            <p className="text-xs leading-5 text-hush-text-accent">
+              Compact codes resolve only against the selected finalized package ZIP.
+            </p>
+            {preview ? <ReceiptPreviewGrid preview={preview} /> : null}
+            {compactCodeText ? (
+              <button
+                type="button"
+                onClick={onClear}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-black/20 px-3 py-2 text-sm font-medium transition-colors hover:bg-black/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple"
+              >
+                <X className="h-4 w-4" />
+                <span>Clear compact code</span>
+              </button>
+            ) : null}
+          </div>
         ) : (
           <div className="space-y-3">
             <label
@@ -825,6 +1056,26 @@ function ReceiptSourcePanel({
       />
     </div>
   );
+}
+
+function mapCompactLookupCategory(
+  category: Exclude<CompactReceiptLookupCategory, 'resolved'>,
+): ReceiptVerificationResultCategory {
+  return category;
+}
+
+function cameraIssueFromError(error: unknown): QrCameraIssue {
+  if (error instanceof QrCameraScanError) {
+    return error.issue;
+  }
+
+  return {
+    code: 'unsupported_browser_feature',
+    message:
+      error instanceof Error
+        ? `This browser could not start local QR scanning. ${error.message}`
+        : 'This browser could not start local QR scanning.',
+  };
 }
 
 function ReceiptSelectedSummary({
