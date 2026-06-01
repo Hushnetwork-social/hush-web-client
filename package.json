@@ -44,6 +44,7 @@
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-shell": "^2.3.4",
     "@tauri-apps/plugin-updater": "^2.10.0",
+    "@zxing/browser": "^0.2.0",
     "bip39": "^3.1.0",
     "emoji-picker-react": "^4.16.1",
     "ffjavascript": "^0.2.45",
