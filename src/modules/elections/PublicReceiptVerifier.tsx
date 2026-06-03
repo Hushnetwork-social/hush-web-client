@@ -828,7 +828,7 @@ export function PublicReceiptVerifier({
                 <p className="mt-2 leading-6 opacity-90">{resultCopy.recovery}</p>
               </div>
 
-              <EvidenceSummary result={result} />
+              <EvidenceSummary result={result} sourceLabel={receiptPreview?.sourceLabel} />
             </div>
           </section>
         ) : null}
@@ -1231,7 +1231,13 @@ function FilePickerPanel({
   );
 }
 
-function EvidenceSummary({ result }: { result: ReceiptVerificationResult }) {
+function EvidenceSummary({
+  result,
+  sourceLabel,
+}: {
+  result: ReceiptVerificationResult;
+  sourceLabel?: string;
+}) {
   const receipt = result.receipt as HushVotingReceiptExport | undefined;
   return (
     <details className="rounded-2xl bg-black/20 px-4 py-3 text-sm" data-testid="receipt-verifier-evidence">
@@ -1239,6 +1245,7 @@ function EvidenceSummary({ result }: { result: ReceiptVerificationResult }) {
         Checked evidence
       </summary>
       <div className="mt-4 grid gap-3 xl:grid-cols-3">
+        {sourceLabel ? <ValueWell label="Receipt source" value={sourceLabel} /> : null}
         <ValueWell label="Package id" value={result.packageIdentity?.packageId} />
         <ValueWell label="Package hash" value={result.packageIdentity?.packageHash} />
         <ValueWell label="Verifier profile" value={result.packageIdentity?.verifierProfileId} />

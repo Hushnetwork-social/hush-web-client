@@ -288,6 +288,9 @@ describe('PublicReceiptVerifier', () => {
     await waitFor(() => expect(resolveCompactCode).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(verifyReceipt).toHaveBeenCalledTimes(1));
     expect(JSON.parse(verifyReceipt.mock.calls[0][0].receiptJson)).toEqual(compactReceipt);
+    expect(await screen.findByTestId('receipt-verifier-result-verified_included')).toHaveTextContent(
+      'Compact code',
+    );
   });
 
   it('fails compact codes closed when package lookup cannot find a proof', async () => {
