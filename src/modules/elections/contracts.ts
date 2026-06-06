@@ -112,43 +112,130 @@ const DEFAULT_CEREMONY_PROFILE_TIMESTAMP: GrpcTimestamp = {
 };
 const TRUSTEE_PRODUCTION_PROFILE_ID = 'dkg-prod-3of5';
 const TRUSTEE_DEV_PROFILE_ID = 'dkg-dev-3of5';
+const TRUSTEE_VERITAS_2K_PRODUCTION_PROFILE_ID = 'dkg-prod-7of10';
+const TRUSTEE_VERITAS_2K_DEV_PROFILE_ID = 'dkg-dev-7of10';
+const TRUSTEE_VERITAS_10K_PRODUCTION_PROFILE_ID = 'dkg-prod-8of13';
+const TRUSTEE_VERITAS_10K_DEV_PROFILE_ID = 'dkg-dev-8of13';
+const TRUSTEE_ENTERPRISE_PROFILE_ID_PREFIX = 'dkg-enterprise-';
 const ADMIN_ONLY_PRODUCTION_PROFILE_ID = 'admin-prod-1of1';
 const ADMIN_ONLY_DEV_PROFILE_ID = 'admin-dev-1of1';
 
+export type HushVotingLicenseId =
+  | 'direct'
+  | 'veritas-500'
+  | 'veritas-2k'
+  | 'veritas-10k'
+  | 'enterprise';
+
+export type HushVotingLicenseOption = {
+  id: HushVotingLicenseId;
+  label: string;
+  description: string;
+  governanceMode: ElectionGovernanceModeProto;
+  productionProfileId: string;
+  devProfileId?: string;
+  isEnterprise?: boolean;
+};
+
+function createDefaultCeremonyProfile({
+  profileId,
+  displayName,
+  description,
+  profileVersion,
+  trusteeCount,
+  requiredApprovalCount,
+  devOnly,
+}: {
+  profileId: string;
+  displayName: string;
+  description: string;
+  profileVersion: string;
+  trusteeCount: number;
+  requiredApprovalCount: number;
+  devOnly: boolean;
+}): ElectionCeremonyProfile {
+  return {
+    ProfileId: profileId,
+    DisplayName: displayName,
+    Description: description,
+    ProviderKey: 'hush-dkg-profile-manifest',
+    ProfileVersion: profileVersion,
+    TrusteeCount: trusteeCount,
+    RequiredApprovalCount: requiredApprovalCount,
+    DevOnly: devOnly,
+    RegisteredAt: DEFAULT_CEREMONY_PROFILE_TIMESTAMP,
+    LastUpdatedAt: DEFAULT_CEREMONY_PROFILE_TIMESTAMP,
+  };
+}
+
 const DEFAULT_TRUSTEE_CEREMONY_PROFILES: ElectionCeremonyProfile[] = [
-  {
-    ProfileId: TRUSTEE_PRODUCTION_PROFILE_ID,
-    DisplayName: 'Default protected circuit (3 of 5)',
-    Description:
-      'Built-in protected circuit for binding elections and non-binding protected audit runs.',
-    ProviderKey: 'built-in',
-    ProfileVersion: 'v1',
-    TrusteeCount: 5,
-    RequiredApprovalCount: 3,
-    DevOnly: false,
-    RegisteredAt: DEFAULT_CEREMONY_PROFILE_TIMESTAMP,
-    LastUpdatedAt: DEFAULT_CEREMONY_PROFILE_TIMESTAMP,
-  },
-  {
-    ProfileId: TRUSTEE_DEV_PROFILE_ID,
-    DisplayName: 'Open audit circuit (3 of 5)',
-    Description:
-      'Built-in dev/open circuit for explicit non-binding audit elections with readable ballots.',
-    ProviderKey: 'built-in',
-    ProfileVersion: 'v1',
-    TrusteeCount: 5,
-    RequiredApprovalCount: 3,
-    DevOnly: true,
-    RegisteredAt: DEFAULT_CEREMONY_PROFILE_TIMESTAMP,
-    LastUpdatedAt: DEFAULT_CEREMONY_PROFILE_TIMESTAMP,
-  },
+  createDefaultCeremonyProfile({
+    profileId: TRUSTEE_PRODUCTION_PROFILE_ID,
+    displayName: 'HushVoting! Veritas 500',
+    description:
+      'Protected Veritas 500 license profile for binding elections and protected audit runs.',
+    profileVersion: 'omega-v1.0.0-prod-3of5',
+    trusteeCount: 5,
+    requiredApprovalCount: 3,
+    devOnly: false,
+  }),
+  createDefaultCeremonyProfile({
+    profileId: TRUSTEE_VERITAS_2K_PRODUCTION_PROFILE_ID,
+    displayName: 'HushVoting! Veritas 2k',
+    description:
+      'Protected Veritas 2k license profile for larger trustee-governed elections.',
+    profileVersion: 'omega-v1.0.0-prod-7of10',
+    trusteeCount: 10,
+    requiredApprovalCount: 7,
+    devOnly: false,
+  }),
+  createDefaultCeremonyProfile({
+    profileId: TRUSTEE_VERITAS_10K_PRODUCTION_PROFILE_ID,
+    displayName: 'HushVoting! Veritas 10k',
+    description:
+      'Protected Veritas 10k license profile for high-scale trustee-governed elections.',
+    profileVersion: 'omega-v1.0.0-prod-8of13',
+    trusteeCount: 13,
+    requiredApprovalCount: 8,
+    devOnly: false,
+  }),
+  createDefaultCeremonyProfile({
+    profileId: TRUSTEE_DEV_PROFILE_ID,
+    displayName: 'HushVoting! Veritas 500 readable audit',
+    description:
+      'Readable non-binding audit profile for Veritas 500 rehearsals.',
+    profileVersion: 'omega-v1.0.0-dev-3of5',
+    trusteeCount: 5,
+    requiredApprovalCount: 3,
+    devOnly: true,
+  }),
+  createDefaultCeremonyProfile({
+    profileId: TRUSTEE_VERITAS_2K_DEV_PROFILE_ID,
+    displayName: 'HushVoting! Veritas 2k readable audit',
+    description:
+      'Readable non-binding audit profile for Veritas 2k rehearsals.',
+    profileVersion: 'omega-v1.0.0-dev-7of10',
+    trusteeCount: 10,
+    requiredApprovalCount: 7,
+    devOnly: true,
+  }),
+  createDefaultCeremonyProfile({
+    profileId: TRUSTEE_VERITAS_10K_DEV_PROFILE_ID,
+    displayName: 'HushVoting! Veritas 10k readable audit',
+    description:
+      'Readable non-binding audit profile for Veritas 10k rehearsals.',
+    profileVersion: 'omega-v1.0.0-dev-8of13',
+    trusteeCount: 13,
+    requiredApprovalCount: 8,
+    devOnly: true,
+  }),
 ];
 const DEFAULT_ADMIN_ONLY_CEREMONY_PROFILES: ElectionCeremonyProfile[] = [
   {
     ProfileId: ADMIN_ONLY_PRODUCTION_PROFILE_ID,
-    DisplayName: 'Admin-only protected circuit',
+    DisplayName: 'HushVoting Direct protected circuit',
     Description:
-      'Built-in protected circuit for admin-only elections with aggregate-only protected tally custody.',
+      'Built-in protected circuit for HushVoting Direct elections with aggregate-only protected tally custody.',
     ProviderKey: 'built-in-admin',
     ProfileVersion: 'omega-v1.0.0-admin-prod-1of1',
     TrusteeCount: 1,
@@ -159,9 +246,9 @@ const DEFAULT_ADMIN_ONLY_CEREMONY_PROFILES: ElectionCeremonyProfile[] = [
   },
   {
     ProfileId: ADMIN_ONLY_DEV_PROFILE_ID,
-    DisplayName: 'Admin-only open audit circuit',
+    DisplayName: 'HushVoting Direct readable audit circuit',
     Description:
-      'Built-in dev/open circuit for explicit non-binding admin-only audit elections with readable ballots.',
+      'Built-in readable audit circuit for explicit non-binding HushVoting Direct audit elections.',
     ProviderKey: 'built-in-admin',
     ProfileVersion: 'omega-v1.0.0-admin-dev-1of1',
     TrusteeCount: 1,
@@ -169,6 +256,49 @@ const DEFAULT_ADMIN_ONLY_CEREMONY_PROFILES: ElectionCeremonyProfile[] = [
     DevOnly: true,
     RegisteredAt: DEFAULT_CEREMONY_PROFILE_TIMESTAMP,
     LastUpdatedAt: DEFAULT_CEREMONY_PROFILE_TIMESTAMP,
+  },
+];
+
+export const HUSHVOTING_LICENSE_OPTIONS: HushVotingLicenseOption[] = [
+  {
+    id: 'direct',
+    label: 'HushVoting! Direct',
+    description: 'Owner-admin custody path without trustee-threshold governance.',
+    governanceMode: ElectionGovernanceModeProto.AdminOnly,
+    productionProfileId: ADMIN_ONLY_PRODUCTION_PROFILE_ID,
+    devProfileId: ADMIN_ONLY_DEV_PROFILE_ID,
+  },
+  {
+    id: 'veritas-500',
+    label: 'HushVoting! Veritas 500',
+    description: 'Standard trustee-governed Veritas license for compact elections.',
+    governanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+    productionProfileId: TRUSTEE_PRODUCTION_PROFILE_ID,
+    devProfileId: TRUSTEE_DEV_PROFILE_ID,
+  },
+  {
+    id: 'veritas-2k',
+    label: 'HushVoting! Veritas 2k',
+    description: 'Standard trustee-governed Veritas license for larger elections.',
+    governanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+    productionProfileId: TRUSTEE_VERITAS_2K_PRODUCTION_PROFILE_ID,
+    devProfileId: TRUSTEE_VERITAS_2K_DEV_PROFILE_ID,
+  },
+  {
+    id: 'veritas-10k',
+    label: 'HushVoting! Veritas 10k',
+    description: 'Standard trustee-governed Veritas license for high-scale elections.',
+    governanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+    productionProfileId: TRUSTEE_VERITAS_10K_PRODUCTION_PROFILE_ID,
+    devProfileId: TRUSTEE_VERITAS_10K_DEV_PROFILE_ID,
+  },
+  {
+    id: 'enterprise',
+    label: 'HushVoting! Enterprise',
+    description: 'Custom trustee-governed profile for organization-specific trustee counts.',
+    governanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+    productionProfileId: `${TRUSTEE_ENTERPRISE_PROFILE_ID_PREFIX}1of2`,
+    isEnterprise: true,
   },
 ];
 
@@ -188,13 +318,13 @@ export const BINDING_OPTIONS: ElectionSelectOption<ElectionBindingStatusProto>[]
 export const GOVERNANCE_OPTIONS: ElectionSelectOption<ElectionGovernanceModeProto>[] = [
   {
     value: ElectionGovernanceModeProto.AdminOnly,
-    label: 'Admin only',
-    description: 'The owner can open, close, and finalize directly in FEAT-094.',
+    label: 'HushVoting Direct',
+    description: 'Owner-controlled voting for everyday governance; the owner opens, closes, and finalizes directly.',
   },
   {
     value: ElectionGovernanceModeProto.TrusteeThreshold,
-    label: 'Trustee threshold',
-    description: 'Draft setup is supported now, but open requires governed trustee approval.',
+    label: 'HushVoting Veritas',
+    description: 'Multi-party governance for elections that need scrutiny; lifecycle actions use governed approval.',
   },
 ];
 
@@ -240,8 +370,8 @@ const BINDING_LABELS: Record<ElectionBindingStatusProto, string> = {
 };
 
 const GOVERNANCE_LABELS: Record<ElectionGovernanceModeProto, string> = {
-  [ElectionGovernanceModeProto.AdminOnly]: 'Admin only',
-  [ElectionGovernanceModeProto.TrusteeThreshold]: 'Trustee threshold',
+  [ElectionGovernanceModeProto.AdminOnly]: 'HushVoting Direct',
+  [ElectionGovernanceModeProto.TrusteeThreshold]: 'HushVoting Veritas',
 };
 
 const OUTCOME_LABELS: Record<OutcomeRuleKindProto, string> = {
@@ -497,6 +627,130 @@ export function applyGovernanceModeDefaults(
   };
 }
 
+export function getHushVotingLicenseOption(
+  licenseId: HushVotingLicenseId
+): HushVotingLicenseOption {
+  return HUSHVOTING_LICENSE_OPTIONS.find((option) => option.id === licenseId) ??
+    HUSHVOTING_LICENSE_OPTIONS[0];
+}
+
+export function parseEnterpriseCeremonyProfileId(
+  profileId?: string | null
+): { requiredApprovalCount: number; trusteeCount: number } | null {
+  const normalizedProfileId = profileId?.trim() ?? '';
+  if (!normalizedProfileId.startsWith(TRUSTEE_ENTERPRISE_PROFILE_ID_PREFIX)) {
+    return null;
+  }
+
+  const thresholdText = normalizedProfileId.slice(TRUSTEE_ENTERPRISE_PROFILE_ID_PREFIX.length);
+  const [requiredText, trusteeText, extraText] = thresholdText.split('of');
+  if (!requiredText || !trusteeText || extraText !== undefined) {
+    return null;
+  }
+
+  const requiredApprovalCount = Number(requiredText);
+  const trusteeCount = Number(trusteeText);
+  if (
+    !Number.isInteger(requiredApprovalCount) ||
+    !Number.isInteger(trusteeCount) ||
+    requiredApprovalCount < 1 ||
+    trusteeCount <= requiredApprovalCount
+  ) {
+    return null;
+  }
+
+  return { requiredApprovalCount, trusteeCount };
+}
+
+export function buildEnterpriseCeremonyProfileId(
+  requiredApprovalCount: number,
+  trusteeCount: number
+): string {
+  const normalizedRequiredApprovalCount = Math.max(
+    1,
+    Math.floor(requiredApprovalCount || 1)
+  );
+  const normalizedTrusteeCount = Math.max(
+    normalizedRequiredApprovalCount + 1,
+    Math.floor(trusteeCount || normalizedRequiredApprovalCount + 1)
+  );
+  return `${TRUSTEE_ENTERPRISE_PROFILE_ID_PREFIX}${normalizedRequiredApprovalCount}of${normalizedTrusteeCount}`;
+}
+
+function createEnterpriseCeremonyProfile(
+  requiredApprovalCount: number,
+  trusteeCount: number
+): ElectionCeremonyProfile {
+  const profileId = buildEnterpriseCeremonyProfileId(requiredApprovalCount, trusteeCount);
+  return {
+    ProfileId: profileId,
+    DisplayName: 'HushVoting! Enterprise',
+    Description:
+      'Custom Enterprise trustee-governed license profile with organization-defined approval and trustee counts.',
+    ProviderKey: 'hush-enterprise-custom',
+    ProfileVersion: `omega-v1.0.0-enterprise-${requiredApprovalCount}of${trusteeCount}`,
+    TrusteeCount: trusteeCount,
+    RequiredApprovalCount: requiredApprovalCount,
+    DevOnly: false,
+    RegisteredAt: DEFAULT_CEREMONY_PROFILE_TIMESTAMP,
+    LastUpdatedAt: DEFAULT_CEREMONY_PROFILE_TIMESTAMP,
+  };
+}
+
+function createEnterpriseCeremonyProfileFromId(
+  profileId?: string | null
+): ElectionCeremonyProfile | null {
+  const parsedProfile = parseEnterpriseCeremonyProfileId(profileId);
+  return parsedProfile
+    ? createEnterpriseCeremonyProfile(
+        parsedProfile.requiredApprovalCount,
+        parsedProfile.trusteeCount
+      )
+    : null;
+}
+
+export function getHushVotingLicenseIdForPolicy(
+  governanceMode: ElectionGovernanceModeProto,
+  profileId?: string | null
+): HushVotingLicenseId {
+  if (governanceMode === ElectionGovernanceModeProto.AdminOnly) {
+    return 'direct';
+  }
+
+  const normalizedProfileId = profileId?.trim() ?? '';
+  if (parseEnterpriseCeremonyProfileId(normalizedProfileId)) {
+    return 'enterprise';
+  }
+
+  return (
+    HUSHVOTING_LICENSE_OPTIONS.find(
+      (option) =>
+        option.governanceMode === ElectionGovernanceModeProto.TrusteeThreshold &&
+        (option.productionProfileId === normalizedProfileId ||
+          option.devProfileId === normalizedProfileId)
+    )?.id ?? 'veritas-500'
+  );
+}
+
+export function getSelectedProfileIdForHushVotingLicense(
+  licenseId: HushVotingLicenseId,
+  bindingStatus: ElectionBindingStatusProto,
+  enterpriseRequiredApprovalCount = 1,
+  enterpriseTrusteeCount = 2
+): string {
+  const license = getHushVotingLicenseOption(licenseId);
+  if (license.isEnterprise) {
+    return buildEnterpriseCeremonyProfileId(
+      enterpriseRequiredApprovalCount,
+      enterpriseTrusteeCount
+    );
+  }
+
+  return bindingStatus === ElectionBindingStatusProto.NonBinding && license.devProfileId
+    ? license.devProfileId
+    : license.productionProfileId;
+}
+
 function normalizeSelectedCeremonyProfileId(
   governanceMode: ElectionGovernanceModeProto,
   profileId?: string | null
@@ -576,6 +830,7 @@ export function findCeremonyProfileById(
     getDefaultCeremonyProfiles(governanceMode).find(
       (profile) => profile.ProfileId === normalizedProfileId
     ) ??
+    createEnterpriseCeremonyProfileFromId(normalizedProfileId) ??
     null
   );
 }
@@ -611,9 +866,14 @@ export function coerceSelectedCeremonyProfileId(
     governanceMode,
     selectedProfileId
   );
+  const enterpriseProfile = createEnterpriseCeremonyProfileFromId(
+    normalizedSelectedProfileId
+  );
   if (
     normalizedSelectedProfileId &&
-    compatibleProfiles.some((profile) => profile.ProfileId === normalizedSelectedProfileId)
+    (compatibleProfiles.some((profile) => profile.ProfileId === normalizedSelectedProfileId) ||
+      (enterpriseProfile &&
+        isCeremonyProfileCompatible(bindingStatus, enterpriseProfile)))
   ) {
     return normalizedSelectedProfileId;
   }
@@ -863,14 +1123,14 @@ export function getSecrecyBoundaryCopy(selectedProfileDevOnly?: boolean): string
 
 export function getGovernancePathLabel(governanceMode: ElectionGovernanceModeProto): string {
   return governanceMode === ElectionGovernanceModeProto.AdminOnly
-    ? 'Admin-only protected custody path'
-    : 'Trustee-threshold aggregate release path';
+    ? 'HushVoting Direct protected custody path'
+    : 'HushVoting Veritas aggregate release path';
 }
 
 export function getCustodyBoundaryCopy(governanceMode: ElectionGovernanceModeProto): string {
   return governanceMode === ElectionGovernanceModeProto.AdminOnly
-    ? 'Admin-only protected custody keeps tally release bound to the owner-admin protected custody profile. This path does not expose trustee shares, reusable tally private keys, or single-ballot inspection authority.'
-    : 'Trustee-threshold custody requires exact-target aggregate tally release with executor-bound trustee submissions. This path does not expose arbitrary ballot inspection, raw trustee shares on persisted surfaces, or reusable tally private keys.';
+    ? 'HushVoting Direct protected custody keeps tally release bound to the owner-controlled protected custody profile. This path does not expose trustee shares, reusable tally private keys, or single-ballot inspection authority.'
+    : 'HushVoting Veritas custody requires exact-target aggregate tally release with executor-bound trustee submissions. This path does not expose arbitrary ballot inspection, raw trustee shares on persisted surfaces, or reusable tally private keys.';
 }
 
 export function getModeProfileFreezeCopy(bindingStatus: ElectionBindingStatusProto): string {
@@ -3141,14 +3401,14 @@ export function getUnsupportedDraftValueMessages(draft: ElectionDraftInput): str
     draft.GovernanceMode === ElectionGovernanceModeProto.AdminOnly &&
     draft.ReviewWindowPolicy !== ReviewWindowPolicyProto.NoReviewWindow
   ) {
-    messages.push('Admin-only elections must use the no-review-window policy in FEAT-094.');
+    messages.push('HushVoting Direct elections must use the no-review-window policy in FEAT-094.');
   }
 
   if (
     draft.GovernanceMode === ElectionGovernanceModeProto.TrusteeThreshold &&
     draft.ReviewWindowPolicy !== ReviewWindowPolicyProto.GovernedReviewWindowReserved
   ) {
-    messages.push('Trustee-threshold drafts should reserve the governed review-window policy.');
+    messages.push('HushVoting Veritas drafts should reserve the governed review-window policy.');
   }
 
   return messages;
@@ -3157,6 +3417,11 @@ export function getUnsupportedDraftValueMessages(draft: ElectionDraftInput): str
 export function getDraftSaveValidationErrors(draft: ElectionDraftInput): string[] {
   const errors = [...getUnsupportedDraftValueMessages(draft)];
   const ownerManagedOptions = getOwnerManagedElectionOptions(draft.OwnerOptions);
+  const selectedCeremonyProfile = findCeremonyProfileById(
+    getAvailableCeremonyProfiles(null, draft.GovernanceMode),
+    draft.SelectedProfileId,
+    draft.GovernanceMode
+  );
 
   if (!draft.Title.trim()) {
     errors.push('Election title is required.');
@@ -3210,14 +3475,31 @@ export function getDraftSaveValidationErrors(draft: ElectionDraftInput): string[
   }
 
   if (draft.GovernanceMode === ElectionGovernanceModeProto.AdminOnly && draft.RequiredApprovalCount) {
-    errors.push('Admin-only elections must not set a required approval count.');
+    errors.push('HushVoting Direct elections must not set a required approval count.');
   }
 
   if (
     draft.GovernanceMode === ElectionGovernanceModeProto.TrusteeThreshold &&
     (!draft.RequiredApprovalCount || draft.RequiredApprovalCount < 1)
   ) {
-    errors.push('Trustee-threshold elections require a required approval count of at least 1.');
+    errors.push('HushVoting Veritas elections require a required approval count of at least 1.');
+  }
+
+  if (
+    draft.GovernanceMode === ElectionGovernanceModeProto.TrusteeThreshold &&
+    draft.SelectedProfileId.startsWith(TRUSTEE_ENTERPRISE_PROFILE_ID_PREFIX) &&
+    !parseEnterpriseCeremonyProfileId(draft.SelectedProfileId)
+  ) {
+    errors.push('HushVoting Enterprise requires accepted trustee count greater than required approvals.');
+  }
+
+  if (
+    draft.GovernanceMode === ElectionGovernanceModeProto.TrusteeThreshold &&
+    selectedCeremonyProfile &&
+    draft.RequiredApprovalCount &&
+    selectedCeremonyProfile.RequiredApprovalCount !== draft.RequiredApprovalCount
+  ) {
+    errors.push('Selected HushVoting license does not match the required trustee approval count.');
   }
 
   const optionIds = new Set<string>();
@@ -3258,6 +3540,11 @@ export function getDraftOpenValidationErrors(draft: ElectionDraftInput): string[
   const nonBlankOptions = getOwnerManagedElectionOptions(draft.OwnerOptions).filter(
     (option) => option.DisplayLabel.trim().length > 0
   );
+  const selectedCeremonyProfile = findCeremonyProfileById(
+    getAvailableCeremonyProfiles(null, draft.GovernanceMode),
+    draft.SelectedProfileId,
+    draft.GovernanceMode
+  );
 
   if (nonBlankOptions.length < 2) {
     errors.push('At least two non-blank options are required before opening the election.');
@@ -3271,14 +3558,23 @@ export function getDraftOpenValidationErrors(draft: ElectionDraftInput): string[
     draft.GovernanceMode === ElectionGovernanceModeProto.TrusteeThreshold &&
     (!draft.RequiredApprovalCount || draft.RequiredApprovalCount < 1)
   ) {
-    errors.push('Trustee-threshold elections require a required approval count before open.');
+    errors.push('HushVoting Veritas elections require a required approval count before open.');
+  }
+
+  if (
+    draft.GovernanceMode === ElectionGovernanceModeProto.TrusteeThreshold &&
+    selectedCeremonyProfile &&
+    draft.RequiredApprovalCount &&
+    selectedCeremonyProfile.RequiredApprovalCount !== draft.RequiredApprovalCount
+  ) {
+    errors.push('Selected HushVoting license does not match the required trustee approval count.');
   }
 
   if (
     draft.GovernanceMode === ElectionGovernanceModeProto.AdminOnly &&
     draft.ReviewWindowPolicy !== ReviewWindowPolicyProto.NoReviewWindow
   ) {
-    errors.push('Admin-only elections must use the no-review-window policy in FEAT-094.');
+    errors.push('HushVoting Direct elections must use the no-review-window policy in FEAT-094.');
   }
 
   return errors;

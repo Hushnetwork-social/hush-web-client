@@ -376,7 +376,7 @@ describe('useElectionsStore FEAT-103 hub state', () => {
     electionsServiceMock.getElectionReportAccessGrants.mockResolvedValue(createGrantResponse([]));
 
     const result = await useElectionsStore.getState().voidElection(
-      ' Trustee threshold could not be satisfied after the close ceremony. ',
+      ' Veritas release threshold could not be satisfied after the close ceremony. ',
       [],
       'actor-encrypt-address',
       'actor-private-encrypt-key',
@@ -389,7 +389,7 @@ describe('useElectionsStore FEAT-103 hub state', () => {
       'actor-address',
       'actor-encrypt-address',
       'actor-private-encrypt-key',
-      'Trustee threshold could not be satisfied after the close ceremony.',
+      'Veritas release threshold could not be satisfied after the close ceremony.',
       [],
       'actor-signing-private-key'
     );

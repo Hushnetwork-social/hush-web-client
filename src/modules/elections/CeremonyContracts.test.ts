@@ -18,8 +18,10 @@ import {
   getModeProfileFamilyLabel,
   getModeProfileFreezeCopy,
   getCeremonyVersionStatusLabel,
+  getHushVotingLicenseIdForPolicy,
   getTrusteeCeremonyStateLabel,
   normalizeElectionDraft,
+  parseEnterpriseCeremonyProfileId,
 } from './contracts';
 
 describe('ceremony contract helpers', () => {
@@ -215,7 +217,7 @@ describe('ceremony contract helpers', () => {
       CeremonyProfiles: [
         {
           ProfileId: 'admin-prod-1of1',
-          DisplayName: 'Admin-only protected circuit',
+          DisplayName: 'HushVoting Direct protected circuit',
           Description: 'Admin protected',
           ProviderKey: 'built-in-admin',
           ProfileVersion: 'omega-v1.0.0-admin-prod-1of1',
@@ -239,6 +241,8 @@ describe('ceremony contract helpers', () => {
 
     expect(trusteeProfiles.map((profile) => profile.ProfileId)).toEqual([
       'dkg-prod-3of5',
+      'dkg-prod-7of10',
+      'dkg-prod-8of13',
     ]);
     expect(getFixedCeremonyProfileShape(detail)).toBeNull();
   });
@@ -255,5 +259,49 @@ describe('ceremony contract helpers', () => {
 
     expect(normalizedDraft.SelectedProfileId).toBe('dkg-prod-3of5');
     expect(normalizedDraft.RequiredApprovalCount).toBe(3);
+  });
+
+  it('maps standard Veritas license profiles to their approval counts during normalization', () => {
+    const normalizedDraft = normalizeElectionDraft({
+      ...createDefaultElectionDraft(),
+      Title: 'Large Board Election',
+      GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+      BindingStatus: ElectionBindingStatusProto.Binding,
+      SelectedProfileId: 'dkg-prod-7of10',
+      RequiredApprovalCount: 1,
+    });
+
+    expect(normalizedDraft.SelectedProfileId).toBe('dkg-prod-7of10');
+    expect(normalizedDraft.RequiredApprovalCount).toBe(7);
+    expect(
+      getHushVotingLicenseIdForPolicy(
+        normalizedDraft.GovernanceMode,
+        normalizedDraft.SelectedProfileId,
+      ),
+    ).toBe('veritas-2k');
+  });
+
+  it('supports Enterprise custom trustee approval profiles', () => {
+    const normalizedDraft = normalizeElectionDraft({
+      ...createDefaultElectionDraft(),
+      Title: 'Enterprise Election',
+      GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+      BindingStatus: ElectionBindingStatusProto.Binding,
+      SelectedProfileId: 'dkg-enterprise-10of20',
+      RequiredApprovalCount: 1,
+    });
+
+    expect(normalizedDraft.SelectedProfileId).toBe('dkg-enterprise-10of20');
+    expect(normalizedDraft.RequiredApprovalCount).toBe(10);
+    expect(parseEnterpriseCeremonyProfileId(normalizedDraft.SelectedProfileId)).toEqual({
+      requiredApprovalCount: 10,
+      trusteeCount: 20,
+    });
+    expect(
+      getHushVotingLicenseIdForPolicy(
+        normalizedDraft.GovernanceMode,
+        normalizedDraft.SelectedProfileId,
+      ),
+    ).toBe('enterprise');
   });
 });

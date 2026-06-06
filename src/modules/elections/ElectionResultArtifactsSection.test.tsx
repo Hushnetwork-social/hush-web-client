@@ -606,7 +606,7 @@ describe('ElectionResultArtifactsSection', () => {
 
     expect(screen.getByTestId('election-artifact-context')).toHaveTextContent('Mode and circuit truth');
     expect(screen.getByTestId('election-artifact-context')).toHaveTextContent('Binding');
-    expect(screen.getByTestId('election-artifact-context')).toHaveTextContent('Admin-only protected custody path');
+    expect(screen.getByTestId('election-artifact-context')).toHaveTextContent('HushVoting Direct protected custody path');
     expect(screen.getByTestId('election-artifact-context')).toHaveTextContent('non-dev circuits');
     expect(screen.getByTestId('election-artifact-context')).toHaveTextContent('Non-dev circuit');
     expect(screen.getByTestId('election-artifact-context')).toHaveTextContent('dkg-prod-3of5');
@@ -615,7 +615,7 @@ describe('ElectionResultArtifactsSection', () => {
       'protected non-dev circuit'
     );
     expect(screen.getByTestId('election-artifact-context')).toHaveTextContent(
-      'Admin-only protected custody keeps tally release bound'
+      'HushVoting Direct protected custody keeps tally release bound'
     );
   });
 
@@ -717,7 +717,7 @@ describe('ElectionResultArtifactsSection', () => {
 
     expect(screen.getByTestId('report-package-boundary-context')).toHaveTextContent('Binding');
     expect(screen.getByTestId('report-package-boundary-context')).toHaveTextContent(
-      'Admin-only protected custody path'
+      'HushVoting Direct protected custody path'
     );
     expect(screen.getByTestId('report-package-boundary-context')).toHaveTextContent(
       'non-dev circuits'

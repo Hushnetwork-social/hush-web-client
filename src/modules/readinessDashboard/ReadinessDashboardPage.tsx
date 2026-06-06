@@ -162,7 +162,10 @@ export function ReadinessDashboardPage({
         <ReadinessDashboardSummary dashboard={dashboard} />
 
         <section className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
-          <ReadinessClaimGatePanel claims={dashboard.claims} />
+          <ReadinessClaimGatePanel
+            claims={dashboard.claims}
+            claimProfiles={dashboard.claimProfiles}
+          />
           <ReadinessBlockerPanel blockers={dashboard.blockers} />
         </section>
 

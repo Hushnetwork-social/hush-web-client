@@ -13,7 +13,7 @@ describe('ElectionHubCard', () => {
     const entry = createHubEntry(
       'election-finalized',
       ElectionLifecycleStateProto.Finalized,
-      'Finalized Trustee Election',
+      'Finalized HushVoting Veritas Election',
       {
         ActorRoles: {
           IsOwnerAdmin: false,

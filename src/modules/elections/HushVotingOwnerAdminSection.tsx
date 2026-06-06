@@ -340,7 +340,7 @@ export function OwnerAdminWorkspaceSummary({
               value={
                 usesTrustees
                   ? `${acceptedTrustees.length} accepted | ${pendingTrustees.length} pending`
-                  : 'Admin-only flow'
+                  : 'HushVoting Direct'
               }
             />
             <AvailabilityCard
@@ -356,7 +356,7 @@ export function OwnerAdminWorkspaceSummary({
                   Ready-to-open snapshot
                 </div>
                 <p className="mt-2 max-w-3xl text-sm text-hush-text-accent">
-                  Use this as the quick answer to &quot;can I open yet?&quot;. Auditor management moved to the Owner Workspace, and trustee-threshold elections also require the key ceremony there.
+                  Use this as the quick answer to &quot;can I open yet?&quot;. Auditor management moved to the Owner Workspace, and HushVoting Veritas elections also require the key ceremony there.
                 </p>
               </div>
               <div className="rounded-xl border border-hush-bg-light px-3 py-2 text-xs text-hush-text-accent">

@@ -37,6 +37,20 @@ describe('FEAT-142 readiness dashboard projection', () => {
       severity: 'red',
       status: 'open',
     });
+    expect(
+      dashboard.claimProfiles.find((profile) => profile.profileId === 'hushvoting.direct.binding')
+    ).toMatchObject({
+      productMode: 'HushVoting! Direct',
+      bindingStatus: 'Binding',
+      isNonBindingElection: false,
+      gateStatus: 'with_warnings',
+      verifierWarningCount: 2,
+    });
+    expect(
+      dashboard.claimProfiles
+        .find((profile) => profile.profileId === 'hushvoting.direct.binding')
+        ?.verifierWarnings.map((warning) => warning.resultCode)
+    ).toContain('operational_security_access_snapshot_missing');
   });
 
   it('keeps red pilot blockers independent from a synthetic score above 70', () => {

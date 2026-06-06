@@ -141,7 +141,7 @@ export function ElectionFinalizationWorkspaceSection({
           <p className="mt-1 text-sm text-hush-text-accent">
             {usesTrustees
               ? 'Close-counting share sessions appear before tally readiness, while this view keeps the aggregate-only release boundary for the exact target session.'
-              : 'Admin-only finalization keeps the protected custody story visible here so the owner can verify the release boundary without implying ballot inspection authority.'}
+              : 'HushVoting Direct finalization keeps the protected custody story visible here so the owner can verify the release boundary without implying ballot inspection authority.'}
           </p>
         </div>
         {session ? (
@@ -166,7 +166,7 @@ export function ElectionFinalizationWorkspaceSection({
             <span>
               {usesTrustees
                 ? `${finalizeActionState?.label || 'Finalize'} has not created a bound session yet.`
-                : 'Admin-only protected custody is waiting for the finalization boundary.'}
+                : 'HushVoting Direct protected custody is waiting for the finalization boundary.'}
             </span>
           </div>
           <p className="mt-2">
@@ -244,10 +244,10 @@ export function ElectionFinalizationWorkspaceSection({
                 <div>
                   <div className="font-semibold">
                     {belowTrusteeThreshold
-                      ? 'Fail closed: trustee threshold not met'
+                      ? 'Fail closed: Veritas release threshold not met'
                       : missingNonRequiredTrusteesVisible
-                        ? 'Threshold satisfied with missing non-required trustee evidence visible'
-                        : 'Trustee threshold satisfied'}
+                        ? 'Veritas release threshold satisfied with missing non-required trustee evidence visible'
+                        : 'Veritas release threshold satisfied'}
                   </div>
                   <div className="mt-2">
                     SP-06 expects {requiredTrusteeThreshold} of {expectedTrusteeCount} accepted

@@ -52,11 +52,11 @@ describe('ProtocolPackageBindingPanel', () => {
     expect(screen.getByText(/tracker intelligence, not certification/i)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open Public spec package access location' })).toHaveAttribute(
       'href',
-      'https://www.hushnetwork.social/protocol-omega/hushvoting-v1/v1.0.0/spec.zip'
+      'https://www.hushnetwork.social/protocol-omega/hushvoting-v1/v1.2.0/spec.zip'
     );
     expect(screen.getByRole('link', { name: 'Open Public proof package access location' })).toHaveAttribute(
       'href',
-      'https://www.hushnetwork.social/protocol-omega/hushvoting-v1/v1.0.0/proof.zip'
+      'https://www.hushnetwork.social/protocol-omega/hushvoting-v1/v1.2.0/proof.zip'
     );
     expect(screen.queryByTestId('protocol-package-refresh')).not.toBeInTheDocument();
   });

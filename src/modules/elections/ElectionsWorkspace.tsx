@@ -43,11 +43,11 @@ import { identityService } from "@/lib/grpc/services/identity";
 import { useBlockchainStore } from "@/modules/blockchain";
 import {
   BINDING_OPTIONS,
-  coerceSelectedCeremonyProfileId,
-  GOVERNANCE_OPTIONS,
+  HUSHVOTING_LICENSE_OPTIONS,
   OUTCOME_RULE_OPTIONS,
   WARNING_CHOICES,
   applyGovernanceModeDefaults,
+  buildEnterpriseCeremonyProfileId,
   canCloseElection,
   canFinalizeElection,
   canOpenElection,
@@ -78,6 +78,8 @@ import {
   getEligibilityMutationLabel,
   getEligibilitySourceLabel,
   getGovernanceLabel,
+  getHushVotingLicenseIdForPolicy,
+  getHushVotingLicenseOption,
   getLifecycleLabel,
   getLatestFinalizationReleaseEvidence,
   getOutcomeRuleLabel,
@@ -91,13 +93,16 @@ import {
   getModeProfileFamilyLabel,
   getModeProfileFreezeCopy,
   getSelectedProfileFamilyLabel,
+  getSelectedProfileIdForHushVotingLicense,
   getSummaryBadge,
   getUnsupportedDraftValueMessages,
   getVoteUpdatePolicyLabel,
   getWarningTitle,
   isDraftEditable,
   normalizeElectionDraft,
+  parseEnterpriseCeremonyProfileId,
   renumberElectionOptions,
+  type HushVotingLicenseId,
 } from "./contracts";
 import { DesignatedAuditorGrantManager } from "./DesignatedAuditorGrantManager";
 import { ElectionCeremonyWorkspaceSection } from "./ElectionCeremonyWorkspaceSection";
@@ -207,6 +212,43 @@ function formatTrusteeReferenceList(
     .join(", ");
 }
 
+function getEnterprisePolicyEditorValues(
+  profileId: string,
+  requiredApprovalCount?: number | null,
+): { requiredApprovalCount: number; trusteeCount: number } {
+  const parsedProfile = parseEnterpriseCeremonyProfileId(profileId);
+  if (parsedProfile) {
+    return parsedProfile;
+  }
+
+  const normalizedRequiredApprovalCount = Math.max(
+    1,
+    Math.floor(requiredApprovalCount ?? 1),
+  );
+  return {
+    requiredApprovalCount: normalizedRequiredApprovalCount,
+    trusteeCount: normalizedRequiredApprovalCount + 1,
+  };
+}
+
+function normalizeEnterprisePolicyEditorValues(
+  requiredApprovalCount: number,
+  trusteeCount: number,
+): { requiredApprovalCount: number; trusteeCount: number } {
+  const normalizedRequiredApprovalCount = Math.max(
+    1,
+    Math.floor(requiredApprovalCount || 1),
+  );
+  const normalizedTrusteeCount = Math.max(
+    normalizedRequiredApprovalCount + 1,
+    Math.floor(trusteeCount || normalizedRequiredApprovalCount + 1),
+  );
+  return {
+    requiredApprovalCount: normalizedRequiredApprovalCount,
+    trusteeCount: normalizedTrusteeCount,
+  };
+}
+
 type OwnerEditorOverlayId =
   | "metadata"
   | "policy"
@@ -224,8 +266,9 @@ type MetadataEditorState = {
 
 type PolicyEditorState = {
   bindingStatus: ElectionBindingStatusProto;
-  selectedProfileId: string;
-  governanceMode: ElectionGovernanceModeProto;
+  licenseId: HushVotingLicenseId;
+  enterpriseRequiredApprovalCount: number;
+  enterpriseTrusteeCount: number;
   outcomeRuleKind: OutcomeRuleKindProto;
 };
 
@@ -307,8 +350,8 @@ function buildFixedPolicyItems(
       value: getReviewWindowPolicyLabel(draft.ReviewWindowPolicy),
       note:
         draft.GovernanceMode === ElectionGovernanceModeProto.TrusteeThreshold
-          ? "Trustee-threshold drafts reserve the governed review path for proposal approval."
-          : "Admin-only elections stay on the no-review-window path.",
+          ? "HushVoting Veritas drafts reserve the governed review path for proposal approval."
+          : "HushVoting Direct elections stay on the no-review-window path.",
     },
   ];
 }
@@ -579,11 +622,19 @@ export function ElectionsWorkspace({
   });
   const [policyEditor, setPolicyEditor] = useState<PolicyEditorState>(() => {
     const defaultDraft = createDefaultElectionDraft();
+    const enterpriseDefaults = getEnterprisePolicyEditorValues(
+      defaultDraft.SelectedProfileId,
+      defaultDraft.RequiredApprovalCount,
+    );
 
     return {
       bindingStatus: defaultDraft.BindingStatus,
-      selectedProfileId: defaultDraft.SelectedProfileId,
-      governanceMode: defaultDraft.GovernanceMode,
+      licenseId: getHushVotingLicenseIdForPolicy(
+        defaultDraft.GovernanceMode,
+        defaultDraft.SelectedProfileId,
+      ),
+      enterpriseRequiredApprovalCount: enterpriseDefaults.requiredApprovalCount,
+      enterpriseTrusteeCount: enterpriseDefaults.trusteeCount,
       outcomeRuleKind: defaultDraft.OutcomeRule.Kind,
     };
   });
@@ -593,7 +644,6 @@ export function ElectionsWorkspace({
   const [warningChoicesEditor, setWarningChoicesEditor] = useState<
     ElectionWarningCodeProto[]
   >([]);
-  const [trusteeApprovalEditor, setTrusteeApprovalEditor] = useState(1);
   const ownerRefreshInFlightRef = useRef(false);
   const blockHeight = useBlockchainStore((state) => state.blockHeight);
 
@@ -771,26 +821,46 @@ export function ElectionsWorkspace({
       ),
     [availableCeremonyProfiles, draft.GovernanceMode, draft.SelectedProfileId],
   );
+  const policyEditorLicense = useMemo(
+    () => getHushVotingLicenseOption(policyEditor.licenseId),
+    [policyEditor.licenseId],
+  );
+  const policyEditorGovernanceMode = policyEditorLicense.governanceMode;
+  const policyEditorSelectedProfileId = useMemo(
+    () =>
+      getSelectedProfileIdForHushVotingLicense(
+        policyEditor.licenseId,
+        policyEditor.bindingStatus,
+        policyEditor.enterpriseRequiredApprovalCount,
+        policyEditor.enterpriseTrusteeCount,
+      ),
+    [
+      policyEditor.bindingStatus,
+      policyEditor.enterpriseRequiredApprovalCount,
+      policyEditor.enterpriseTrusteeCount,
+      policyEditor.licenseId,
+    ],
+  );
   const compatiblePolicyEditorProfiles = useMemo(
     () =>
       getAllowedCeremonyProfiles(
         selectedElection ?? null,
         policyEditor.bindingStatus,
-        policyEditor.governanceMode,
+        policyEditorGovernanceMode,
       ),
-    [policyEditor.bindingStatus, policyEditor.governanceMode, selectedElection],
+    [policyEditor.bindingStatus, policyEditorGovernanceMode, selectedElection],
   );
   const selectedPolicyEditorProfile = useMemo(
     () =>
       findCeremonyProfileById(
         compatiblePolicyEditorProfiles,
-        policyEditor.selectedProfileId,
-        policyEditor.governanceMode,
+        policyEditorSelectedProfileId,
+        policyEditorGovernanceMode,
       ),
     [
       compatiblePolicyEditorProfiles,
-      policyEditor.governanceMode,
-      policyEditor.selectedProfileId,
+      policyEditorGovernanceMode,
+      policyEditorSelectedProfileId,
     ],
   );
   const fixedTrusteeApprovalCount =
@@ -1079,6 +1149,9 @@ export function ElectionsWorkspace({
       protocolPackageBinding,
     ]
   );
+  const protocolPackageVersionLabel =
+    protocolPackageBinding?.PackageVersion?.trim() ||
+    (selectedElectionId ? protocolPackagePresentation.version : "Pending after save");
   const sp06Evidence = openReadiness?.Sp06Evidence ?? null;
   const sp06EvidenceExpected = Boolean(
     sp06Evidence?.EvidenceExpected ||
@@ -1764,31 +1837,46 @@ export function ElectionsWorkspace({
   };
 
   const openPolicyOverlay = () => {
+    const enterpriseValues = getEnterprisePolicyEditorValues(
+      draft.SelectedProfileId,
+      draft.RequiredApprovalCount,
+    );
+
     setPolicyEditor({
       bindingStatus: draft.BindingStatus,
-      selectedProfileId: draft.SelectedProfileId,
-      governanceMode: draft.GovernanceMode,
+      licenseId: getHushVotingLicenseIdForPolicy(
+        draft.GovernanceMode,
+        draft.SelectedProfileId,
+      ),
+      enterpriseRequiredApprovalCount: enterpriseValues.requiredApprovalCount,
+      enterpriseTrusteeCount: enterpriseValues.trusteeCount,
       outcomeRuleKind: draft.OutcomeRule.Kind,
     });
     setActiveOverlay("policy");
   };
 
   const applyPolicyChanges = () => {
-    const nextSelectedProfileId = coerceSelectedCeremonyProfileId(
+    const enterpriseValues = normalizeEnterprisePolicyEditorValues(
+      policyEditor.enterpriseRequiredApprovalCount,
+      policyEditor.enterpriseTrusteeCount,
+    );
+    const nextLicense = getHushVotingLicenseOption(policyEditor.licenseId);
+    const nextGovernanceMode = nextLicense.governanceMode;
+    const nextSelectedProfileId = getSelectedProfileIdForHushVotingLicense(
+      policyEditor.licenseId,
       policyEditor.bindingStatus,
-      policyEditor.governanceMode,
-      policyEditor.selectedProfileId,
-      compatiblePolicyEditorProfiles,
+      enterpriseValues.requiredApprovalCount,
+      enterpriseValues.trusteeCount,
     );
     const nextSelectedProfile = findCeremonyProfileById(
       compatiblePolicyEditorProfiles,
       nextSelectedProfileId,
-      policyEditor.governanceMode,
+      nextGovernanceMode,
     );
     setDraft((current) => {
       const governanceUpdated = applyGovernanceModeDefaults(
         current,
-        policyEditor.governanceMode,
+        nextGovernanceMode,
       );
       return {
         ...governanceUpdated,
@@ -1796,7 +1884,7 @@ export function ElectionsWorkspace({
         SelectedProfileId: nextSelectedProfileId,
         OutcomeRule: createOutcomeRuleForKind(policyEditor.outcomeRuleKind),
         RequiredApprovalCount:
-          policyEditor.governanceMode ===
+          nextGovernanceMode ===
           ElectionGovernanceModeProto.TrusteeThreshold
             ? Math.max(
                 1,
@@ -1847,9 +1935,6 @@ export function ElectionsWorkspace({
   };
 
   const openTrusteeOverlay = () => {
-    setTrusteeApprovalEditor(
-      fixedTrusteeApprovalCount ?? draft.RequiredApprovalCount ?? 1,
-    );
     setTrusteeUserAddress("");
     setTrusteeDisplayName("");
     setTrusteeSearchQuery("");
@@ -1859,13 +1944,6 @@ export function ElectionsWorkspace({
   };
 
   const applyTrusteeDraftChanges = () => {
-    setDraft((current) => ({
-      ...current,
-      RequiredApprovalCount: Math.max(
-        1,
-        fixedTrusteeApprovalCount ?? trusteeApprovalEditor ?? 1,
-      ),
-    }));
     setActiveOverlay(null);
   };
 
@@ -2577,7 +2655,7 @@ export function ElectionsWorkspace({
               <div style={{ order: 4 }}>
                 <OwnerOverviewSection
                 title="Trustee Setup"
-                description="Trustee approvals and invitations are reviewed here. Open the editor to adjust the approval threshold or manage invitation records without editing the whole page inline."
+                description="Trustee approvals and invitations are reviewed here. The selected HushVoting license controls the approval threshold."
                 actionLabel={canEditDraft ? "Edit trustee setup" : undefined}
                 onAction={canEditDraft ? openTrusteeOverlay : undefined}
                 dataTestId="elections-trustee-overview"
@@ -2604,7 +2682,9 @@ export function ElectionsWorkspace({
                         ? trusteeThresholdNeedsSaveAlignment
                           ? `Aligned locally to the current ${fixedTrusteeApprovalCount}-of-${fixedCeremonyTrusteeCount} trustee rollout. Save the next draft revision to persist it.`
                           : `Fixed by the current ${fixedTrusteeApprovalCount}-of-${fixedCeremonyTrusteeCount} trustee rollout.`
-                        : "This threshold is saved with the next draft revision."}
+                        : selectedDraftProfile
+                          ? `Set by ${selectedDraftProfile.DisplayName}.`
+                          : "Set by the selected HushVoting license."}
                     </div>
                   </div>
 
@@ -3147,9 +3227,9 @@ export function ElectionsWorkspace({
                           ? "Governed open path"
                           : "Server open readiness"}
                       </div>
-                      <div className="mt-1 text-xs text-hush-text-accent">
+                        <div className="mt-1 text-xs text-hush-text-accent">
                         {usesTrusteeThreshold
-                          ? "Direct open is disabled here. When the checklist is clear and the key ceremony is ready, start the Open proposal in Governed Actions."
+                          ? "Owner-only open is disabled here. When the checklist is clear and the key ceremony is ready, start the Open proposal in Governed Actions."
                           : "This uses the current saved draft revision and the selected warning acknowledgements."}
                       </div>
                     </div>
@@ -3219,7 +3299,7 @@ export function ElectionsWorkspace({
                     ) : (
                       <div className="mt-4 text-sm text-hush-text-accent">
                         {selectedElectionId
-                          ? "Save a valid admin-only draft to evaluate server open readiness."
+                          ? "Save a valid HushVoting Direct draft to evaluate server open readiness."
                           : "Create the draft first to fetch server open readiness."}
                       </div>
                     )
@@ -3909,7 +3989,7 @@ export function ElectionsWorkspace({
                     ) : (
                       <div className="mt-4 text-sm text-hush-text-accent">
                         {selectedElectionId
-                          ? "Save a valid admin-only draft to evaluate server open readiness."
+                          ? "Save a valid HushVoting Direct draft to evaluate server open readiness."
                           : "Create the draft first to fetch server open readiness."}
                       </div>
                     )}
@@ -3986,14 +4066,14 @@ export function ElectionsWorkspace({
                     </p>
                   </div>
                   <div className="rounded-xl border border-hush-purple/30 bg-hush-purple/10 px-3 py-2 text-xs text-hush-text-primary">
-                    Trustee-threshold elections use proposal approval instead of
-                    direct lifecycle buttons.
+                    HushVoting Veritas elections use proposal approval instead of
+                    owner-only lifecycle buttons.
                   </div>
                 </div>
 
                 {!selectedElectionId ? (
                   <div className="rounded-xl border border-dashed border-hush-bg-light bg-hush-bg-dark/60 px-4 py-5 text-sm text-hush-text-accent">
-                    Save the trustee-threshold draft first to start governed
+                    Save the HushVoting Veritas draft first to start governed
                     actions.
                   </div>
                 ) : (
@@ -4370,10 +4450,10 @@ export function ElectionsWorkspace({
                     </div>
                     <div>
                       <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
-                        Protocol Omega version
+                        Protocol package version
                       </div>
                       <div className="mt-1 text-sm">
-                        {draft.ProtocolOmegaVersion}
+                        {protocolPackageVersionLabel}
                       </div>
                     </div>
                     <div>
@@ -4556,16 +4636,6 @@ export function ElectionsWorkspace({
                         setPolicyEditor((current) => ({
                           ...current,
                           bindingStatus: nextBindingStatus,
-                          selectedProfileId: coerceSelectedCeremonyProfileId(
-                            nextBindingStatus,
-                            current.governanceMode,
-                            current.selectedProfileId,
-                            getAllowedCeremonyProfiles(
-                              selectedElection ?? null,
-                              undefined,
-                              current.governanceMode,
-                            ),
-                          ),
                         }));
                       }}
                       className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-2 text-sm outline-none transition-colors focus:border-hush-purple"
@@ -4595,77 +4665,134 @@ export function ElectionsWorkspace({
 
                   <label className="text-sm md:col-span-3">
                     <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
-                      Circuit / profile
+                      HushVoting license
                     </span>
                     <select
-                      value={coerceSelectedCeremonyProfileId(
-                        policyEditor.bindingStatus,
-                        policyEditor.governanceMode,
-                        policyEditor.selectedProfileId,
-                        compatiblePolicyEditorProfiles,
-                      )}
-                      onChange={(event) =>
-                        setPolicyEditor((current) => ({
-                          ...current,
-                          selectedProfileId: event.target.value,
-                        }))
-                      }
+                      value={policyEditor.licenseId}
+                      onChange={(event) => {
+                        const nextLicenseId = event.target.value as HushVotingLicenseId;
+                        setPolicyEditor((current) => {
+                          const normalizedEnterpriseValues =
+                            normalizeEnterprisePolicyEditorValues(
+                              current.enterpriseRequiredApprovalCount,
+                              current.enterpriseTrusteeCount,
+                            );
+                          return {
+                            ...current,
+                            licenseId: nextLicenseId,
+                            enterpriseRequiredApprovalCount:
+                              normalizedEnterpriseValues.requiredApprovalCount,
+                            enterpriseTrusteeCount:
+                              normalizedEnterpriseValues.trusteeCount,
+                          };
+                        });
+                      }}
                       className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-2 text-sm outline-none transition-colors focus:border-hush-purple"
-                      data-testid="elections-policy-profile-select"
+                      data-testid="elections-policy-license-select"
                     >
-                      {compatiblePolicyEditorProfiles.map((profile) => (
-                        <option key={profile.ProfileId} value={profile.ProfileId}>
-                          {profile.DisplayName}
+                      {HUSHVOTING_LICENSE_OPTIONS.map((license) => (
+                        <option key={license.id} value={license.id}>
+                          {license.label}
                         </option>
                       ))}
                     </select>
                     <div className="mt-2 rounded-2xl bg-hush-bg-dark/80 px-4 py-3 text-sm text-hush-text-accent">
                       <div className="text-hush-text-primary">
-                        {selectedPolicyEditorProfile?.Description ||
-                          "Select the circuit/profile that this election will freeze before open."}
+                        {policyEditorLicense.description}
                       </div>
                       <div className="mt-2 text-xs text-hush-text-accent">
                         {selectedPolicyEditorProfile
-                          ? `Selected family: ${getSelectedProfileFamilyLabel(selectedPolicyEditorProfile.DevOnly)}.`
-                          : "A selected circuit/profile is required before save and open."}
+                          ? `Product path: ${getGovernanceLabel(policyEditorGovernanceMode)}. Selected family: ${getSelectedProfileFamilyLabel(selectedPolicyEditorProfile.DevOnly)}.`
+                          : `Product path: ${getGovernanceLabel(policyEditorGovernanceMode)}.`}
                       </div>
                     </div>
                   </label>
 
-                  <label className="text-sm">
-                    <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
-                      Governance mode
-                    </span>
-                    <select
-                      value={policyEditor.governanceMode}
-                      onChange={(event) => {
-                        const nextGovernanceMode = Number(
-                          event.target.value,
-                        ) as ElectionGovernanceModeProto;
-                        setPolicyEditor((current) => ({
-                          ...current,
-                          governanceMode: nextGovernanceMode,
-                          selectedProfileId: coerceSelectedCeremonyProfileId(
-                            current.bindingStatus,
-                            nextGovernanceMode,
-                            current.selectedProfileId,
-                            getAllowedCeremonyProfiles(
-                              selectedElection ?? null,
-                              undefined,
-                              nextGovernanceMode,
-                            ),
-                          ),
-                        }));
-                      }}
-                      className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-2 text-sm outline-none transition-colors focus:border-hush-purple"
-                    >
-                      {GOVERNANCE_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  {policyEditorLicense.isEnterprise ? (
+                    <>
+                      <label className="text-sm">
+                        <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                          Required approvals
+                        </span>
+                        <input
+                          type="number"
+                          min={1}
+                          value={policyEditor.enterpriseRequiredApprovalCount}
+                          onChange={(event) => {
+                            const nextRequiredApprovalCount = Math.max(
+                              1,
+                              Number(event.target.value) || 1,
+                            );
+                            setPolicyEditor((current) => {
+                              const normalizedValues =
+                                normalizeEnterprisePolicyEditorValues(
+                                  nextRequiredApprovalCount,
+                                  Math.max(
+                                    current.enterpriseTrusteeCount,
+                                    nextRequiredApprovalCount + 1,
+                                  ),
+                                );
+                              return {
+                                ...current,
+                                enterpriseRequiredApprovalCount:
+                                  normalizedValues.requiredApprovalCount,
+                                enterpriseTrusteeCount:
+                                  normalizedValues.trusteeCount,
+                              };
+                            });
+                          }}
+                          className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-2 text-sm outline-none transition-colors focus:border-hush-purple"
+                          data-testid="elections-policy-enterprise-required-input"
+                        />
+                      </label>
+
+                      <label className="text-sm">
+                        <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                          Accepted trustees
+                        </span>
+                        <input
+                          type="number"
+                          min={policyEditor.enterpriseRequiredApprovalCount + 1}
+                          value={policyEditor.enterpriseTrusteeCount}
+                          onChange={(event) => {
+                            const nextTrusteeCount = Math.max(
+                              policyEditor.enterpriseRequiredApprovalCount + 1,
+                              Number(event.target.value) ||
+                                policyEditor.enterpriseRequiredApprovalCount + 1,
+                            );
+                            setPolicyEditor((current) => {
+                              const normalizedValues =
+                                normalizeEnterprisePolicyEditorValues(
+                                  current.enterpriseRequiredApprovalCount,
+                                  nextTrusteeCount,
+                                );
+                              return {
+                                ...current,
+                                enterpriseRequiredApprovalCount:
+                                  normalizedValues.requiredApprovalCount,
+                                enterpriseTrusteeCount:
+                                  normalizedValues.trusteeCount,
+                              };
+                            });
+                          }}
+                          className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-2 text-sm outline-none transition-colors focus:border-hush-purple"
+                          data-testid="elections-policy-enterprise-trustees-input"
+                        />
+                      </label>
+
+                      <div className="rounded-2xl bg-hush-bg-dark/80 px-4 py-3 text-sm text-hush-text-accent">
+                        <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                          Enterprise profile
+                        </div>
+                        <div className="mt-2 text-hush-text-primary">
+                          {buildEnterpriseCeremonyProfileId(
+                            policyEditor.enterpriseRequiredApprovalCount,
+                            policyEditor.enterpriseTrusteeCount,
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  ) : null}
 
                   <label className="text-sm">
                     <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
@@ -4863,35 +4990,33 @@ export function ElectionsWorkspace({
             {activeOverlay === "trustees" && (
               <OwnerEditorOverlay
                 title="Edit trustee setup"
-                description="Manage the approval threshold and trustee invitations from a focused overlay. Draft-backed changes stay local; invitation actions still submit immediately."
+                description="Manage trustee invitations from a focused overlay. Approval thresholds are controlled by the HushVoting license selected in draft policy."
                 onClose={() => setActiveOverlay(null)}
                 onApply={applyTrusteeDraftChanges}
                 applyLabel="Apply trustee changes"
                 maxWidthClass="max-w-5xl"
               >
                 <div className="space-y-5">
-                  <label className="block text-sm max-w-xs">
-                    <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
-                      Required approval count
-                    </span>
-                    <input
-                      type="number"
-                      min={1}
-                      value={trusteeApprovalEditor}
-                      onChange={(event) =>
-                        setTrusteeApprovalEditor(
-                          Math.max(1, Number(event.target.value) || 1),
-                        )
-                      }
-                      readOnly={!!fixedTrusteeApprovalCount}
-                      className="w-full rounded-xl border border-hush-bg-light bg-hush-bg-dark px-3 py-2 text-sm outline-none transition-colors focus:border-hush-purple read-only:cursor-default read-only:opacity-80"
-                    />
-                    <span className="mt-2 block text-xs text-hush-text-accent">
-                      {fixedTrusteeApprovalCount && fixedCeremonyTrusteeCount
-                        ? `The current ceremony rollout is fixed to ${fixedTrusteeApprovalCount}-of-${fixedCeremonyTrusteeCount}, so this threshold stays aligned with the allowed trustee model.`
-                        : "Choose how many accepted trustees are required for the trustee-threshold path."}
-                    </span>
-                  </label>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="rounded-2xl bg-hush-bg-dark/40 px-4 py-3">
+                      <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                        HushVoting license
+                      </div>
+                      <div className="mt-2 text-sm font-semibold text-hush-text-primary">
+                        {selectedDraftProfile?.DisplayName ?? "Not selected"}
+                      </div>
+                    </div>
+                    <div className="rounded-2xl bg-hush-bg-dark/40 px-4 py-3">
+                      <div className="text-xs font-semibold uppercase tracking-[0.2em] text-hush-text-accent">
+                        Required approvals
+                      </div>
+                      <div className="mt-2 text-sm font-semibold text-hush-text-primary">
+                        {selectedDraftProfile
+                          ? `${selectedDraftProfile.RequiredApprovalCount} / ${selectedDraftProfile.TrusteeCount}`
+                          : draft.RequiredApprovalCount ?? 1}
+                      </div>
+                    </div>
+                  </div>
 
                   {selectedElectionId ? (
                     <>

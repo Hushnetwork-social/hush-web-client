@@ -178,9 +178,9 @@ export function createReadinessDashboardFixtureSource(
           blockerSeverity: 'amber',
           status: 'allowed_with_limitations',
           allowedWording:
-            'HushVoting may run an internal non-binding rehearsal when all remaining blockers stay visible.',
+            'HushVoting may use internal technical rehearsal evidence when product-mode profile limitations and stronger claim boundaries remain visible.',
           limitationWording:
-            'The rehearsal must be clearly labelled non-binding and must not be presented as customer, production, or public election readiness.',
+            'Internal rehearsal evidence is not a customer, production, public/state, legal, certification, or independent-validation claim; runtime binding status is represented by the HushVoting claim profile gates.',
           blockedWording: '',
           blockerIds: ['RDY-BLOCK-INTERNAL_NON_BINDING_REHEARSAL-001'],
           publicSafeStatus: 'not_for_publication',
@@ -199,6 +199,46 @@ export function createReadinessDashboardFixtureSource(
             'RDY-BLOCK-FRIENDLY_ORGANIZATION_PILOT-006',
           ],
           publicSafeStatus: 'not_ready_for_public_claim',
+        },
+      ],
+      claimProfiles: [
+        {
+          profileId: 'hushvoting.direct.binding',
+          label: 'Binding HushVoting! Direct',
+          productMode: 'HushVoting! Direct',
+          governanceEffect: 'binding',
+          bindingStatus: 'Binding',
+          isNonBindingElection: false,
+          thresholdProfile: 'direct',
+          profileClass: 'standard',
+          gateSeverity: 'amber',
+          gateStatus: 'with_warnings',
+          claimLevel: 'internal_non_binding_rehearsal',
+          claimWording:
+            'Product mode HushVoting! Direct, binding status Binding, and isNonBindingElection false are accepted for the internal technical claim profile gate with verifier warnings attached.',
+          limitationWording:
+            'The pass is limited to runtime/profile evidence and does not promote customer, production, public/state, legal, certification, or independent-validation claims.',
+          evidenceRefs: ['audit-boundary-note.md', 'public-verifier-output-current-public/VerifierOutput.json'],
+          requiredEvidence: [
+            'productMode == HushVoting! Direct',
+            'bindingStatus == Binding',
+            'isNonBindingElection == false',
+          ],
+          verifierWarningCount: 2,
+          verifierWarnings: [
+            {
+              checkCode: 'OPS-002',
+              resultCode: 'operational_security_access_snapshot_missing',
+              message: 'SP-10 access-control snapshot evidence is missing.',
+              evidenceRef: 'public-verifier-output-current-public/VerifierOutput.json',
+            },
+            {
+              checkCode: 'OPS-006',
+              resultCode: 'operational_security_backup_restore_missing',
+              message: 'SP-10 backup/restore evidence is missing.',
+              evidenceRef: 'public-verifier-output-current-public/VerifierOutput.json',
+            },
+          ],
         },
       ],
       blockers: [

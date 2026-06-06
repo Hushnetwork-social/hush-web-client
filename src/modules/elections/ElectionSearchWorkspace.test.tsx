@@ -192,7 +192,7 @@ describe('ElectionSearchWorkspace', () => {
           Election: createSummary(
             'election-finalized',
             ElectionLifecycleStateProto.Finalized,
-            'AdminOnly Election I'
+            'HushVoting Direct Election I'
           ),
           ActorRoles: {
             IsOwnerAdmin: false,
@@ -213,7 +213,7 @@ describe('ElectionSearchWorkspace', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Search elections' }));
 
-    expect(await screen.findByText('AdminOnly Election I')).toBeInTheDocument();
+    expect(await screen.findByText('HushVoting Direct Election I')).toBeInTheDocument();
     expect(screen.getByText('Claim-link discovery is unavailable after finalization.')).toBeInTheDocument();
     expect(screen.getByText('Eligibility unavailable')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Open eligibility/i })).not.toBeInTheDocument();
@@ -233,7 +233,7 @@ describe('ElectionSearchWorkspace', () => {
           Election: createSummary(
             'election-owner-claimable',
             ElectionLifecycleStateProto.Draft,
-            'AdminOnly Election III'
+            'HushVoting Direct Election III'
           ),
           ActorRoles: {
             IsOwnerAdmin: true,
@@ -248,7 +248,7 @@ describe('ElectionSearchWorkspace', () => {
           Election: createSummary(
             'election-owner',
             ElectionLifecycleStateProto.Open,
-            'AdminOnly Election II'
+            'HushVoting Direct Election II'
           ),
           ActorRoles: {
             IsOwnerAdmin: true,
@@ -263,7 +263,7 @@ describe('ElectionSearchWorkspace', () => {
           Election: createSummary(
             'election-trustee',
             ElectionLifecycleStateProto.Draft,
-            'Trustee Election'
+            'HushVoting Veritas Election'
           ),
           ActorRoles: {
             IsOwnerAdmin: false,
@@ -299,11 +299,11 @@ describe('ElectionSearchWorkspace', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Search elections' }));
 
-    expect(await screen.findByText('AdminOnly Election III')).toBeInTheDocument();
+    expect(await screen.findByText('HushVoting Direct Election III')).toBeInTheDocument();
     expect(screen.getAllByText('ElectionOwner')).toHaveLength(2);
-    expect(await screen.findByText('AdminOnly Election II')).toBeInTheDocument();
+    expect(await screen.findByText('HushVoting Direct Election II')).toBeInTheDocument();
     expect(screen.getByText('Auditor')).toBeInTheDocument();
-    expect(await screen.findByText('Trustee Election')).toBeInTheDocument();
+    expect(await screen.findByText('HushVoting Veritas Election')).toBeInTheDocument();
     expect(screen.getByText('Trustee')).toBeInTheDocument();
     expect(await screen.findByText('Linked Voter Election')).toBeInTheDocument();
     expect(screen.getByText('This election is already linked to this Hush account.')).toBeInTheDocument();

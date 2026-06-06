@@ -78,6 +78,33 @@ export interface ReadinessClaimGateView {
   publicSafeStatus: string;
 }
 
+export interface ReadinessClaimProfileWarningView {
+  checkCode: string;
+  resultCode: string;
+  message: string;
+  evidenceRef: string;
+}
+
+export interface ReadinessClaimProfileGateView {
+  profileId: string;
+  label: string;
+  productMode: string;
+  governanceEffect: string;
+  bindingStatus: string;
+  isNonBindingElection: boolean;
+  thresholdProfile: string;
+  profileClass: string;
+  severity: ReadinessSeverity;
+  gateStatus: string;
+  claimLevel: string;
+  claimWording: string;
+  limitationWording: string;
+  evidenceRefs: string[];
+  requiredEvidence: string[];
+  verifierWarningCount: number;
+  verifierWarnings: ReadinessClaimProfileWarningView[];
+}
+
 export interface ReadinessDimensionView {
   dimensionId: string;
   name: string;
@@ -168,6 +195,7 @@ export interface ReadinessDashboardViewModel {
     thresholdBand: ReadinessScoreBand;
   };
   claims: ReadinessClaimGateView[];
+  claimProfiles: ReadinessClaimProfileGateView[];
   dimensions: ReadinessDimensionView[];
   blockers: ReadinessBlockerView[];
   evidenceLifecycleCounts: Record<ReadinessEvidenceStatus, number>;
@@ -262,6 +290,33 @@ export interface RawReadinessClaimLevel {
   publicSafeStatus: string;
 }
 
+export interface RawReadinessClaimProfile {
+  profileId: string;
+  label: string;
+  productMode: string;
+  governanceEffect: string;
+  bindingStatus: string;
+  isNonBindingElection: boolean;
+  thresholdProfile: string;
+  profileClass: string;
+  gateSeverity: ReadinessSeverity;
+  gateStatus: string;
+  claimLevel: string;
+  claimWording: string;
+  limitationWording: string;
+  evidenceRefs: string[];
+  requiredEvidence: string[];
+  verifierWarningCount?: number;
+  verifierWarnings?: RawReadinessClaimProfileWarning[];
+}
+
+export interface RawReadinessClaimProfileWarning {
+  checkCode: string;
+  resultCode: string;
+  message: string;
+  evidenceRef: string;
+}
+
 export interface RawReadinessBlocker {
   blockerId: string;
   claimLevel: string;
@@ -318,6 +373,7 @@ export interface RawReadinessRegister {
   };
   dimensions: RawReadinessDimension[];
   claimLevels: RawReadinessClaimLevel[];
+  claimProfiles?: RawReadinessClaimProfile[];
   blockers: RawReadinessBlocker[];
   evidenceItems: RawReadinessEvidenceItem[];
   exceptions: RawReadinessException[];

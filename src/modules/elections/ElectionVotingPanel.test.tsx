@@ -54,7 +54,7 @@ vi.mock('@/lib/crypto', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/crypto')>();
   return {
     ...actual,
-    generateGuid: () => 'submission-guid-1',
+    generateGuid: () => '11111111-1111-4111-8111-111111111111',
   };
 });
 
@@ -432,7 +432,7 @@ describe('ElectionVotingPanel', () => {
     expect(await screen.findByTestId('voting-accepted-panel')).toBeInTheDocument();
   });
 
-  it('submits a protected admin-only ballot on a non-binding election with the production-like proof profile', async () => {
+  it('submits a protected HushVoting Direct ballot on a non-binding election with the production-like proof profile', async () => {
     const nonBindingProtectedElection = createElectionRecord({
       BindingStatus: ElectionBindingStatusProto.NonBinding,
       GovernanceMode: ElectionGovernanceModeProto.AdminOnly,
@@ -845,19 +845,45 @@ describe('ElectionVotingPanel', () => {
   });
 
   it('gates SP-04 final cast until the current selection challenge passes', async () => {
-    electionsServiceMock.getElectionVotingView.mockResolvedValue(
-      createVotingViewResponse({
-        CommitmentRegistered: true,
-        HasCommitmentRegisteredAt: true,
-        CommitmentRegisteredAt: timestamp,
-        Sp04Required: true,
-        BallotDefinitionVersion: 1,
-        BallotDefinitionHash: 'ballot-definition-hash-1',
-        HasBallotDefinitionSealedAt: true,
-        RequiredChallengeCount: 1,
-        ChallengeSatisfied: false,
-      }),
-    );
+    const challengeReadyView = createVotingViewResponse({
+      CommitmentRegistered: true,
+      HasCommitmentRegisteredAt: true,
+      CommitmentRegisteredAt: timestamp,
+      Sp04Required: true,
+      BallotDefinitionVersion: 1,
+      BallotDefinitionHash: 'ballot-definition-hash-1',
+      HasBallotDefinitionSealedAt: true,
+      RequiredChallengeCount: 1,
+      SpoiledPackageCount: 1,
+      ChallengeSatisfied: true,
+    });
+    electionsServiceMock.getElectionVotingView
+      .mockResolvedValueOnce(
+        createVotingViewResponse({
+          CommitmentRegistered: true,
+          HasCommitmentRegisteredAt: true,
+          CommitmentRegisteredAt: timestamp,
+          Sp04Required: true,
+          BallotDefinitionVersion: 1,
+          BallotDefinitionHash: 'ballot-definition-hash-1',
+          HasBallotDefinitionSealedAt: true,
+          RequiredChallengeCount: 1,
+          ChallengeSatisfied: false,
+        }),
+      )
+      .mockResolvedValueOnce(challengeReadyView)
+      .mockResolvedValue(
+        createVotingViewResponse({
+          ...challengeReadyView,
+          HasAcceptedAt: true,
+          AcceptedAt: timestamp,
+          PersonalParticipationStatus:
+            ElectionParticipationStatusProto.ParticipationCountedAsVoted,
+          ReceiptId: 'receipt-sp04-1',
+          AcceptanceId: 'acceptance-sp04-1',
+          ServerProof: 'server-proof-sp04-1',
+        }),
+      );
 
     render(
       <ElectionVotingPanel
@@ -879,13 +905,20 @@ describe('ElectionVotingPanel', () => {
       'Challenge required for current selection',
     );
 
-    fireEvent.click(screen.getByTestId('voting-sp04-prepare-action'));
+    expect(screen.queryByTestId('voting-sp04-prepare-action')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('voting-sp04-challenge-action'));
 
     await waitFor(() => {
       expect(
         transactionServiceMock.createRegisterPreparedBallotCommitmentTransaction,
       ).toHaveBeenCalled();
     });
+    const prepareCall =
+      transactionServiceMock.createRegisterPreparedBallotCommitmentTransaction.mock.calls[0];
+    expect(prepareCall?.[4]).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
+    expect(prepareCall?.[4]).not.toContain('-challenge-');
     expect(screen.getByTestId('voting-sp04-prepared-timer')).toHaveTextContent(
       'Prepared package timer',
     );
@@ -895,10 +928,9 @@ describe('ElectionVotingPanel', () => {
       'polite',
     );
 
-    fireEvent.click(screen.getByTestId('voting-sp04-challenge-action'));
-
     await waitFor(() => {
       expect(transactionServiceMock.createSpoilPreparedBallotTransaction).toHaveBeenCalled();
+      expect(electionsServiceMock.getElectionVotingView).toHaveBeenCalledTimes(2);
       expect(screen.getByTestId('voting-sp04-challenge-summary')).toHaveTextContent(
         'Challenge verification passed',
       );
@@ -911,12 +943,14 @@ describe('ElectionVotingPanel', () => {
     expect(screen.getByTestId('voting-sp04-download-transcript')).toBeInTheDocument();
     expect(screen.getByTestId('voting-submit')).toBeEnabled();
 
-    fireEvent.click(screen.getByTestId('voting-option-option-b'));
+    fireEvent.click(screen.getByTestId('voting-submit'));
 
-    expect(screen.getByTestId('voting-sp04-challenge-summary')).toHaveTextContent(
-      'Challenge reset',
-    );
-    expect(screen.getByTestId('voting-submit')).toBeDisabled();
+    await waitFor(() => {
+      expect(transactionServiceMock.createAcceptElectionBallotCastTransaction).toHaveBeenCalled();
+    });
+    expect(
+      transactionServiceMock.createRegisterPreparedBallotCommitmentTransaction,
+    ).toHaveBeenCalledTimes(1);
   });
 
   it('shows safe bound receipt fields without returning to the selected choice', async () => {

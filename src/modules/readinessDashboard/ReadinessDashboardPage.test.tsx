@@ -69,7 +69,7 @@ describe('ReadinessDashboardPage', () => {
     expect(screen.queryByTestId('readiness-summary')).not.toBeInTheDocument();
   });
 
-  it('renders the baseline dashboard with amber rehearsal and red pilot blockers', () => {
+  it('renders the dashboard with profile gates and separate blocker status', () => {
     render(<ReadinessDashboardPage gate={clientGate} initialResponse={readyResponse} />);
 
     expect(screen.getByRole('heading', { name: 'Internal Readiness Dashboard' })).toBeInTheDocument();
@@ -77,10 +77,19 @@ describe('ReadinessDashboardPage', () => {
     expect(screen.getByText('60 / 100')).toBeInTheDocument();
 
     const claimGates = screen.getByTestId('readiness-claim-gates');
-    expect(within(claimGates).getByText('internal non binding rehearsal')).toBeInTheDocument();
-    expect(within(claimGates).getByText(/amber \/ allowed_with_limitations/)).toBeInTheDocument();
-    expect(within(claimGates).getByText('friendly organization pilot')).toBeInTheDocument();
-    expect(within(claimGates).getByText(/red \/ blocked/)).toBeInTheDocument();
+    expect(within(claimGates).queryByText('internal audit rehearsal boundary')).not.toBeInTheDocument();
+    expect(within(claimGates).queryByText('friendly organization pilot boundary')).not.toBeInTheDocument();
+    expect(within(claimGates).getByText('Binding HushVoting! Direct')).toBeInTheDocument();
+    const warningBadge = within(claimGates).getByText(/amber \/ with_warnings/);
+    expect(warningBadge).toBeInTheDocument();
+    expect(warningBadge).toHaveAttribute(
+      'title',
+      expect.stringContaining('operational_security_access_snapshot_missing')
+    );
+    expect(claimGates).toHaveTextContent('OPS-002');
+    expect(claimGates).toHaveTextContent(
+      'HushVoting! Direct / Binding / isNonBindingElection: false / direct'
+    );
 
     const blockers = screen.getByTestId('readiness-blockers');
     expect(blockers).toHaveTextContent('RDY-BLOCK-FRIENDLY_ORGANIZATION_PILOT-003');

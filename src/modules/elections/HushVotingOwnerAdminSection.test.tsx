@@ -439,10 +439,10 @@ describe('OwnerAdminWorkspaceSummary', () => {
 
     fireEvent.click(screen.getByTestId('hush-voting-owner-admin-toggle'));
     expect(screen.getByTestId('hush-voting-section-owner-admin')).toHaveTextContent(
-      'Admin-only protected custody path'
+      'HushVoting Direct protected custody path'
     );
     expect(screen.getByTestId('hush-voting-section-owner-admin')).toHaveTextContent(
-      'owner-admin protected custody profile'
+      'owner-controlled protected custody profile'
     );
   });
 });

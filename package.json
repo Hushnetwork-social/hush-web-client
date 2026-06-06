@@ -29,11 +29,11 @@
     "fixture:election": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/generate-election-crypto-fixture.mts",
     "tauri": "tauri",
     "pretauri:dev": "npm run clean:tauri:legacy-target",
-    "tauri:dev": "tauri dev",
+    "tauri:dev": "node scripts/run-tauri.mjs dev",
     "pretauri:prod": "npm run clean:tauri:legacy-target",
-    "tauri:prod": "tauri dev --config src-tauri/tauri.prod.conf.json",
+    "tauri:prod": "node scripts/run-tauri.mjs dev --config src-tauri/tauri.prod.conf.json",
     "pretauri:build": "npm run clean:tauri:legacy-target",
-    "tauri:build": "tauri build"
+    "tauri:build": "node scripts/run-tauri.mjs build"
   },
   "dependencies": {
     "@noble/hashes": "^2.0.1",

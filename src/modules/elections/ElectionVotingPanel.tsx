@@ -1073,6 +1073,7 @@ function ChallengeVerificationSummary({
   currentOptionId: string;
 }) {
   const challengeIsCurrent = challenge.status === 'passed' && challenge.optionId === currentOptionId;
+  const isPending = challenge.status === 'pending';
   const isFailure = challenge.status === 'failed';
   const isReset = challenge.status === 'reset' || (
     challenge.status === 'passed' &&
@@ -1081,25 +1082,31 @@ function ChallengeVerificationSummary({
   );
   const className = challengeIsCurrent
     ? 'bg-green-500/12 text-green-100'
-    : isFailure
-      ? 'bg-red-500/12 text-red-100'
-      : isReset
-        ? 'bg-amber-500/12 text-amber-100'
-        : 'bg-hush-bg-dark/70 text-hush-text-accent';
+    : isPending
+      ? 'bg-cyan-500/12 text-cyan-100'
+      : isFailure
+        ? 'bg-red-500/12 text-red-100'
+        : isReset
+          ? 'bg-amber-500/12 text-amber-100'
+          : 'bg-hush-bg-dark/70 text-hush-text-accent';
   const title = challengeIsCurrent
     ? 'Challenge verification passed'
-    : isFailure
-      ? 'Challenge verification failed'
-      : isReset
-        ? 'Challenge reset'
-        : 'Challenge required';
+    : isPending
+      ? 'Challenge indexing pending'
+      : isFailure
+        ? 'Challenge verification failed'
+        : isReset
+          ? 'Challenge reset'
+          : 'Challenge required';
   const detail = challengeIsCurrent
     ? 'The challenged package opened to the current selection. Final cast will use a fresh prepared package.'
-    : isFailure
-      ? challenge.reason || 'Local challenge verification failed for this prepared package.'
-      : isReset
-        ? 'The previous challenge was for another selection. Run a new challenge for the current selection.'
-        : 'Final cast stays blocked until the current selected option has passed local challenge verification.';
+    : isPending
+      ? 'The spoiled challenge was submitted. Final cast stays blocked until the server voting view indexes it.'
+      : isFailure
+        ? challenge.reason || 'Local challenge verification failed for this prepared package.'
+        : isReset
+          ? 'The previous challenge was for another selection. Run a new challenge for the current selection.'
+          : 'Final cast stays blocked until the current selected option has passed local challenge verification.';
 
   return (
     <div
@@ -1109,7 +1116,13 @@ function ChallengeVerificationSummary({
       data-testid="voting-sp04-challenge-summary"
     >
       <div className="flex items-center gap-2 font-semibold">
-        {challengeIsCurrent ? <CheckCircle2 className="h-4 w-4" /> : <ShieldAlert className="h-4 w-4" />}
+        {challengeIsCurrent ? (
+          <CheckCircle2 className="h-4 w-4" />
+        ) : isPending ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <ShieldAlert className="h-4 w-4" />
+        )}
         <span>{title}</span>
       </div>
       <div className="mt-2 leading-6">{detail}</div>
@@ -1474,9 +1487,6 @@ export function ElectionVotingPanel({
       : selectedBallotOption
         ? 'Ready to submit'
         : 'Choose an option first';
-  const sp04PreparedPackageExpired = Boolean(
-    sp04PreparedPackage && Date.parse(sp04PreparedPackage.expiresAt) <= sp04NowMs,
-  );
   const sp04ChallengePassedForCurrentSelection =
     !isSp04Required ||
     Boolean(
@@ -1889,7 +1899,10 @@ export function ElectionVotingPanel({
     }
   }
 
-  async function prepareSp04Package(purpose: 'challenge' | 'final'): Promise<Sp04PreparedPackage | null> {
+  async function prepareSp04Package(
+    purpose: 'challenge' | 'final',
+    options?: { submitPrecommit?: boolean },
+  ): Promise<Sp04PreparedPackage | null> {
     if (!selectedBallotOption) {
       setFeedback({ tone: 'error', message: 'Choose a ballot option before preparing a package.' });
       return null;
@@ -1918,7 +1931,7 @@ export function ElectionVotingPanel({
         }
       }
 
-      const preparedBallotId = `${generateGuid()}-${purpose}-${Date.now().toString(36)}`;
+      const preparedBallotId = generateGuid();
       const preparedBallotHash = await buildSp04PreparedPackageHash({
         electionId,
         ballotDefinitionHash,
@@ -1950,31 +1963,34 @@ export function ElectionVotingPanel({
       };
       preparedPackage.transcriptText = buildSp04TranscriptText(preparedPackage);
 
-      const { signedTransaction } = await createRegisterPreparedBallotCommitmentTransaction(
-        electionId,
-        actorPublicAddress,
-        actorEncryptionPublicKey,
-        actorEncryptionPrivateKey,
-        preparedBallotId,
-        preparedBallotHash,
-        ballotDefinitionVersion,
-        ballotDefinitionHash,
-        ceremonyProfileId,
-        proofStatementId,
-        actorSigningPrivateKey,
-      );
-      const submitResult = await submitTransaction(signedTransaction);
-      if (
-        !submitResult.successful &&
-        submitResult.status !== TransactionStatus.ACCEPTED &&
-        submitResult.status !== TransactionStatus.PENDING
-      ) {
-        throw new Error(submitResult.message || 'Prepared package precommit was rejected.');
+      const shouldSubmitPrecommit = options?.submitPrecommit ?? true;
+      if (shouldSubmitPrecommit) {
+        const { signedTransaction } = await createRegisterPreparedBallotCommitmentTransaction(
+          electionId,
+          actorPublicAddress,
+          actorEncryptionPublicKey,
+          actorEncryptionPrivateKey,
+          preparedBallotId,
+          preparedBallotHash,
+          ballotDefinitionVersion,
+          ballotDefinitionHash,
+          ceremonyProfileId,
+          proofStatementId,
+          actorSigningPrivateKey,
+        );
+        const submitResult = await submitTransaction(signedTransaction);
+        if (
+          !submitResult.successful &&
+          submitResult.status !== TransactionStatus.ACCEPTED &&
+          submitResult.status !== TransactionStatus.PENDING
+        ) {
+          throw new Error(submitResult.message || 'Prepared package precommit was rejected.');
+        }
       }
 
       setSp04NowMs(Date.now());
       setSp04PreparedPackage(preparedPackage);
-      if (purpose === 'challenge') {
+      if (purpose === 'challenge' && shouldSubmitPrecommit) {
         setSp04Challenge({ status: 'pending', optionId: selectedBallotOption.OptionId, optionLabel: selectedBallotOption.DisplayLabel });
         setFeedback({
           tone: 'success',
@@ -1996,17 +2012,22 @@ export function ElectionVotingPanel({
     }
   }
 
-  async function handlePrepareSp04ChallengePackage(): Promise<void> {
-    await prepareSp04Package('challenge');
-  }
-
-  async function handleChallengeSpoilPreparedPackage(): Promise<void> {
-    if (!sp04PreparedPackage || !selectedBallotOption) {
-      setFeedback({ tone: 'error', message: 'Prepare a package before running the challenge.' });
+  async function handleRunSp04Challenge(): Promise<void> {
+    const preparedPackage = await prepareSp04Package('challenge');
+    if (!preparedPackage) {
       return;
     }
 
-    if (sp04PreparedPackage.optionId !== selectedBallotOption.OptionId) {
+    await spoilSp04PreparedPackage(preparedPackage);
+  }
+
+  async function spoilSp04PreparedPackage(preparedPackage: Sp04PreparedPackage): Promise<void> {
+    if (!selectedBallotOption) {
+      setFeedback({ tone: 'error', message: 'Choose a ballot option before running the challenge.' });
+      return;
+    }
+
+    if (preparedPackage.optionId !== selectedBallotOption.OptionId) {
       setSp04Challenge({
         status: 'reset',
         optionId: selectedBallotOption.OptionId,
@@ -2017,7 +2038,7 @@ export function ElectionVotingPanel({
       return;
     }
 
-    if (sp04PreparedPackageExpired) {
+    if (Date.parse(preparedPackage.expiresAt) <= Date.now()) {
       setSp04Challenge({
         status: 'failed',
         optionId: selectedBallotOption.OptionId,
@@ -2032,13 +2053,13 @@ export function ElectionVotingPanel({
     setFeedback(null);
 
     try {
-      const spoiledTranscriptHash = await hashText(sp04PreparedPackage.transcriptText);
+      const spoiledTranscriptHash = await hashText(preparedPackage.transcriptText);
       const spoilRecordHash = await hashText(
         JSON.stringify({
           version: 'sp04-spoil-record-v1',
           electionId,
-          preparedBallotId: sp04PreparedPackage.preparedBallotId,
-          preparedBallotHash: sp04PreparedPackage.preparedBallotHash,
+          preparedBallotId: preparedPackage.preparedBallotId,
+          preparedBallotHash: preparedPackage.preparedBallotHash,
           spoiledTranscriptHash,
           verifier: SP04_LOCAL_VERIFIER_VERSION,
         }),
@@ -2048,8 +2069,8 @@ export function ElectionVotingPanel({
         actorPublicAddress,
         actorEncryptionPublicKey,
         actorEncryptionPrivateKey,
-        sp04PreparedPackage.preparedBallotId,
-        sp04PreparedPackage.preparedBallotHash,
+        preparedPackage.preparedBallotId,
+        preparedPackage.preparedBallotHash,
         spoiledTranscriptHash,
         spoilRecordHash,
         SP04_LOCAL_VERIFIER_VERSION,
@@ -2065,13 +2086,48 @@ export function ElectionVotingPanel({
       }
 
       setSp04Challenge({
+        status: 'pending',
+        optionId: selectedBallotOption.OptionId,
+        optionLabel: selectedBallotOption.DisplayLabel,
+      });
+      setFeedback({
+        tone: 'success',
+        message: 'Challenge submitted. Waiting for the server voting view to index it.',
+      });
+
+      const awaitedView = await waitForVotingViewMatch(
+        electionId,
+        actorPublicAddress,
+        '',
+        (response) =>
+          response.ChallengeSatisfied &&
+          response.SpoiledPackageCount >= (response.RequiredChallengeCount || 1),
+        24,
+        750,
+      );
+      if (!awaitedView) {
+        setSp04Challenge({
+          status: 'pending',
+          optionId: selectedBallotOption.OptionId,
+          optionLabel: selectedBallotOption.DisplayLabel,
+          reason: 'The server has not indexed the spoiled challenge yet.',
+        });
+        setFeedback({
+          tone: 'error',
+          message: 'Challenge submitted, but it is not indexed yet. Wait a moment before final cast.',
+        });
+        return;
+      }
+
+      setVotingView(awaitedView);
+      setSp04Challenge({
         status: 'passed',
         optionId: selectedBallotOption.OptionId,
         optionLabel: selectedBallotOption.DisplayLabel,
         verifiedAt: new Date().toISOString(),
         spoiledTranscriptHash,
         spoilRecordHash,
-        transcriptText: sp04PreparedPackage.transcriptText,
+        transcriptText: preparedPackage.transcriptText,
       });
       setFeedback({
         tone: 'success',
@@ -2120,7 +2176,7 @@ export function ElectionVotingPanel({
       return;
     }
 
-    const finalPreparedPackage = await prepareSp04Package('final');
+    const finalPreparedPackage = await prepareSp04Package('final', { submitPrecommit: false });
     if (!finalPreparedPackage) {
       return;
     }
@@ -2863,47 +2919,26 @@ export function ElectionVotingPanel({
                     <div className="mt-3 flex flex-col gap-3 sm:flex-row">
                       <button
                         type="button"
-                        onClick={() => void handlePrepareSp04ChallengePackage()}
+                        onClick={() => void handleRunSp04Challenge()}
                         disabled={
                           !selectedBallotOption ||
                           !isBallotDefinitionSealed ||
                           isPreparingSp04Package ||
                           isSpoilingSp04Package
                         }
-                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-hush-purple px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-hush-purple/90 disabled:cursor-not-allowed disabled:bg-hush-bg-light disabled:text-hush-text-accent"
-                        data-testid="voting-sp04-prepare-action"
-                      >
-                        {isPreparingSp04Package ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <ShieldCheck className="h-4 w-4" />
-                        )}
-                        <span>
-                          {sp04PreparedPackageExpired || sp04PreparedPackage
-                            ? 'Prepare again'
-                            : 'Prepare package'}
-                        </span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => void handleChallengeSpoilPreparedPackage()}
-                        disabled={
-                          !sp04PreparedPackage ||
-                          sp04PreparedPackageExpired ||
-                          sp04PreparedPackage.optionId !== selectedBallotOptionId ||
-                          isPreparingSp04Package ||
-                          isSpoilingSp04Package
-                        }
                         className="inline-flex items-center justify-center gap-2 rounded-xl bg-teal-700 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-teal-600 disabled:cursor-not-allowed disabled:bg-hush-bg-light disabled:text-hush-text-accent"
                         data-testid="voting-sp04-challenge-action"
                       >
-                        {isSpoilingSp04Package ? (
+                        {isPreparingSp04Package || isSpoilingSp04Package ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
                         ) : (
                           <ShieldAlert className="h-4 w-4" />
                         )}
-                        <span>Challenge / spoil</span>
+                        <span>
+                          {sp04ChallengePassedForCurrentSelection
+                            ? 'Run challenge again'
+                            : 'Run required challenge'}
+                        </span>
                       </button>
                     </div>
 

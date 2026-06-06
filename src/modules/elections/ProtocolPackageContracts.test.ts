@@ -22,7 +22,7 @@ function createBinding(
     Id: 'binding-1',
     ElectionId: 'election-1',
     PackageId: 'omega-hushvoting-v1',
-    PackageVersion: 'v1.0.0',
+    PackageVersion: 'v1.2.0',
     SelectedProfileId: 'dkg-prod-3of5',
     SpecPackageHash: 'a'.repeat(64),
     ProofPackageHash: 'b'.repeat(64),
@@ -31,7 +31,7 @@ function createBinding(
       {
         LocationKind: ProtocolPackageAccessLocationKindProto.PublicWebsite,
         Label: 'Public package',
-        Location: 'https://www.hushnetwork.social/protocol-omega/hushvoting-v1/v1.0.0/spec.zip',
+        Location: 'https://www.hushnetwork.social/protocol-omega/hushvoting-v1/v1.2.0/spec.zip',
         ContentHash: 'a'.repeat(64),
       },
     ],
@@ -39,7 +39,7 @@ function createBinding(
       {
         LocationKind: ProtocolPackageAccessLocationKindProto.PublicWebsite,
         Label: 'Public package',
-        Location: 'https://www.hushnetwork.social/protocol-omega/hushvoting-v1/v1.0.0/proof.zip',
+        Location: 'https://www.hushnetwork.social/protocol-omega/hushvoting-v1/v1.2.0/proof.zip',
         ContentHash: 'b'.repeat(64),
       },
     ],

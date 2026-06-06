@@ -2,6 +2,7 @@ import {
   READINESS_DASHBOARD_ROUTE,
   type RawReadinessBlocker,
   type RawReadinessCatalogEntry,
+  type RawReadinessClaimProfile,
   type RawReadinessDimension,
   type RawReadinessEvidenceItem,
   type RawReadinessException,
@@ -169,6 +170,35 @@ function mapException(exception: RawReadinessException, index: number) {
   };
 }
 
+function mapClaimProfile(profile: RawReadinessClaimProfile) {
+  const verifierWarnings = profile.verifierWarnings ?? [];
+
+  return {
+    profileId: profile.profileId,
+    label: profile.label,
+    productMode: profile.productMode,
+    governanceEffect: profile.governanceEffect,
+    bindingStatus: profile.bindingStatus,
+    isNonBindingElection: profile.isNonBindingElection,
+    thresholdProfile: profile.thresholdProfile,
+    profileClass: profile.profileClass,
+    severity: profile.gateSeverity,
+    gateStatus: profile.gateStatus,
+    claimLevel: profile.claimLevel,
+    claimWording: profile.claimWording,
+    limitationWording: profile.limitationWording,
+    evidenceRefs: profile.evidenceRefs,
+    requiredEvidence: profile.requiredEvidence,
+    verifierWarningCount: profile.verifierWarningCount ?? verifierWarnings.length,
+    verifierWarnings: verifierWarnings.map((warning) => ({
+      checkCode: warning.checkCode,
+      resultCode: warning.resultCode,
+      message: warning.message,
+      evidenceRef: warning.evidenceRef,
+    })),
+  };
+}
+
 function buildEvidenceLifecycleCounts(
   evidenceItems: RawReadinessEvidenceItem[]
 ): Record<ReadinessEvidenceStatus, number> {
@@ -246,6 +276,7 @@ export function projectReadinessDashboard(
       blockerIds: claim.blockerIds,
       publicSafeStatus: claim.publicSafeStatus,
     })),
+    claimProfiles: (register.claimProfiles ?? []).map(mapClaimProfile),
     dimensions: register.dimensions.map(mapDimension),
     blockers: register.blockers
       .filter((blocker) => blocker.status !== 'superseded')

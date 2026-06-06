@@ -187,7 +187,7 @@ function createProtocolPackageBinding(
     Id: "protocol-package-binding-1",
     ElectionId: "election-1",
     PackageId: "omega-hushvoting-v1",
-    PackageVersion: "v1.0.0",
+    PackageVersion: "v1.2.0",
     SelectedProfileId: "dkg-prod-3of5",
     SpecPackageHash: "a".repeat(64),
     ProofPackageHash: "b".repeat(64),
@@ -197,7 +197,7 @@ function createProtocolPackageBinding(
         LocationKind: ProtocolPackageAccessLocationKindProto.PublicWebsite,
         Label: "Public spec package",
         Location:
-          "https://www.hushnetwork.social/protocol-omega/hushvoting-v1/v1.0.0/spec.zip",
+          "https://www.hushnetwork.social/protocol-omega/hushvoting-v1/v1.2.0/spec.zip",
         ContentHash: "a".repeat(64),
       },
     ],
@@ -206,7 +206,7 @@ function createProtocolPackageBinding(
         LocationKind: ProtocolPackageAccessLocationKindProto.PublicWebsite,
         Label: "Public proof package",
         Location:
-          "https://www.hushnetwork.social/protocol-omega/hushvoting-v1/v1.0.0/proof.zip",
+          "https://www.hushnetwork.social/protocol-omega/hushvoting-v1/v1.2.0/proof.zip",
         ContentHash: "b".repeat(64),
       },
     ],
@@ -847,11 +847,11 @@ describe("ElectionsWorkspace", () => {
       Elections: [
         createElectionSummary(ElectionLifecycleStateProto.Draft, {
           ElectionId: "election-1",
-          Title: "AdminOnly Election I",
+          Title: "HushVoting Direct Election I",
         }),
         createElectionSummary(ElectionLifecycleStateProto.Draft, {
           ElectionId: "election-2",
-          Title: "Election with Trustees I",
+          Title: "HushVoting Veritas Election I",
           GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
         }),
       ],
@@ -860,7 +860,7 @@ describe("ElectionsWorkspace", () => {
       createElectionResponse({
         Election: createElectionRecord(ElectionLifecycleStateProto.Draft, {
           ElectionId: "election-2",
-          Title: "Election with Trustees I",
+          Title: "HushVoting Veritas Election I",
           GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
         }),
       }),
@@ -1220,6 +1220,31 @@ describe("ElectionsWorkspace", () => {
     expect(electionsServiceMock.getElection).not.toHaveBeenCalled();
   });
 
+  it("shows protocol package refs as pending before a local draft is saved", async () => {
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
+        ownerSigningPrivateKey="owner-private-key"
+        startInNewDraftMode={true}
+      />,
+    );
+
+    await screen.findByText("Create Election Draft");
+    await openOwnerDetailTab("lifecycle");
+
+    expect(screen.getByTestId("elections-frozen-policy")).toHaveTextContent(
+      "Protocol package version",
+    );
+    expect(screen.getByTestId("elections-frozen-policy")).toHaveTextContent(
+      "Pending after save",
+    );
+    expect(screen.getByTestId("elections-frozen-policy")).not.toHaveTextContent(
+      "omega-v1.0.0",
+    );
+  });
+
   it("updates an existing draft through blockchain submission and waits for the next revision", async () => {
     const baselineElection = createElectionRecord(
       ElectionLifecycleStateProto.Draft,
@@ -1373,7 +1398,7 @@ describe("ElectionsWorkspace", () => {
         CeremonyProfiles: [
           {
             ProfileId: "admin-prod-1of1",
-            DisplayName: "Admin-only protected circuit",
+            DisplayName: "HushVoting Direct protected circuit",
             Description: "Admin protected",
             ProviderKey: "built-in-admin",
             ProfileVersion: "omega-v1.0.0-admin-prod-1of1",
@@ -1400,8 +1425,8 @@ describe("ElectionsWorkspace", () => {
     fireEvent.click(
       await screen.findByRole("button", { name: "Edit draft policy" }),
     );
-    fireEvent.change(screen.getByLabelText("Governance mode"), {
-      target: { value: `${ElectionGovernanceModeProto.TrusteeThreshold}` },
+    fireEvent.change(screen.getByTestId("elections-policy-license-select"), {
+      target: { value: "veritas-500" },
     });
     fireEvent.click(
       screen.getByRole("button", { name: "Apply policy changes" }),
@@ -1438,6 +1463,70 @@ describe("ElectionsWorkspace", () => {
         (option: { IsBlankOption: boolean }) => option.IsBlankOption,
       ),
     ).toBe(false);
+  });
+
+  it("saves an Enterprise custom license as a generated trustee profile", async () => {
+    electionsServiceMock.getElectionsByOwner.mockResolvedValueOnce({
+      Elections: [createElectionSummary(ElectionLifecycleStateProto.Draft)],
+    });
+    electionsServiceMock.getElection.mockResolvedValueOnce(createElectionResponse());
+
+    render(
+      <ElectionsWorkspace
+        ownerPublicAddress="owner-public-key"
+        ownerEncryptionPublicKey="owner-encryption-key"
+        ownerEncryptionPrivateKey="owner-encryption-private-key"
+        ownerSigningPrivateKey="owner-private-key"
+      />,
+    );
+
+    await openOwnerDetailTab("policy");
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Edit draft policy" }),
+    );
+
+    const policyDialog = await screen.findByRole("dialog", {
+      name: "Edit draft policy",
+    });
+    fireEvent.change(
+      within(policyDialog).getByTestId("elections-policy-license-select"),
+      {
+        target: { value: "enterprise" },
+      },
+    );
+    fireEvent.change(
+      within(policyDialog).getByTestId("elections-policy-enterprise-required-input"),
+      {
+        target: { value: "10" },
+      },
+    );
+    fireEvent.change(
+      within(policyDialog).getByTestId("elections-policy-enterprise-trustees-input"),
+      {
+        target: { value: "20" },
+      },
+    );
+    fireEvent.click(
+      within(policyDialog).getByRole("button", { name: "Apply policy changes" }),
+    );
+
+    await openOwnerDetailTab("save");
+    fireEvent.click(screen.getByTestId("elections-save-button"));
+
+    await waitFor(() => {
+      expect(
+        transactionServiceMock.createUpdateElectionDraftTransaction,
+      ).toHaveBeenCalled();
+    });
+
+    const submittedDraft =
+      transactionServiceMock.createUpdateElectionDraftTransaction.mock.calls[0]?.[5];
+
+    expect(submittedDraft.GovernanceMode).toBe(
+      ElectionGovernanceModeProto.TrusteeThreshold,
+    );
+    expect(submittedDraft.SelectedProfileId).toBe("dkg-enterprise-10of20");
+    expect(submittedDraft.RequiredApprovalCount).toBe(10);
   });
 
   it("invites a trustee through blockchain submission and waits for indexed readback", async () => {
@@ -2071,10 +2160,10 @@ describe("ElectionsWorkspace", () => {
       await screen.findByRole("button", { name: "Edit trustee setup" }),
     );
 
-    const thresholdInput = screen.getByDisplayValue("3");
-    expect(thresholdInput).toHaveAttribute("readonly");
+    expect(screen.getByText("Required approvals")).toBeInTheDocument();
+    expect(screen.getByText("3 / 5")).toBeInTheDocument();
     expect(
-      screen.getByText(/The current ceremony rollout is fixed to 3-of-5/i),
+      screen.getByText("Production-Like 3 of 5"),
     ).toBeInTheDocument();
   });
 
@@ -2085,7 +2174,8 @@ describe("ElectionsWorkspace", () => {
         GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
         ReviewWindowPolicy:
           ReviewWindowPolicyProto.GovernedReviewWindowReserved,
-        RequiredApprovalCount: 1,
+        RequiredApprovalCount: 3,
+        SelectedProfileId: "dkg-prod-3of5",
         OutcomeRule: {
           Kind: OutcomeRuleKindProto.PassFail,
           TemplateKey: "pass_fail_yes_no",
@@ -2103,6 +2193,8 @@ describe("ElectionsWorkspace", () => {
       Elections: [
         createElectionSummary(ElectionLifecycleStateProto.Draft, {
           GovernanceMode: ElectionGovernanceModeProto.TrusteeThreshold,
+          RequiredApprovalCount: 3,
+          SelectedProfileId: "dkg-prod-3of5",
         }),
       ],
     });
@@ -2130,7 +2222,9 @@ describe("ElectionsWorkspace", () => {
             ReportingPolicy: ReportingPolicyProto.DefaultPhaseOnePackage,
             ReviewWindowPolicy:
               ReviewWindowPolicyProto.GovernedReviewWindowReserved,
-            RequiredApprovalCount: 1,
+            RequiredApprovalCount: 3,
+            SelectedProfileId: "dkg-prod-3of5",
+            ThresholdProfileId: "dkg-prod-3of5",
           },
         }),
         TrusteeInvitations: [
@@ -2283,7 +2377,7 @@ describe("ElectionsWorkspace", () => {
     ).toHaveTextContent("non-dev circuits");
   });
 
-  it("filters the admin-only circuit catalog by binding status without leaking trustee labels", async () => {
+  it("keeps HushVoting Direct profile selection license-driven by binding status", async () => {
     electionsServiceMock.getElectionsByOwner.mockResolvedValueOnce({
       Elections: [createElectionSummary(ElectionLifecycleStateProto.Draft)],
     });
@@ -2306,12 +2400,19 @@ describe("ElectionsWorkspace", () => {
     const policyDialog = await screen.findByRole("dialog", {
       name: "Edit draft policy",
     });
-    const profileSelect = (await within(policyDialog).findByTestId(
-      "elections-policy-profile-select",
+    const licenseSelect = (await within(policyDialog).findByTestId(
+      "elections-policy-license-select",
     )) as HTMLSelectElement;
     expect(
-      Array.from(profileSelect.options).map((option) => option.textContent?.trim()),
-    ).toEqual(["Admin-only protected circuit"]);
+      Array.from(licenseSelect.options).map((option) => option.textContent?.trim()),
+    ).toEqual([
+      "HushVoting! Direct",
+      "HushVoting! Veritas 500",
+      "HushVoting! Veritas 2k",
+      "HushVoting! Veritas 10k",
+      "HushVoting! Enterprise",
+    ]);
+    expect(licenseSelect.value).toBe("direct");
     expect(screen.getByTestId("elections-mode-freeze-summary")).toHaveTextContent(
       "non-dev circuits",
     );
@@ -2323,19 +2424,7 @@ describe("ElectionsWorkspace", () => {
       });
     });
 
-    await waitFor(() => {
-      expect(
-        Array.from(profileSelect.options).map((option) => option.textContent?.trim()),
-      ).toEqual([
-        "Admin-only protected circuit",
-        "Admin-only open audit circuit",
-      ]);
-    });
-
     await act(async () => {
-      fireEvent.change(profileSelect, {
-        target: { value: "admin-dev-1of1" },
-      });
       fireEvent.click(
         within(policyDialog).getByRole("button", { name: "Apply policy changes" }),
       );
@@ -2344,7 +2433,7 @@ describe("ElectionsWorkspace", () => {
     expect(screen.getByTestId("elections-mode-freeze-summary")).toHaveTextContent(
       "Non-binding elections may choose either a dev/open circuit or a non-dev circuit",
     );
-    expect(screen.getByText("Admin-only open audit circuit")).toBeInTheDocument();
+    expect(screen.getByText("HushVoting Direct readable audit circuit")).toBeInTheDocument();
     expect(screen.queryByText("Production-Like 3 of 5")).not.toBeInTheDocument();
   });
 
@@ -3171,7 +3260,10 @@ describe("ElectionsWorkspace", () => {
       screen.queryByTestId("elections-draft-save-overview"),
     ).not.toBeInTheDocument();
     expect(screen.getByTestId("elections-frozen-policy")).toHaveTextContent(
-      "Protocol Omega version",
+      "Protocol package version",
+    );
+    expect(screen.getByTestId("elections-frozen-policy")).toHaveTextContent(
+      "v1.2.0",
     );
     expect(screen.getByTestId("elections-warning-evidence")).toHaveTextContent(
       "Low anonymity set",
@@ -5294,7 +5386,7 @@ describe("ElectionsWorkspace", () => {
     ).toHaveTextContent("2 accepted / 2 expected");
     expect(
       screen.getByTestId("elections-finalization-session"),
-    ).toHaveTextContent("Trustee threshold satisfied");
+    ).toHaveTextContent("Veritas release threshold satisfied");
     expect(
       screen.getByTestId("elections-finalization-session"),
     ).toHaveTextContent("Alice Trustee");

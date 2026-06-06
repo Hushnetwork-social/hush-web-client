@@ -52,7 +52,7 @@ describe('ElectionOwnAnomalyWorkspacePanel', () => {
         Election: createElectionRecord(
           'election-127',
           ElectionLifecycleStateProto.Open,
-          'Non-Dev Trustees Election III',
+          'Non-Dev HushVoting Veritas Election III',
           { OwnerPublicAddress: 'owner-address' },
         ),
         TrusteeInvitations: [],
@@ -87,7 +87,7 @@ describe('ElectionOwnAnomalyWorkspacePanel', () => {
       'href',
       '/elections/election-127',
     );
-    expect(screen.getByText('Non-Dev Trustees Election III')).toBeInTheDocument();
+    expect(screen.getByText('Non-Dev HushVoting Veritas Election III')).toBeInTheDocument();
     expect(await screen.findByText('Report an anomaly')).toBeInTheDocument();
     expect(screen.getByText(/This is the submitter workspace, separate from authority triage/))
       .toBeInTheDocument();

@@ -22,7 +22,7 @@ function createElectionDetail(
 ): GetElectionResponse {
   const election = {
     ElectionId: 'election-1',
-    Title: 'Election with Trustees I',
+    Title: 'HushVoting Veritas Election I',
     ShortDescription: '',
     OwnerPublicAddress: 'owner-public-key',
     LifecycleState: ElectionLifecycleStateProto.Draft,

@@ -658,7 +658,7 @@ describe('transactionService encrypted election envelope helpers', () => {
       ownerSigningPublicKey,
       ownerEncryptionPublicKey,
       ownerEncryptionPrivateKeyHex,
-      'Trustee threshold could not be satisfied after the close ceremony.',
+      'Veritas release threshold could not be satisfied after the close ceremony.',
       [
         {
           Id: 'evidence-ref-1',
@@ -702,7 +702,7 @@ describe('transactionService encrypted election envelope helpers', () => {
     expect(parsedTransaction.PayloadKind).toBe(ENCRYPTED_ELECTION_ENVELOPE_PAYLOAD_KIND);
     expect(decryptedPayload.ActionType).toBe('void_election');
     expect(decryptedPayload.ActionPayload.ActorPublicAddress).toBe(ownerSigningPublicKey);
-    expect(decryptedPayload.ActionPayload.PublicJustification).toContain('Trustee threshold');
+    expect(decryptedPayload.ActionPayload.PublicJustification).toContain('Veritas release threshold');
     expect(decryptedPayload.ActionPayload.EvidenceReferences[0].ReferenceId).toBe(
       'board-minute-2026-05-21',
     );

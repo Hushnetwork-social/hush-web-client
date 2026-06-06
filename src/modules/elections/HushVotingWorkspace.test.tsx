@@ -392,7 +392,7 @@ describe('HushVotingWorkspace', () => {
     const pendingTrusteeEntry = createHubEntry(
       'election-pending-trustee',
       ElectionLifecycleStateProto.Draft,
-      'Pending Trustee Election',
+      'Pending HushVoting Veritas Election',
       {
         ActorRoles: {
           IsOwnerAdmin: false,
@@ -424,7 +424,7 @@ describe('HushVotingWorkspace', () => {
       selectedElection: createDetail(
         'election-pending-trustee',
         ElectionLifecycleStateProto.Draft,
-        'Pending Trustee Election',
+        'Pending HushVoting Veritas Election',
         {
           TrusteeInvitations: [
             {
@@ -998,7 +998,7 @@ describe('HushVotingWorkspace', () => {
     const finalizedEntry = createHubEntry(
       'election-finalized-stale',
       ElectionLifecycleStateProto.Finalized,
-      'Finalized Trustee Election',
+      'Finalized HushVoting Veritas Election',
       {
         ActorRoles: {
           IsOwnerAdmin: true,
@@ -1025,12 +1025,12 @@ describe('HushVotingWorkspace', () => {
       selectedElection: createDetail(
         'election-finalized-stale',
         ElectionLifecycleStateProto.Finalized,
-        'Finalized Trustee Election',
+        'Finalized HushVoting Veritas Election',
         {
           Election: createElectionRecord(
             'election-finalized-stale',
             ElectionLifecycleStateProto.Finalized,
-            'Finalized Trustee Election',
+            'Finalized HushVoting Veritas Election',
             {
               UnofficialResultArtifactId: 'unofficial-result-stale',
               OfficialResultArtifactId: 'official-result-stale',
