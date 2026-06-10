@@ -2,6 +2,8 @@ export const READINESS_DASHBOARD_NAV_ID = 'readiness-dashboard';
 export const READINESS_DASHBOARD_ROUTE = '/elections/readiness';
 export const READINESS_DASHBOARD_LEGACY_INTERNAL_ROUTE = '/internal/hushvoting/readiness';
 export const READINESS_DASHBOARD_API_ROUTE = '/api/internal/hushvoting/readiness';
+export const READINESS_PROFILE_ROUTE_BASE = `${READINESS_DASHBOARD_ROUTE}/profile`;
+export const READINESS_PROFILE_API_ROUTE_BASE = `${READINESS_DASHBOARD_API_ROUTE}/profile`;
 
 export type ReadinessDashboardGateReason =
   | 'enabled'
@@ -263,6 +265,22 @@ export interface RawReadinessManifest {
   strongestAllowedV1PolicyCeiling: string;
   publicationStatus: string;
   manifestHash: string;
+  archive?: {
+    fileName: string;
+    sha256Hash: string;
+    hashAlgorithm: string;
+    sizeBytes: number;
+  };
+  files?: RawReadinessManifestFile[];
+}
+
+export interface RawReadinessManifestFile {
+  relativePath: string;
+  visibility: string;
+  sha256Hash: string;
+  hashAlgorithm: string;
+  mediaType: string;
+  sizeBytes: number;
 }
 
 export interface RawReadinessDimension {
@@ -332,16 +350,43 @@ export interface RawReadinessBlocker {
 
 export interface RawReadinessEvidenceItem {
   evidenceId: string;
+  parentEpic?: string;
   featureId: string;
+  sourceGapRow?: string;
   status: ReadinessEvidenceStatus;
   acceptanceGateIds: string[];
   dimensionIds: string[];
+  electionScope?: string;
+  releaseScope?: string;
+  visibility?: string;
+  producedAt?: string;
+  owner?: string;
+  artifactRefs?: RawReadinessArtifactRef[];
+  checkResults?: RawReadinessCheckResult[];
   freshness?: {
     state?: string;
     invalidationRule?: string;
     staleReason?: string;
   };
+  residualRisk?: string;
   claimEffect?: string;
+}
+
+export interface RawReadinessArtifactRef {
+  artifactId: string;
+  relativePath: string;
+  sha256Hash: string;
+  hashAlgorithm: string;
+  mediaType: string;
+  sizeBytes: number;
+  visibility: string;
+}
+
+export interface RawReadinessCheckResult {
+  checkId: string;
+  status: string;
+  summary: string;
+  detailsRef: string;
 }
 
 export interface RawReadinessException {

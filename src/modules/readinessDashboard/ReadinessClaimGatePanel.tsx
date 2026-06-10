@@ -1,8 +1,10 @@
-import { CheckCircle2, CircleAlert, Clock3, Landmark, XCircle } from 'lucide-react';
+import Link from 'next/link';
+import { CheckCircle2, CircleAlert, Clock3, FileSearch, Landmark, XCircle } from 'lucide-react';
 import type { CSSProperties } from 'react';
-import type {
-  ReadinessClaimGateView,
-  ReadinessClaimProfileGateView,
+import {
+  buildReadinessProfileRoute,
+  type ReadinessClaimGateView,
+  type ReadinessClaimProfileGateView,
 } from '@/lib/readinessDashboard';
 
 function formatLabel(value: string): string {
@@ -299,6 +301,14 @@ export function ReadinessClaimGatePanel({
                             profile.isNonBindingElection
                           )} / ${profile.thresholdProfile}`}
                         </p>
+                        <Link
+                          href={buildReadinessProfileRoute(profile.profileId)}
+                          className="mt-3 inline-flex min-h-8 items-center gap-2 rounded-md bg-hush-bg-element/85 px-3 py-1.5 text-xs font-semibold text-hush-text-primary transition hover:bg-hush-purple/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hush-purple"
+                          aria-label={`View evidence checks for ${profile.label}`}
+                        >
+                          <FileSearch className="h-3.5 w-3.5" aria-hidden="true" />
+                          View evidence checks
+                        </Link>
                       </div>
                     </div>
                     {hasVerifierWarnings ? (

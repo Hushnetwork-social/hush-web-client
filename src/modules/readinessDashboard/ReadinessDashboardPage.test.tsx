@@ -90,6 +90,14 @@ describe('ReadinessDashboardPage', () => {
     expect(claimGates).toHaveTextContent(
       'HushVoting! Direct / Binding / isNonBindingElection: false / direct'
     );
+    expect(
+      within(claimGates).getByRole('link', {
+        name: 'View evidence checks for Binding HushVoting! Direct',
+      })
+    ).toHaveAttribute(
+      'href',
+      '/elections/readiness/profile/hushvoting.direct.binding'
+    );
 
     const blockers = screen.getByTestId('readiness-blockers');
     expect(blockers).toHaveTextContent('RDY-BLOCK-FRIENDLY_ORGANIZATION_PILOT-003');

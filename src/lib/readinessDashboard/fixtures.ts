@@ -287,9 +287,32 @@ export function createReadinessDashboardFixtureSource(
         {
           evidenceId: 'RDY-EVID-AT-RDY-001-FEAT-130-001',
           featureId: 'FEAT-130',
+          sourceGapRow: 'Protocol/evidence architecture',
           status: 'accepted',
           acceptanceGateIds: ['AT-RDY-001'],
           dimensionIds: ['RDY-DIM-001'],
+          producedAt: '2026-05-18T22:00:00Z',
+          artifactRefs: [
+            {
+              artifactId: 'ART-RDY-GAP-20260518',
+              relativePath:
+                'hush-documents/PrivateServer_ElectronicVoting/HushVoting-Technical-Delivery-Gap-Assessment-2026-05-18.md',
+              sha256Hash: '2de7e099895023fe4d4ef481fa4ff77c84bda6c2be2150e4bed297479f5257e0',
+              hashAlgorithm: 'SHA-256',
+              mediaType: 'text/markdown',
+              sizeBytes: 36244,
+              visibility: 'restricted_reviewer',
+            },
+          ],
+          checkResults: [
+            {
+              checkId: 'CHK-RDY-001-GAP-REGISTER',
+              status: 'pass',
+              summary: 'Gap register maps source gaps to EPIC-015 and FEAT-130 through FEAT-142.',
+              detailsRef:
+                'hush-memory-bank/Features/00_EPICS/EPIC-015-hushvoting-technical-delivery-readiness/EpicDescription.md',
+            },
+          ],
           freshness: {
             state: 'current',
             invalidationRule: 'Event-based invalidation when score policy changes.',
