@@ -145,7 +145,10 @@ function getProfileTone(profile: ReadinessClaimProfileGateView) {
 }
 
 function getProfileDisplayState(profile: ReadinessClaimProfileGateView) {
-  if (profile.gateStatus === 'with_warnings' || profile.verifierWarningCount > 0) {
+  if (
+    profile.gateStatus === 'with_warnings' ||
+    (profile.gateStatus === 'passed' && profile.verifierWarningCount > 0)
+  ) {
     return {
       severity: 'amber' as const,
       status: 'with_warnings',

@@ -31,9 +31,9 @@ import {
   buildReadinessProfileApiRoute,
   type ReadinessDashboardClientGate,
   type ReadinessProfileApiResponse,
-  type ReadinessProfileAssessmentView,
   type ReadinessProfileEvidenceItemView,
   type ReadinessProfileEvidenceCheckView,
+  type ReadinessSeverity,
 } from '@/lib/readinessDashboard';
 import { useAppStore } from '@/stores/useAppStore';
 
@@ -42,6 +42,7 @@ async function defaultFetchReadinessProfile(
   publicKey?: string | null
 ): Promise<ReadinessProfileApiResponse> {
   const response = await fetch(buildApiUrl(buildReadinessProfileApiRoute(profileId)), {
+    cache: 'no-store',
     headers: publicKey
       ? {
           [READINESS_DASHBOARD_PUBLIC_KEY_HEADER]: publicKey,
@@ -169,13 +170,13 @@ function getCheckVisualState(check: ReadinessProfileEvidenceCheckView): {
         label: 'passed',
         icon: CheckCircle2,
       };
-    case 'developer_adjusted':
+    case 'rehearsal_accepted':
       return {
         surface: 'bg-slate-800/30',
         rail: 'bg-amber-300',
         header: 'bg-slate-800/42',
         badge: 'bg-amber-950/85 text-amber-100',
-        label: 'developer adjusted',
+        label: 'rehearsal accepted',
         icon: CircleAlert,
       };
     case 'disabled':
@@ -209,12 +210,12 @@ function getCheckVisualState(check: ReadinessProfileEvidenceCheckView): {
   }
 }
 
-function getAssessmentBadgeClass(assessment: ReadinessProfileAssessmentView): string {
-  if (assessment.severity === 'red') {
+function getSeverityBadgeClass(severity: ReadinessSeverity): string {
+  if (severity === 'red') {
     return 'bg-red-900/90 text-red-50';
   }
 
-  if (assessment.severity === 'amber') {
+  if (severity === 'amber') {
     return 'bg-amber-950/85 text-amber-100';
   }
 
@@ -796,7 +797,8 @@ function EvidenceCheckCard({ check }: { check: ReadinessProfileEvidenceCheckView
   const CategoryIcon = category.icon;
   const visual = getCheckVisualState(check);
   const StatusIcon = visual.icon;
-  const noteLabel = check.status === 'disabled' ? 'Disabled in this profile' : 'Development adjustment';
+  const noteLabel =
+    check.status === 'disabled' ? 'Disabled in this profile' : 'Accepted rehearsal boundary';
 
   return (
     <article className={`relative overflow-hidden rounded-xl p-4 shadow-sm shadow-black/14 ${visual.surface}`}>
@@ -993,6 +995,7 @@ export function ReadinessProfileCheckPage({
 
     try {
       const downloadResponse = await fetch(buildApiUrl(response.detail.download.apiRoute), {
+        cache: 'no-store',
         headers: publicKey
           ? {
               [READINESS_DASHBOARD_PUBLIC_KEY_HEADER]: publicKey,
@@ -1070,13 +1073,17 @@ export function ReadinessProfileCheckPage({
   }
 
   const { detail } = response;
-  const assessmentBadgeClass = getAssessmentBadgeClass(detail.assessment);
+  const profileGateBadgeClass = getSeverityBadgeClass(detail.profile.severity);
+  const profileGateTitle =
+    [detail.profile.claimWording, detail.profile.limitationWording]
+      .filter((value) => value.trim().length > 0)
+      .join(' ') || detail.assessment.summary;
   const proofSummary = detail.checks.reduce(
     (summary, check) => ({
       passed:
-        summary.passed + (check.status === 'passed' || check.status === 'developer_adjusted' ? 1 : 0),
+        summary.passed + (check.status === 'passed' || check.status === 'rehearsal_accepted' ? 1 : 0),
       warnings: summary.warnings + (check.status === 'with_warnings' ? 1 : 0),
-      adjusted: summary.adjusted + (check.status === 'developer_adjusted' ? 1 : 0),
+      adjusted: summary.adjusted + (check.status === 'rehearsal_accepted' ? 1 : 0),
       disabled:
         summary.disabled + (check.status === 'disabled' || check.status === 'not_applicable' ? 1 : 0),
       evidenceRows: summary.evidenceRows + check.evidenceItems.length,
@@ -1125,10 +1132,11 @@ export function ReadinessProfileCheckPage({
                 {detail.register.registerVersionId}
               </span>
               <span
-                className={`whitespace-nowrap rounded-full px-3 py-1 text-sm font-semibold ${assessmentBadgeClass}`}
-                title={detail.assessment.summary}
+                className={`whitespace-nowrap rounded-full px-3 py-1 text-sm font-semibold ${profileGateBadgeClass}`}
+                title={profileGateTitle}
+                data-testid="readiness-profile-gate-status"
               >
-                {detail.assessment.severity} / {detail.assessment.label}
+                {detail.profile.severity} / {detail.profile.gateStatus}
               </span>
               <button
                 type="button"
@@ -1168,6 +1176,7 @@ export function ReadinessProfileCheckPage({
               compact
             />
             <MetadataPill label="Generated" value={formatDate(detail.register.generatedAt)} />
+            <MetadataPill label="Last updated" value={formatDate(detail.register.promotedAt)} />
             <MetadataPill label="Source commit" value={detail.register.sourceCommit} />
           </dl>
         </section>
@@ -1187,7 +1196,7 @@ export function ReadinessProfileCheckPage({
               tone="amber"
             />
             <SummaryStat
-              label="Developer adjusted"
+              label="Rehearsal accepted"
               value={String(proofSummary.adjusted)}
               icon={CircleAlert}
               tone="amber"

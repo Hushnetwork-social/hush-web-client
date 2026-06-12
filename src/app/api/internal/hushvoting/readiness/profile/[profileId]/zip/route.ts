@@ -6,8 +6,12 @@ import {
 } from '@/lib/readinessDashboard';
 import {
   buildReadinessLoadErrorResponse,
+  readinessDashboardNoStoreHeaders,
   loadReadinessSourceForRequest,
 } from '@/lib/readinessDashboard/serverApi';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 type RouteContext = {
   params: Promise<{
@@ -34,7 +38,10 @@ export async function GET(request: Request, { params }: RouteContext) {
           code: 'readiness_profile_not_found',
           message: `Readiness profile ${profileId} is not present in the active register.`,
         },
-        { status: 404 }
+        {
+          status: 404,
+          headers: readinessDashboardNoStoreHeaders,
+        }
       );
     }
 
@@ -67,7 +74,7 @@ export async function GET(request: Request, { params }: RouteContext) {
         'Content-Type': 'application/zip',
         'Content-Disposition': `attachment; filename="${detail.download.fileName}"`,
         'Content-Length': zipBytes.byteLength.toString(),
-        'Cache-Control': 'private, max-age=300',
+        ...readinessDashboardNoStoreHeaders,
       },
     });
   } catch (error) {

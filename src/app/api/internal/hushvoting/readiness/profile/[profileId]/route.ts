@@ -5,8 +5,12 @@ import {
 } from '@/lib/readinessDashboard';
 import {
   buildReadinessLoadErrorResponse,
+  readinessDashboardNoStoreHeaders,
   loadReadinessSourceForRequest,
 } from '@/lib/readinessDashboard/serverApi';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 type RouteContext = {
   params: Promise<{
@@ -41,7 +45,10 @@ export async function GET(request: Request, { params }: RouteContext) {
         message: `Readiness profile ${profileId} is not present in the active register.`,
       };
 
-      return NextResponse.json(body, { status: 404 });
+      return NextResponse.json(body, {
+        status: 404,
+        headers: readinessDashboardNoStoreHeaders,
+      });
     }
 
     const state = getProfileState(result.source.register.status);
@@ -51,7 +58,10 @@ export async function GET(request: Request, { params }: RouteContext) {
       detail,
     };
 
-    return NextResponse.json(body, { status: state === 'ready' ? 200 : 409 });
+    return NextResponse.json(body, {
+      status: state === 'ready' ? 200 : 409,
+      headers: readinessDashboardNoStoreHeaders,
+    });
   } catch (error) {
     return buildReadinessLoadErrorResponse(error);
   }

@@ -1,8 +1,10 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   READINESS_DASHBOARD_CLIENT_ENV_FLAG,
+  READINESS_DASHBOARD_PUBLIC_KEY_HEADER,
   READINESS_DASHBOARD_ROUTE,
+  buildReadinessProfileApiRoute,
   buildReadinessProfileDetail,
   createReadinessDashboardFixtureSource,
   getReadinessDashboardClientRouteGate,
@@ -19,6 +21,22 @@ const clientGate: ReadinessDashboardClientGate = getReadinessDashboardClientRout
     [READINESS_DASHBOARD_CLIENT_ENV_FLAG]: 'true',
   },
 });
+
+const veritas500NonBindingEvidenceRefs = [
+  'hush-documents/PrivateServer_ElectronicVoting/Live-Rehearsal-Evidence/HushVoting-Veritas-500-Non-Binding-IV-20260611081304/evidence-summary.json',
+  'hush-documents/PrivateServer_ElectronicVoting/Live-Rehearsal-Evidence/HushVoting-Veritas-500-Non-Binding-IV-20260611081304/public-verification-package/ElectionRecord.json',
+  'hush-documents/PrivateServer_ElectronicVoting/Live-Rehearsal-Evidence/HushVoting-Veritas-500-Non-Binding-IV-20260611081304/public-verification-package/VerifierInputManifest.json',
+  'hush-documents/PrivateServer_ElectronicVoting/Live-Rehearsal-Evidence/HushVoting-Veritas-500-Non-Binding-IV-20260611081304/public-verification-package/artifacts/report-package/canonical-manifest.json',
+  'hush-documents/PrivateServer_ElectronicVoting/Live-Rehearsal-Evidence/HushVoting-Veritas-500-Non-Binding-IV-20260611081304/public-verification-package/artifacts/report-package/evidence-graph.json',
+  'hush-documents/PrivateServer_ElectronicVoting/Live-Rehearsal-Evidence/HushVoting-Veritas-500-Non-Binding-IV-20260611081304/public-verification-package/artifacts/report-package/result-report.json',
+  'hush-documents/PrivateServer_ElectronicVoting/Live-Rehearsal-Evidence/HushVoting-Veritas-500-Non-Binding-IV-20260611081304/public-verification-package/artifacts/election-record/trustee-control-profile.json',
+  'hush-documents/PrivateServer_ElectronicVoting/Live-Rehearsal-Evidence/HushVoting-Veritas-500-Non-Binding-IV-20260611081304/public-verification-package/artifacts/election-record/trustee-control-summary.json',
+  'hush-documents/PrivateServer_ElectronicVoting/Live-Rehearsal-Evidence/HushVoting-Veritas-500-Non-Binding-IV-20260611081304/public-verification-package/artifacts/election-record/trustee-release-evidence.json',
+  'hush-documents/PrivateServer_ElectronicVoting/Live-Rehearsal-Evidence/HushVoting-Veritas-500-Non-Binding-IV-20260611081304/public-verification-package/artifacts/election-record/trustee-verifier-output.json',
+  'hush-documents/PrivateServer_ElectronicVoting/Live-Rehearsal-Evidence/HushVoting-Veritas-500-Non-Binding-IV-20260611081304/public-verification-package/artifacts/election-record/tally-replay.json',
+  'hush-documents/PrivateServer_ElectronicVoting/Live-Rehearsal-Evidence/HushVoting-Veritas-500-Non-Binding-IV-20260611081304/public-verification-package/artifacts/election-record/result-binding.json',
+  'hush-documents/PrivateServer_ElectronicVoting/Live-Rehearsal-Evidence/HushVoting-Veritas-500-Non-Binding-IV-20260611081304/public-verifier-output/VerifierOutput.json',
+];
 
 function getProfileDetail(profileId = 'hushvoting.direct.binding'): ReadinessProfileDetailView {
   const detail = buildReadinessProfileDetail(
@@ -64,6 +82,10 @@ function createEvidenceItem(
     ...overrides,
   };
 }
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe('ReadinessProfileCheckPage', () => {
   it('renders profile checks, evidence rows, and the ZIP action', () => {
@@ -121,11 +143,74 @@ describe('ReadinessProfileCheckPage', () => {
     );
 
     expect(checks).toHaveTextContent(
-      'Development Direct profile: full deployment evidence is disabled'
+      'Development Direct profile: production deployment evidence is outside this rehearsal claim'
     );
     expect(checks).toHaveTextContent('RDY-EVID-AT-RDY-001-FEAT-130-001');
     expect(checks).toHaveTextContent(
       'Gap register maps source gaps to the promoted readiness evidence set'
+    );
+  });
+
+  it('fetches the current profile checks without browser cache reuse', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      json: async () => getProfileResponse('hushvoting.direct.binding'),
+    } as Response);
+
+    render(
+      <ReadinessProfileCheckPage
+        profileId="hushvoting.direct.binding"
+        gate={clientGate}
+        credentialsPublicKey="npub-1"
+      />
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: 'Binding HushVoting! Direct' })
+    ).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining(buildReadinessProfileApiRoute('hushvoting.direct.binding')),
+      {
+        cache: 'no-store',
+        headers: {
+          [READINESS_DASHBOARD_PUBLIC_KEY_HEADER]: 'npub-1',
+        },
+      }
+    );
+  });
+
+  it('downloads the current profile ZIP without browser cache reuse', async () => {
+    const response = getProfileResponse('hushvoting.direct.binding');
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      blob: async () => new Blob(['profile checks']),
+      headers: new Headers({
+        'content-disposition': 'attachment; filename="profile-checks.zip"',
+      }),
+    } as Response);
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:profile-checks');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+
+    render(
+      <ReadinessProfileCheckPage
+        profileId="hushvoting.direct.binding"
+        gate={clientGate}
+        initialResponse={response}
+        credentialsPublicKey="npub-1"
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /download zip/i }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining(response.detail.download.apiRoute),
+      {
+        cache: 'no-store',
+        headers: {
+          [READINESS_DASHBOARD_PUBLIC_KEY_HEADER]: 'npub-1',
+        },
+      }
     );
   });
 
@@ -190,7 +275,7 @@ describe('ReadinessProfileCheckPage', () => {
     expect(nonBindingCheck?.check).toContain('dev-mode published-ballot tally fallback');
   });
 
-  it('uses the evidence assessment status in the header when checks have warnings', () => {
+  it('uses the profile gate status in the header when checks have warnings', () => {
     render(
       <ReadinessProfileCheckPage
         profileId="hushvoting.direct.binding"
@@ -200,10 +285,192 @@ describe('ReadinessProfileCheckPage', () => {
       />
     );
 
-    expect(screen.getByText('amber / with warnings')).toBeInTheDocument();
+    expect(screen.getByTestId('readiness-profile-gate-status')).toHaveTextContent(
+      'amber / with_warnings'
+    );
     expect(screen.queryByText('green / passed')).not.toBeInTheDocument();
     expect(screen.getByText('Warning checks')).toBeInTheDocument();
     expect(screen.getByText('Disabled / N/A').closest('div')).toHaveTextContent('2');
+  });
+
+  it('keeps a not-observed Veritas profile gate in the header when evidence checks warn', () => {
+    const source = createReadinessDashboardFixtureSource();
+    const baseProfile = source.register.claimProfiles?.find(
+      (profile) => profile.profileId === 'hushvoting.direct.binding'
+    );
+
+    if (!baseProfile) {
+      throw new Error('Expected fixture binding profile was not found.');
+    }
+
+    source.register.claimProfiles?.push({
+      ...baseProfile,
+      profileId: 'hushvoting.veritas_3_of_5.non_binding',
+      label: 'Non-Binding HushVoting! Veritas 3/5',
+      productMode: 'HushVoting! Veritas',
+      governanceEffect: 'non_binding',
+      bindingStatus: 'Non-Binding',
+      isNonBindingElection: true,
+      thresholdProfile: '3/5',
+      gateSeverity: 'amber',
+      gateStatus: 'not_observed',
+      claimWording:
+        'The non-binding Veritas 3/5 profile is tracked, but no accepted runtime rehearsal evidence is bound to it in the current accepted evidence baseline.',
+      limitationWording:
+        'Requires a Veritas 3/5 threshold ceremony, trustee evidence, bindingStatus Non-Binding, and isNonBindingElection true.',
+      evidenceRefs: [],
+      requiredEvidence: [
+        'productMode == HushVoting! Veritas',
+        'thresholdProfile == 3/5',
+        'bindingStatus == Non-Binding',
+        'isNonBindingElection == true',
+      ],
+      verifierWarningCount: 0,
+      verifierWarnings: [],
+    });
+
+    const detail = buildReadinessProfileDetail(
+      source,
+      'hushvoting.veritas_3_of_5.non_binding'
+    );
+
+    if (!detail) {
+      throw new Error('Expected Veritas profile detail to be built.');
+    }
+
+    expect(detail.assessment.status).toBe('incomplete');
+    expect(
+      detail.checks.find((check) => check.checkId === 'profile-gate-runtime-evidence')
+    ).toMatchObject({
+      status: 'not_observed',
+      tone: 'amber',
+    });
+
+    render(
+      <ReadinessProfileCheckPage
+        profileId="hushvoting.veritas_3_of_5.non_binding"
+        gate={clientGate}
+        initialResponse={{
+          success: true,
+          state: 'ready',
+          detail,
+        }}
+        credentialsPublicKey="npub-1"
+      />
+    );
+
+    expect(screen.getByRole('heading', { name: 'Non-Binding HushVoting! Veritas 3/5' })).toBeInTheDocument();
+    expect(screen.getByTestId('readiness-profile-gate-status')).toHaveTextContent(
+      'amber / not_observed'
+    );
+    expect(screen.getByText('Warning checks')).toBeInTheDocument();
+  });
+
+  it('uses package-bound Veritas 500 non-binding evidence instead of stale generic lifecycle warnings', () => {
+    const source = createReadinessDashboardFixtureSource();
+    const baseProfile = source.register.claimProfiles?.find(
+      (profile) => profile.profileId === 'hushvoting.direct.binding'
+    );
+
+    if (!baseProfile) {
+      throw new Error('Expected fixture binding profile was not found.');
+    }
+
+    source.register.evidenceItems.push(
+      createEvidenceItem({
+        evidenceId: 'RDY-EVID-AT-RDY-011-FEAT-139-001',
+        featureId: 'FEAT-139',
+        sourceGapRow: 'Governed outcome and continuity evidence',
+        status: 'blocked',
+        acceptanceGateIds: ['AT-RDY-011'],
+        dimensionIds: ['RDY-DIM-009'],
+        producedAt: '2026-05-25T00:00:00Z',
+        freshness: {
+          state: 'stale',
+          invalidationRule: 'Event-based invalidation when failed-finalize evidence changes.',
+          staleReason: 'freshness stale after feat146',
+        },
+        residualRisk: 'Failed-finalize outcome evidence remains absent.',
+      })
+    );
+
+    source.register.claimProfiles?.push({
+      ...baseProfile,
+      profileId: 'hushvoting.veritas_3_of_5.non_binding',
+      label: 'Non-Binding HushVoting! Veritas 3/5',
+      productMode: 'HushVoting! Veritas',
+      governanceEffect: 'non_binding',
+      bindingStatus: 'Non-Binding',
+      isNonBindingElection: true,
+      thresholdProfile: '3/5',
+      gateSeverity: 'green',
+      gateStatus: 'passed',
+      claimWording:
+        'HushVoting! Veritas 500, Non-Binding IV binds finalized runtime evidence for the internal technical Veritas 3/5 rehearsal profile.',
+      limitationWording:
+        'The pass is limited to internal non-binding rehearsal evidence.',
+      evidenceRefs: veritas500NonBindingEvidenceRefs,
+      requiredEvidence: [
+        'productMode == HushVoting! Veritas',
+        'thresholdProfile == 3/5',
+        'bindingStatus == Non-Binding',
+        'isNonBindingElection == true',
+        'acceptedTrusteeCount == 5',
+        'acceptedFinalizationShareCount == 3',
+        'package warningCount == 0',
+      ],
+      verifierWarningCount: 0,
+      verifierWarnings: [],
+    });
+
+    const detail = buildReadinessProfileDetail(
+      source,
+      'hushvoting.veritas_3_of_5.non_binding'
+    );
+
+    if (!detail) {
+      throw new Error('Expected Veritas profile detail to be built.');
+    }
+
+    const profileGate = detail.checks.find(
+      (check) => check.checkId === 'profile-gate-runtime-evidence'
+    );
+    const cryptoPathCheck = detail.checks.find(
+      (check) => check.checkId === 'binding-mode-circuit-crypto-validation'
+    );
+    const lifecycleCheck = detail.checks.find(
+      (check) => check.checkId === 'election-lifecycle-tally-version-consistency'
+    );
+    const trusteeCheck = detail.checks.find(
+      (check) => check.checkId === 'veritas-trustee-ceremony-acceptance'
+    );
+
+    expect(profileGate).toMatchObject({ status: 'passed', tone: 'green' });
+    expect(cryptoPathCheck).toMatchObject({ status: 'passed', tone: 'green' });
+    expect(lifecycleCheck).toMatchObject({ status: 'passed', tone: 'green' });
+    expect(trusteeCheck).toMatchObject({ status: 'passed', tone: 'green' });
+    expect(cryptoPathCheck?.evidenceRefs.join(' ')).toContain('VerifierInputManifest.json');
+    expect(cryptoPathCheck?.evidenceRefs.join(' ')).toContain('trustee-control-profile.json');
+    expect(lifecycleCheck?.evidenceItems).toEqual([]);
+    expect(lifecycleCheck?.evidenceRefs.join(' ')).toContain('tally-replay.json');
+    expect(trusteeCheck?.evidenceRefs.join(' ')).toContain('trustee-release-evidence.json');
+
+    render(
+      <ReadinessProfileCheckPage
+        profileId="hushvoting.veritas_3_of_5.non_binding"
+        gate={clientGate}
+        initialResponse={{
+          success: true,
+          state: 'ready',
+          detail,
+        }}
+        credentialsPublicKey="npub-1"
+      />
+    );
+
+    expect(screen.getByTestId('readiness-profile-gate-status')).toHaveTextContent(
+      'green / passed'
+    );
   });
 
   it('reports current accepted replacement evidence instead of older observed rows', () => {
@@ -267,7 +534,7 @@ describe('ReadinessProfileCheckPage', () => {
     expect(evidenceIds).not.toContain('RDY-EVID-AT-RDY-007-FEAT-112-001');
   });
 
-  it('treats developer-adjusted and disabled profile checks as pass-equivalent overall', () => {
+  it('treats rehearsal-accepted and disabled profile checks as pass-equivalent overall', () => {
     const source = createReadinessDashboardFixtureSource();
     const profile = source.register.claimProfiles?.find(
       (item) => item.profileId === 'hushvoting.direct.binding'
@@ -308,7 +575,7 @@ describe('ReadinessProfileCheckPage', () => {
       status: 'passed',
       label: 'passed',
     });
-    expect(detail?.checks.some((check) => check.status === 'developer_adjusted')).toBe(true);
+    expect(detail?.checks.some((check) => check.status === 'rehearsal_accepted')).toBe(true);
     expect(detail?.checks.some((check) => check.status === 'disabled')).toBe(true);
     expect(detail?.checks.some((check) => check.status === 'not_applicable')).toBe(true);
   });

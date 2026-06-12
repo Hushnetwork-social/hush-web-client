@@ -11,6 +11,12 @@ import {
 } from './serverLoader';
 import type { ReadinessDashboardSource } from './contracts';
 
+export const readinessDashboardNoStoreHeaders = {
+  'Cache-Control': 'no-store, max-age=0',
+  Pragma: 'no-cache',
+  Expires: '0',
+};
+
 export function getReadinessRegisterRoot(): string | null {
   const configuredRoot = process.env[READINESS_DASHBOARD_REGISTER_ROOT_ENV]?.trim();
 
@@ -46,7 +52,7 @@ export function buildReadinessGateBlockedResponse(gate: ReturnType<typeof getRea
         code: 'readiness_dashboard_disabled',
         message: 'Internal readiness dashboard API is disabled.',
       },
-      { status: 404 }
+      { status: 404, headers: readinessDashboardNoStoreHeaders }
     );
   }
 
@@ -59,7 +65,7 @@ export function buildReadinessGateBlockedResponse(gate: ReturnType<typeof getRea
         message:
           'Internal readiness dashboard API is blocked in production without an explicit override.',
       },
-      { status: 403 }
+      { status: 403, headers: readinessDashboardNoStoreHeaders }
     );
   }
 
@@ -70,7 +76,7 @@ export function buildReadinessGateBlockedResponse(gate: ReturnType<typeof getRea
       code: 'readiness_dashboard_unauthorized',
       message: 'Internal readiness dashboard API is restricted to allowlisted collaborators.',
     },
-    { status: 403 }
+    { status: 403, headers: readinessDashboardNoStoreHeaders }
   );
 }
 
@@ -114,7 +120,7 @@ export function buildReadinessLoadErrorResponse(error: unknown): NextResponse {
         code: error.code,
         message: error.message,
       },
-      { status: error.httpStatus }
+      { status: error.httpStatus, headers: readinessDashboardNoStoreHeaders }
     );
   }
 
@@ -127,6 +133,6 @@ export function buildReadinessLoadErrorResponse(error: unknown): NextResponse {
       code: 'readiness_dashboard_load_error',
       message,
     },
-    { status: 500 }
+    { status: 500, headers: readinessDashboardNoStoreHeaders }
   );
 }

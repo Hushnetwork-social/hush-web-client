@@ -5,8 +5,12 @@ import {
 import { projectReadinessDashboard } from '@/lib/readinessDashboard/projection';
 import {
   buildReadinessLoadErrorResponse,
+  readinessDashboardNoStoreHeaders,
   loadReadinessSourceForRequest,
 } from '@/lib/readinessDashboard/serverApi';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 export async function GET(request: Request) {
   try {
@@ -27,7 +31,10 @@ export async function GET(request: Request) {
       dashboard,
     };
 
-    return NextResponse.json(body, { status: state === 'ready' ? 200 : 409 });
+    return NextResponse.json(body, {
+      status: state === 'ready' ? 200 : 409,
+      headers: readinessDashboardNoStoreHeaders,
+    });
   } catch (error) {
     return buildReadinessLoadErrorResponse(error);
   }

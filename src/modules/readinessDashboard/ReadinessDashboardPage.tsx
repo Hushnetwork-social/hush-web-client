@@ -25,6 +25,7 @@ async function defaultFetchReadinessDashboard(
   publicKey?: string | null
 ): Promise<ReadinessDashboardApiResponse> {
   const response = await fetch(buildApiUrl(READINESS_DASHBOARD_API_ROUTE), {
+    cache: 'no-store',
     headers: publicKey
       ? {
           [READINESS_DASHBOARD_PUBLIC_KEY_HEADER]: publicKey,
@@ -33,6 +34,24 @@ async function defaultFetchReadinessDashboard(
   });
 
   return (await response.json()) as ReadinessDashboardApiResponse;
+}
+
+function formatDate(value: string): string {
+  if (!value) {
+    return 'Not recorded';
+  }
+
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat('en-US', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'UTC',
+  }).format(parsed);
 }
 
 export function ReadinessDashboardPage({
@@ -133,6 +152,12 @@ export function ReadinessDashboardPage({
               </span>
               <span className="rounded-full bg-hush-bg-dark/70 px-3 py-1 font-semibold">
                 {dashboard.register.status}
+              </span>
+              <span
+                className="rounded-full bg-hush-bg-dark/70 px-3 py-1 font-semibold"
+                data-testid="readiness-report-last-updated"
+              >
+                Last updated: {formatDate(dashboard.register.promotedAt)}
               </span>
               <span>{READINESS_DASHBOARD_ROUTE}</span>
             </div>

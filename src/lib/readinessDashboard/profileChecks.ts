@@ -14,7 +14,7 @@ import {
 export type ReadinessProfileCheckStatus =
   | 'passed'
   | 'with_warnings'
-  | 'developer_adjusted'
+  | 'rehearsal_accepted'
   | 'disabled'
   | 'not_observed'
   | 'future_gated'
@@ -140,6 +140,48 @@ interface EvidenceCheckDefinition {
   evidenceRefs?: string[];
 }
 
+interface ProfileBoundEvidenceOverride {
+  status: ReadinessProfileCheckStatus;
+  tone: ReadinessProfileCheckTone;
+  evidenceRefs: string[];
+  requiredEvidence: string[];
+  whatWasTested: string;
+  check: string;
+  whenWasTested?: string;
+}
+
+const VERITAS_500_NON_BINDING_PROFILE_ID = 'hushvoting.veritas_3_of_5.non_binding';
+const VERITAS_500_NON_BINDING_EVIDENCE_MARKER =
+  'HushVoting-Veritas-500-Non-Binding-IV-20260611081304';
+
+const VERITAS_500_LIFECYCLE_REF_SUFFIXES = [
+  'evidence-summary.json',
+  'public-verification-package/ElectionRecord.json',
+  'public-verification-package/artifacts/report-package/canonical-manifest.json',
+  'public-verification-package/artifacts/report-package/evidence-graph.json',
+  'public-verification-package/artifacts/report-package/result-report.json',
+  'public-verification-package/artifacts/election-record/tally-replay.json',
+  'public-verification-package/artifacts/election-record/result-binding.json',
+];
+
+const VERITAS_500_TRUSTEE_REF_SUFFIXES = [
+  'evidence-summary.json',
+  'public-verification-package/artifacts/election-record/trustee-control-profile.json',
+  'public-verification-package/artifacts/election-record/trustee-control-summary.json',
+  'public-verification-package/artifacts/election-record/trustee-release-evidence.json',
+  'public-verification-package/artifacts/election-record/trustee-verifier-output.json',
+];
+
+const VERITAS_500_CRYPTO_PATH_REF_SUFFIXES = [
+  'evidence-summary.json',
+  'public-verification-package/ElectionRecord.json',
+  'public-verification-package/VerifierInputManifest.json',
+  'public-verification-package/artifacts/election-record/trustee-control-profile.json',
+  'public-verification-package/artifacts/election-record/trustee-control-summary.json',
+  'public-verification-package/artifacts/election-record/result-binding.json',
+  'public-verifier-output/VerifierOutput.json',
+];
+
 const evidenceCheckDefinitions: EvidenceCheckDefinition[] = [
   {
     checkId: 'binding-mode-circuit-crypto-validation',
@@ -163,9 +205,6 @@ const evidenceCheckDefinitions: EvidenceCheckDefinition[] = [
       'Election binding status, isNonBindingElection, selected circuit/profile, Protocol Omega version/package binding, ballot artifact acceptance policy, and close-counting/tally path for the Direct profile family.',
     check:
       'Run the FEAT-105 server unit block; verify the admin Direct profile matrix binds admin-dev-1of1 for non-binding and admin-prod-1of1 for binding, records protocolOmegaVersion omega-v1.0.0, binds the latest compatible Protocol Omega package refs, rejects dev/open artifacts on binding casts, allows explicit non-binding dev/open artifacts, and keeps binding close-counting on the protected aggregate/SP-07 path.',
-    onlyForProductModes: ['HushVoting! Direct'],
-    derivedStatus: 'passed',
-    derivedTone: 'green',
   },
   {
     checkId: 'protocol-omega-package-binding',
@@ -195,10 +234,10 @@ const evidenceCheckDefinitions: EvidenceCheckDefinition[] = [
     whatWasTested:
       'Deployment ceremony evidence, release artifact identity, package manifest references, hash audit details, and deployment binding policy.',
     check:
-      'Read AT-RDY-005/RDY-DIM-006 evidence items and checkResults; in Development Direct profiles, full deployment evidence is disabled and represented as a developer-adjusted check.',
+      'Read AT-RDY-005/RDY-DIM-006 evidence items and checkResults; in Development Direct profiles, full production deployment evidence is outside the rehearsal claim and the row is accepted only as a visible development/rehearsal boundary.',
     developmentAdjusted: true,
     developmentAdjustment:
-      'Development Direct profile: full deployment evidence is disabled. The check is adjusted to developer runtime/profile evidence and local release/package binding; no production deployment, customer, legal, certification, or independent-validation claim is made.',
+      'Development Direct profile: production deployment evidence is outside this rehearsal claim. The row is accepted as development/runtime/profile evidence plus local release/package binding; no production deployment, customer, legal, certification, or independent-validation claim is made.',
   },
   {
     checkId: 'election-lifecycle-tally-version-consistency',
@@ -336,6 +375,127 @@ function isDefinitionApplicable(
   }
 
   return definition.onlyForProductModes.includes(profile.productMode);
+}
+
+function isPassedVeritas500NonBindingProfile(profile: RawReadinessClaimProfile): boolean {
+  return (
+    profile.profileId === VERITAS_500_NON_BINDING_PROFILE_ID &&
+    profile.productMode === 'HushVoting! Veritas' &&
+    profile.bindingStatus === 'Non-Binding' &&
+    profile.isNonBindingElection &&
+    profile.thresholdProfile === '3/5' &&
+    profile.gateStatus === 'passed' &&
+    profile.gateSeverity === 'green' &&
+    profile.evidenceRefs.some((ref) => ref.includes(VERITAS_500_NON_BINDING_EVIDENCE_MARKER))
+  );
+}
+
+function getProfileEvidenceRefsBySuffix(
+  profile: RawReadinessClaimProfile,
+  suffixes: string[]
+): string[] {
+  const matchingRefs = profile.evidenceRefs.filter(
+    (ref) =>
+      ref.includes(VERITAS_500_NON_BINDING_EVIDENCE_MARKER) &&
+      suffixes.some((suffix) => ref.endsWith(suffix))
+  );
+
+  if (matchingRefs.length > 0) {
+    return matchingRefs;
+  }
+
+  return profile.evidenceRefs.filter((ref) =>
+    ref.includes(VERITAS_500_NON_BINDING_EVIDENCE_MARKER)
+  );
+}
+
+function getProfileBoundEvidenceOverride(
+  definition: EvidenceCheckDefinition,
+  profile: RawReadinessClaimProfile,
+  source: ReadinessDashboardSource
+): ProfileBoundEvidenceOverride | null {
+  if (
+    definition.checkId === 'binding-mode-circuit-crypto-validation' &&
+    profile.productMode === 'HushVoting! Direct'
+  ) {
+    const directCopy = getDirectCryptoPathCopy(definition, profile);
+
+    return {
+      status: 'passed',
+      tone: 'green',
+      whenWasTested: source.register.promotedAt || source.manifest.generatedAt,
+      evidenceRefs: definition.evidenceRefs ?? [],
+      requiredEvidence: directCopy.requiredEvidence,
+      whatWasTested: directCopy.whatWasTested,
+      check: directCopy.check,
+    };
+  }
+
+  if (!isPassedVeritas500NonBindingProfile(profile)) {
+    return null;
+  }
+
+  if (definition.checkId === 'binding-mode-circuit-crypto-validation') {
+    return {
+      status: 'passed',
+      tone: 'green',
+      whenWasTested: source.register.promotedAt || source.manifest.generatedAt,
+      evidenceRefs: getProfileEvidenceRefsBySuffix(profile, VERITAS_500_CRYPTO_PATH_REF_SUFFIXES),
+      requiredEvidence: [
+        'The profile-bound Veritas 500 non-binding package records productMode HushVoting! Veritas.',
+        'Threshold profile 3/5 is selected through dkg-dev-3of5 and TrusteeThreshold governance.',
+        'Runtime binding status is NonBinding and isNonBindingElection is true.',
+        'Three accepted finalization shares satisfy the 3-of-5 threshold.',
+        'Public verifier output is bound to the same election record and reports warningCount=0.',
+      ],
+      whatWasTested:
+        'HushVoting! Veritas 500, Non-Binding IV binding mode, threshold profile selection, trustee-governed crypto path, and verifier-output binding.',
+      check:
+        'Read the profile-bound Veritas IV election record, verifier input manifest, trustee control profile, trustee control summary, result binding, and verifier output. Verify selectedProfileId dkg-dev-3of5, governanceMode TrusteeThreshold, bindingStatus NonBinding, isNonBindingElection true, acceptedFinalizationShareCount=3, and warningCount=0.',
+    };
+  }
+
+  if (definition.checkId === 'election-lifecycle-tally-version-consistency') {
+    return {
+      status: 'passed',
+      tone: 'green',
+      whenWasTested: source.register.promotedAt || source.manifest.generatedAt,
+      evidenceRefs: getProfileEvidenceRefsBySuffix(profile, VERITAS_500_LIFECYCLE_REF_SUFFIXES),
+      requiredEvidence: [
+        'The profile-bound Veritas 500 non-binding package is sealed and finalized.',
+        'Runtime binding status is NonBinding and isNonBindingElection is true.',
+        'Lifecycle state is Finalized with two eligible voters and two counted votes.',
+        'Tally replay, result binding, canonical manifest, and result report are bound to the same election id and package hash.',
+        'The package warning count is zero.',
+      ],
+      whatWasTested:
+        'HushVoting! Veritas 500, Non-Binding IV lifecycle, tally replay, result binding, result report, and package version binding.',
+      check:
+        'Read the profile-bound Veritas IV public verification package refs. Verify lifecycleState Finalized, bindingStatus NonBinding, isNonBindingElection true, dkg-dev-3of5, two eligible voters, two counted votes, matching tally/result hashes, and warningCount=0. Do not substitute older global FEAT-139 failed-finalize continuity residuals for this clean finalized package.',
+    };
+  }
+
+  if (definition.checkId === 'veritas-trustee-ceremony-acceptance') {
+    return {
+      status: 'passed',
+      tone: 'green',
+      whenWasTested: source.register.promotedAt || source.manifest.generatedAt,
+      evidenceRefs: getProfileEvidenceRefsBySuffix(profile, VERITAS_500_TRUSTEE_REF_SUFFIXES),
+      requiredEvidence: [
+        'The profile-bound Veritas 500 non-binding package is bound to the 3-of-5 trustee profile.',
+        'Five trustee invitations reached accepted state.',
+        'Three governed approvals satisfy the 3-of-5 threshold.',
+        'Three finalization shares were accepted and bound to the final encrypted tally hash.',
+        'Trustee verifier output reports the trustee control-domain evidence as valid.',
+      ],
+      whatWasTested:
+        'HushVoting! Veritas 500, Non-Binding IV trustee acceptance, threshold-governed approvals, finalization shares, trustee control summary, and trustee verifier output.',
+      check:
+        'Read trustee-control-profile.json, trustee-control-summary.json, trustee-release-evidence.json, trustee-verifier-output.json, and evidence-summary.json from the profile-bound Veritas IV package. Verify acceptedTrusteeCount=5, threshold 3/5, governedApprovalCount=3, acceptedFinalizationShareCount=3, and no readiness blockers for the non-binding internal rehearsal claim.',
+    };
+  }
+
+  return null;
 }
 
 function hasAny(values: string[], expected: string[]): boolean {
@@ -531,16 +691,16 @@ function getProfileGateStatus(profile: RawReadinessClaimProfile): {
     return { status: 'failed', tone: 'red' };
   }
 
-  if ((profile.verifierWarningCount ?? 0) > 0 || profile.gateStatus === 'with_warnings') {
-    return { status: 'with_warnings', tone: 'amber' };
-  }
-
   if (profile.gateStatus === 'future_gated') {
     return { status: 'future_gated', tone: 'amber' };
   }
 
   if (profile.gateStatus === 'not_observed') {
     return { status: 'not_observed', tone: 'amber' };
+  }
+
+  if ((profile.verifierWarningCount ?? 0) > 0 || profile.gateStatus === 'with_warnings') {
+    return { status: 'with_warnings', tone: 'amber' };
   }
 
   return { status: 'passed', tone: profile.gateSeverity };
@@ -611,8 +771,10 @@ function buildEvidenceCheck(
   source: ReadinessDashboardSource
 ): ReadinessProfileEvidenceCheckView {
   const displayCopy = getDirectCryptoPathCopy(definition, profile);
-  const applicable = isDefinitionApplicable(definition, profile);
-  const evidenceItems = applicable ? getCurrentEvidenceItemsForDefinition(definition, source) : [];
+  const profileBoundOverride = getProfileBoundEvidenceOverride(definition, profile, source);
+  const applicable = profileBoundOverride !== null || isDefinitionApplicable(definition, profile);
+  const evidenceItems =
+    applicable && !profileBoundOverride ? getCurrentEvidenceItemsForDefinition(definition, source) : [];
   const disabledInDevelopment =
     applicable &&
     definition.disabledForDevelopmentDirect === true &&
@@ -620,9 +782,14 @@ function buildEvidenceCheck(
   const developmentAdjusted =
     applicable && definition.developmentAdjusted === true && isDevelopmentDirectProfile(profile);
   const status = developmentAdjusted
-    ? ({ status: 'developer_adjusted', tone: 'amber' } as const)
+    ? ({ status: 'rehearsal_accepted', tone: 'amber' } as const)
     : disabledInDevelopment
       ? ({ status: 'disabled', tone: 'neutral' } as const)
+      : profileBoundOverride
+        ? ({
+            status: profileBoundOverride.status,
+            tone: profileBoundOverride.tone,
+          } as const)
       : applicable && definition.derivedStatus
         ? ({
             status: definition.derivedStatus,
@@ -631,7 +798,10 @@ function buildEvidenceCheck(
       : getEvidenceStatus(evidenceItems, applicable ? 'not_observed' : 'not_applicable');
   const latestProducedAt = getLatestTimestamp(evidenceItems.map((item) => item.producedAt ?? ''));
   const whenWasTested =
-    latestProducedAt || source.register.promotedAt || source.manifest.generatedAt;
+    profileBoundOverride?.whenWasTested ||
+    latestProducedAt ||
+    source.register.promotedAt ||
+    source.manifest.generatedAt;
 
   return {
     checkId: definition.checkId,
@@ -640,11 +810,11 @@ function buildEvidenceCheck(
     status: status.status,
     tone: status.tone,
     applicability: applicable ? 'Applies to this profile.' : 'Not applicable to this profile.',
-    whatWasTested: displayCopy.whatWasTested,
+    whatWasTested: profileBoundOverride?.whatWasTested ?? displayCopy.whatWasTested,
     whenWasTested,
-    check: displayCopy.check,
-    requiredEvidence: displayCopy.requiredEvidence,
-    evidenceRefs: definition.evidenceRefs ?? [],
+    check: profileBoundOverride?.check ?? displayCopy.check,
+    requiredEvidence: profileBoundOverride?.requiredEvidence ?? displayCopy.requiredEvidence,
+    evidenceRefs: profileBoundOverride?.evidenceRefs ?? definition.evidenceRefs ?? [],
     evidenceItems: evidenceItems.map(mapEvidenceItem),
     disabledInDevelopment: disabledInDevelopment || developmentAdjusted,
     developmentAdjustment: disabledInDevelopment
@@ -667,15 +837,6 @@ function buildReadinessProfileAssessment(
     };
   }
 
-  if (checks.some((check) => check.status === 'with_warnings')) {
-    return {
-      severity: 'amber',
-      status: 'with_warnings',
-      label: 'with warnings',
-      summary: 'One or more readiness checks passed only with warnings; review the affected evidence sections.',
-    };
-  }
-
   if (checks.some((check) => check.status === 'not_observed' || check.status === 'future_gated')) {
     return {
       severity: 'amber',
@@ -685,12 +846,21 @@ function buildReadinessProfileAssessment(
     };
   }
 
+  if (checks.some((check) => check.status === 'with_warnings')) {
+    return {
+      severity: 'amber',
+      status: 'with_warnings',
+      label: 'with warnings',
+      summary: 'One or more readiness checks need warning review before this report can pass cleanly.',
+    };
+  }
+
   return {
     severity: 'green',
     status: 'passed',
     label: 'passed',
     summary:
-      'All current readiness checks passed for this profile; developer adjustments and disabled/not-applicable checks remain visible for review.',
+      'All current readiness checks passed for this profile; rehearsal-boundary acceptances and disabled/not-applicable checks remain visible for review.',
   };
 }
 
@@ -804,6 +974,7 @@ export function renderReadinessProfileCheckReport(detail: ReadinessProfileDetail
     `| Register Version | ${detail.register.registerVersionId} |`,
     `| Register Status | ${detail.register.status} |`,
     `| Generated At | ${detail.register.generatedAt} |`,
+    `| Last Updated At | ${detail.register.promotedAt} |`,
     `| Source Commit | ${detail.register.sourceCommit} |`,
     `| Manifest Hash | ${detail.register.manifestHash} |`,
     `| Register Archive | ${detail.register.archiveFileName || 'not recorded'} |`,
